@@ -13,6 +13,10 @@ an example, a pytest group; names like `test_cases/test_array` or just `test_arr
 SIM=yavs TOPLEVEL_LANG=vhdl under a 300 s timeout and (without --no-sandbox) a 2 GB memory cap. A job passes when it
 exits 0 (cocotb's own verdict, expected failures included). Exit status 1 when a job fails or one
 in EXPECTED_FAIL passes. Python stdlib only.
+
+On Windows (MSVC tools on PATH: cl, lib, dumpbin) the library is linked against import libraries made
+here, one for yavs.exe from src/exports.txt and one per DLL of the wheel, and only the jobs that need
+no make run (the Python runner's: the pytest ones): cocotb's makefiles need make and a POSIX shell.
 """
 import argparse, concurrent.futures as cf, hashlib, json, os, shutil, subprocess, sys, xml.etree.ElementTree as ET
 from pathlib import Path
@@ -48,6 +52,11 @@ GATES = [
 EXPECTED_FAIL: dict[str, str] = {}
 
 
+WINDOWS = os.name == "nt"
+VENV_BIN = "Scripts" if WINDOWS else "bin"
+VENV_PYTHON = f"{VENV_BIN}/python.exe" if WINDOWS else f"{VENV_BIN}/python"
+
+
 def run(cmd, **kw):
     p = subprocess.run([str(c) for c in cmd], text=True, capture_output=True, **kw)
     if p.returncode:
@@ -56,7 +65,7 @@ def run(cmd, **kw):
 
 
 def site(venv):
-    return Path(run([venv / "bin/python", "-c", "import sysconfig; print(sysconfig.get_paths()['purelib'])"]).strip())
+    return Path(run([venv / VENV_PYTHON, "-c", "import sysconfig; print(sysconfig.get_paths()['purelib'])"]).strip())
 
 
 def append(f, text):
@@ -66,28 +75,57 @@ def append(f, text):
         f.write_text(s + "\n" + mark + text)
 
 
+def build_windows(tmp, share, src, gpi, libs, lib):
+    """cocotb's VHPI library with MSVC: every symbol must resolve at link, so an import library
+    for yavs.exe (crates/yavs-vhpi/src/exports.txt) and for each DLL of the wheel."""
+    tmp.mkdir(parents=True, exist_ok=True)
+
+    def implib(name, exports):
+        d = tmp / f"{name}.def"
+        d.write_text(f"LIBRARY {name}\nEXPORTS\n" + "".join(f"  {e}\n" for e in exports))
+        out = tmp / f"{Path(name).stem}.lib"
+        run(["lib", "/NOLOGO", "/MACHINE:X64", f"/DEF:{d}", f"/OUT:{out}"])
+        return out
+
+    listed = (HERE.parents[1] / "crates/yavs-vhpi/src/exports.txt").read_text().splitlines()
+    imports = [implib("yavs.exe", [x.strip() for x in listed if x.strip() and not x.startswith("#")])]
+    for dll in sorted(libs.glob("*.dll")):
+        if dll == lib:
+            continue
+        # the table of `dumpbin /exports`: ordinal, hint, RVA, name
+        rows = [ln.split() for ln in run(["dumpbin", "/NOLOGO", "/EXPORTS", dll]).splitlines()]
+        names = [r[3] for r in rows if len(r) >= 4 and r[0].isdigit()]
+        if names:
+            imports.append(implib(dll.name, names))
+    run(["cl", "/nologo", "/std:c++17", "/EHsc", "/O2", "/LD", "/MD", "/DCOCOTBVHPI_EXPORTS", "/D__STDC_FORMAT_MACROS",
+         f"/I{share / 'include'}", f"/I{src / 'src/cocotb'}", *gpi, f"/Fe{lib}", f"/Fo{tmp}\\", "/link", *imports])
+
+
 def setup(d):
     venv, src = d / "venv", d / "src"
     if not shutil.which("uv"):
         sys.exit("error: `uv` not found on PATH; it creates the venv (https://docs.astral.sh/uv/)")
-    if not (venv / "bin/python").exists():
+    if not (venv / VENV_PYTHON).exists():
         run(["uv", "venv", "-q", "--python", PYTHON, venv])
-    run(["uv", "pip", "install", "-q", "--python", venv / "bin/python", f"cocotb=={COCOTB}", *TEST_DEPS])
+    run(["uv", "pip", "install", "-q", "--python", venv / VENV_PYTHON, f"cocotb=={COCOTB}", *TEST_DEPS])
     if not src.exists():
-        run(["git", "clone", "-q", "--depth", "1", "--branch", f"v{COCOTB}", REPO, src])
+        run(["git", "clone", "-q", "-c", "core.autocrlf=false", "--depth", "1", "--branch", f"v{COCOTB}", REPO, src])
     head = run(["git", "-C", src, "rev-parse", "HEAD"]).strip()
     if head != SHA:
         sys.exit(f"error: {src} is at {head}, not v{COCOTB} ({SHA}); delete it and rerun")
     sp = site(venv)
     libs, share = sp / "cocotb/libs", src / "src/cocotb/share"
-    lib = libs / "libcocotbvhpi_yavs.so"
+    lib = libs / ("libcocotbvhpi_yavs.dll" if WINDOWS else "libcocotbvhpi_yavs.so")
     gpi = sorted((share / "lib/gpi/vhpi").glob("*.cpp"))
     if not lib.exists() or any(f.stat().st_mtime > lib.stat().st_mtime for f in gpi):
+        if WINDOWS:
+            build_windows(d / "implib", share, src, gpi, libs, lib)
         cxx = os.environ.get("CXX", "c++")
         # the manylinux wheel's libgpi uses the old libstdc++ string ABI
-        run([cxx, "-std=c++11", "-O2", "-shared", "-fPIC", "-DCOCOTBVHPI_EXPORTS", "-D__STDC_FORMAT_MACROS", "-D_GLIBCXX_USE_CXX11_ABI=0",
-             f"-I{share / 'include'}", f"-I{src / 'src/cocotb'}", *gpi, "-o", lib,
-             f"-L{libs}", "-lgpi", "-Wl,-rpath,$ORIGIN"])
+        if not WINDOWS:
+            run([cxx, "-std=c++11", "-O2", "-shared", "-fPIC", "-DCOCOTBVHPI_EXPORTS", "-D__STDC_FORMAT_MACROS", "-D_GLIBCXX_USE_CXX11_ABI=0",
+                 f"-I{share / 'include'}", f"-I{src / 'src/cocotb'}", *gpi, "-o", lib,
+                 f"-L{libs}", "-lgpi", "-Wl,-rpath,$ORIGIN"])
     shutil.copy(HERE / "Makefile.yavs", sp / "cocotb_tools/makefiles/simulators/Makefile.yavs")
     shutil.copy(HERE / "yavs_runner.py", sp / "yavs_runner.py")
     # the upstream change in miniature: yavs in the runner table and the pytest plugin's simulator table
@@ -165,11 +203,13 @@ def main():
                                      "--cocotb-toplevel-lang", "vhdl", "--junitxml=plugin.xml"], [out / "plugin.xml"])]
     jobs += [(f"examples-pytest/{e}", out / "examples" / e, [*py, "--junitxml=pytest.xml"], [out / "examples" / e / "pytest.xml"])
              for e in PYTEST_EXAMPLES]
+    if WINDOWS:
+        jobs = [j for j in jobs if j[2][0] != "make"]
     if a.cases:
         jobs = [j for j in jobs if j[0] in a.cases or j[0].split("/")[-1] in a.cases]
     # cocotb's noxfile settings for every simulator test (configure_test_env)
     env = {**os.environ, "PYTHONWARNINGS": "error,ignore::DeprecationWarning:site,ignore:coroutine :RuntimeWarning",
-           "COCOTB_SCHEDULER_DEBUG": "1", "PYTHON_VERSION": PYTHON, "GPI_DEBUG": "1", "PYGPI_DEBUG": "1", "PATH": f"{venv / 'bin'}{os.pathsep}{os.environ['PATH']}", "VIRTUAL_ENV": str(venv),
+           "COCOTB_SCHEDULER_DEBUG": "1", "PYTHON_VERSION": PYTHON, "GPI_DEBUG": "1", "PYGPI_DEBUG": "1", "PATH": f"{venv / VENV_BIN}{os.pathsep}{os.environ['PATH']}", "VIRTUAL_ENV": str(venv),
            "SIM": "yavs", "TOPLEVEL_LANG": "vhdl", "VHDL_GPI_INTERFACE": "vhpi", "YAVS_BIN": str(yavs),
            "YAVS_STD_CACHE": str(out / "std")}
     env.pop("PYTHONHOME", None)
@@ -177,9 +217,15 @@ def main():
     def one(j):
         name, cd, cmd, xml = j
         cap = [] if a.no_sandbox else ["systemd-run", "--user", "--scope", "-q", "-p", "MemoryMax=2G"]
-        p = subprocess.run(["timeout", "300", *cap, "env", "-C", cd, f"PWD={cd}", *cmd],
-                           env=env, text=True, capture_output=True, errors="replace")
-        (out / f"{name.replace('/', '-')}.log").write_text(p.stdout + p.stderr)
+        if WINDOWS:
+            try:
+                p = subprocess.run(cmd, cwd=cd, env=env, text=True, capture_output=True, errors="replace", timeout=300)
+            except subprocess.TimeoutExpired as e:
+                p = subprocess.CompletedProcess(cmd, 124, str(e.stdout), str(e.stderr))
+        else:
+            p = subprocess.run(["timeout", "300", *cap, "env", "-C", cd, f"PWD={cd}", *cmd],
+                               env=env, text=True, capture_output=True, errors="replace")
+        (out / f"{name.replace('/', '-')}.log").write_text(p.stdout + p.stderr, encoding="utf-8")
         if xml is None:
             # cases that check their own expected failures delete results.xml and keep the combined file
             xml = [*cd.glob("results*.xml"), *cd.glob("sim_build/**/*.result.xml")] or [*cd.glob("combined_results.xml")]
@@ -195,7 +241,7 @@ def main():
         print(f"{'PASS' if ok else 'FAIL'} {c} rc={rc} tests: {p} pass, {f} fail, {s} skip")
         if not ok:
             print(f"  failing tests: {' '.join(failed) or 'none recorded'}; log tail:")
-            log = (out / f"{c.replace('/', '-')}.log").read_text().splitlines()
+            log = (out / f"{c.replace('/', '-')}.log").read_text(encoding="utf-8").splitlines()
             print("\n".join("  | " + l for l in log[-40:]))
     t = [sum(r[2][i] for r in res) for i in range(3)]
     ran = [c for c, _, n, _ in res if n[0] + n[1]]

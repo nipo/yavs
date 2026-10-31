@@ -1,0 +1,46 @@
+# cocotb's own regression on Windows (#849), the part that needs no make (tools/cocotb/run.py): a
+# pinned cocotb from PyPI, its VHPI library built here with MSVC, yavs.exe from this commit. Its own
+# workflow, not a job of `conformance`, whose runs a newer push cancels.
+name: cocotb-windows
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "crates/yavs-vhpi/**"
+      - "tools/cocotb/**"
+      - ".github/workflows/cocotb-windows.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_PROFILE_DEV_DEBUG: 0
+
+jobs:
+  cocotb:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: ilammy/msvc-dev-cmd@v1
+      - uses: astral-sh/setup-uv@v6
+      - run: cargo build --release --locked -p yavs
+      - name: cocotb's regression through its Python runner
+        shell: bash
+        run: |
+          python -I tools/cocotb/run.py --no-sandbox --jobs 2 --yavs target/release/yavs.exe \
+            --dir "$RUNNER_TEMP/cocotb" --json "$RUNNER_TEMP/cocotb-windows.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cocotb-windows
+          path: ${{ runner.temp }}/cocotb/out/*.log

@@ -59,6 +59,11 @@ Behaviour the Python testbench framework relies on, for M5:
 
 ## Windows
 
+Running: `tools/cocotb/run.py` on Windows (workflow `cocotb-windows`, #849) builds the VHPI library
+with MSVC against import libraries it makes itself, one for `yavs.exe` from `src/exports.txt` and
+one per DLL of the wheel from `dumpbin /exports`, and runs the jobs that need no make: the pytest
+ones, through the framework's Python runner. The makefile jobs need make and a POSIX shell.
+
 - The Python testbench framework links each VHPI implementation DLL against an import library it
   builds itself from a `.def` file (`lib /def:`
   with MSVC, `dlltool -d` with MinGW; the `WIN32` block of its CMake file).
