@@ -37,7 +37,7 @@
 > variables {"variablesReference":4294967300}
 < {"body":{"variables":[{"evaluateName":"vals._p0","name":"_p0","value":"process, waiting","variablesReference":0},{"evaluateName":"vals.p","name":"p","value":"process, running","variablesReference":0},{"__vscodeVariableMenuContext":"signal","evaluateName":"vals.r","name":"r","namedVariables":2,"type":"rec_t","value":"(a => 1, b => \"0000\")","variablesReference":4294967301},{"__vscodeVariableMenuContext":"signal","evaluateName":"vals.d","name":"d","type":"STD_ULOGIC_VECTOR","value":"\"00000000\"","variablesReference":0},{"__vscodeVariableMenuContext":"signal","evaluateName":"vals.t","name":"t","type":"TIME","value":"0 fs","variablesReference":0},{"__vscodeVariableMenuContext":"signal","evaluateName":"vals.q","name":"q","type":"STD_ULOGIC_VECTOR","value":"\"00000000\"","variablesReference":0}]},"command":"variables","request_seq":18,"success":true,"type":"response"}
 > setVariable {"name":"t","value":"3 ns","variablesReference":4294967300}
-< {"body":{"value":"3000000 fs","variablesReference":0},"command":"setVariable","request_seq":19,"success":true,"type":"response"}
+< {"body":{"value":"3 ns","variablesReference":0},"command":"setVariable","request_seq":19,"success":true,"type":"response"}
 > yavs/stepDelta {}
 < {"body":{},"command":"yavs/stepDelta","request_seq":20,"success":true,"type":"response"}
 < {"body":{"allThreadsContinued":true,"threadId":2},"event":"continued","type":"event"}
@@ -49,7 +49,7 @@
 > evaluate {"expression":":vals:r"}
 < {"body":{"evaluateName":"vals.r","namedVariables":2,"result":"(a => 1, b => \"1100\")","type":"rec_t","variablesReference":4294967296},"command":"evaluate","request_seq":22,"success":true,"type":"response"}
 > evaluate {"expression":":vals:t"}
-< {"body":{"evaluateName":"vals.t","result":"3000000 fs","type":"TIME","variablesReference":0},"command":"evaluate","request_seq":23,"success":true,"type":"response"}
+< {"body":{"evaluateName":"vals.t","result":"3 ns","type":"TIME","variablesReference":0},"command":"evaluate","request_seq":23,"success":true,"type":"response"}
 > continue {"threadId":2}
 < {"body":{"allThreadsContinued":true},"command":"continue","request_seq":24,"success":true,"type":"response"}
 < {"body":{"category":"stdout","output":"** Note: 11000000fs+0: n=10 b=A d=00 q=00 t=3000000 fs r.a=1\n    Process :vals:p\n"},"event":"output","type":"event"}

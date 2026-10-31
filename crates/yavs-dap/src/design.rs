@@ -380,6 +380,8 @@ pub(crate) struct Proc {
     pub shared: Vec<usize>,
     /// Name and value of each generic of its instance.
     pub generics: Vec<(String, String)>,
+    /// The generics that can be read in an expression, with their values.
+    pub generic_lits: Vec<(String, LitType, Lit)>,
 }
 
 pub(crate) struct Design {
@@ -415,6 +417,8 @@ pub(crate) struct Region {
     pub shared: Vec<usize>,
     /// Process names ([`Elaborated::proc_name`]).
     pub procs: Vec<String>,
+    /// For an instance, its generics that can be read in an expression.
+    pub generic_lits: Vec<(String, LitType, Lit)>,
 }
 
 /// The name of the subtype an object is declared with (`std_logic`, not its base type).
@@ -647,7 +651,14 @@ impl Design {
                         || "?".to_string(),
                         |v| const_text(db, db.base(o.subtype), v),
                     );
-                    pr.generics.push((db.decls[decl].name.to_string(), v));
+                    let name = db.decls[decl].name.to_string();
+                    let lit = e
+                        .value(inst, decl)
+                        .and_then(|v| generic_lit(db, db.base(o.subtype), v));
+                    if let Some((t, x)) = lit {
+                        pr.generic_lits.push((name.clone(), t, x));
+                    }
+                    pr.generics.push((name, v));
                 }
             }
             pr.shared.extend(&package_shared);
@@ -679,6 +690,7 @@ impl Design {
                 sigs: scope_sigs.remove(&s).unwrap_or_default(),
                 shared: scope_shared.remove(&s).unwrap_or_default(),
                 procs: Vec::new(),
+                generic_lits: Vec::new(),
             });
         }
         // Scopes come in elaboration order, parents first.
@@ -702,6 +714,16 @@ impl Design {
         for p in &e.procs {
             if let Some(r) = up(p.scope) {
                 d.regions[r].procs.push(e.proc_name(p));
+            }
+        }
+        // An instance's generics, for a stop between cycles.
+        for p in &e.procs {
+            let name = e.proc_name(p);
+            if let Some(&r) = region_of.get(&e.instance_of(p.scope))
+                && d.regions[r].generic_lits.is_empty()
+                && let Some(pr) = d.procs.get(&name)
+            {
+                d.regions[r].generic_lits = pr.generic_lits.clone();
             }
         }
         d
@@ -795,6 +817,19 @@ impl Design {
                     .collect::<Vec<_>>()
                     .join(" or ")
             )),
+        }
+    }
+
+    /// The generics a process sees, or at the top level between cycles those of the top region.
+    pub fn generics_at(&self, proc: Option<&str>) -> &[(String, LitType, Lit)] {
+        let top = || {
+            self.roots
+                .first()
+                .map(|&r| &self.regions[r].generic_lits[..])
+        };
+        match proc.and_then(|n| self.proc(n)) {
+            Some(p) => &p.generic_lits,
+            None => top().unwrap_or_default(),
         }
     }
 
@@ -933,10 +968,20 @@ fn takes(text: &str, ty: &LitType, why: &str) -> String {
         LitType::Int(b) if *b == StdBounds::I64 => "expected an integer".to_string(),
         LitType::Int(b) => format!("expected an integer from {} to {}", b.low, b.high),
         LitType::Real(_) => "expected a real number".to_string(),
-        LitType::Phys(p, _) => format!(
-            "expected a number and a unit, such as 10 {}",
-            String::from_utf8_lossy(&p.primary().name)
-        ),
+        LitType::Phys(p, _) => {
+            let units: Vec<String> = (p.units.iter())
+                .map(|u| String::from_utf8_lossy(&u.name).into_owned())
+                .collect();
+            // A unit that is none of the type's: the closest.
+            let word = text.trim_start_matches(|c: char| !c.is_ascii_alphabetic());
+            let help = crate::console::similar(word, "unit", &units)
+                .filter(|_| !word.is_empty())
+                .map_or(String::new(), |h| format!(": {h}"));
+            format!(
+                "expected a number and a unit, such as 10 {}{help}",
+                String::from_utf8_lossy(&p.primary().name)
+            )
+        }
         LitType::Array { len, elem, .. } => match &**elem {
             LitType::Enum(t) if bit_like(t) => {
                 let ex = "01".repeat((*len).min(8) as usize / 2 + 1);
@@ -993,6 +1038,69 @@ fn fmt(db: &Db, shape: &Shape) -> Fmt {
     }
 }
 
+/// The type values of scalar type `ty` within `bounds` are read and written in.
+fn scalar_type(db: &Db, ty: yavs_sem::TypeId, bounds: StdBounds) -> LitType {
+    match &db.types[ty].kind {
+        TypeKind::Enum { lits } => LitType::Enum(EnumType {
+            lits: lits
+                .iter()
+                .map(|&l| match db.decls[l].name {
+                    Designator::Char(c) => EnumLit::Char(c as u8),
+                    Designator::Ident(i) => EnumLit::ident(&i.text.to_string()),
+                    Designator::Operator { text, .. } => EnumLit::ident(&text.to_string()),
+                })
+                .collect(),
+        }),
+        TypeKind::Floating | TypeKind::UniversalReal => LitType::Real(RealBounds::REAL),
+        TypeKind::Physical { units } => LitType::Phys(
+            PhysicalType {
+                units: units
+                    .iter()
+                    .map(|u| Unit {
+                        name: to_latin1(&db.decls[u.decl].name.to_string()),
+                        value: u.scale,
+                    })
+                    .collect(),
+            },
+            bounds,
+        ),
+        _ => LitType::Int(bounds),
+    }
+}
+
+/// A generic's value for the debugger: scalars and one-dimensional arrays of enumerations
+/// (strings, bit vectors); `None` for the rest.
+fn generic_lit(db: &Db, ty: yavs_sem::TypeId, v: &ConstValue) -> Option<(LitType, Lit)> {
+    match (&db.types[ty].kind, v) {
+        (TypeKind::Array { elem, .. }, ConstValue::Array(a)) if a.bounds.len() == 1 => {
+            let Elems::Bytes(b) = &a.elems else {
+                return None;
+            };
+            let (left, dir, _) = a.bounds[0];
+            let et = scalar_type(db, db.base(*elem), StdBounds::I64);
+            let ascending = dir == Direction::To;
+            let len = b.len() as u64;
+            Some((
+                LitType::Array {
+                    left,
+                    ascending,
+                    len,
+                    elem: Box::new(et),
+                },
+                Lit::Array(b.iter().map(|&p| Lit::Enum(p as usize)).collect()),
+            ))
+        }
+        (TypeKind::Array { .. } | TypeKind::Record { .. }, _) => None,
+        (_, ConstValue::Enum(p)) => {
+            Some((scalar_type(db, ty, StdBounds::I64), Lit::Enum(*p as usize)))
+        }
+        (_, ConstValue::Int(n)) => Some((scalar_type(db, ty, StdBounds::I64), Lit::Int(*n))),
+        (_, ConstValue::Phys(n)) => Some((scalar_type(db, ty, StdBounds::I64), Lit::Phys(*n))),
+        (_, ConstValue::Real(x)) => Some((scalar_type(db, ty, StdBounds::I64), Lit::Real(*x))),
+        _ => None,
+    }
+}
+
 /// The type values of `shape` are read and written in. Arrays of several dimensions nest.
 fn lit_type(db: &Db, shape: &Shape) -> LitType {
     match shape {
@@ -1005,32 +1113,7 @@ fn lit_type(db: &Db, shape: &Shape) -> LitType {
                 };
                 StdBounds { low: lo, high: hi }
             });
-            match &db.types[*ty].kind {
-                TypeKind::Enum { lits } => LitType::Enum(EnumType {
-                    lits: lits
-                        .iter()
-                        .map(|&l| match db.decls[l].name {
-                            Designator::Char(c) => EnumLit::Char(c as u8),
-                            Designator::Ident(i) => EnumLit::ident(&i.text.to_string()),
-                            Designator::Operator { text, .. } => EnumLit::ident(&text.to_string()),
-                        })
-                        .collect(),
-                }),
-                TypeKind::Floating | TypeKind::UniversalReal => LitType::Real(RealBounds::REAL),
-                TypeKind::Physical { units } => LitType::Phys(
-                    PhysicalType {
-                        units: units
-                            .iter()
-                            .map(|u| Unit {
-                                name: to_latin1(&db.decls[u.decl].name.to_string()),
-                                value: u.scale,
-                            })
-                            .collect(),
-                    },
-                    bounds,
-                ),
-                _ => LitType::Int(bounds),
-            }
+            scalar_type(db, *ty, bounds)
         }
         Shape::Array { dims, elem, .. } => {
             dims.iter()

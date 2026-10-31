@@ -65,9 +65,9 @@ fn span_place(sh: &Shared, s: yavs_diag::Span) -> String {
 }
 
 /// The signal `name` means at this stop.
-fn signal<'s>(sh: &'s Shared, at: &At<'_, '_>, name: &str) -> Result<&'s Sig, String> {
+fn signal<'s>(sh: &'s Shared, at: &At<'_, '_>, cmd: &str, name: &str) -> Result<&'s Sig, String> {
     if name.is_empty() {
-        return Err("this command needs a signal name".to_string());
+        return Err(format!("`{cmd}` needs a signal name"));
     }
     let proc = thread_proc(sh, thread_of(at));
     sh.design
@@ -241,7 +241,7 @@ fn header(sig: &Sig, at: &At<'_, '_>) -> String {
 
 /// `drivers NAME`.
 pub(crate) fn drivers(sh: &Shared, at: &At<'_, '_>, name: &str) -> Result<String, String> {
-    let sig = signal(sh, at, name)?;
+    let sig = signal(sh, at, "drivers", name)?;
     let mut o = header(sig, at);
     let links = sh.ports.get().map_or(&[][..], Vec::as_slice);
     let mut rows = vec![row(["driver", "value", "assigned at"])];
@@ -280,7 +280,9 @@ pub(crate) fn drivers(sh: &Shared, at: &At<'_, '_>, name: &str) -> Result<String
                 }
             }
         }
-        if info.driving != info.effective && info.forced.is_empty() {
+        // A signal with no driver of its own has no driving value to show.
+        let driven = info.sources.iter().any(|x| x.range.overlaps(part));
+        if driven && info.driving != info.effective && info.forced.is_empty() {
             driving = Some(image(sig, leaf, true, &info.driving));
         }
         for (r, v, kind) in (info.forced.iter().map(|(r, v)| (r, v, "force")))
@@ -663,8 +665,20 @@ fn all_variables(sh: &Shared) -> Vec<(String, String)> {
 /// `find signals PATTERN` and `find variables PATTERN`.
 pub(crate) fn find(sh: &Shared, at: &At<'_, '_>, rest: &str) -> Result<String, String> {
     let (what, pattern) = crate::console::word(rest);
-    if pattern.is_empty() {
-        return Err("`find` needs a pattern: `find signals *clk*`, `find variables count`".into());
+    if what.is_empty() {
+        return Err(crate::console::bad_sub(
+            "find",
+            what,
+            &["signals", "variables"],
+        ));
+    }
+    if pattern.is_empty() && matches!(what, "signals" | "signal" | "variables" | "variable") {
+        let eg = if what.starts_with("signal") {
+            "*clk*"
+        } else {
+            "count"
+        };
+        return Err(format!("`find {what}` needs a pattern: `find {what} {eg}`"));
     }
     let none = |noun: &'static str, cands: Vec<String>| {
         let keys: Vec<(String, &str)> = (cands.iter())
@@ -714,15 +728,11 @@ pub(crate) fn find(sh: &Shared, at: &At<'_, '_>, rest: &str) -> Result<String, S
             }
             Ok(table(&rows).trim_end().to_string())
         }
-        _ => {
-            let help = yavs_sem::suggest::suggest(
-                &what.to_ascii_lowercase(),
-                "subcommand",
-                ["signals", "variables"].iter().map(|&n| (n, n)),
-            );
-            let help = help.unwrap_or_else(|| "expected `signals` or `variables`".to_string());
-            Err(format!("`find {what}`: {help}"))
-        }
+        _ => Err(crate::console::bad_sub(
+            "find",
+            what,
+            &["signals", "variables"],
+        )),
     }
 }
 
@@ -848,11 +858,7 @@ pub(crate) fn examine_at(sh: &Shared, at: &At<'_, '_>, text: &str) -> Result<Str
 }
 
 fn parse_time(text: &str) -> Result<u64, String> {
-    yavs_std::value::time_literal(text)
-        .map_err(|e| e.to_string())
-        .and_then(|fs| Time::from_vhdl(fs).map_err(|e| e.to_string()))
-        .map(Time::as_fs)
-        .map_err(|e| format!("`{text}` is not a time: {e}"))
+    crate::console::parse_time(text).map(Time::as_fs)
 }
 
 /// The name of a signal or a variable in the wave file, seen from this stop.
@@ -886,16 +892,10 @@ fn wave_name(sh: &Shared, at: &At<'_, '_>, name: &str) -> String {
 pub(crate) fn trace_x(sh: &Shared, at: &At<'_, '_>, rest: &str) -> Result<String, String> {
     let (kind, name) = crate::console::word(rest);
     if kind != "x" {
-        let help = yavs_sem::suggest::suggest(
-            &kind.to_ascii_lowercase(),
-            "form",
-            [("x", "x")].into_iter(),
-        );
-        let help = help.unwrap_or_else(|| "the form is `trace x NAME`".to_string());
-        return Err(format!("`trace {kind}`: {help}"));
+        return Err(crate::console::bad_sub("trace", kind, &["x"]));
     }
     let (name, _) = name_word(name);
-    let sig = signal(sh, at, name)?;
+    let sig = signal(sh, at, "trace x", name)?;
     let k = sh.design.sigs.iter().position(|s| std::ptr::eq(s, sig));
     let text = sig.show(&|r| at.read(r));
     if !yavs_wave::history::unknown(&text) {

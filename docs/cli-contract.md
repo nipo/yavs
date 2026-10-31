@@ -565,8 +565,12 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   expression over the stopped frame's locals and the signals visible from the process (or the
   watched signal's region) or by path, with predefined operators, numeric comparisons of `unsigned`
   and `signed` and `to_integer`; one that does not parse, uses something unsupported or compares a
-  signal with a literal that is no value of its type is `verified: false` with a `message`, an error
-  while evaluating a stop with reason `exception`. `hitCondition` counts the hits where the condition
+  signal with a literal that is no value of its type, names nothing visible, mixes operand types or is
+  not boolean is `verified: false` with a `message` (the check runs when the breakpoint is set; a
+  variable of a process is known by name only, so a verified breakpoint names such variables in its
+  `message`), an error while evaluating at a stop (a value-dependent one) a stop with reason
+  `exception`. Physical values, `time` among them, are shown in the largest unit that holds them
+  whole (`10 ns`). `hitCondition` counts the hits where the condition
   held. `evaluate` takes a local or signal, a part of one (field, element, slice, `.all`) or any such
   expression. `completions` (`supportsCompletionsRequest`, at a stop) answers targets with `label` and
   `length`, the characters before the cursor it replaces. Access values and protected objects expand

@@ -1,0 +1,5 @@
+request initialize {"adapterID": "yavs"}
+request launch {"stopOnEntry": true}
+request configurationDone {}
+event stopped
+event stopped

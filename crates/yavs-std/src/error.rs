@@ -50,6 +50,8 @@ pub enum ErrorKind {
     Overflow,
     /// The value is outside the bounds of the target subtype.
     OutOfRange { low: String, high: String },
+    /// A physical literal that is no whole number of the primary unit, where that is required.
+    Fraction { unit: String },
     /// A physical literal names a unit the type does not have.
     UnknownUnit,
     /// The text names no literal of the enumeration type.
@@ -120,6 +122,11 @@ impl fmt::Display for ConvError {
             ErrorKind::OutOfRange { low, high } => write!(
                 f,
                 "{w} value \"{}\" is outside the range {low} to {high}",
+                self.offending()
+            ),
+            ErrorKind::Fraction { unit } => write!(
+                f,
+                "{w} value \"{}\" is not a whole number of {unit}: the resolution is 1 {unit}",
                 self.offending()
             ),
             ErrorKind::UnknownUnit => {

@@ -411,6 +411,13 @@ pub(crate) struct Kept {
 }
 
 impl Kept {
+    /// A breakpoint that was refused gives its number back, if none was made since.
+    fn give_back(&mut self, id: u64) {
+        if self.next_id == id {
+            self.next_id -= 1;
+        }
+    }
+
     fn numbered(&mut self, mut list: Vec<Json>) -> Vec<Json> {
         for b in &mut list {
             self.next_id += 1;
@@ -892,12 +899,20 @@ pub(crate) fn no_signal(sh: &Shared, tid: i64, name: &str) -> String {
     }
 }
 
-/// A subcommand that is none of `subs`.
-fn bad_sub(cmd: &str, sub: &str, subs: &[&str]) -> String {
-    let list: Vec<String> = subs.iter().map(|s| s.to_string()).collect();
-    let names = subs.iter().map(|s| format!("`{s}`")).collect::<Vec<_>>();
-    let mut m = format!("`{cmd} {sub}`: expected {}", names.join(" or "));
-    if let Some(h) = similar(sub, "subcommand", &list) {
+/// The error for a missing subcommand or one that is none of `subs`.
+pub(crate) fn bad_sub(cmd: &str, sub: &str, subs: &[&str]) -> String {
+    let names: Vec<String> = subs.iter().map(|s| format!("`{s}`")).collect();
+    let list = match names.split_last() {
+        Some((last, first)) if !first.is_empty() => format!("{} or {last}", first.join(", ")),
+        _ => names.join(""),
+    };
+    if sub.is_empty() {
+        return format!("`{cmd}` needs a subcommand: {list}");
+    }
+    let mut m = format!("`{cmd} {sub}`: expected {list}");
+    let all: Vec<String> = subs.iter().map(|s| s.to_string()).collect();
+    // With one choice the list is the help.
+    if let Some(h) = similar(sub, "subcommand", &all).filter(|_| all.len() > 1) {
         m += &format!(": {h}");
     }
     m
@@ -926,6 +941,13 @@ pub(crate) fn names_here(sh: &Shared, at: &At<'_, '_>, tid: i64, frame: usize) -
             out.extend(shared.map(|&k| sh.design.shared[k].name.clone()));
         }
     }
+    let proc = crate::proc_name(sh, tid);
+    out.extend(
+        sh.design
+            .generics_at(proc.as_deref())
+            .iter()
+            .map(|g| g.0.clone()),
+    );
     out.retain(|n| n != "self");
     out.sort();
     out.dedup();
@@ -1078,28 +1100,68 @@ fn common_prefix(labels: &[String]) -> String {
     same.map(|(x, _)| x).collect()
 }
 
+/// The flags of `force`, `deposit` and `release`: a flag goes last, after the value.
 fn change(sh: &Shared, at: &At<'_, '_>, cmd: &str, rest: &str) -> Result<String, String> {
     let (name, mut rest) = name_word(rest);
     if name.is_empty() {
-        return Err(format!("`{cmd}` needs a signal"));
+        return Err(format!("`{cmd}` needs a signal name"));
     }
-    let out = rest.strip_suffix("-out");
-    if let Some(r) = out {
-        rest = r.trim_end();
+    let mut mode = "in";
+    // A word that starts with `-` and a letter is a flag (`-3` is a value).
+    let flag = |w: &str| {
+        w.strip_prefix('-')
+            .is_some_and(|f| f.starts_with(char::is_alphabetic))
+    };
+    let (value, last) = word_end(rest);
+    if flag(last) {
+        if cmd == "deposit" && last == "-out" {
+            return Err(
+                "`deposit` has no `-out`: a deposit gives a value once, to the signal".into(),
+            );
+        }
+        if last != "-out" {
+            let help = similar(last, "flag", &["-out".to_string()]);
+            let help = help.map_or(String::new(), |h| format!(": {h}"));
+            let only = if cmd == "deposit" {
+                "has no flags"
+            } else {
+                "has only `-out`"
+            };
+            return Err(format!("`{cmd}` {only}, not `{last}`{help}"));
+        }
+        mode = "out";
+        rest = value;
     }
     if cmd != "release" && rest.is_empty() {
         return Err(format!("`{cmd}` needs a value"));
     }
+    if cmd == "release" && !rest.is_empty() {
+        return Err(format!("`release` takes no value, only `-out`: `{rest}`"));
+    }
     let name = qualify(sh, at, name);
     let mut args = json!({"signal": name, "value": rest});
-    if out.is_some() {
+    if mode == "out" {
         args["mode"] = json!("out");
     }
-    let r = signal_change(sh, at, &format!("yavs/{cmd}"), &args)?;
+    let r = signal_change(sh, at, &format!("yavs/{cmd}"), &args).map_err(|e| {
+        match rest.split_whitespace().any(flag) {
+            true => format!("{e}: a flag goes last, after the value"),
+            false => e,
+        }
+    })?;
     Ok(match r["value"].as_str() {
         Some(v) => format!("{} = {v}", r["signal"].as_str().unwrap_or_default()),
         None => r["signal"].as_str().unwrap_or_default().to_string(),
     })
+}
+
+/// `text` without its last word, and that word.
+fn word_end(text: &str) -> (&str, &str) {
+    let text = text.trim_end();
+    match text.rfind(char::is_whitespace) {
+        Some(i) => (text[..i].trim_end(), &text[i + 1..]),
+        None => ("", text),
+    }
 }
 
 fn where_text(sh: &Shared, at: &At<'_, '_>) -> String {
@@ -1177,14 +1239,35 @@ fn break_cmd(sh: &Shared, at: &At<'_, '_>, rest: &str) -> Result<String, String>
     let out = apply_signals(sh, CONSOLE_BREAKS);
     let r = out.last().cloned().unwrap_or(Json::Null);
     if r["verified"] != true {
-        kept(sh).signals[CONSOLE_BREAKS].pop();
+        let mut k = kept(sh);
+        k.signals[CONSOLE_BREAKS].pop();
+        k.give_back(id);
+        drop(k);
         apply_signals(sh, CONSOLE_BREAKS);
         return Err(r["message"].as_str().unwrap_or_default().to_string());
     }
     Ok(format!(
-        "breakpoint {id}: {}",
-        r["description"].as_str().unwrap_or_default()
+        "breakpoint {id}: {}{}",
+        r["description"].as_str().unwrap_or_default(),
+        unchecked_note(&r)
     ))
+}
+
+/// What a reply says about the names of a condition that wait for the stop.
+pub(crate) fn unchecked_note(r: &Json) -> String {
+    let names: Vec<&str> = r["unchecked"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Json::as_str)
+        .collect();
+    match names.is_empty() {
+        true => String::new(),
+        false => format!(
+            "\n  not checked until the condition is evaluated at a stop: `{}`",
+            names.join("`, `")
+        ),
+    }
 }
 
 fn break_line(
@@ -1217,16 +1300,20 @@ fn break_line(
     let out = apply_lines(sh, &key);
     let r = out.last().cloned().unwrap_or(Json::Null);
     if r["verified"] != true {
-        if let Some(l) = kept(sh).lines.get_mut(&key) {
+        let mut k = kept(sh);
+        if let Some(l) = k.lines.get_mut(&key) {
             l.pop();
         }
+        k.give_back(id);
+        drop(k);
         apply_lines(sh, &key);
         return Err(r["message"].as_str().unwrap_or_default().to_string());
     }
     Ok(format!(
-        "breakpoint {id}: {}:{}",
+        "breakpoint {id}: {}:{}{}",
         sh.design.shown_file(&key),
-        r["line"]
+        r["line"],
+        unchecked_note(&r)
     ))
 }
 
@@ -1274,7 +1361,14 @@ fn break_list(sh: &Shared) -> String {
     }
     for (f, list) in &k.lines {
         for b in list {
-            let mut t = format!("{} {}:{}", b["yavsId"], sh.design.shown_file(f), b["line"]);
+            // The line it stops at: a line with no statement moves to the next.
+            let asked = b["line"].as_u64().unwrap_or(0) as u32;
+            let at = match sh.design.line_stmts(f, asked) {
+                Some((l, _)) if l != asked => format!("{l} (asked for line {asked})"),
+                Some(_) => asked.to_string(),
+                None => format!("{asked} (no statement on or after it)"),
+            };
+            let mut t = format!("{} {}:{at}", b["yavsId"], sh.design.shown_file(f));
             if let Some(c) = b["condition"].as_str() {
                 t += &format!(" if {c}");
             }
@@ -1307,6 +1401,9 @@ fn break_list(sh: &Shared) -> String {
 fn break_delete(sh: &Shared, what: &str) -> Result<String, String> {
     let all = what == "all";
     let id = what.parse::<u64>().ok();
+    if what.is_empty() {
+        return Err("`break delete` needs a breakpoint's number, `all` or `assert`".into());
+    }
     if !all && id.is_none() {
         return Err(
             bad_sub("break delete", what, &["all", "assert"]) + ", or a breakpoint's number"
@@ -1354,7 +1451,7 @@ fn break_delete(sh: &Shared, what: &str) -> Result<String, String> {
 
 /// `run until`: stop at the first change of a signal the condition names after which it holds.
 fn run_until(sh: &Shared, at: &At<'_, '_>, text: &str) -> Result<Exec, String> {
-    let first = cond::parse(text)?;
+    let (first, unchecked) = crate::make_cond(sh, text, crate::kernel_seen(sh, thread_of(at)))?;
     let proc = thread_proc(sh, thread_of(at));
     let sigs: Vec<usize> = first
         .names()
@@ -1371,7 +1468,7 @@ fn run_until(sh: &Shared, at: &At<'_, '_>, text: &str) -> Result<Exec, String> {
         bps.push(SigBp {
             sig,
             value: None,
-            cond: Some(cond::parse(text)?),
+            cond: Some(crate::make_cond(sh, text, crate::kernel_seen(sh, tid))?.0),
             hit: yavs_interp::HitCond::Always,
             hits: 0,
             tid,
@@ -1379,7 +1476,25 @@ fn run_until(sh: &Shared, at: &At<'_, '_>, text: &str) -> Result<Exec, String> {
     }
     sh.sig_bps.lock().unwrap_or_else(|p| p.into_inner())[RUN_UNTIL] = bps;
     rewatch(sh);
+    let note = unchecked_note(&json!({"unchecked": unchecked}));
+    if !note.is_empty() {
+        sh.output("console", &format!("{}\n", note.trim_start()));
+    }
     Ok(Exec::Next(Next::Run(Run::ToEnd)))
+}
+
+/// A time as the user types it: a number and a unit (`10 ns`), as one error says for all.
+pub(crate) fn parse_time(text: &str) -> Result<Time, String> {
+    let t = text.trim();
+    if t.starts_with(|c: char| c.is_ascii_digit() || c == '.')
+        && !t.contains(|c: char| c.is_ascii_alphabetic())
+    {
+        return Err(format!("a time needs a unit: `{t} ns`"));
+    }
+    yavs_std::value::time_literal(t)
+        .map_err(|e| e.to_string())
+        .and_then(|fs| Time::from_vhdl(fs).map_err(|e| e.to_string()))
+        .map_err(|e| format!("`{t}` is not a time: {e}"))
 }
 
 fn run(sh: &Shared, at: &At<'_, '_>, rest: &str) -> Result<Exec, String> {
@@ -1393,10 +1508,7 @@ fn run(sh: &Shared, at: &At<'_, '_>, rest: &str) -> Result<Exec, String> {
     if let ("until", cond_text) = word(rest) {
         return run_until(sh, at, cond_text);
     }
-    let t = yavs_std::value::time_literal(rest)
-        .map_err(|e| e.to_string())
-        .and_then(|fs| Time::from_vhdl(fs).map_err(|e| e.to_string()))
-        .map_err(|e| format!("`{rest}` is not a time: {e}"))?;
+    let t = parse_time(rest)?;
     let now = at.now().ok_or("no simulation time at this stop")?;
     let to = now.checked_add(t).map_err(|e| e.to_string())?;
     Ok(Exec::Next(Next::Run(Run::Until(to))))
@@ -1622,10 +1734,7 @@ fn wave(sh: &Shared, at: &At<'_, '_>, rest: &str) -> Result<String, String> {
             let t = if args.is_empty() {
                 at.now().ok_or("no simulation time at this stop")?
             } else {
-                yavs_std::value::time_literal(args)
-                    .map_err(|e| e.to_string())
-                    .and_then(|fs| Time::from_vhdl(fs).map_err(|e| e.to_string()))
-                    .map_err(|e| format!("`{args}` is not a time: {e}"))?
+                parse_time(args)?
             };
             v.cursor(t.as_fs());
             Ok(String::new())

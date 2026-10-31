@@ -877,10 +877,7 @@ fn run_to(at: &At<'_, '_>, req: &Json) -> Result<Time, String> {
     let text = req["arguments"]["time"]
         .as_str()
         .ok_or("expected a `time` argument such as \"10 ns\"")?;
-    let t = yavs_std::value::time_literal(text)
-        .map_err(|e| e.to_string())
-        .and_then(|fs| Time::from_vhdl(fs).map_err(|e| e.to_string()))
-        .map_err(|e| format!("`{text}` is not a time: {e}"))?;
+    let t = console::parse_time(text)?;
     let now = at.now().ok_or("no simulation time at this stop")?;
     if req["command"] == "yavs/runFor" {
         return now.checked_add(t).map_err(|e| e.to_string());
@@ -1458,13 +1455,20 @@ impl cond::Env for Names<'_, '_, '_> {
                 if let Some(v) = self.state_var(name) {
                     return Some(v);
                 }
-                match found?.err()? {
-                    design::Named::Signal(k) => {
-                        let s = &self.sh.design.sigs[k];
-                        Some((s.lit.clone(), s.value(&|r| self.at.read(r))?))
-                    }
-                    design::Named::Shared(k) => shared_value(self.sh, self.at, k),
+                if let Some(Err(named)) = found {
+                    return match named {
+                        design::Named::Signal(k) => {
+                            let s = &self.sh.design.sigs[k];
+                            Some((s.lit.clone(), s.value(&|r| self.at.read(r))?))
+                        }
+                        design::Named::Shared(k) => shared_value(self.sh, self.at, k),
+                    };
                 }
+                // A generic of the process's instance, or of the top level between cycles.
+                let proc = proc_name(self.sh, self.tid);
+                let all = self.sh.design.generics_at(proc.as_deref());
+                let g = all.iter().find(|g| g.0.eq_ignore_ascii_case(name));
+                g.map(|(_, t, x)| (t.clone(), x.clone()))
             }
         }
     }
@@ -1484,32 +1488,194 @@ impl cond::Env for Names<'_, '_, '_> {
     }
 }
 
-/// What a condition can know before the run: the types of the signals, by a name that means one
-/// signal of the design. ponytail: a local that hides such a signal is taken for the signal.
-struct Typed<'a>(&'a Design);
+/// What a condition will see when it is read: the locals and the signals of the process (or
+/// processes) it runs in. `None` is not known: a subprogram's caller decides.
+struct Seen {
+    locals: Option<Vec<String>>,
+    sigs: Option<Vec<usize>>,
+    /// The generics of the instances, with their values.
+    generics: Vec<(String, LitType, Lit)>,
+}
+
+/// What a condition can know when it is made: the types of the signals, by a name that means one
+/// signal (or several of one type) of the design or by path, and the names of the locals it may
+/// read.
+struct Typed<'a> {
+    design: &'a Design,
+    seen: Seen,
+    /// The names met that wait for the stop to be checked.
+    unchecked: std::cell::RefCell<Vec<String>>,
+}
 
 impl Typed<'_> {
-    fn sig(&self, name: &str) -> Option<&design::Sig> {
-        let mut named = self
-            .0
-            .sigs
-            .iter()
-            .filter(|s| s.name.eq_ignore_ascii_case(name));
-        let s = named.next()?;
-        named.next().is_none().then_some(s)
+    /// The signals a simple name can mean here.
+    fn named(&self, name: &str) -> Vec<&design::Sig> {
+        let all = self.design.sigs.iter().enumerate();
+        let seen = |k: &usize| self.seen.sigs.as_ref().is_none_or(|s| s.contains(k));
+        let named = |(_, s): &(usize, &design::Sig)| s.name.eq_ignore_ascii_case(name);
+        all.filter(|(k, _)| seen(k))
+            .filter(named)
+            .map(|(_, s)| s)
+            .collect()
+    }
+
+    /// The signal a name means, if it is one or all of one type.
+    fn signal(&self, name: &str) -> Option<&design::Sig> {
+        let named = self.named(name);
+        match named.first() {
+            Some(s) if named.iter().all(|o| o.lit == s.lit) => Some(*s),
+            Some(_) => None,
+            None => self.design.find(None, name).map(|k| &self.design.sigs[k]),
+        }
     }
 }
 
 impl cond::Env for Typed<'_> {
     fn get(&self, name: &str) -> Option<(LitType, Lit)> {
-        let t = self.sig(name)?.lit.clone();
+        let Some(s) = self.signal(name) else {
+            let g = (self.seen.generics.iter()).find(|g| g.0.eq_ignore_ascii_case(name));
+            return g.map(|(_, t, x)| (t.clone(), x.clone()));
+        };
+        let t = s.lit.clone();
         let v = cond::zero(&t);
         Some((t, v))
     }
 
     fn type_name(&self, name: &str) -> Option<String> {
-        Some(self.sig(name)?.ty.clone())
+        Some(self.signal(name)?.ty.clone())
     }
+
+    fn local(&self, name: &str) -> bool {
+        let simple = !name.contains(['.', '(', ':']);
+        let named = |l: &String| l.eq_ignore_ascii_case(name);
+        // A name of signals of different types is read at the stop.
+        let ambiguous = self.signal(name).is_none() && !self.named(name).is_empty();
+        let known = match &self.seen.locals {
+            Some(l) => l.iter().any(named),
+            None => simple,
+        };
+        // A shared variable is read at the stop.
+        let shared = self
+            .design
+            .shared
+            .iter()
+            .any(|v| v.name.eq_ignore_ascii_case(name))
+            || matches!(
+                self.design.named(None, name),
+                Some(design::Named::Shared(_))
+            );
+        let known = known || ambiguous || shared;
+        if known {
+            let mut u = self.unchecked.borrow_mut();
+            if !u.iter().any(named) {
+                u.push(name.to_string());
+            }
+        }
+        known
+    }
+}
+
+/// What thread `tid`'s process sees (nothing for 0: between cycles, names are paths).
+fn thread_seen(sh: &Shared, tid: i64) -> Seen {
+    let Some(name) = proc_name(sh, tid) else {
+        return Seen {
+            locals: Some(Vec::new()),
+            sigs: None,
+            generics: sh.design.generics_at(None).to_vec(),
+        };
+    };
+    let t = sh.elab.proc_table();
+    let k = (sh.elab.procs.iter()).position(|p| sh.elab.proc_name(p) == name);
+    let func = k.and_then(|k| t.func(yavs_kernel::ProcId(k as u32)));
+    Seen {
+        locals: Some(
+            func.and_then(|f| sh.prog.func(f))
+                .map_or_else(Vec::new, locals_of),
+        ),
+        sigs: sh.design.proc(&name).map(|p| p.signals.clone()),
+        generics: sh.design.generics_at(Some(&name)).to_vec(),
+    }
+}
+
+/// What a condition on a signal sees when it is read: a change is read between cycles, where no
+/// process's variables are.
+fn kernel_seen(sh: &Shared, tid: i64) -> Seen {
+    Seen {
+        locals: Some(Vec::new()),
+        ..thread_seen(sh, tid)
+    }
+}
+
+fn locals_of(f: &yavs_ir::Func) -> Vec<String> {
+    let own = |n: &&String| !n.starts_with('_') && n.as_str() != "self";
+    (f.locals.iter().map(|l| &l.name))
+        .filter(own)
+        .cloned()
+        .collect()
+}
+
+/// What a condition on these statements sees: that of their processes. Unknown when a statement
+/// is in a subprogram: the process that calls it has its own.
+fn line_seen(sh: &Shared, stmts: &[yavs_ir::StmtId]) -> Seen {
+    let t = sh.elab.proc_table();
+    let procs: Vec<_> = (0..sh.elab.procs.len())
+        .map(|k| (k, t.func(yavs_kernel::ProcId(k as u32))))
+        .collect();
+    let mut seen = Seen {
+        locals: Some(Vec::new()),
+        sigs: Some(Vec::new()),
+        generics: Vec::new(),
+    };
+    for &s in stmts {
+        let Some(f) = sh.prog.stmts.get(s).map(|st| st.func) else {
+            continue;
+        };
+        let own: Vec<_> = procs.iter().filter(|(_, g)| *g == Some(f)).collect();
+        if own.is_empty() {
+            return Seen {
+                locals: None,
+                sigs: None,
+                generics: Vec::new(),
+            };
+        }
+        seen.locals.iter_mut().for_each(|l| {
+            l.extend(sh.prog.func(f).map(locals_of).unwrap_or_default());
+        });
+        for (k, _) in own {
+            let name = sh.elab.proc_name(&sh.elab.procs[*k]);
+            let sigs = sh.design.proc(&name).map(|p| p.signals.clone());
+            seen.sigs
+                .iter_mut()
+                .for_each(|v| v.extend(sigs.iter().flatten()));
+            if let Some(p) = sh.design.proc(&name) {
+                seen.generics.extend(p.generic_lits.iter().cloned());
+            }
+        }
+    }
+    seen
+}
+
+/// Parse a condition and check what can be known now (`Cond::check_types`), with the help the
+/// evaluation gives. The names left for the stop come back with it.
+fn make_cond(sh: &Shared, text: &str, seen: Seen) -> Result<(cond::Cond, Vec<String>), String> {
+    let c = cond::parse(text)?;
+    let env = Typed {
+        design: &sh.design,
+        seen,
+        unchecked: Default::default(),
+    };
+    c.check_types(&env).map_err(|e| {
+        let word = e
+            .strip_prefix("no local or signal `")
+            .and_then(|r| r.split('`').next());
+        let mut names: Vec<String> = sh.design.sigs.iter().map(|s| s.name.clone()).collect();
+        names.extend(env.seen.locals.iter().flatten().cloned());
+        names.extend(env.seen.generics.iter().map(|g| g.0.clone()));
+        let help = word.and_then(|w| console::similar(w, "signal or variable", &names));
+        let help = help.map_or(String::new(), |h| format!(": {h}"));
+        format!("condition `{text}`: {e}{help}")
+    })?;
+    Ok((c, env.unchecked.into_inner()))
 }
 
 /// A local of the frame, or a signal by name or path: its value (a composite expands).
@@ -2152,7 +2318,22 @@ fn set_breakpoints(sh: &Shared, req: &Json) {
         .unwrap_or_else(|p| p.into_inner())
         .set_lines(&key, list);
     let out = apply_lines(sh, &key);
-    sh.respond(req, json!({"breakpoints": out}));
+    sh.respond(req, json!({"breakpoints": for_client(out)}));
+}
+
+/// What a client is told of its breakpoints: `unchecked` (the console's reply) as the message
+/// of a verified breakpoint.
+fn for_client(mut list: Vec<Json>) -> Vec<Json> {
+    for b in &mut list {
+        let note = console::unchecked_note(b);
+        if let Some(o) = b.as_object_mut() {
+            o.remove("unchecked");
+            if !note.is_empty() {
+                o.insert("message".into(), json!(note.trim()));
+            }
+        }
+    }
+    list
 }
 
 /// Map each kept line breakpoint of file `key` to the statements starting on its line (or the
@@ -2179,24 +2360,26 @@ fn apply_lines(sh: &Shared, key: &str) -> Vec<Json> {
             None => Ok(HitCond::Always),
             Some(h) => h,
         };
+        let found = sh.design.line_stmts(key, line);
         // A condition is evaluated here; the interpreter then stops on every hit.
+        let mut unchecked = Vec::new();
         let hit = hit.and_then(|hit| match bp["condition"].as_str() {
             None => Ok((hit, None)),
-            Some(c) => cond::parse(c)
-                .and_then(|c| {
-                    c.check_types(&Typed(&sh.design))?;
-                    Ok(c)
-                })
-                .map(|cond| {
-                    let c = Arc::new(LineCond {
-                        cond,
-                        hit,
-                        hits: std::sync::atomic::AtomicU64::new(0),
-                    });
-                    (HitCond::Always, Some(c))
-                }),
+            Some(c) => {
+                let seen = match found {
+                    Some((_, stmts)) => line_seen(sh, stmts),
+                    None => thread_seen(sh, 0),
+                };
+                let (cond, left) = make_cond(sh, c, seen)?;
+                unchecked = left;
+                let c = Arc::new(LineCond {
+                    cond,
+                    hit,
+                    hits: std::sync::atomic::AtomicU64::new(0),
+                });
+                Ok((HitCond::Always, Some(c)))
+            }
         });
-        let found = sh.design.line_stmts(key, line);
         match (found, hit) {
             (Some((l, stmts)), Ok((hit, c))) => {
                 for &s in stmts {
@@ -2206,7 +2389,11 @@ fn apply_lines(sh: &Shared, key: &str) -> Vec<Json> {
                     }
                     ids.push(s);
                 }
-                out.push(json!({"verified": true, "line": l, "source": source(key)}));
+                let mut b = json!({"verified": true, "line": l, "source": source(key)});
+                if !unchecked.is_empty() {
+                    b["unchecked"] = json!(unchecked);
+                }
+                out.push(b);
             }
             (None, _) => out.push(json!({
                 "verified": false,
@@ -2308,7 +2495,7 @@ fn set_signal_breakpoints(sh: &Shared, req: &Json, set: usize) {
         .unwrap_or_else(|p| p.into_inner())
         .set_signals(set, list);
     let out = apply_signals(sh, set);
-    sh.respond(req, json!({"breakpoints": out}));
+    sh.respond(req, json!({"breakpoints": for_client(out)}));
 }
 
 /// Resolve the kept signal breakpoints of `set`; what a client is told of each.
@@ -2322,6 +2509,7 @@ fn apply_signals(sh: &Shared, set: usize) -> Vec<Json> {
     let mut bps = Vec::new();
     let mut out = Vec::new();
     for bp in &list {
+        let mut unchecked = Vec::new();
         let tid = bp["frameId"].as_i64().map_or(0, |f| f >> 16);
         let p = thread_proc(sh, tid);
         let name = bp[if set == 0 { "dataId" } else { "signal" }]
@@ -2338,7 +2526,11 @@ fn apply_signals(sh: &Shared, set: usize) -> Vec<Json> {
             };
             let cond = match bp["condition"].as_str() {
                 None => None,
-                Some(c) => Some(cond::parse(c)?),
+                Some(c) => {
+                    let (c, left) = make_cond(sh, c, kernel_seen(sh, tid))?;
+                    unchecked = left;
+                    Some(c)
+                }
             };
             let hit = match bp["hitCondition"].as_str() {
                 None => HitCond::Always,
@@ -2357,7 +2549,11 @@ fn apply_signals(sh: &Shared, set: usize) -> Vec<Json> {
             Ok(b) => {
                 let d = console::dotted(&sh.design.sigs[b.sig].path);
                 bps.push(b);
-                json!({"verified": true, "description": d})
+                let mut j = json!({"verified": true, "description": d});
+                if !unchecked.is_empty() {
+                    j["unchecked"] = json!(unchecked);
+                }
+                j
             }
             Err(m) => json!({"verified": false, "message": m}),
         });

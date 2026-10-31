@@ -75,6 +75,9 @@ A name in a command is a signal, a variable, a part of one, or a path:
   process sees (those of its architecture and its ports). Inside a method of a protected type
   the variables of the object are in scope too. Between cycles (after ``run 12 ns``, no
   process stopped) a simple name is looked up at the top level.
+* A generic of the instance (``N``) is a name in an expression, after the signals: ``examine N``,
+  ``break cnt if cnt = N``. Arrays of characters, enumerations, numbers and times are the generics
+  it reads; between cycles the generics of the top level.
 * A path names a signal anywhere. ``tb.u_reg.q``, ``:tb:u_reg:q`` and ``TB.U_REG.Q`` are the same
   signal; the dotted form is what ``find`` and the messages print. Case does not matter, and a
   leading ``:`` starts a path of colons. A path may also start from where the name is looked up:
@@ -125,7 +128,8 @@ the target, written as in VHDL source, or with the quotes left out for a bit-lik
 * An enumeration: the literal (``busy``, ``true``, ``'1'``, ``'Z'``), not case sensitive
   for identifiers.
 * A physical value, ``time`` among them: a number and a unit, ``5 ns``, ``2.5 us``. Without a
-  unit a number is an error. It is shown in the primary unit (femtoseconds for ``time``).
+  unit a number is an error. It is shown in the largest unit that holds it whole (``10 ns``,
+  ``1500 ps``). A fraction that is no whole number of the primary unit (``0.5 fs``) is an error.
 * A string or bit string for an array of characters: ``"0101"``, ``x"F0"``, ``b"1010"``,
   ``o"17"``, ``8ux"F"`` (sized, as VHDL-2008). The length must be the length of the target.
 * An aggregate for a record or an array: positional (``(7, true, '1')``), named (``(x => 7,
@@ -147,7 +151,8 @@ Time
 
 A time is a number and a unit, with or without a space: ``10 ns``, ``10ns``, ``1.5 us``,
 ``250 ps``. The units are ``fs``, ``ps``, ``ns``, ``us``, ``ms``, ``sec``, ``min`` and ``hr``, in
-any case. The number is not negative. A time without a unit, such as ``run 10``, is an error. ``run`` takes a
+any case. The number is not negative. A time without a unit, such as ``run 10``, is an error, and so is a fraction of
+the resolution (``run 0.5 fs``: the resolution is 1 fs). ``run`` takes a
 time relative to now; ``examine NAME @ TIME`` and ``wave cursor`` take an absolute one.
 Times are printed in the largest unit that shows them whole (``12 ns``, ``1510 ps``).
 
@@ -168,11 +173,16 @@ the names the stop sees. ``if`` ends the place of a ``break`` and starts the con
   by an integer.
 * No other function calls, no attributes, no overloaded operators.
 
-The text is parsed when the command is made, and a syntax error or an unsupported operator is
-refused then. Names and types are not checked until the condition is evaluated: at a ``break``
-that is when the place is reached, and a condition that fails to evaluate (an unknown name, a
-type that does not fit, a result that is not boolean) stops the run there as an ``exception``
-with the reason. In ``examine`` the result is printed whatever its type.
+The condition is checked when the command is made, with the text and the help it would have
+at a stop. A syntax error or an unsupported operator is refused, and so are an unknown name, a
+literal that does not fit the type of the signal it is compared with, operands of different types
+and a result that is not boolean. What only a stop knows cannot be checked: the value of a
+variable of a process, so its type (``total > 2`` is not checked against ``total``'s type), and
+what depends on a value, such as a division by zero, an index or an access value that is
+``null``. The reply of the command names the variables that were not checked. They are
+evaluated when the place is reached, and a condition that fails to evaluate then stops the run
+there as an ``exception`` with the reason. In ``examine`` the result is printed whatever its
+type.
 
 .. example:
 
@@ -180,16 +190,20 @@ with the reason. In ``examine`` the result is printed whatever its type.
 
     yavs> break tb.vhd:43 if total > 2
     breakpoint 1: /work/tb.vhd:43
+      not checked until the condition is evaluated at a stop: `total`
     yavs> break tb.vhd:43 if total > 2 and cnt = "0010"
     breakpoint 2: /work/tb.vhd:43
+      not checked until the condition is evaluated at a stop: `total`
     yavs> break tb.vhd:43 if total >
     error: condition `total >` does not parse: expected expression, found the end
     yavs> break tb.vhd:43 if cnt & cnt
     error: operator `&` is not supported in conditions
-    yavs> examine to_integer(cnt) + 1
-    1
-    yavs> examine cnt > 3
-    FALSE
+    yavs> break tb.vhd:43 if cn = "0010"
+    error: condition `cn = "0010"`: no local or signal `cn` here: a signal or variable with a similar name exists: `cnt`
+    yavs> break tb.vhd:43 if cnt
+    error: condition `cnt`: the condition is not a boolean
+    yavs> break tb.vhd:43 if cnt = '1'
+    error: condition `cnt = '1'`: `'1'` is not a value of the other operand's type: expected 4 elements, such as 0101 or "0101", x".." or an aggregate
     yavs> run
     breakpoint at 25 ns, delta 0, /work/tb.vhd:43
     yavs> examine total
@@ -331,14 +345,21 @@ or earlier at a breakpoint or the end.
 
 ``run until CONDITION`` runs until a change of a signal named in ``CONDITION`` (`Conditions`_)
 makes it true, and stops there, saying which signal changed (``data breakpoint at 15 ns, delta
-1: tb.cnt = "0010"``). Breakpoints still stop it. The condition is parsed at once; a type
-error shows at the first change as a stop with the reason (``exception at 15 ns, delta 1: ...``). A condition that names no
-signal, such as one on a variable alone, is refused: it would have nothing to watch.
+1: tb.cnt = "0010"``). Breakpoints still stop it. The condition is checked at once, as for
+``break`` (`Conditions`_); what only the stop knows shows at the first change as a stop with the
+reason (``exception at 15 ns, delta 1: ...``). A change is read between cycles, where no
+process's variables are: a variable in the condition is an unknown name. A condition that names no signal (``run until 1 = 1``) is refused: it would have nothing to watch.
 
 .. example:
 
 .. code-block:: text
 
+    yavs> run 10
+    error: a time needs a unit: `10 ns`
+    yavs> run 0.5 fs
+    error: `0.5 fs` is not a time: physical value "0.5 fs" is not a whole number of fs: the resolution is 1 fs
+    yavs> run until nosuch = 1
+    error: condition `nosuch = 1`: no local or signal `nosuch` here
     yavs> run 12 ns
     step at 12 ns, delta 0
     yavs> run until cnt = "0010"
@@ -439,7 +460,7 @@ Breakpoints
 ~~~~~~~~~~~
 
 Breakpoints are numbered from 1 in the order they are made. The number is for ``break delete``
-and ``break list``. They stay over ``restart``. A ``break`` that fails still uses up a number.
+and ``break list``. They stay over ``restart``. A ``break`` that fails uses up no number.
 
 .. _console-break:
 
@@ -481,7 +502,8 @@ A breakpoint at a source line. ``FILE`` is a source file of the design by the na
 ``break list`` or its file name alone; without ``FILE`` the line is in the file of the current
 stop, which needs a stop in a process. A line with no statement moves to the next line that has
 one, and the reply gives the line it moved to (``break tb.vhd:44`` answers ``breakpoint 2:
-/work/tb.vhd:47``); past the last statement it is an error. The
+/work/tb.vhd:47``); past the last statement it is an error. ``break list`` shows the line the
+breakpoint is at and, when it moved, the line asked for. The
 run stops *before* the statement runs: ``breakpoint at TIME, delta N, FILE:LINE``. With ``if
 CONDITION`` (`Conditions`_) it stops only when the condition holds there.
 
@@ -491,6 +513,7 @@ CONDITION`` (`Conditions`_) it stops only when the condition holds there.
 
     yavs> break tb.vhd:43 if total > 1
     breakpoint 1: /work/tb.vhd:43
+      not checked until the condition is evaluated at a stop: `total`
     yavs> break 43
     error: no source file here: write FILE:LINE
     yavs> break tb.vh:43
@@ -502,10 +525,15 @@ CONDITION`` (`Conditions`_) it stops only when the condition holds there.
     yavs> examine total
     2
     yavs> break 42
-    breakpoint 3: /work/tb.vhd:42
+    breakpoint 2: /work/tb.vhd:42
+    yavs> break tb.vhd:44
+    breakpoint 3: /work/tb.vhd:47
+    yavs> break tb.vhd:43 if nosuch = 1
+    error: condition `nosuch = 1`: no local or signal `nosuch` here
     yavs> break list
     1 /work/tb.vhd:43 if total > 1
-    3 /work/tb.vhd:42
+    2 /work/tb.vhd:42
+    3 /work/tb.vhd:47 (asked for line 44)
     yavs> break delete 1
     1 deleted
     yavs> break delete 7
@@ -527,7 +555,8 @@ break SIGNAL
 A data breakpoint: stops at the first cycle in which ``SIGNAL`` (a name, `Names`_) changes, or,
 with ``= VALUE`` (`Values`_), changes to that value. The stop says ``data breakpoint at TIME,
 delta N: NAME = VALUE`` and is *after* the cycle in which the value changed, between processes.
-With ``if CONDITION`` it also needs the condition. A name that is no signal is an error with
+With ``if CONDITION`` it also needs the condition, read after the change between cycles, so it
+sees signals and not the variables of a process. A name that is no signal is an error with
 the closest names (``break`` cannot watch a variable).
 
 .. example:
@@ -540,6 +569,8 @@ the closest names (``break`` cannot watch a variable).
     breakpoint 2: tb.cnt
     yavs> break q = '1' if cnt > 1
     breakpoint 3: tb.q
+    yavs> break q if total > 1
+    error: condition `total > 1`: no local or signal `total` here
     yavs> break list
     1 tb.cnt
     2 tb.cnt = "0011"
@@ -586,7 +617,7 @@ delete assert`` removes it.
     time 25 ns, delta 1
     tb.check, /work/tb.vhd:53
     yavs> break assert bogus
-    error: `break assert bogus`: expected `note` or `warning` or `error` or `failure`
+    error: `break assert bogus`: expected `note`, `warning`, `error` or `failure`
     yavs> break list
     assert: severity error, failure
 
@@ -709,7 +740,7 @@ Records, arrays, enumerations, access values and the variables of a protected ob
     yavs> examine ratio
     0.5
     yavs> examine delay
-    10000000 fs
+    10 ns
     yavs> examine tail.nosuch
     error: no field `nosuch` in `tail.nosuch`
 
@@ -767,7 +798,7 @@ elements. It is the way to read a process variable outside its process.
     yavs> examine cnt @ 1 us
     error: 1 us is still to come: the simulation is at 30 ns
     yavs> examine cnt @ 12
-    error: `12` is not a time: invalid unit value "12 " at "": expected an identifier or character literal
+    error: a time needs a unit: `12 ns`
     yavs> examine tb.counter.total @ 20 ns
     2
     yavs> examine cn @ 12 ns
@@ -912,6 +943,8 @@ shows both (``force: ...``, ``force out: ...``).
     tb.cnt = "0101"
     yavs> force enable
     error: `force` needs a value
+    yavs> force enable -out '1'
+    error: `-out '1'` is not a value of `tb.enable`, type STD_LOGIC: expected one of 'U', 'X', '0', '1', 'Z', 'W', 'L', 'H', '-': a flag goes last, after the value
     yavs> force nosuch '1'
     error: no signal `nosuch` here
     yavs> force cnt "10"
@@ -943,7 +976,7 @@ Give a signal a value once, in the next cycle.
 .. console-end
 
 ``deposit`` gives the signal the value once, in the next cycle: its drivers may change it at their
-next assignment. ``-out`` is accepted and has no meaning for a deposit.
+next assignment. ``-out`` has no meaning for a deposit and is an error.
 
 .. example:
 
@@ -957,6 +990,8 @@ next assignment. ``-out`` is accepted and has no meaning for a deposit.
     tb.cnt(1 downto 0) = "11"
     yavs> deposit cnt(9) '0'
     error: index 9 is out of range
+    yavs> deposit cnt "0101" -out
+    error: `deposit` has no `-out`: a deposit gives a value once, to the signal
     yavs> step delta
     step at 12 ns, delta 1
     yavs> examine cnt
@@ -1001,7 +1036,7 @@ Values of every kind, on ``types.vhd``:
     yavs> force ratio 1.5e-3
     types_tb.ratio = 0.0015
     yavs> force delay 5 us
-    types_tb.delay = 5000000000 fs
+    types_tb.delay = 5 us
     yavs> force delay 5
     error: `5` is not a value of `types_tb.delay`, type TIME: expected a number and a unit, such as 10 fs
     yavs> force pair (x => 3, ok => true, tag => 'Z')
@@ -1033,7 +1068,7 @@ Values of every kind, on ``types.vhd``:
     yavs> examine words
     ("00000000", "11111111", "10101010", "00000000")
     yavs> examine delay
-    5000000000 fs
+    5 us
 
 Waves
 ~~~~~
@@ -1240,7 +1275,7 @@ it lists, ``examine``, ``drivers``, ``describe`` and ``wave add`` take.
     yavs> find signals zz*
     error: no signal matches `zz*`
     yavs> find
-    error: `find` needs a pattern: `find signals *clk*`, `find variables count`
+    error: `find` needs a subcommand: `signals` or `variables`
 
 .. _console-find-variables:
 
@@ -1316,8 +1351,12 @@ is one. A signal with no driver says so.
     tb.enable : STD_LOGIC = 'U', declared at tb.vhd:29
       no driver: it keeps its initial value unless forced or deposited
       resolved by resolved
+    yavs> drivers tb.u_reg.clk
+    tb.u_reg.clk : STD_LOGIC = '0', declared at tb.vhd:7
+      no driver of its own: this port takes its value from tb.clk
+      resolved by resolved
     yavs> drivers
-    error: this command needs a signal name
+    error: `drivers` needs a signal name
     yavs> drivers cnt(0)
     error: no signal `cnt(0)` here
     yavs> drivers nosuch
@@ -1422,9 +1461,9 @@ signal read made the value. A signal with no unknown value says so.
     yavs> trace x cnt
     tb.cnt = "0011": all known, nothing to trace
     yavs> trace
-    error: `trace `: a form with a similar name exists: `x`
+    error: `trace` needs a subcommand: `x`
     yavs> trace y q
-    error: `trace y`: a form with a similar name exists: `x`
+    error: `trace y`: expected `x`
 
 .. _console-activity:
 

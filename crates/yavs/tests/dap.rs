@@ -162,6 +162,11 @@ fn normalize(log: &[String], dir: &Path) -> String {
 }
 
 fn script_case(name: &str, extra: &[&str]) {
+    script_case_within(name, extra, 120);
+}
+
+/// [`script_case`] with a session that is killed after `secs`.
+fn script_case_within(name: &str, extra: &[&str], secs: u64) {
     let dir = setup(&format!("{name}{}", extra.len()));
     let src = dir.join("tb.vhd").display().to_string();
     let script = std::fs::read_to_string(cases().join(format!("{name}.script"))).expect("script");
@@ -171,6 +176,8 @@ fn script_case(name: &str, extra: &[&str]) {
         None => ("tb", script.as_str()),
     };
     let mut child = spawn(&dir, top.trim(), &[&["--dap=stdio"], extra].concat());
+    // A script that waits for an event that never comes fails with its transcript (#971).
+    let _watchdog = Watchdog::new(child.id(), secs);
     let mut c = stdio_client(&mut child);
     let esc = serde_json::to_string(&src).expect("json");
     let esc = &esc[1..esc.len() - 1];
@@ -203,6 +210,14 @@ fn script_case(name: &str, extra: &[&str]) {
         );
     }
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A script that waits for an event that never comes fails with its transcript, not by hanging
+/// (#971): `hang.script` stops on entry and then waits for a second stop.
+#[test]
+#[should_panic(expected = "end of input; so far")]
+fn a_script_waiting_for_a_missing_event_fails() {
+    script_case_within("hang", &[], 5);
 }
 
 /// Line breakpoints, stack, scopes, variables, evaluate, step over and out, a waiting

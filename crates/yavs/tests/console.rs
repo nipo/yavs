@@ -97,9 +97,28 @@ fn run_until_a_condition() {
     let d = setup("until");
     let o = script(&d, "tb", "run until cnt = 4; where; examine cnt");
     assert_eq!(stdout(&o), "time 10 ns, delta 1\nbetween cycles\n4\n");
+    // A change is read between cycles, where a variable of a process is not: an unknown name.
+    let o = script(
+        &d,
+        "tb",
+        "break tb.vhd:21; run; run until i = 3 and cnt = 2",
+    );
+    assert_eq!(o.status.code(), Some(1));
+    assert!(
+        stderr(&o).contains("no local or signal `i` here"),
+        "{}",
+        stderr(&o)
+    );
+    // A generic is a name, with nothing to watch.
     let o = script(&d, "tb", "run until N = 3");
     assert_eq!(o.status.code(), Some(1));
     assert!(stderr(&o).contains("names no signal"), "{}", stderr(&o));
+    let o = script(&d, "tb", "run until M = 3");
+    assert!(
+        stderr(&o).contains("no local or signal `M` here"),
+        "{}",
+        stderr(&o)
+    );
 }
 
 #[test]
@@ -1304,4 +1323,273 @@ end;
     assert!(line.contains("before"), "{line}");
     c.kill().expect("kill");
     c.wait().expect("wait");
+}
+
+/// `break list` shows the line a breakpoint is at, and a `break` that fails keeps its number for
+/// the next one (#956).
+#[test]
+fn break_list_shows_the_line_and_failures_keep_numbers() {
+    let d = setup("breaknums");
+    let mut c = yavs();
+    c.current_dir(&d)
+        .args(["run", "--work=work:lib", "tb", "--interactive"]);
+    let lines =
+        "break tb.vhd:18\nbreak nosuch\nbreak tb.vhd:0\nbreak cnt = zz\nbreak cnt\nbreak list\n";
+    let out = stdout(&bounded(c, lines));
+    let lines: Vec<&str> = out.lines().collect();
+    assert!(
+        lines[0].starts_with("breakpoint 1: ") && lines[0].ends_with("tb.vhd:19"),
+        "{out}"
+    );
+    assert!(
+        lines[1].starts_with("breakpoint 2: ") && lines[1].ends_with("tb.vhd:6"),
+        "{out}"
+    );
+    assert_eq!(lines[2], "breakpoint 3: tb.cnt", "{out}");
+    // The numbers have no gaps; the list shows where each one stops.
+    assert!(
+        lines[3].starts_with("1 ") && lines[3].ends_with("tb.vhd:19 (asked for line 18)"),
+        "{out}"
+    );
+    assert!(
+        lines[4].starts_with("2 ") && lines[4].ends_with("tb.vhd:6 (asked for line 0)"),
+        "{out}"
+    );
+    assert_eq!(lines[5], "3 tb.cnt", "{out}");
+    assert_eq!(lines.len(), 6, "{out}");
+}
+
+/// A condition is checked when the breakpoint is made, with the text and the help of its
+/// evaluation (#957); what only a stop knows is said.
+#[test]
+fn conditions_are_checked_when_made() {
+    let d = setup("condcheck");
+    let bad = |cmd: &str, want: &str| {
+        let o = script(&d, "tb", cmd);
+        assert_eq!(o.status.code(), Some(1), "{cmd}");
+        assert!(stderr(&o).contains(want), "{cmd}: {}", stderr(&o));
+        assert!(
+            !stdout(&o).contains("breakpoint 1"),
+            "{cmd}: {}",
+            stdout(&o)
+        );
+    };
+    bad(
+        "break tb.vhd:21 if nosuch = 1",
+        "no local or signal `nosuch` here",
+    );
+    bad(
+        "break tb.vhd:21 if cnt = 1 and nosuch",
+        "no local or signal `nosuch` here",
+    );
+    bad(
+        "break tb.vhd:21 if ctn = 1",
+        "a signal or variable with a similar name exists: `cnt`",
+    );
+    bad("break tb.vhd:21 if cnt", "the condition is not a boolean");
+    bad("break tb.vhd:21 if cnt = '1'", "expected an integer");
+    bad("break tb.vhd:21 if cnt = v", "bit_vector");
+    bad(
+        "break cnt if nosuch = 1",
+        "no local or signal `nosuch` here",
+    );
+    bad("break cnt = 1 if cnt", "the condition is not a boolean");
+    bad("run until cnt", "the condition is not a boolean");
+    // A signal's condition is read between cycles: the variables of a process are not there.
+    bad("break cnt if i > 1", "no local or signal `i` here");
+    bad("run until nosuch = 1", "no local or signal `nosuch` here");
+    // A variable of the process is known by name, and its type waits for the stop.
+    let o = script(
+        &d,
+        "tb",
+        "break tb.vhd:21 if i > 1 and cnt >= 0; run; examine i",
+    );
+    let out = stdout(&o);
+    assert!(
+        out.contains("not checked until the condition is evaluated at a stop: `i`"),
+        "{out}{}",
+        stderr(&o)
+    );
+    assert!(out.ends_with("2\n"), "{out}");
+    // A value that depends on the stop is no error now.
+    let o = script(&d, "tb", "break tb.vhd:21 if cnt / cnt > 0");
+    assert_eq!(o.status.code(), Some(0), "{}", stderr(&o));
+}
+
+/// The wording of subcommand, argument and time errors (#958).
+#[test]
+fn subcommand_argument_and_time_errors_say_what_is_needed() {
+    let d = setup("wording");
+    let err = |cmd: &str| {
+        let o = script(&d, "tb", cmd);
+        assert_eq!(o.status.code(), Some(1), "{cmd}");
+        stderr(&o)
+    };
+    assert!(err("trace").contains("error: `trace` needs a subcommand: `x`\n"));
+    assert!(err("trace y").contains("error: `trace y`: expected `x`\n"));
+    assert!(err("find").contains("error: `find` needs a subcommand: `signals` or `variables`\n"));
+    assert!(err("find signals").contains("error: `find signals` needs a pattern"));
+    assert!(err("drivers").contains("error: `drivers` needs a signal name\n"));
+    assert!(err("run 10").contains("error: a time needs a unit: `10 ns`\n"));
+    assert!(err("examine cnt @ 12").contains("error: a time needs a unit: `12 ns`\n"));
+    assert!(err("run 0.5 fs").contains("is not a whole number of fs: the resolution is 1 fs"));
+    // A fraction that is whole in the primary unit is fine.
+    let o = script(&d, "tb", "run 0.5 ns; where");
+    assert_eq!(o.status.code(), Some(0), "{}", stderr(&o));
+    let d = setup("wording2");
+    let o = script(&d, "vals", "force t 5; ");
+    assert!(
+        stderr(&o).contains("type TIME: expected a number and a unit"),
+        "{}",
+        stderr(&o)
+    );
+}
+
+/// A time shows in the largest unit that holds it whole, in `examine`, `force` and `find` (#958).
+#[test]
+fn times_print_in_real_units() {
+    let d = setup("timeunits");
+    let o = script(
+        &d,
+        "vals",
+        "force t 10 ns; examine t; deposit t 1500 ps; find signals t; deposit t 7 fs; examine t",
+    );
+    let out = stdout(&o);
+    assert!(out.contains("vals.t = 10 ns\n"), "{out}{}", stderr(&o));
+    assert!(out.contains("vals.t = 1500 ps\n"), "{out}");
+    assert!(!out.contains("10000000"), "{out}");
+}
+
+/// `deposit` has no `-out`; a flag in the middle is named in the error of the value (#960).
+#[test]
+fn flags_that_have_no_meaning_are_errors() {
+    let d = setup("flags");
+    let err = |cmd: &str| {
+        let o = script(&d, "tb", cmd);
+        assert_eq!(o.status.code(), Some(1), "{cmd}");
+        stderr(&o)
+    };
+    assert!(
+        err("deposit cnt 1 -out").contains(
+            "error: `deposit` has no `-out`: a deposit gives a value once, to the signal\n"
+        )
+    );
+    let e = err("force cnt -out 1");
+    assert!(e.contains("a flag goes last, after the value"), "{e}");
+    let e = err("force cnt 1 -ou");
+    assert!(e.contains("`force` has only `-out`, not `-ou`"), "{e}");
+    assert!(e.contains("similar name exists: `-out`"), "{e}");
+    assert!(err("release cnt 1").contains("`release` takes no value"));
+    // The flag that has a meaning still works, and a negative number is a value.
+    let o = script(&d, "tb", "force cnt 1 -out; force cnt -3; release cnt -out");
+    assert_eq!(o.status.code(), Some(0), "{}", stderr(&o));
+}
+
+/// A generic is a name in an expression: between cycles and in a process (#970).
+#[test]
+fn generics_are_names() {
+    let d = setup("generics");
+    let o = script(&d, "tb", "examine N; examine NAME; examine N + 1 > 3");
+    assert_eq!(stdout(&o), "3\n\"dap\"\nTRUE\n", "{}", stderr(&o));
+    let o = script(&d, "tb", "run until N = 3 and cnt = 4; examine cnt");
+    assert_eq!(o.status.code(), Some(0), "{}", stderr(&o));
+    assert!(stdout(&o).ends_with("4\n"), "{}{}", stdout(&o), stderr(&o));
+    let o = script(&d, "tb", "break tb.vhd:21 if k = N; run; examine k");
+    assert!(stdout(&o).ends_with("3\n"), "{}{}", stdout(&o), stderr(&o));
+    let o = script(&d, "tb", "break tb.vhd:21 if cnt = M");
+    assert!(
+        stderr(&o).contains("no local or signal `M` here"),
+        "{}",
+        stderr(&o)
+    );
+}
+
+/// A wrong value says what was typed, what the target is and an example (#972).
+#[test]
+fn literal_errors_are_in_plain_words() {
+    let d = setup("literals");
+    let err = |top: &str, cmd: &str| {
+        let o = script(&d, top, cmd);
+        assert_eq!(o.status.code(), Some(1), "{cmd}");
+        stderr(&o)
+    };
+    let e = err("tb", "force cnt abc");
+    assert!(
+        e.contains("`abc` is not a value of `tb.cnt`, type INTEGER: expected an integer"),
+        "{e}"
+    );
+    let e = err("tb", "force v 7");
+    assert!(e.contains("expected 4 elements, such as 0101"), "{e}");
+    let e = err("vals", "force d(0) 7");
+    assert!(
+        e.contains("a part of type STD_LOGIC_VECTOR: expected one of 'U'"),
+        "{e}"
+    );
+    let e = err("vals", "force t 5 xs");
+    assert!(
+        e.contains("expected a number and a unit, such as 10 fs: similar names exist"),
+        "{e}"
+    );
+    // A condition names what was compared (#972).
+    let e = err("tb", "break tb.vhd:21 if cnt = '1'");
+    assert!(
+        e.contains("`'1'` is not a value of the other operand's type: expected an integer"),
+        "{e}"
+    );
+}
+
+const IN_PORT: &str = "
+library ieee;
+use ieee.std_logic_1164.all;
+entity dut is port (wr : in std_ulogic); end;
+architecture a of dut is begin end;
+library ieee;
+use ieee.std_logic_1164.all;
+entity ip is end;
+architecture a of ip is
+  signal wr : std_ulogic := '0';
+begin
+  u : entity work.dut port map (wr => wr);
+  process begin wait for 5 ns; wr <= '1'; wait; end process;
+end;
+";
+
+/// A port with no driver of its own shows no driving value; `where` names the process with dots
+/// (#974).
+#[test]
+fn an_in_port_has_no_driving_value() {
+    let d = setup("inport");
+    std::fs::write(d.join("ip.vhd"), IN_PORT).expect("write");
+    let ok = yavs()
+        .current_dir(&*d)
+        .args(["analyze", "--std=2008", "--work=work:lib", "ip.vhd"])
+        .status()
+        .expect("yavs")
+        .success();
+    assert!(ok, "analyze failed");
+    let o = script(&d, "ip", "run 10 ns; drivers ip.u.wr");
+    let out = stdout(&o);
+    assert!(out.contains("no driver of its own"), "{out}{}", stderr(&o));
+    assert!(!out.contains("driving value"), "{out}");
+    let d = setup("where");
+    let o = script(&d, "tb", "break tb.vhd:21; run; where");
+    let out = stdout(&o);
+    assert!(out.contains("\ntb.p, "), "{out}{}", stderr(&o));
+}
+
+/// A shared variable is a name in a condition: known when the breakpoint is made, read at the stop.
+#[test]
+fn conditions_read_shared_variables() {
+    let d = shared_design("shared-cond");
+    let o = shared_script(
+        &d,
+        &[],
+        "break t.vhd:40 if sn = 6 and sr.y = 2; run; examine sn; quit",
+    );
+    assert!(
+        o.contains("not checked until the condition is evaluated at a stop"),
+        "{o}"
+    );
+    assert!(o.contains("t.vhd:40"), "{o}");
+    assert!(o.contains("\n6\n"), "{o}");
 }

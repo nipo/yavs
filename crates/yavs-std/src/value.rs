@@ -9,7 +9,7 @@
 //! errors; nothing is clamped.
 
 use crate::error::{ConvError, ErrorKind, What, latin1};
-use crate::types::{Bounds, EnumLit, EnumType, PhysicalType, RealBounds, is_letter, lower};
+use crate::types::{Bounds, EnumLit, EnumType, PhysicalType, RealBounds, Unit, is_letter, lower};
 
 /// Whitespace accepted around a value: space, non-breaking space and the
 /// format effectors HT, LF, VT, FF, CR.
@@ -194,6 +194,11 @@ impl Abstract {
     /// The literal times `scale`, rounded to the nearest integer (ties away
     /// from zero), as an exact computation; `None` on overflow.
     pub fn scaled(&self, scale: i64) -> Option<i128> {
+        self.scaled_exact(scale).map(|(q, _)| q)
+    }
+
+    /// [`scaled`](Self::scaled), and whether the value was a whole number.
+    pub fn scaled_exact(&self, scale: i64) -> Option<(i128, bool)> {
         let base = self.base as u128;
         let mut num: u128 = 0;
         for &d in &self.digits {
@@ -212,14 +217,14 @@ impl Abstract {
                 match den.checked_mul(base) {
                     Some(d) => den = d,
                     // Denominator larger than any numerator: the value is 0.
-                    None => return Some(0),
+                    None => return Some((0, num == 0)),
                 }
             }
         }
         let q = num / den;
         let r = num % den;
         let q = if r >= den - r { q + 1 } else { q };
-        i128::try_from(q).ok()
+        Some((i128::try_from(q).ok()?, r == 0))
     }
 }
 
@@ -541,6 +546,12 @@ pub fn enum_value(s: &[u8], ty: &EnumType) -> R<usize> {
 /// `T'value` for a physical type, in primary units: `"1.5 ns"`, `"ns"`,
 /// `"16#A# ps"`. A decimal value is rounded to the primary unit.
 pub fn physical_value(s: &[u8], ty: &PhysicalType, bounds: Bounds) -> R<i64> {
+    physical_value_in(s, ty, bounds, false)
+}
+
+/// [`physical_value`]; with `whole`, a value that is no whole number of the primary unit
+/// (`0.5 fs`) is an error, not rounded.
+fn physical_value_in(s: &[u8], ty: &PhysicalType, bounds: Bounds, whole: bool) -> R<i64> {
     let what = What::Physical;
     let b = start(s, what)?;
     let (neg, i) = sign(s, b);
@@ -560,11 +571,15 @@ pub fn physical_value(s: &[u8], ty: &PhysicalType, bounds: Bounds) -> R<i64> {
         .iter()
         .find(|u| name_matches(&s[j..k], tok, &EnumLit::Ident(u.name.clone())))
         .ok_or_else(|| ConvError::new(What::Unit, ErrorKind::UnknownUnit, s, j..k))?;
-    let mag = match &lit {
-        Some(l) => l.scaled(unit.value),
-        None => Some(unit.value.unsigned_abs() as i128),
+    let (mag, exact) = match &lit {
+        Some(l) => l.scaled_exact(unit.value),
+        None => Some((unit.value.unsigned_abs() as i128, true)),
     }
     .ok_or_else(|| ConvError::new(what, ErrorKind::Overflow, s, b..k))?;
+    if whole && !exact {
+        let unit = latin1(&ty.primary().name);
+        return Err(ConvError::new(what, ErrorKind::Fraction { unit }, s, b..k));
+    }
     let v = if neg != (unit.value < 0) { -mag } else { mag };
     if v < bounds.low as i128 || v > bounds.high as i128 {
         let img = |v| String::from_utf8_lossy(&crate::image::physical_image(v, ty)).into_owned();
@@ -588,7 +603,12 @@ pub fn time_literal(t: &str) -> R<i64> {
         .position(|c| c.is_ascii_alphabetic())
         .unwrap_or(t.len());
     let text = format!("{} {}", t[..split].trim(), &t[split..]);
-    physical_value(text.as_bytes(), &crate::types::time_type(), Bounds::I64)
+    physical_value_in(
+        text.as_bytes(),
+        &crate::types::time_type(),
+        Bounds::I64,
+        true,
+    )
 }
 
 /// `boolean'value`.
@@ -682,7 +702,7 @@ pub fn literal(s: &[u8], ty: &LitType) -> R<Lit> {
 }
 
 /// `v` of type `ty` as text: scalars as [`literal`] reads them (physical values in the
-/// primary unit), arrays of characters as strings, other composites as aggregates; arrays
+/// largest unit that holds them whole), arrays of characters as strings, other composites as aggregates; arrays
 /// longer than 256 elements end in `...` (a string: after its closing quote).
 pub fn literal_image(v: &Lit, ty: &LitType) -> String {
     const MAX: usize = 256;
@@ -703,8 +723,12 @@ pub fn literal_image(v: &Lit, ty: &LitType) -> String {
             },
         ) => "protected".to_string(),
         (Lit::Handle(_), _) => "access".to_string(),
+        // The largest unit that shows the value whole, as a time is printed at a stop.
         (Lit::Phys(x), LitType::Phys(t, _)) => {
-            format!("{x} {}", latin1(&t.primary().name))
+            let whole = |u: &&Unit| *x != 0 && u.value > 0 && x % u.value == 0;
+            let unit = (t.units.iter().filter(whole)).max_by_key(|u| u.value);
+            let unit = unit.unwrap_or_else(|| t.primary());
+            format!("{} {}", x / unit.value, latin1(&unit.name))
         }
         (Lit::Array(xs), LitType::Array { elem, .. }) => {
             if let LitType::Enum(t) = &**elem {
@@ -834,7 +858,7 @@ fn lit_at(s: &[u8], i: usize, ty: &LitType) -> R<(Lit, usize)> {
                 LitType::Enum(e) => Lit::Enum(enum_value(t, e)?),
                 LitType::Int(b) => Lit::Int(integer_value(t, *b)?),
                 LitType::Real(b) => Lit::Real(real_value(t, *b)?),
-                LitType::Phys(p, b) => Lit::Phys(physical_value(t, p, *b)?),
+                LitType::Phys(p, b) => Lit::Phys(physical_value_in(t, p, *b, true)?),
                 LitType::Array { .. } | LitType::Record(_) | LitType::Handle { .. } => {
                     unreachable!("matched above")
                 }
@@ -1290,7 +1314,7 @@ mod tests {
 
         let time = LitType::Phys(time_type(), Bounds::I64);
         assert_eq!(p("1.5 ns", &time), Ok(Lit::Phys(1_500_000)));
-        assert_eq!(img("2 us", &time), "2000000000 fs");
+        assert_eq!(img("2 us", &time), "2 us");
         let rec = LitType::Record(vec![
             ("a".into(), LitType::Int(Bounds::I32)),
             ("b".into(), slv(2, 1)),
@@ -1298,11 +1322,11 @@ mod tests {
         ]);
         assert_eq!(
             img("(t => 5 ns, A => -3, b => \"1Z\")", &rec),
-            "(a => -3, b => \"1Z\", t => 5000000 fs)"
+            "(a => -3, b => \"1Z\", t => 5 ns)"
         );
         assert_eq!(
             img("(1, ('0', '1'), others => 1 ps)", &rec),
-            "(a => 1, b => \"01\", t => 1000 fs)"
+            "(a => 1, b => \"01\", t => 1 ps)"
         );
         assert!(p("(a => 1, b => \"11\")", &rec).is_err());
         assert!(p("(a => 1, a => 2, others => 0 fs)", &rec).is_err());
@@ -1334,5 +1358,26 @@ mod tests {
         let b = LitType::Enum(crate::types::boolean_type());
         assert_eq!(img(" true ", &b), "TRUE");
         assert!(p("maybe", &b).is_err());
+    }
+
+    #[test]
+    fn debugger_times_print_whole_and_refuse_fractions() {
+        let t = LitType::Phys(crate::types::time_type(), Bounds::I64);
+        let img = |fs: i64| literal_image(&Lit::Phys(fs), &t);
+        assert_eq!(img(10_000_000), "10 ns");
+        assert_eq!(img(1_500_000), "1500 ps");
+        assert_eq!(img(7), "7 fs");
+        assert_eq!(img(0), "0 fs");
+        assert_eq!(img(-2_000_000_000), "-2 us");
+        assert_eq!(literal(b"1.5 ns", &t), Ok(Lit::Phys(1_500_000)));
+        let e = literal(b"0.5 fs", &t).unwrap_err().to_string();
+        assert!(e.contains("not a whole number of fs"), "{e}");
+        assert!(time_literal("0.5 fs").is_err());
+        assert_eq!(time_literal("0.5ps"), Ok(500));
+        // `'value` keeps rounding.
+        assert_eq!(
+            physical_value(b"0.5 fs", &crate::types::time_type(), Bounds::I64),
+            Ok(1)
+        );
     }
 }

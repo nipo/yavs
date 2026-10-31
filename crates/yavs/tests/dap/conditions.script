@@ -11,6 +11,7 @@ request continue {"threadId": 1}
 event stopped
 request stackTrace {"threadId": 1}
 request setBreakpoints {"source": {"path": "$SRC"}, "breakpoints": [{"line": 20, "condition": "nosuch = 1"}]}
+request setBreakpoints {"source": {"path": "$SRC"}, "breakpoints": [{"line": 20, "condition": "10 / (cnt - cnt) = 1"}]}
 request continue {"threadId": 1}
 event stopped
 request setBreakpoints {"source": {"path": "$SRC"}, "breakpoints": []}

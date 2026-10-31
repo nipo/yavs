@@ -34,6 +34,12 @@ pub(crate) trait Env {
     fn type_name(&self, _name: &str) -> Option<String> {
         None
     }
+    /// A name that has a value, but not one this environment knows (the check made when a
+    /// condition is made, `check_types`): a local of a process, read at a stop. The environment
+    /// notes the name.
+    fn local(&self, _name: &str) -> bool {
+        false
+    }
 }
 
 /// A value of type `t` to check types with.
@@ -124,6 +130,8 @@ enum V {
     /// An array of a bit-like type, with the name of its type if it is known.
     Bits(LitType, Lit, Option<String>),
     Text(String),
+    /// A value that exists but is not known before the stop (`Env::local`): it fits any type.
+    Unknown,
 }
 
 impl V {
@@ -282,6 +290,32 @@ fn is_boolean(t: &LitType) -> bool {
     matches!(&e.lits[..], [f, t] if named(f, "false") && named(t, "true"))
 }
 
+/// An error that depends on the values of the moment, not on names and types.
+fn by_value(e: &str) -> bool {
+    e == "overflow in the condition"
+        || e.ends_with("is outside the array")
+        || e.ends_with("the access value is null")
+}
+
+/// The truth of a result: a boolean, or a `bit` or `std_ulogic` as `??` converts it.
+fn as_bool(v: V) -> Result<bool, String> {
+    match v {
+        V::Typed(t, Lit::Enum(p)) if is_boolean(&t) => Ok(p == 1),
+        V::Typed(LitType::Enum(t), Lit::Enum(p))
+            if char_pos(&t, b'1').is_some() && char_pos(&t, b'0').is_some() =>
+        {
+            Ok(Some(p) == char_pos(&t, b'1') || Some(p) == char_pos(&t, b'H'))
+        }
+        V::Text(t) if is_identifier(&t) => Err(format!("no local or signal `{t}` here")),
+        _ => Err("the condition is not a boolean".into()),
+    }
+}
+
+fn is_identifier(s: &str) -> bool {
+    s.starts_with(|c: char| c.is_ascii_alphabetic())
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
 /// The bit-like types: enumerations whose literals include `'0'` and `'1'`.
 fn char_pos(t: &EnumType, c: u8) -> Option<usize> {
     t.lits.iter().position(|l| *l == EnumLit::Char(c))
@@ -394,58 +428,30 @@ impl Cond {
                     .ok_or(None)
             }
             V::Bits(..) => Err(Some("this is a bug in yavs: bits after `plain`".into())),
+            V::Unknown => Err(None),
         }
     }
 
-    /// What can be known before the run: a literal compared with a signal reads in its type.
-    /// Everything else waits for the stop, where the locals are known.
+    /// What can be known when the condition is made: the evaluation over the types of the
+    /// signals with a value of each, and what the environment calls `local` as a value that fits
+    /// any type. The errors are those of the evaluation (an unknown name, operands of different
+    /// types, a result that is not boolean); what depends on a value (a division by zero, an
+    /// index, a null access) waits for the stop.
     pub(crate) fn check_types(&self, env: &dyn Env) -> Result<(), String> {
-        self.lint(&self.expr, env)
-            .map_err(|e| format!("condition: {e}"))
-    }
-
-    fn lint(&self, e: &Expr, env: &dyn Env) -> Result<(), String> {
-        match &e.kind {
-            ExprKind::Paren(x) | ExprKind::Unary { operand: x, .. } => self.lint(x, env),
-            ExprKind::Binary { op, left, right } => {
-                self.lint(left, env)?;
-                self.lint(right, env)?;
-                let named = |x: &Expr, env: &dyn Env| match &x.kind {
-                    ExprKind::Name(n) => match self.name(n, env) {
-                        Ok(v @ (V::Typed(..) | V::Bits(..))) => Some(v),
-                        _ => None,
-                    },
-                    _ => None,
-                };
-                let literal = |x: &Expr| matches!(x.kind, ExprKind::Literal(_));
-                let operands = if literal(right) {
-                    named(left, env).map(|v| (v, V::Text(self.text(right))))
-                } else if literal(left) {
-                    named(right, env).map(|v| (V::Text(self.text(left)), v))
-                } else {
-                    None
-                };
-                match operands {
-                    Some((l, r)) if is_compare(*op) => binary(*op, l, r).map(|_| ()),
-                    _ => Ok(()),
-                }
-            }
-            _ => Ok(()),
+        let v = match self.value(&self.expr, env) {
+            Ok(v) => v.plain(),
+            Err(e) if by_value(&e) => return Ok(()),
+            Err(e) => return Err(e),
+        };
+        match v {
+            V::Unknown => Ok(()),
+            v => as_bool(v).map(|_| ()),
         }
     }
 
     /// Evaluate to a boolean; `bit` and `std_ulogic` results convert as `??` does.
     pub(crate) fn eval(&self, env: &dyn Env) -> Result<bool, String> {
-        match self.value(&self.expr, env)?.plain() {
-            V::Typed(t, Lit::Enum(p)) if is_boolean(&t) => Ok(p == 1),
-            V::Typed(LitType::Enum(t), Lit::Enum(p))
-                if char_pos(&t, b'1').is_some() && char_pos(&t, b'0').is_some() =>
-            {
-                Ok(Some(p) == char_pos(&t, b'1') || Some(p) == char_pos(&t, b'H'))
-            }
-            V::Text(t) => Err(format!("no local or signal `{t}` here")),
-            _ => Err("the condition is not a boolean".into()),
-        }
+        as_bool(self.value(&self.expr, env)?.plain())
     }
 
     fn value(&self, e: &Expr, env: &dyn Env) -> Result<V, String> {
@@ -480,6 +486,9 @@ impl Cond {
                 V::Typed(t, v)
             });
         }
+        if env.local(&text) {
+            return Ok(V::Unknown);
+        }
         // Through an access value, as VHDL's `p.x` and `p(1)` go.
         let through = |v: V| match v.plain() {
             V::Typed(t @ LitType::Handle { .. }, x) => env
@@ -493,6 +502,7 @@ impl Cond {
                 prefix,
                 suffix: Suffix::All(_),
             } => match self.name(prefix, env)?.plain() {
+                V::Unknown => Ok(V::Unknown),
                 V::Text(_) => Ok(V::Text(text)),
                 v @ V::Typed(LitType::Handle { .. }, _) => through(v),
                 _ => Err(format!("`{text}`: not an access value")),
@@ -521,11 +531,16 @@ impl Cond {
                 }
                 // A path such as `tb.u1.s` the environment did not know.
                 V::Text(_) => Ok(V::Text(text)),
+                V::Unknown => Ok(V::Unknown),
                 _ => Err(format!("`{text}`: not a record")),
             },
             NameKind::Apply { prefix, args } => {
                 if matches!(&args[0].actual, Actual::Range(_)) {
-                    let V::Typed(t, x) = through(self.name(prefix, env)?)? else {
+                    let inner = through(self.name(prefix, env)?)?;
+                    if let V::Unknown = inner {
+                        return Ok(V::Unknown);
+                    }
+                    let V::Typed(t, x) = inner else {
                         return Err(format!("`{text}`: not an array, local or signal here"));
                     };
                     let p = self
@@ -556,10 +571,15 @@ impl Cond {
                                 i64::try_from(i).map_err(|_| format!("`{text}` is too large"))?;
                             Ok(V::Typed(LitType::Int(Bounds::I64), Lit::Int(i)))
                         }
+                        V::Unknown => Ok(V::Unknown),
                         _ => Err(format!("`{text}`: not an `unsigned` or `signed`")),
                     };
                 }
-                let V::Typed(t, Lit::Array(xs)) = through(prefix_value)? else {
+                let element = through(prefix_value)?;
+                if let V::Unknown = element {
+                    return Ok(V::Unknown);
+                }
+                let V::Typed(t, Lit::Array(xs)) = element else {
                     return Err(format!("`{text}`: not an array, local or signal here"));
                 };
                 let LitType::Array { len, elem, .. } = &t else {
@@ -571,6 +591,7 @@ impl Cond {
                         Ok(Lit::Int(i)) => i,
                         _ => return Err(format!("`{s}` is not an index")),
                     },
+                    V::Unknown => return Ok(V::Unknown),
                     _ => return Err(format!("`{text}`: only integer indices")),
                 };
                 let k = (0..*len)
@@ -590,7 +611,13 @@ impl Cond {
 
 /// Both operands in one type: a literal is read in the type of the other.
 fn unify(l: V, r: V) -> Result<(LitType, Lit, Lit), String> {
-    let read = |t: &LitType, s: &str| literal(s.as_bytes(), t).map_err(|e| e.to_string());
+    // A word that reads as no literal is a name the environment does not know.
+    let read = |t: &LitType, s: &str| {
+        crate::design::typed_literal(s, t).map_err(|e| match is_identifier(s) {
+            true => format!("no local or signal `{s}` here"),
+            false => format!("`{s}` is not a value of the other operand's type: {e}"),
+        })
+    };
     match (l.plain(), r.plain()) {
         (V::Typed(t, a), V::Typed(_, b)) => {
             if std::mem::discriminant(&a) != std::mem::discriminant(&b) {
@@ -671,6 +698,14 @@ fn logic(op: BinaryOp, t: &LitType, a: &Lit, b: &Lit) -> Result<V, String> {
 
 fn binary(op: BinaryOp, l: V, r: V) -> Result<V, String> {
     use BinaryOp as B;
+    // Before the stop: a comparison is a boolean whatever its operands hold.
+    if matches!(l, V::Unknown) || matches!(r, V::Unknown) {
+        return Ok(if is_compare(op) {
+            boolean(false)
+        } else {
+            V::Unknown
+        });
+    }
     if let Some(v) = numeric_op(op, &l, &r) {
         return v;
     }
@@ -779,6 +814,7 @@ fn phys_scale(op: BinaryOp, l: V, r: V) -> Result<V, String> {
 
 fn unary(op: UnaryOp, v: V) -> Result<V, String> {
     let v = match v {
+        V::Unknown => return Ok(V::Unknown),
         // A lone literal: an integer, else a real.
         V::Text(s) => {
             let mut out = None;
@@ -887,5 +923,48 @@ mod tests {
         assert!(ok("v(9) = '1'").unwrap_err().contains("outside"));
         assert!(ok("i = '1'").is_err());
         assert!(ok("i / 0 = 1").unwrap_err().contains("overflow"));
+    }
+
+    /// `M` with a local `loc`, whose value waits for the stop.
+    struct Before(M);
+    impl Env for Before {
+        fn get(&self, n: &str) -> Option<(LitType, Lit)> {
+            self.0.get(n)
+        }
+        fn local(&self, n: &str) -> bool {
+            n == "loc"
+        }
+    }
+
+    #[test]
+    fn conditions_are_checked_before_the_stop() {
+        let logic = LitType::Enum(EnumType {
+            lits: b"UX01ZWLH-".iter().map(|&c| EnumLit::Char(c)).collect(),
+        });
+        let env = Before(M(HashMap::from([
+            ("i", (LitType::Int(Bounds::I64), Lit::Int(0))),
+            ("clk", (logic, Lit::Enum(0))),
+        ])));
+        let check = |s: &str| parse(s).and_then(|c| c.check_types(&env));
+        assert_eq!(check("i = 6 and clk = '1'"), Ok(()));
+        assert_eq!(check("loc > 3 and i = 1"), Ok(()));
+        assert_eq!(check("loc"), Ok(()));
+        // A value of the moment is no error before it.
+        assert_eq!(check("i / i = 1"), Ok(()));
+        assert_eq!(
+            check("nosuch = 1"),
+            Err("no local or signal `nosuch` here".into())
+        );
+        assert_eq!(
+            check("i = nosuch"),
+            Err("no local or signal `nosuch` here".into())
+        );
+        assert_eq!(check("i"), Err("the condition is not a boolean".into()));
+        assert_eq!(
+            check("loc = 1 and i"),
+            Err("operands of different types".into())
+        );
+        assert!(check("clk = 7").is_err());
+        assert!(check("i = '1'").is_err());
     }
 }

@@ -363,7 +363,7 @@ Limits
 
 The console is a debug session: the interpreter on one thread (``--threads`` and ``--tier`` have no
 effect), no ``--cov`` or ``--profile``.
-``run until`` watches signals, so a condition on variables alone is refused.
+``run until`` watches signals and reads them between cycles, so a variable of a process in its condition is an unknown name.
 
 See also
 --------

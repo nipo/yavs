@@ -47,7 +47,7 @@
 < {"body":{"allThreadsContinued":true,"threadId":2},"event":"continued","type":"event"}
 < {"body":{"allThreadsStopped":true,"description":"step at 10 ns, delta 0","reason":"step"},"event":"stopped","type":"event"}
 > yavs/deposit {"signal":":vals:t","value":"5 ns"}
-< {"body":{"signal":"vals.t","value":"5000000 fs"},"command":"yavs/deposit","request_seq":23,"success":true,"type":"response"}
+< {"body":{"signal":"vals.t","value":"5 ns"},"command":"yavs/deposit","request_seq":23,"success":true,"type":"response"}
 > yavs/deposit {"signal":":vals:r","value":"(a => 7, b => \"01ZX\")"}
 < {"body":{"signal":"vals.r","value":"(a => 7, b => \"01ZX\")"},"command":"yavs/deposit","request_seq":24,"success":true,"type":"response"}
 > evaluate {"expression":":vals:d"}
@@ -61,7 +61,7 @@
 > evaluate {"expression":":vals:q"}
 < {"body":{"evaluateName":"vals.q","result":"\"11111111\"","type":"STD_ULOGIC_VECTOR","variablesReference":0},"command":"evaluate","request_seq":28,"success":true,"type":"response"}
 > evaluate {"expression":":vals:t"}
-< {"body":{"evaluateName":"vals.t","result":"5000000 fs","type":"TIME","variablesReference":0},"command":"evaluate","request_seq":29,"success":true,"type":"response"}
+< {"body":{"evaluateName":"vals.t","result":"5 ns","type":"TIME","variablesReference":0},"command":"evaluate","request_seq":29,"success":true,"type":"response"}
 > evaluate {"expression":":vals:r"}
 < {"body":{"evaluateName":"vals.r","namedVariables":2,"result":"(a => 7, b => \"01ZX\")","type":"rec_t","variablesReference":4294967296},"command":"evaluate","request_seq":30,"success":true,"type":"response"}
 > continue {"threadId":2}
