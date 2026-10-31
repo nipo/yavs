@@ -2677,6 +2677,11 @@ impl Signal {
         })
     }
 
+    /// Whether an element of `r` had an event after cycle `since` (cold: reports).
+    pub(crate) fn event_since(&self, r: Range, since: u64) -> bool {
+        (r.offset as usize..(r.offset + r.len) as usize).any(|e| self.event_cycle(e) > since)
+    }
+
     /// The event records of block `k` (at most one when lean), `None` for a signal of up to 64
     /// elements.
     #[inline]

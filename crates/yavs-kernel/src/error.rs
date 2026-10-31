@@ -50,6 +50,10 @@ pub enum ErrorKind {
         limit: u32,
         processes: Vec<String>,
         cause: crate::LoopCause,
+        /// The processes that ran in the last delta, ascending.
+        ran: Vec<ProcId>,
+        /// The signals with an event in the last deltas (`LOOP_WINDOW`).
+        changing: Vec<crate::ChangingSignal>,
     },
     /// A postponed process scheduled a delta cycle (LRM 14.7.5.3).
     PostponedDelta,

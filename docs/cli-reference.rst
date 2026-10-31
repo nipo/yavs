@@ -359,6 +359,14 @@ Arguments:
 
    Sample where the simulation spends its time and print the busiest processes, instances and subprograms to standard error when the run ends; with FILE also write them as JSON.
 
+.. option:: --activity, --activity=FILE
+
+   Count process activations and signal events and print the busiest to standard error when the run ends; with FILE also write them as JSON. Costs run time only when given.
+
+.. option:: --assert-summary
+
+   Print the counts of assertion failures and reports by severity and source place to standard error when the run ends; with ``--message-format=json``, one JSON object.
+
 .. option:: --stop-time=TIME
 
    Stop the simulation at this time and exit 0: a number and a unit, ``10ms`` or ``10 ns`` (a bare number is E0105).

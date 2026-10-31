@@ -25,7 +25,9 @@ use yavs_logic::StdULogic;
 use yavs_logic::wide::nmask;
 
 mod hang;
-pub use hang::{DeadClock, LoopCause, LoopLink, ProcWait, StuckProc, StuckReport, StuckSignal};
+pub use hang::{
+    ChangingSignal, DeadClock, LoopCause, LoopLink, ProcWait, StuckProc, StuckReport, StuckSignal,
+};
 
 /// Estimated work (ns) of the parallel processes of a batch, less its largest one, from which
 /// the batch goes to the thread pool; below it the hand-over costs more than it saves (#497).
@@ -1130,6 +1132,9 @@ impl SimControl {
                 s.process = pr.wrap(name, inner);
             }
         }
+        if let Some(a) = crate::profile::activity() {
+            a.wrap_all(slots.iter_mut().map(|s| &mut slot_mut(s).process));
+        }
         let mut triggers = Vec::new();
         let mut ids = std::collections::HashMap::new();
         for m in &mut procs {
@@ -2186,15 +2191,19 @@ impl SimControl {
             if self.delta >= self.cfg.max_deltas {
                 let mut ran = self.last_ran.clone();
                 ran.sort_unstable();
+                ran.dedup();
                 let processes = ran
                     .iter()
                     .map(|&p| self.names[p as usize].clone())
                     .collect();
                 let cause = self.loop_cause();
+                let changing = self.still_changing();
                 return Err(self.err(ErrorKind::DeltaLimit {
                     limit: self.cfg.max_deltas,
                     processes,
                     cause,
+                    ran: ran.into_iter().map(ProcId).collect(),
+                    changing,
                 }));
             }
             self.delta += 1;

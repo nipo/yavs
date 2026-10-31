@@ -399,7 +399,7 @@ const EXPLAIN: &[(&str, &str)] = &[
     ),
     (
         "E3002",
-        "More delta cycles than the limit ran at one simulated time, usually a zero-delay feedback loop. The labels and the note name the processes of the loop and the signals through which they wake each other: two processes (or concurrent assignments) that assign each other's inputs with no delay, a process that waits only on a signal it assigns, a combinational loop through concurrent statements, or a process that waits for 0 ns in a loop. `--max-deltas=N` raises the limit (default 10000) for a design that needs more deltas at one time.",
+        "More delta cycles than the limit ran at one simulated time, usually a zero-delay feedback loop. The labels and the note name the processes of the loop and the signals through which they wake each other, and label the declaration of each signal still changing: two processes (or concurrent assignments) that assign each other's inputs with no delay, a process that waits only on a signal it assigns, a combinational loop through concurrent statements, or a process that waits for 0 ns in a loop. `--max-deltas=N` raises the limit (default 10000) for a design that needs more deltas at one time.",
     ),
     (
         "E0136",

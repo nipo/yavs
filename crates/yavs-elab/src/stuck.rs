@@ -14,10 +14,12 @@ use yavs_kernel::{
 use crate::Elaborated;
 use crate::hier::ScopeKind;
 
-/// What a process is, by kernel process id: its IR function.
+/// What a process is, by kernel process id: its IR function; where the signals are declared.
 #[derive(Clone, Default)]
 pub struct ProcTable {
     funcs: Vec<Option<FuncId>>,
+    /// Where each kernel signal is declared (its outermost object), by signal id.
+    decls: Vec<Option<Span>>,
 }
 
 /// Why a [`StuckReport`] was made.
@@ -42,7 +44,20 @@ fn proc_span(prog: &Program, f: FuncId) -> Option<Span> {
     prog.stmts.get(s).map(|i| i.span)
 }
 
+impl ProcTable {
+    /// Where kernel signal `s` is declared.
+    pub fn signal_place(&self, s: SignalId) -> Option<Span> {
+        self.decls.get(s.0 as usize).copied().flatten()
+    }
+}
+
 impl Elaborated {
+    /// Where process `p` starts.
+    pub fn proc_place(&self, t: &ProcTable, p: ProcId) -> Option<Span> {
+        let f = t.funcs.get(p.0 as usize).copied().flatten()?;
+        proc_span(&self.ir.as_ref()?.program, f)
+    }
+
     /// The IR function of each process, by kernel process id. Call it before
     /// [`Elaborated::release_for_run`], which frees what it reads.
     pub fn proc_table(&self) -> ProcTable {
@@ -80,7 +95,19 @@ impl Elaborated {
                 }
             })
             .collect();
-        ProcTable { funcs }
+        let mut decls = Vec::new();
+        for o in self.hier.scopes.iter().flat_map(|sc| &sc.objs) {
+            let obj = self.nets.obj(*o);
+            for l in obj.leaves.0.0..obj.leaves.1.0 {
+                let l = crate::LeafId(l);
+                let k = self.nets.kpart(l, yavs_kernel::Range::new(0, 0)).0.0 as usize;
+                if decls.len() <= k {
+                    decls.resize(k + 1, None);
+                }
+                decls[k].get_or_insert(obj.name.span);
+            }
+        }
+        ProcTable { funcs, decls }
     }
 
     /// `W3102` for every process that can never suspend: no wait statement, no sensitivity
@@ -127,7 +154,14 @@ impl Elaborated {
     /// names.
     pub fn runtime_diagnostic_in(&self, e: &SimError, procs: &ProcTable) -> Diagnostic {
         let mut d = self.runtime_diagnostic(e);
-        let yavs_kernel::ErrorKind::DeltaLimit { cause, .. } = &e.kind else {
+        let yavs_kernel::ErrorKind::DeltaLimit {
+            processes,
+            cause,
+            ran,
+            changing,
+            ..
+        } = &e.kind
+        else {
             return d;
         };
         let Some(ir) = &self.ir else { return d };
@@ -175,6 +209,49 @@ impl Elaborated {
                 };
             }
         }
+        // The rest of what still runs and changes, where it is.
+        let labelled =
+            |p: ProcId| links.iter().any(|l| l.process == p) || zero.iter().any(|z| z.0 == p);
+        let mut left = 8usize;
+        let mut more = (0, 0);
+        for (&p, name) in ran.iter().zip(processes).filter(|(p, _)| !labelled(**p)) {
+            match span(p).filter(|_| left > 0) {
+                Some(s) => {
+                    left -= 1;
+                    let text = format!("`{name}` still runs in the last delta");
+                    d = if d.primary.is_none() {
+                        d.with_primary(s, text)
+                    } else {
+                        d.with_secondary(s, text)
+                    };
+                }
+                None => more.0 += 1,
+            }
+        }
+        for c in changing {
+            let place = procs.decls.get(c.id.0 as usize).copied().flatten();
+            match place.filter(|_| left > 0) {
+                Some(s) => {
+                    left -= 1;
+                    let text = match &c.value {
+                        Some(v) => format!("{} still changes, now {v}", c.name),
+                        None => format!("{} still changes", c.name),
+                    };
+                    d = if d.primary.is_none() {
+                        d.with_primary(s, text)
+                    } else {
+                        d.with_secondary(s, text)
+                    };
+                }
+                None => more.1 += 1,
+            }
+        }
+        if more != (0, 0) {
+            d = d.with_note(format!(
+                "and {} more processes and {} more signals still active",
+                more.0, more.1
+            ));
+        }
         d = d.with_note(match cause {
             LoopCause::Cycle(l) => cycle_text(l, implicit),
             LoopCause::ZeroWait(z) => format!(
@@ -210,9 +287,14 @@ impl Elaborated {
         max: usize,
     ) -> Diagnostic {
         let prog = self.ir.as_ref().map(|ir| &*ir.program);
+        // The statement it stands at where the process knows it, else where the process starts.
         let span = |p: ProcId| {
-            let f = procs.funcs.get(p.0 as usize).copied().flatten()?;
-            proc_span(prog?, f)
+            let at = r.procs.get(p.0 as usize).and_then(|q| q.at);
+            at.and_then(|s| prog?.stmts.get(yavs_ir::StmtId(s)).map(|i| i.span))
+                .or_else(|| {
+                    let f = procs.funcs.get(p.0 as usize).copied().flatten()?;
+                    proc_span(prog?, f)
+                })
         };
         describe(r, why, max, &span)
     }
@@ -323,25 +405,59 @@ fn describe(
         });
         d = d.with_note(text);
     }
-    // Processes that wait for a timeout.
+    // Processes that can still run: on a signal, or at a timeout.
+    let mut waits_on: Vec<&StuckProc> = r
+        .procs
+        .iter()
+        .filter(|p| p.state == ProcWait::Waiting)
+        .collect();
+    waits_on.truncate(max);
+    let shown = waits_on.len();
+    for p in waits_on {
+        let text = format!("process {} waits for an event on {}", p.name, on(p));
+        if let Some(s) = span(p.id).filter(|_| labelled < 8) {
+            labelled += 1;
+            d = if d.primary.is_none() {
+                d.with_primary(s, format!("{} waits for {}", p.name, on(p)))
+            } else {
+                d.with_secondary(s, format!("{} waits for {}", p.name, on(p)))
+            };
+        }
+        d = d.with_note(text);
+    }
+    if waiting > shown {
+        d = d.with_note(format!(
+            "and {} more processes waiting for signals",
+            waiting - shown
+        ));
+    }
     let timed_procs: Vec<&StuckProc> = r
         .procs
         .iter()
         .filter(|p| p.state == ProcWait::Timed)
         .collect();
-    for p in timed_procs.iter().take(max.min(5)) {
+    for p in timed_procs.iter().take(max) {
         if let Some(t) = p.timeout {
             let mut text = format!("process {} runs again at {t}", p.name);
             if !p.on.is_empty() {
                 text.push_str(&format!(" or on an event on {}", on(p)));
             }
+            if let Some(s) = span(p.id).filter(|_| labelled < 8) {
+                labelled += 1;
+                let l = format!("{} runs again at {t}", p.name);
+                d = if d.primary.is_none() {
+                    d.with_primary(s, l)
+                } else {
+                    d.with_secondary(s, l)
+                };
+            }
             d = d.with_note(text);
         }
     }
-    if timed_procs.len() > max.min(5) {
+    if timed_procs.len() > max {
         d = d.with_note(format!(
             "and {} more processes waiting for a timeout",
-            timed_procs.len() - max.min(5)
+            timed_procs.len() - max
         ));
     }
     if never > 0 || !r.clocks.is_empty() {

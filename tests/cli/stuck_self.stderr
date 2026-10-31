@@ -1,6 +1,9 @@
 error[E3002]: delta cycle limit 50 exceeded; active processes: :stuck_self:p
  --> $DIR/stuck_self.vhd:8:5
   |
+4 |   signal a : bit := '0';
+  |          - :stuck_self:a still changes, now '0'
+...
 8 |     a <= not a;
   |     ^^^^^^^^^^^ `:stuck_self:p` assigns :stuck_self:a, which wakes `:stuck_self:p`
   |

@@ -406,3 +406,98 @@ fn a_field_of_a_record_is_reported_alone() {
     assert!(e.contains("waits for an event on :stuck_record:r.b"), "{e}");
     assert!(e.contains("never had an event; it has no driver"), "{e}");
 }
+
+#[test]
+fn hang_report_points_at_the_wait_of_each_process() {
+    let e = snapshot(
+        "stuck_forever",
+        &["--stop-time=1us", "--hang-report"],
+        "stuck_forever",
+        0,
+    );
+    // The statement each process stands at, not the first one of its body.
+    assert!(e.contains("wait for 100 us"), "{e}");
+    assert!(
+        e.contains(":stuck_forever:_p0 waits for :stuck_forever:clk"),
+        "{e}"
+    );
+}
+
+fn stdout(o: &Output) -> String {
+    String::from_utf8(o.stdout.clone()).expect("utf-8")
+}
+
+#[test]
+fn assert_summary_counts_by_severity_and_place() {
+    let plain = run("summary_asserts", &[]);
+    let o = run("summary_asserts", &["--assert-summary"]);
+    // The reports and the exit status stay; only the table is added.
+    assert_eq!(stdout(&plain), stdout(&o));
+    assert_eq!(plain.status.code(), o.status.code());
+    assert!(plain.stderr.is_empty(), "{}", clean(&plain));
+    let e = clean(&o);
+    assert!(
+        e.starts_with("Assertion summary: 0 failures, 1 error, 2 warnings, 3 notes\n"),
+        "{e}"
+    );
+    for row in [
+        "error         1  $DIR/summary_asserts.vhd:25  first error",
+        "warning       2  $DIR/summary_asserts.vhd:23  too early",
+        "note          3  $DIR/summary_asserts.vhd:22  tick",
+    ] {
+        assert!(e.contains(row), "{row} in {e}");
+    }
+}
+
+#[test]
+fn assert_summary_is_one_json_object_with_message_format_json() {
+    let t = tmp("json");
+    let lib = format!("--work=work:{}/lib", t.display());
+    assert!(
+        yavs(&["analyze", "--std=2008", &lib, "summary_asserts.vhd"])
+            .status
+            .success()
+    );
+    let o = yavs(&[
+        "--message-format=json",
+        "run",
+        &lib,
+        "--assert-summary",
+        "summary_asserts",
+    ]);
+    let _ = std::fs::remove_dir_all(&t);
+    let e = clean(&o);
+    let j: serde_json::Value = serde_json::from_str(e.trim()).expect(&e);
+    let s = &j["assert_summary"];
+    assert_eq!(s["totals"]["warning"], 2, "{e}");
+    assert_eq!(s["places"][0]["severity"], "error", "{e}");
+    assert_eq!(s["places"][0]["line"], 25, "{e}");
+}
+
+#[test]
+fn activity_lists_the_busiest_processes_and_signals() {
+    let t = tmp("activity");
+    let file = t.join("a.json");
+    let flag = format!("--activity={}", file.display());
+    for tier in tiers() {
+        let o = run("summary_asserts", &[&flag, tier]);
+        assert_eq!(o.status.code(), Some(1), "{}", clean(&o));
+        let e = clean(&o);
+        // A clock of three periods: six events, and the process of the clock runs for each and at the start.
+        assert!(e.contains("Process activations: "), "{e}");
+        assert!(e.contains(":summary_asserts:clk"), "{e}");
+        let row = e
+            .lines()
+            .find(|l| l.contains(":summary_asserts:clk"))
+            .expect(&e);
+        assert!(row.trim_start().starts_with("6 "), "{e}");
+        let j: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&file).expect("json")).expect("json");
+        assert_eq!(j["signals"][0]["name"], ":summary_asserts:clk", "{j}");
+        assert_eq!(j["signals"][0]["events"], 6, "{j}");
+        assert!(j["processes"][0]["runs"].as_u64() >= Some(4), "{j}");
+    }
+    let bad = run("summary_asserts", &["--activity=/nonexistent/dir/a.json"]);
+    assert!(clean(&bad).contains("E0124"), "{}", clean(&bad));
+    let _ = std::fs::remove_dir_all(&t);
+}

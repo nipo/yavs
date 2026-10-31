@@ -12859,3 +12859,21 @@ duplicate implementations without changing diagnostics (issue #894; implemented 
 - **The interpreter tier is opt-in for `--cpubench`** (maintainer, 2026-10-31): the defaults are `auto`, `auto-cold` and `auto@4`; `--with-interp` adds `interp`.
 - **The POWER compiler comes from a pinned `ziglang` wheel in the harness's own virtual environment** (maintainer, 2026-10-31): `tools/realbench/requirements.txt` (version and hashes), installed into `<cache>/venv` the first time an image needs it (so `--prepare` makes it), nothing outside the cache; `YAVS_PPC_ZIG` and `YAVS_PPC_PREFIX` override it.
 - **Microwatt's C simulation helpers are replaced, not loaded** (agent, 2026-10-31): they use the other foreign-string convention (#928); the console and JTAG-socket helpers are VHDL in `tools/realbench/cpu/microwatt`.
+
+## Debugger tools (#944, maintainer request 2026-10-31)
+
+- **Hang report: `--hang-report`, SIGUSR1 and the console's `waits`; silent otherwise.** A testbench that simply ends is
+  not an error, and a stop time is the normal end of many testbenches, so nothing is printed without the option. The
+  report labels the statement a process stands at (`Process::wait_stmt`, read cold from the suspended frame); compiled
+  code does not keep it, so there the label is where the process starts. Every process that can still run is listed.
+- **Delta-loop report has no flag.** An `E3002` is an error, so it says all it knows: `ErrorKind::DeltaLimit` carries the
+  processes of the last delta and the signals with an event in the last 16 deltas (`LOOP_WINDOW`, from the stamps kept
+  anyway, computed when the error is made). A loop of more than 16 signals shows its last ones.
+- **`--assert-summary` counts per innermost statement.** A failed check in a library procedure counts at the assert in the
+  library, not at its caller: one report has one place, and the first message tells the callers apart. Reports disabled by
+  `SetVhdlAssertEnable` do not count, as in the assert counts; `ClearVhdlAssert` clears those counts, not this table, which
+  is a history of the run. Reports of elaboration are a count in the header: they ran before the option could take effect.
+  Human text by default, one object with `--message-format=json`, because CI already asks for JSON there.
+- **`--activity` is a wrapper and an observer, like `--profile`.** Without the option nothing is wrapped or subscribed, and
+  `SimControl` has no new field (one moved the hot layout before). It counts runs of a process and, per signal, cycles
+  with an event. Activations the kernel skips (pure clocked processes, gates) do not run, so they do not count.

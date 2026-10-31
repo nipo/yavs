@@ -27,6 +27,19 @@ pub enum LoopCause {
     Unknown,
 }
 
+/// How many delta cycles back an event counts as "still changing" at a delta cycle limit error:
+/// a loop of more signals than this shows only its last ones.
+const LOOP_WINDOW: u64 = 16;
+
+/// A signal (or named part) that was still changing when the delta cycle limit hit.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ChangingSignal {
+    pub id: SignalId,
+    pub name: String,
+    /// Its current value as a VHDL literal, for logic signals of at most 16 elements.
+    pub value: Option<String>,
+}
+
 /// What a process is doing, between two cycles.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProcWait {
@@ -50,6 +63,8 @@ pub struct StuckProc {
     pub on: Vec<SignalId>,
     /// When the pending timeout expires.
     pub timeout: Option<Time>,
+    /// The statement it stands at (an IR `StmtId`), where the process knows it.
+    pub at: Option<u32>,
 }
 
 /// A signal some process waits on that has no future event.
@@ -96,6 +111,18 @@ pub struct StuckReport {
     pub stuck: Vec<StuckSignal>,
     /// Edge-triggered signals (clocks) that cannot toggle again while a process waits for them.
     pub clocks: Vec<DeadClock>,
+}
+
+/// The value of elements `r` as a VHDL literal, for logic signals of at most 16 elements.
+fn short_value(g: &Signal, r: Range) -> Option<String> {
+    if !matches!(g.ty.elem, Elem::Logic) || r.len > 16 {
+        return None;
+    }
+    let v = g.cur.extract(r.offset as usize, r.len as usize).to_value();
+    Some(match r.len {
+        1 => format!("'{}'", v.to_string().trim_matches('"')),
+        _ => v.to_string(),
+    })
 }
 
 /// The parts of the kernel signals: per part its signal, elements and name; per signal its first
@@ -214,6 +241,22 @@ impl SimControl {
             );
         }
         LoopCause::Unknown
+    }
+
+    /// The signals with an event in the last `LOOP_WINDOW` cycles.
+    pub(super) fn still_changing(&self) -> Vec<ChangingSignal> {
+        let since = self.cycle.saturating_sub(LOOP_WINDOW);
+        let parts = self.parts();
+        parts
+            .of
+            .iter()
+            .filter(|(s, r, _)| self.signals[*s as usize].event_since(*r, since))
+            .map(|(s, r, name)| ChangingSignal {
+                id: SignalId(*s),
+                name: name.clone(),
+                value: short_value(&self.signals[*s as usize], *r),
+            })
+            .collect()
     }
 
     /// Per part the processes that wait on it, per process the parts it drives (both
@@ -374,6 +417,7 @@ impl SimControl {
                 },
                 on: std::mem::take(&mut on[p]),
                 timeout: timeout[p],
+                at: slot_mut(&mut self.slots[p]).process.wait_stmt(),
             })
             .collect();
         let driven_by = |k: u32| -> Vec<ProcId> {
@@ -417,20 +461,10 @@ impl SimControl {
             .map(|s| {
                 let (sig, r, name) = &parts.of[s as usize];
                 let g = &self.signals[*sig as usize];
-                let value = match g.ty.elem {
-                    Elem::Logic if r.len <= 16 => {
-                        let v = g.cur.extract(r.offset as usize, r.len as usize).to_value();
-                        Some(match r.len {
-                            1 => format!("'{}'", v.to_string().trim_matches('"')),
-                            _ => v.to_string(),
-                        })
-                    }
-                    _ => None,
-                };
                 StuckSignal {
                     id: SignalId(s),
                     name: name.clone(),
-                    value,
+                    value: short_value(g, *r),
                     drivers: driven_by(s),
                     fed_by: fed_by(s),
                     last_event: last_event(s as usize),

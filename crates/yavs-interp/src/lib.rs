@@ -43,7 +43,7 @@ mod tier_census;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-pub use env::{Sources, elaboration_reports};
+pub use env::{AssertSite, Sources, elaboration_reports};
 use yavs_ffi::ForeignFn;
 use yavs_ir::{ForeignId, FuncId, FuncKind, Program};
 use yavs_kernel::{
@@ -1886,6 +1886,16 @@ impl Runtime {
         self.replay.store(on, Ordering::Relaxed);
     }
 
+    /// Count reports per statement from now on (`--assert-summary`).
+    pub fn keep_assert_sites(&self) {
+        self.asserts.keep_sites();
+    }
+
+    /// The reports per statement and severity so far.
+    pub fn assert_sites(&self) -> Vec<AssertSite> {
+        self.asserts.sites()
+    }
+
     /// The VHDL assert count of severity `s` (`GetVhdlAssertCount(s)`) as it stands now:
     /// the CLI's exit status follows the error and failure counts at the end of the run.
     pub fn assert_count(&self, s: yavs_kernel::Severity) -> u64 {
@@ -2391,6 +2401,10 @@ impl Process for InterpProcess {
 
     fn entry_func(&self) -> Option<u32> {
         Some(self.m.rt.prog.base_of(self.m.entry).0)
+    }
+
+    fn wait_stmt(&self) -> Option<u32> {
+        self.m.suspended_at().map(|s| s.0)
     }
 
     fn as_any(&mut self) -> Option<&mut dyn std::any::Any> {

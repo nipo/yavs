@@ -417,11 +417,14 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   - `E3002` (delta cycle limit) names the processes and signals of the loop found from the drivers
     and waits at the time of the error (two processes waking each other, a process waiting only on a
     signal it assigns, a combinational loop through concurrent statements, `wait for 0 ns;` in a
-    loop), labels their places and says how to raise the limit. `--max-deltas=N` (default 10000, at
-    least 1) sets the limit. Nothing is recorded during the run.
+    loop), labels their places and says how to raise the limit. It also labels the other processes
+    of the last delta and the declaration of every signal with an event in the last 16 deltas, with
+    its value for a short logic signal (at most 8 such labels, then a count). `--max-deltas=N`
+    (default 10000, at least 1) sets the limit. Nothing is recorded during the run.
   - `W3101` is the hang report: time and delta, how many processes wait for a timeout, for signals
     that can still change, or can never run again; for each of those processes (at most MAX per
-    part) what it waits for, and for each signal that nothing can change its value, its last event
+    part) what it waits for, labelled at the statement it stands at when it runs interpreted (else
+    where the process starts), and for each signal that nothing can change its value, its last event
     and the processes that drive it (`it has no driver`); a clock (a signal an edge-triggered
     process waits for) that had an event and cannot toggle any more is named. Printed by
     `--hang-report[=MAX]` (default 30) when the run ends at `--stop-time` without `stop` or `finish`,
@@ -432,6 +435,14 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
     continues; the signal is handled between two delta cycles, so a process that never suspends
     (`W3102`) cannot be reported. SIGUSR1 is not handled on Windows. The report goes to stderr; a
     warning does not change the exit status (`-Werror` and `-Wno-W3101` apply).
+  - `--assert-summary` adds to stderr, after the reports and whatever the outcome: a table of the
+    reports and failed assertions per severity and source line with the first message, or with
+    `--message-format=json` one object `{"assert_summary": {"totals": {SEVERITY: N}, "places":
+    [{"severity", "count", "file", "line", "message"}]}}`. Reports disabled with
+    `SetVhdlAssertEnable` are not counted; `ClearVhdlAssert` does not clear it. Reports and the exit
+    status do not change. `--activity[=FILE]` adds to stderr the top 20 processes by runs and signals
+    by cycles with an event, with FILE also JSON `{"processes": [{"name", "runs", "place"}],
+    "signals": [{"name", "events", "place"}]}` of all of them. Neither costs anything unless given.
   - `W3102`: a process whose body has no wait statement, no sensitivity list and no call of a
     procedure that waits, printed before time 0. It never gives control back, so time cannot
     advance (only `stop` or `finish` ends the run).

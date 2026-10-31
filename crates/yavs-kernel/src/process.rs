@@ -58,6 +58,12 @@ pub trait Process: Send {
 
     /// The function an interpreted process starts in (an IR `FuncId`), for the profiler's
     /// source lines.
+    /// The statement (an IR `StmtId`) a suspended interpreted process stands at, for a hang
+    /// report; `None` where it is not known (compiled code, no code).
+    fn wait_stmt(&self) -> Option<u32> {
+        None
+    }
+
     fn entry_func(&self) -> Option<u32> {
         None
     }

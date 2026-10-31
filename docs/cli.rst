@@ -58,7 +58,11 @@ Control a run
 * End the run at a time with ``--stop-time=10ms``. The exit status is then 0.
 * Stop at a report of a lower severity with ``--exit-severity=error``. By default a ``failure`` stops the run, and
   an ``error`` report does not, but it still makes the exit status 1 at the end.
-* A run that ends without ``finish`` or ``stop``: ``--hang-report`` says what the waiting processes wait for.
+* A run that ends without ``finish`` or ``stop``: ``--hang-report`` says where each process waits and what for.
+* How many assertions failed, and where: ``--assert-summary`` prints the counts by severity and source line at
+  the end, ``--message-format=json`` makes that one JSON object for CI.
+* What keeps a simulation busy: ``--activity`` prints the processes that ran most often and the signals that
+  changed most often, with ``--activity=FILE`` also as JSON. ``--profile`` measures time instead.
 * A testbench that may depend on process order: ``--shuffle`` runs the processes in a random order and prints the
   seed, so the run can be repeated with ``--shuffle=SEED``.
 

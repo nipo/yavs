@@ -1,6 +1,9 @@
 error[E3002]: delta cycle limit 10000 exceeded; active processes: :stuck_comb:_p0
  --> $DIR/stuck_comb.vhd:6:3
   |
+4 |   signal a : bit := '0';
+  |          - :stuck_comb:a still changes, now '0'
+5 | begin
 6 |   a <= not a;
   |   ^^^^^^^^^^^ `:stuck_comb:_p0` assigns :stuck_comb:a, which wakes `:stuck_comb:_p0`
   |

@@ -1564,8 +1564,15 @@ impl Machine {
         }
     }
 
+    /// The statement a suspended process stands at: the pc is past the instruction that suspended.
+    pub(crate) fn suspended_at(&self) -> Option<StmtId> {
+        let fr = self.frames.last()?;
+        let f = self.rt.prog.func(fr.func)?;
+        f.loc.get((fr.pc as usize).saturating_sub(1)).copied()
+    }
+
     /// The VHDL call stack, innermost first.
-    fn trace(&self) -> Vec<StmtId> {
+    pub(crate) fn trace(&self) -> Vec<StmtId> {
         self.frames
             .iter()
             .rev()
@@ -10668,6 +10675,9 @@ impl Machine {
                         let Some(text) = self.rt.asserts.report(c, s, text) else {
                             return Ok(Flow::Next);
                         };
+                        self.rt
+                            .asserts
+                            .note_site(|| self.trace().first().copied(), s, &text);
                         c.report(s, text);
                         // The simulation ends after this cycle: execute no further.
                         if s >= c.stop_severity() {

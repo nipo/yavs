@@ -129,6 +129,14 @@ pub struct RunArgs {
     /// JSON.
     #[arg(long, value_name = "FILE", num_args = 0..=1, require_equals = true)]
     profile: Option<Option<String>>,
+    /// Count process activations and signal events and print the busiest to standard error
+    /// when the run ends; with FILE also write them as JSON. Costs run time only when given.
+    #[arg(long, value_name = "FILE", num_args = 0..=1, require_equals = true)]
+    activity: Option<Option<String>>,
+    /// Print the counts of assertion failures and reports by severity and source place to
+    /// standard error when the run ends; with `--message-format=json`, one JSON object.
+    #[arg(long)]
+    assert_summary: bool,
     /// Stop the simulation at this time and exit 0: a number and a unit, `10ms` or `10 ns`
     /// (a bare number is E0105).
     #[arg(long, value_name = "TIME")]
@@ -1671,6 +1679,10 @@ pub fn run(
         .profile
         .is_some()
         .then(yavs_kernel::profile::Profile::install);
+    let activity = a
+        .activity
+        .is_some()
+        .then(yavs_kernel::profile::Activity::install);
     if a.debugged() {
         let (db, e) = (Arc::new(db), Arc::new(e));
         // One signal thread, for the simulation of the moment.
@@ -1804,6 +1816,30 @@ pub fn run(
         sim.set_tokens(p.clone());
     }
     sim.subscribe(Box::new(Printer));
+    if let Some(ac) = &activity {
+        sim.subscribe(ac.observer());
+    }
+    if a.assert_summary
+        && let Some(b) = &built
+    {
+        b.rt.keep_assert_sites();
+    }
+    let activity_names = activity.as_ref().map(|_| yavs_elab::ActivityNames {
+        procs: (0..sim.process_count())
+            .map(|p| {
+                sim.process_name(yavs_kernel::ProcId(p as u32))
+                    .unwrap_or("?")
+                    .to_string()
+            })
+            .collect(),
+        signals: (0..sim.signal_count())
+            .map(|s| {
+                sim.signal_name(yavs_kernel::SignalId(s as u32))
+                    .unwrap_or("?")
+                    .to_string()
+            })
+            .collect(),
+    });
     let on_pipe = sim.interrupt();
     crate::stdout::on_broken(move || on_pipe.stop());
     let rt = built.as_ref().map(|b| b.rt.clone());
@@ -1853,7 +1889,7 @@ pub fn run(
         .clone()
         .map(|(after, f)| (after, Box::new(move || f()) as _));
     let keep_exit = !a.load.is_empty() || !a.vhpi.is_empty();
-    if recorder.is_some() || cfg_profile.is_some() {
+    if recorder.is_some() || cfg_profile.is_some() || activity.is_some() || a.assert_summary {
         let flag = if recorder.is_some() {
             &interrupted
         } else {
@@ -1937,6 +1973,43 @@ pub fn run(
     crate::timing::report();
     crate::counters::report(sim.stats(), rt.as_deref());
     yavs_interp::census_dump(40);
+    let mut activity_error = None;
+    if let (Some(ac), Some(names), Some(file)) = (&activity, &activity_names, &a.activity) {
+        let (runs, events) = (ac.runs(), ac.events());
+        eprint!(
+            "{}",
+            yavs_elab::activity_text(&e, &procs, &runs, &events, names, &db.sources)
+        );
+        if let Some(path) = file {
+            let j = yavs_elab::activity_json(&e, &procs, &runs, &events, names, &db.sources);
+            activity_error = std::fs::write(path, format!("{j:#}\n"))
+                .err()
+                .map(|err| (path.clone(), err));
+        }
+    }
+    if a.assert_summary {
+        match format {
+            MessageFormat::Json => eprintln!(
+                "{}",
+                yavs_elab::assert_summary_json(rt.as_deref(), &db.sources)
+            ),
+            _ => eprint!(
+                "{}",
+                yavs_elab::assert_summary_text(rt.as_deref(), &db.sources)
+            ),
+        }
+    }
+    if let Some((path, err)) = activity_error {
+        out.emit(
+            &none,
+            &Diagnostic::error(
+                "E0124",
+                format!("cannot write the activity report `{path}`"),
+            )
+            .with_note(err.to_string()),
+        );
+        return out.finish(1);
+    }
     if signalled.load(Ordering::SeqCst) {
         if let Some((path, err)) = profile_error {
             out.emit(

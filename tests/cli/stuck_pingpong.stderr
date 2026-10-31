@@ -1,6 +1,11 @@
 error[E3002]: delta cycle limit 10000 exceeded; active processes: :stuck_pingpong:p
   --> $DIR/stuck_pingpong.vhd:8:5
    |
+ 4 |   signal a, b : bit := '0';
+   |          -  - :stuck_pingpong:b still changes, now '0'
+   |          |
+   |          :stuck_pingpong:a still changes, now '0'
+...
  8 |     a <= not b;
    |     ^^^^^^^^^^^ `:stuck_pingpong:p` assigns :stuck_pingpong:a, which wakes `:stuck_pingpong:q`
 ...

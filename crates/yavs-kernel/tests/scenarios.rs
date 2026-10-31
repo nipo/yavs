@@ -484,6 +484,12 @@ fn zero_delay_oscillation_hits_delta_limit() {
                 name: "osc".into(),
                 signal: "s".into(),
             }]),
+            ran: vec![ProcId(0)],
+            changing: vec![yavs_kernel::ChangingSignal {
+                id: s,
+                name: "s".into(),
+                value: None,
+            }],
         }
     );
     assert_eq!(

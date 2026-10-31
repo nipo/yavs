@@ -19,6 +19,7 @@ pub mod libstage;
 mod pkgcall;
 mod sim;
 mod stuck;
+mod summary;
 mod value;
 mod walk;
 mod whole;
@@ -34,6 +35,9 @@ pub use hier::{
 };
 pub use sim::{Built, Ir};
 pub use stuck::{ProcTable, StuckWhy};
+pub use summary::{
+    ActivityNames, activity_json, activity_text, assert_summary_json, assert_summary_text,
+};
 /// Values in IR memory and back (VHPI variables, #309).
 pub use value::{
     CellKind, DataLeaf, decode as ir_decode, decode_shown as ir_decode_shown, encode as ir_encode,

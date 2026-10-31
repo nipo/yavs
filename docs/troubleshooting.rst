@@ -68,12 +68,13 @@ Common problems
      - Analyze the entity of that component.
    * - The run never ends
      - A testbench with a free-running clock needs ``finish``, ``stop`` or ``--stop-time``.
-       ``--hang-report`` explains a run that stops without finishing: what each waiting process
-       waits for, and signals that have no driver.
+       ``--hang-report`` explains a run that stops without finishing: where each process waits and
+       what for, and signals that have no driver.
    * - ``W3102``
      - A process has no ``wait`` and no sensitivity list, so time cannot advance: add a ``wait``.
    * - ``E3002``, too many delta cycles
-     - The error names the processes and signals that wake each other in a loop. Raise
+     - The error names the processes and signals that wake each other in a loop, and labels the
+       declaration of each signal still changing with its value. Raise
        ``--max-deltas`` only if the design really needs more.
    * - ``E0105``
      - A time needs a unit: ``--stop-time=10us``, not ``10``.

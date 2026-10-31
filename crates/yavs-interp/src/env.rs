@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use yavs_diag::{SourceMap, Span};
-use yavs_ir::{Program, TyId, Width};
+use yavs_ir::{Program, StmtId, TyId, Width};
 use yavs_kernel::{Ctx, Severity, Time};
 use yavs_std::env::{self, DayOfWeek, TimeRecord};
 
@@ -396,12 +396,24 @@ fn sev_of(i: u8) -> Severity {
 #[derive(Default)]
 pub(crate) struct Asserts(Mutex<Shared>);
 
+/// The reports of one statement at one severity (`Runtime::assert_sites`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AssertSite {
+    pub stmt: StmtId,
+    pub severity: Severity,
+    pub count: u64,
+    /// The first message.
+    pub message: String,
+}
+
 #[derive(Default)]
 struct Shared {
     base: AssertState,
     cycle: Option<(Time, u32)>,
     /// This cycle's changes per process id, applied in process order.
     logs: BTreeMap<u32, Vec<Op>>,
+    /// `--assert-summary`: per statement and severity the count and the first message.
+    sites: Option<BTreeMap<(u32, Severity), (u64, String)>>,
 }
 
 impl Asserts {
@@ -475,6 +487,38 @@ impl Asserts {
             ELAB_COUNTS[s as usize].fetch_add(1, Ordering::Relaxed);
         }
         on
+    }
+
+    /// Count reports per statement from now on (`--assert-summary`).
+    pub(crate) fn keep_sites(&self) {
+        let mut g = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        g.sites.get_or_insert_default();
+    }
+
+    /// Count a report of `stmt` if sites are kept. Cold enough: a report takes this lock anyway.
+    pub(crate) fn note_site(&self, stmt: impl FnOnce() -> Option<StmtId>, s: Severity, text: &str) {
+        let mut g = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(sites) = &mut g.sites
+            && let Some(st) = stmt()
+        {
+            sites
+                .entry((st.0, s))
+                .or_insert_with(|| (0, text.to_string()))
+                .0 += 1;
+        }
+    }
+
+    /// The reports per statement and severity, statement ascending.
+    pub(crate) fn sites(&self) -> Vec<AssertSite> {
+        let g = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        (g.sites.iter().flatten())
+            .map(|(&(st, severity), (count, message))| AssertSite {
+                stmt: StmtId(st),
+                severity,
+                count: *count,
+                message: message.clone(),
+            })
+            .collect()
     }
 
     /// A report or assertion violation of severity `s` with message `text`: `None` when that
