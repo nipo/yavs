@@ -1300,3 +1300,72 @@ fn vhpi_force_release_through_vhpi_and_forced_flag() {
     assert!(out.contains("force at 2 forced=1"), "{out}");
     assert!(out.contains("release at 5 forced=0"), "{out}");
 }
+
+const COMPOSITE: &str = "entity top is end;\n\
+    architecture a of top is\n\
+    type rec is record b : bit; i : integer; re : real; bv : bit_vector(1 downto 0); end record;\n\
+    type recs is array (0 to 1) of rec;\n\
+    type length is range 0 to integer'high units mm; m = 1000 mm; end units;\n\
+    type biglen is range 0 to 2 ** 40 units um; end units;\n\
+    type lens_t is array (0 to 1) of length;\n\
+    signal r : rec := ('1', 5, 1.5, \"10\");\n\
+    signal w : rec := ('0', 0, 0.0, \"00\");\n\
+    signal a : recs := (others => ('0', -1, 0.0, \"01\"));\n\
+    signal len : length := 2 m;\n\
+    signal big : biglen := 2 ** 39 * 1 um;\n\
+    signal lens : lens_t := (3 mm, 4 mm);\n\
+    type prot is protected procedure tick; end protected;\n\
+    type prot is protected body\n\
+      variable n : integer := 0;\n\
+      procedure tick is begin n := n + 1; end procedure;\n\
+    end protected body;\n\
+    shared variable sv : prot;\n\
+    begin\n\
+    process begin wait for 3 ns; sv.tick; std.env.finish; end process;\n\
+    end;\n";
+
+/// Records as a whole, raw and small physical formats, protected objects, conversions (#833).
+#[test]
+fn vhpi_composites_raw_values_and_protected_objects() {
+    let (lib, so) = setup_with("composite", COMPOSITE);
+    let spec = format!("--vhpi={}:start", so.display());
+    let (code, err, out) = yavs(&["run", &lib, &spec, "--resolution=ns", "top"]);
+    assert_eq!(code, 0, "{err}{out}");
+    assert!(!err.contains("W0904"), "{err}");
+    // A little-endian host; the layout is native (crates/yavs-vhpi/AGENTS.md).
+    #[cfg(target_endian = "little")]
+    for want in [
+        // b, i (4 bytes), re (8), bv: 5 scalars of 15 bytes.
+        "top:r rc=0 format=22 elems=5: 01 05 00 00 00 00 00 00 00 00 00 f8 3f 01 00 ",
+        "top:a rc=0 format=22 elems=10: 00 ff ff ff ff 00 00 00 00 00 00 00 00 00 01 00",
+        "top:r.i rc=0 format=6 elems=",
+        "raw of r.bv: 01 00",
+        "top:w rc=0 format=22 elems=5: 01 fd ff ff ff 00 00 00 00 00 00 04 40 01 00 ",
+    ] {
+        assert!(out.contains(want), "no `{want}` in\n{out}");
+    }
+    for want in [
+        "size of top:r: 15",
+        "int of a record: -1 error=1",
+        "small phys of len: rc=0 2000",
+        "small phys of big: rc=-1 error=1",
+        "small phys vec: rc=0 3 4",
+        "ptr of a bit: -1 error=1",
+        "put raw: 0",
+        "put short: 1 error=1",
+        "protected: 1 kind vhpiProtectedTypeDeclK",
+        "protected type: prot",
+        "in protected call on sv, data 5",
+        "call: 7",
+        "call on a signal: 1 error=1",
+        "value of protected: -1 error=1",
+        "int to real: rc=0 3.0",
+        "real to int: rc=0 3",
+        "real to decimal text: rc=0 -1",
+        "bits to int: rc=0 10",
+        "metavalue to int: rc=-1 error=1",
+        "char to real: rc=-1 error=1",
+    ] {
+        assert!(out.contains(want), "no `{want}` in\n{out}");
+    }
+}

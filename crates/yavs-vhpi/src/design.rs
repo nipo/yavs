@@ -264,6 +264,8 @@ pub(crate) fn vhpi_name(s: &str) -> String {
 
 pub(crate) struct Design {
     pub(crate) net: crate::connect::Net,
+    /// The variables of a protected type (`vhpi_protected_call`).
+    pub(crate) protected: std::collections::HashSet<NodeId>,
     pub(crate) nodes: Vec<Node>,
     pub(crate) packages: Vec<NodeId>,
     pub(crate) types: Types,
@@ -321,6 +323,7 @@ impl Design {
     fn empty() -> Design {
         Design {
             net: Default::default(),
+            protected: Default::default(),
             nodes: Vec::new(),
             packages: Vec::new(),
             types: Types::default(),
@@ -752,6 +755,9 @@ impl Builder<'_> {
         });
         if let Some(obj) = signal {
             self.d.net.obj_nodes.insert(obj, node);
+        }
+        if matches!(db.types[db.base(o.subtype)].kind, TypeKind::Protected { .. }) {
+            self.d.protected.insert(node);
         }
         self.attr_specs(node, s, d);
     }
@@ -1381,6 +1387,9 @@ impl Builder<'_> {
                     TypeKind::Enum { .. } => vhpiEnumTypeDeclK,
                     TypeKind::Floating | TypeKind::UniversalReal => vhpiFloatTypeDeclK,
                     TypeKind::Physical { .. } => vhpiPhysTypeDeclK,
+                    TypeKind::Access { .. } => vhpiAccessTypeDeclK,
+                    TypeKind::File { .. } => vhpiFileTypeDeclK,
+                    TypeKind::Protected { .. } => vhpiProtectedTypeDeclK,
                     _ => vhpiIntTypeDeclK,
                 };
                 let units = match k {

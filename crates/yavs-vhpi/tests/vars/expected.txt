@@ -16,7 +16,7 @@ vhpi:   @work:pkg:pv(3)=3
 vhpi: deposit before the process ran: ok
 vhpi:   d:m=9
 vhpi:   un=8
-vhpi: read a protected object: error: vhpi_get_value: this shared variable has no value to read (a protected object)
+vhpi: read a protected object: error: vhpi_get_value: a protected object has no value; call its methods
 ** Note: 0fs+0: m=9
     Process :top:d
 vhpi: end of initialization

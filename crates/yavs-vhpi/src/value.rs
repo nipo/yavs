@@ -298,6 +298,17 @@ impl Read {
             vhpiPhysVal => Encoded::Scalar(vhpiValueU {
                 phys: split_phys(scalar(is_phys)?),
             }),
+            vhpiSmallPhysVal => Encoded::Scalar(vhpiValueU {
+                smallphys: int32(scalar(is_phys)?)?,
+            }),
+            vhpiSmallPhysVecVal => {
+                let mut out = Vec::new();
+                for &v in vector(is_phys)? {
+                    out.extend(int32(v)?.to_ne_bytes());
+                }
+                buf(out)
+            }
+            vhpiRawDataVal => buf(self.raw(res_fs)),
             vhpiEnumVecVal | vhpiLogicVecVal => buf(vector(enum_lits.is_some())?
                 .iter()
                 .flat_map(|&p| (p as u32).to_ne_bytes())
@@ -335,10 +346,131 @@ impl Read {
                     [p.high.to_ne_bytes(), p.low.to_ne_bytes()].concat()
                 })
                 .collect()),
+            // Only an access parameter of a foreign call has an address (`abi::get_value`).
+            vhpiPtrVal | vhpiPtrVecVal => return Err(mismatch()),
             _ => {
                 return Err(Error::Unsupported(format!("vhpi_get_value: format {name}")));
             }
         })
+    }
+
+    /// `vhpiRawDataVal`: the elements in order, each as `raw_size` says, native byte order.
+    pub(crate) fn raw(&self, res_fs: u64) -> Vec<u8> {
+        match &self.cells {
+            Cells::Real(v) => v.iter().flat_map(|r| r.to_ne_bytes()).collect(),
+            Cells::Int(v) => {
+                let size = raw_size(&self.ty);
+                let time = matches!(self.ty, Scalar::Phys { time: true });
+                v.iter()
+                    .flat_map(|&x| {
+                        let x = if time { x / res_fs as i64 } else { x };
+                        x.to_ne_bytes()[raw_low(size)..][..size].to_vec()
+                    })
+                    .collect()
+            }
+        }
+    }
+
+    /// Elements of `ty` from their `vhpiRawDataVal` bytes: `n` of them for an array, one scalar
+    /// for `None`.
+    pub(crate) fn from_raw(
+        ty: Scalar,
+        n: Option<usize>,
+        bytes: &[u8],
+        res_fs: u64,
+    ) -> Result<Read, Error> {
+        let size = raw_size(&ty);
+        let time = matches!(ty, Scalar::Phys { time: true });
+        let mut ints = Vec::new();
+        let mut reals = Vec::new();
+        for w in bytes.chunks_exact(size) {
+            match (&ty, size) {
+                (Scalar::Real, _) => reals.push(f64::from_ne_bytes(w.try_into().expect("8"))),
+                (_, 1) => ints.push(i64::from(w[0])),
+                (Scalar::Enum { .. }, 4) => {
+                    ints.push(i64::from(u32::from_ne_bytes(w.try_into().expect("4"))));
+                }
+                (_, 4) => ints.push(i64::from(i32::from_ne_bytes(w.try_into().expect("4")))),
+                _ => {
+                    let v = i64::from_ne_bytes(w.try_into().expect("8"));
+                    ints.push(if time {
+                        v.checked_mul(res_fs as i64).ok_or_else(|| {
+                            Error::Mismatch(format!("format vhpiRawDataVal: time {v} overflows"))
+                        })?
+                    } else {
+                        v
+                    });
+                }
+            }
+        }
+        if let Scalar::Enum { lits, .. } = &ty
+            && let Some(p) = ints.iter().find(|&&p| p as usize >= lits.len())
+        {
+            return Err(Error::Mismatch(format!(
+                "format vhpiRawDataVal: {p} is not a literal position"
+            )));
+        }
+        let cells = if matches!(ty, Scalar::Real) {
+            Cells::Real(reals)
+        } else {
+            Cells::Int(ints)
+        };
+        Ok(Read {
+            ty,
+            array: n.is_some(),
+            cells,
+        })
+    }
+
+    /// The value as `vhpi_format_value` needs it for `format` when that means another kind of
+    /// value: an integer to a real, a real to an integer (rounded), a logic array to an integer
+    /// (unsigned). Anything else stays as it is, and `encode` says whether it applies.
+    pub(crate) fn convert_for(self, format: vhpiFormatT) -> Result<Read, Error> {
+        let int = |v: i64| Read {
+            ty: Scalar::Int { narrow: false },
+            array: false,
+            cells: Cells::Int(vec![v]),
+        };
+        let wants_int = matches!(format, vhpiIntVal | vhpiLongIntVal | vhpiDecStrVal);
+        match (&self.ty, &self.cells, self.array) {
+            (Scalar::Int { .. }, Cells::Int(v), false) if format == vhpiRealVal => Ok(Read {
+                ty: Scalar::Real,
+                array: false,
+                cells: Cells::Real(vec![v[0] as f64]),
+            }),
+            (Scalar::Real, Cells::Real(v), false) if wants_int => {
+                let r = v[0].round();
+                if !(-9.2e18..9.2e18).contains(&r) {
+                    return Err(Error::Mismatch(format!("{} does not fit an integer", v[0])));
+                }
+                Ok(int(r as i64))
+            }
+            (Scalar::Enum { logic: true, .. }, Cells::Int(_), true)
+                if matches!(format, vhpiIntVal | vhpiLongIntVal) =>
+            {
+                let chars = self.logic_chars().unwrap_or_default();
+                if chars.len() > 63 {
+                    return Err(Error::Mismatch(format!(
+                        "{} bits do not fit an integer",
+                        chars.len()
+                    )));
+                }
+                let mut v = 0i64;
+                for c in chars {
+                    match c {
+                        b'0' | b'1' => v = v * 2 + i64::from(c - b'0'),
+                        _ => {
+                            return Err(Error::Mismatch(format!(
+                                "the value has the metavalue '{}'",
+                                c as char
+                            )));
+                        }
+                    }
+                }
+                Ok(int(v))
+            }
+            _ => Ok(self),
+        }
     }
 
     fn describe(&self) -> String {
@@ -482,11 +614,31 @@ pub(crate) enum Given<'a> {
 /// The bytes of one element of vector format `f`; `None` for other formats.
 pub(crate) fn vector_elem_size(f: vhpiFormatT) -> Option<usize> {
     Some(match f {
-        vhpiEnumVecVal | vhpiLogicVecVal | vhpiIntVecVal => 4,
+        vhpiEnumVecVal | vhpiLogicVecVal | vhpiIntVecVal | vhpiSmallPhysVecVal => 4,
         vhpiSmallEnumVecVal => 1,
         vhpiLongIntVecVal | vhpiRealVecVal | vhpiTimeVecVal | vhpiPhysVecVal => 8,
         _ => return None,
     })
+}
+
+/// The bytes of one scalar of `ty` in `vhpiRawDataVal`: an enumeration of up to 256 literals
+/// (logic too) 1, a longer one 4, an integer as the kernel holds it (4 or 8), a real, a time or a
+/// physical value 8.
+pub(crate) fn raw_size(ty: &Scalar) -> usize {
+    match ty {
+        Scalar::Enum { lits, .. } if lits.len() <= 256 => 1,
+        Scalar::Enum { .. } | Scalar::Int { narrow: true } => 4,
+        Scalar::Int { narrow: false } | Scalar::Real | Scalar::Phys { .. } => 8,
+    }
+}
+
+/// Where the low `size` bytes of a native `i64` start.
+fn raw_low(size: usize) -> usize {
+    if cfg!(target_endian = "little") {
+        0
+    } else {
+        8 - size
+    }
 }
 
 pub(crate) fn is_text(f: vhpiFormatT) -> bool {
@@ -596,6 +748,11 @@ impl Read {
                     (vhpiLongIntVecVal, Scalar::Int { .. }) => Cells::Int(
                         words
                             .map(|w| i64::from_ne_bytes(w.try_into().expect("8 bytes")))
+                            .collect(),
+                    ),
+                    (vhpiSmallPhysVecVal, _) if is_phys && !is_time => Cells::Int(
+                        words
+                            .map(|w| i64::from(i32::from_ne_bytes(w.try_into().expect("4 bytes"))))
                             .collect(),
                     ),
                     (vhpiTimeVecVal | vhpiPhysVecVal, _)
@@ -891,8 +1048,8 @@ pub(crate) fn format_type(
         vhpiRealVecVal => (Scalar::Real, Some(len)),
         vhpiTimeVal => (Scalar::Phys { time: true }, None),
         vhpiTimeVecVal => (Scalar::Phys { time: true }, Some(len)),
-        vhpiPhysVal => (Scalar::Phys { time: false }, None),
-        vhpiPhysVecVal => (Scalar::Phys { time: false }, Some(len)),
+        vhpiPhysVal | vhpiSmallPhysVal => (Scalar::Phys { time: false }, None),
+        vhpiPhysVecVal | vhpiSmallPhysVecVal => (Scalar::Phys { time: false }, Some(len)),
         vhpiCharVal => (character(), None),
         vhpiStrVal => (character(), Some(len)),
         _ => return None,
@@ -1081,10 +1238,7 @@ mod tests {
             panic!()
         };
         assert_eq!(unsafe_free_int(u), 17); // enumv shares the int field's bytes
-        assert!(matches!(
-            i.encode(vhpiPtrVal, 1),
-            Err(Error::Unsupported(_))
-        ));
+        assert!(matches!(i.encode(vhpiPtrVal, 1), Err(Error::Mismatch(_))));
         let big = Read {
             cells: Cells::Int(vec![1 << 40]),
             ..i

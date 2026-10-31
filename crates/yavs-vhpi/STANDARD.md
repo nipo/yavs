@@ -11,15 +11,15 @@ gap has an issue.
 
 | Area | Status | What works | Missing (issue) |
 |---|---|---|---|
-| Functions | partial | all 34 exported; every one works except the three on the right; `vhpi_get_next_time` in the end-of-time-step phase | `vhpi_get_data`, `vhpi_put_data` ([#832](https://github.com/ru551n/yavs/issues/832)), `vhpi_protected_call` ([#833](https://github.com/ru551n/yavs/issues/833)) |
+| Functions | partial | all 34 exported; every one works except the two on the right; `vhpi_get_next_time` in the end-of-time-step phase | `vhpi_get_data`, `vhpi_put_data` ([#832](https://github.com/ru551n/yavs/issues/832)) |
 | Plugin loading, tool object | supported | startup table or `LIB:ENTRY`, Linux and Windows export tables, `vhpiArgcP`, `vhpiArgvs`, `vhpiNameP`, `vhpiToolVersionP`, `vhpiCapabilitiesP` (hierarchy, static access, connectivity, foreign models, advanced foreign models, run-time debug) | `vhpiPhaseP` ([#832](https://github.com/ru551n/yavs/issues/832)) |
 | Region classes | partial | root and component instances, blocks, `for` and `if`/`case` generates, processes, package instances, entities, architectures, packages | equivalent processes of concurrent statements, statements ([#829](https://github.com/ru551n/yavs/issues/829)); components, configurations, subprograms, libraries ([#831](https://github.com/ru551n/yavs/issues/831)) |
 | Declaration classes | partial | generics, ports, signals, constants, variables, shared variables, user attribute specifications and declarations of declarations | aliases, files, implicit signals, attribute names ([#831](https://github.com/ru551n/yavs/issues/831)) |
-| Types | supported | type and subtype declarations of every scalar, array and record kind, constraints, literals, record elements, units | access, file and protected types as objects ([#831](https://github.com/ru551n/yavs/issues/831), [#833](https://github.com/ru551n/yavs/issues/833)) |
+| Types | supported | type and subtype declarations of every scalar, array and record kind, constraints, literals, record elements, units, access, file and protected types (kind and name) | |
 | One-to-one relations | partial | `vhpiRootInst`, `vhpiTool`, `vhpiUpperRegion`, `vhpiImmRegion`, `vhpiDesignUnit`, `vhpiPrimaryUnit`, `vhpiPrefix`, `vhpiParent`, `vhpiType`, `vhpiSubtype`, `vhpiBaseType`, `vhpiElemType`, `vhpiAttrDecl`, `vhpiSimNet`, `vhpiResolFunc`, `vhpiSignal` and `vhpiEqProcessStmt` of a driver, `vhpiFormal` and `vhpiActual` of a port association | expressions, statements, stack frames ([#829](https://github.com/ru551n/yavs/issues/829)), aliases and configurations ([#831](https://github.com/ru551n/yavs/issues/831)) |
 | One-to-many relations | partial | the region, declaration, element, type, parameter, driver (foreign models) and argument iterators of the hierarchy table below, `vhpiAttrSpecs` of a declaration, `vhpiDrivers`, `vhpiDrivenSigs`, `vhpiLocalContributors`, `vhpiOptimizedContributors`, `vhpiLocalLoads`, `vhpiOptimizedLoads`, `vhpiBasicSignals`, `vhpiTransactions` | `vhpiSensitivitys`, `vhpiSeqStmts` ([#829](https://github.com/ru551n/yavs/issues/829)), `vhpiAliasDecls`, `vhpiSigAttrs`, `vhpiDesignUnits` ([#831](https://github.com/ru551n/yavs/issues/831)); `vhpiGenerateStmts` deliberately not (both references refuse it) |
 | Properties | partial | names, kind, file and line, mode, size, composite and scalar flags, type properties, `vhpiNumPortsP`, `vhpiNumGensP`, `vhpiLabelNameP`, `vhpiGenerateIndexP`, `vhpiIsSharedP`, `vhpiStartLineNoP`, `vhpiResolutionLimitP`, `vhpiIsResolvedP`, `vhpiIsBasicP`, `vhpiSigKindP`, `vhpiIsForcedP`, `vhpiTimeP` | staticness, passive, postponed, guarded ([#829](https://github.com/ru551n/yavs/issues/829)), library and component names, end line ([#831](https://github.com/ru551n/yavs/issues/831)) |
-| Value formats | partial | every format except the four on the right, on scalars, arrays of any dimension, record fields | records as a whole, `vhpiRawDataVal`, `vhpiSmallPhysVal`, `vhpiSmallPhysVecVal`, `vhpiPtrVecVal` ([#833](https://github.com/ru551n/yavs/issues/833)) |
+| Value formats | supported | every format on scalars, arrays of any dimension, record fields; `vhpiRawDataVal` also on whole records and arrays of composites; `vhpiPtrVal` on access parameters of foreign calls | no value for protected objects and no `vhpiPtrVecVal` object exists (no array of access parameters) |
 | Put modes | supported | `vhpiDepositPropagate`, `vhpiForcePropagate`, `vhpiRelease`, `vhpiDeposit` on variables, `vhpiSizeConstraint` on foreign results, `vhpi_schedule_transaction` on foreign drivers (inertial with pulse rejection, transport) | `vhpiDeposit` and `vhpiForce` on signals refused on purpose (two of three references refuse them) |
 | Callback reasons | partial | the simulation-cycle reasons, after delay, value change, `vhpiCbTimeOut`, `vhpiCbRepTimeOut`, `vhpiCbSensitivity` on a signal, transaction (signal or driver), force, release | statement, subprogram call, suspend and resume ([#829](https://github.com/ru551n/yavs/issues/829)); tool, analysis and elaboration phases, quiescence, interrupt, errors, interactive, save, restart and reset ([#832](https://github.com/ru551n/yavs/issues/832)) |
 | Foreign models | supported | `vhpiFuncF`, `vhpiProcF`, `vhpiArchF`, `vhpiLibF`, `vhpiAppF`, `vhpi_create` of processes and drivers | file parameters, `vhpiForeignfs` ([#831](https://github.com/ru551n/yavs/issues/831)) |
@@ -76,7 +76,13 @@ callback. Formats: `vhpiObjTypeVal` (the object's own format), `vhpiBinStrVal`, 
 `vhpiSmallEnumVal`, `vhpiLogicVal`, `vhpiIntVal`, `vhpiLongIntVal`, `vhpiRealVal`,
 `vhpiTimeVal`, `vhpiPhysVal`, and the vector forms of the enumeration, logic, integer, real,
 time and physical formats. A buffer that is too small makes the call return the size needed. A
-format that does not fit is warning `W0903` and returns -1.
+format that does not fit is warning `W0903` and returns -1. A record or an array of composites
+has `vhpiRawDataVal` (also what `vhpiObjTypeVal` means for it): its scalars in order, without
+padding, native byte order: enumerations of up to 256 literals 1 byte (the position), longer ones
+4, integers 4 or 8 as the kernel holds them, reals, times (in the resolution limit) and other
+physical values (base units) 8. `vhpiSmallPhysVal` and `vhpiSmallPhysVecVal` are base units in 32
+bits. A variable of a protected type has no value (warning `W0903`); `vhpi_protected_call` calls
+the function with the handle and data and returns its result.
 
 `vhpi_put_value` writes signals, ports and their fields and elements in the same formats, plus
 an integer into a logic vector and `vhpiStrVal` text (padded or cut to the string's length):
@@ -128,8 +134,9 @@ lose the later triggers.
 `vhpi_format_value` converts a value from one format to another without an object: integers
 (and the enumeration formats) to and from decimal, binary, octal and hex strings, bit, octal and
 hex strings to and from logic vectors, reals, times and physical values, characters and strings.
-The input format decides the kind of value (a binary string is a logic vector); a conversion to
-another kind (an integer to a real) is warning `W0903`. The output follows the buffer protocol of
+The input format decides the kind of value (a binary string is a logic vector). Across kinds: an
+integer to a real, a real to an integer (rounded) or decimal text, a logic array to an integer
+(unsigned, no metavalues). Any other conversion to another kind is warning `W0903`. The output follows the buffer protocol of
 `vhpi_get_value`.
 
 ### Next activity time
@@ -151,8 +158,6 @@ drivers made with `vhpi_create`; an unregistered one is error `E0905`), `vhpiLib
 ### Other gaps
 
 - Sub-elements of variables whose bounds are only known at run time.
-- Values: `vhpiRawDataVal`, `vhpiSmallPhys*` formats; `vhpiPtrVal` only for `in` access
-  parameters of foreign subprograms.
 - Forcing a variable, force and release of constants or generics, and the non-propagating put modes on
   signals (deliberately refused).
 - The element subtype of a resolved array subtype reports `STD_ULOGIC` for `std_logic_vector`.

@@ -678,14 +678,44 @@ pub extern "C" fn vhpi_is_printable(ch: c_char) -> c_int {
 // Present so plugins link and load; each fails cleanly and reports through
 // vhpi_check_error.
 
+/// Calls `f(var, data)` for a variable of a protected type and returns what it returns. Plugin
+/// code never runs alongside a process that holds the object: observers run between phases,
+/// foreign calls one at a time, and a process touching a protected object is serial.
+///
+/// # Safety
+/// `f` is NULL or a function taking a handle and a pointer.
 #[unsafe(no_mangle)]
-pub extern "C" fn vhpi_protected_call(
-    _var: vhpiHandleT,
-    _f: vhpiUserFctT,
-    _data: *mut c_void,
+pub unsafe extern "C" fn vhpi_protected_call(
+    var: vhpiHandleT,
+    f: vhpiUserFctT,
+    data: *mut c_void,
 ) -> c_int {
-    not_implemented("vhpi_protected_call");
-    1
+    let func = "vhpi_protected_call";
+    let ok = with_state(|s| {
+        let protected = match get_obj(s, var, func) {
+            Some(Object::Node(n)) => s.design.protected.contains(&n),
+            Some(_) => false,
+            None => return false,
+        };
+        if !protected {
+            s.fail(
+                Fault::Misuse,
+                format!("{func}: the handle is not a variable of a protected type"),
+            );
+        } else if f.is_none() {
+            s.fail(Fault::Misuse, format!("{func}: NULL function"));
+        }
+        protected && f.is_some()
+    });
+    let Some(f) = f.filter(|_| ok) else {
+        return 1;
+    };
+    // SAFETY: the standard's `userFct` takes the handle and the data; `vhpi_user.h` declares it
+    // without a prototype, and no state lock is held across the call.
+    unsafe {
+        let f: unsafe extern "C" fn(vhpiHandleT, *mut c_void) -> c_int = std::mem::transmute(f);
+        f(var, data)
+    }
 }
 
 /// Reads the value of `expr` in `value.format` (`vhpiObjTypeVal`: the object's own format,
@@ -723,6 +753,19 @@ fn get_value(s: &mut State, obj: &Object, v: &mut vhpiValueT) -> c_int {
         v.numElems = 1;
         v.value.ptr = p as usize as *mut std::ffi::c_void;
         return 0;
+    }
+    // A composite has the one format that holds its elements; any scalar or array has it too.
+    if matches!(obj, Object::Node(_) | Object::Elem { .. })
+        && (v.format == vhpiRawDataVal || v.format == vhpiObjTypeVal && s.is_composite(obj))
+    {
+        let res = s.clock.resolution.fs();
+        let (mut bytes, mut n) = (Vec::new(), 0);
+        if let Err((fault, m)) = s.raw_read(obj, res, &mut bytes, &mut n) {
+            s.fail(fault, m);
+            return -1;
+        }
+        v.format = vhpiRawDataVal;
+        return put_encoded(v, Encoded::Buffer { bytes, n });
     }
     let read = match s.read(obj, |r| with_hook(|h| h.value(r))) {
         Ok(r) => r,
@@ -794,6 +837,19 @@ pub unsafe extern "C" fn vhpi_put_value(
         let decode = |ty: &value::Scalar, n| unsafe { decode(v, ty, n, res, "vhpi_put_value") };
         let put = if matches!(o, Object::Call(_) | Object::Param { .. }) {
             s.foreign_put(&o, mode, v.map(|v| v.numElems), decode)
+        } else if let Some(v) = v.filter(|v| {
+            v.format == vhpiRawDataVal || v.format == vhpiObjTypeVal && s.is_composite(&o)
+        }) {
+            // SAFETY: the plugin's buffer has `bufSize` readable bytes.
+            let bytes = unsafe {
+                let p = v.value.ptr;
+                if p.is_null() {
+                    &[][..]
+                } else {
+                    std::slice::from_raw_parts(p.cast::<u8>(), v.bufSize)
+                }
+            };
+            s.put_raw(&o, mode, bytes)
         } else {
             s.put(&o, mode, decode)
         };
@@ -879,6 +935,7 @@ fn scalar_member(format: vhpiFormatT, u: vhpiValueU) -> Option<Member> {
             vhpiCharVal => Member::Char(u.ch),
             vhpiTimeVal => Member::Time((i64::from(u.time.high) << 32) | i64::from(u.time.low)),
             vhpiPhysVal => Member::Phys((i64::from(u.phys.high) << 32) | i64::from(u.phys.low)),
+            vhpiSmallPhysVal => Member::Phys(i64::from(u.smallphys)),
             _ => return None,
         }
     };
@@ -986,7 +1043,7 @@ pub unsafe extern "C" fn vhpi_format_value(
                     o.format
                 };
                 o.format = f;
-                r.encode(f, res)
+                r.convert_for(f)?.encode(f, res)
             });
         match converted {
             Ok(e) => put_encoded(o, e),

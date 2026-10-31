@@ -312,6 +312,7 @@ pub(crate) const INT_PROPS: &[vhpiIntPropertyT] = &[
     vhpiIsBasicP,
     vhpiSigKindP,
     vhpiIsForcedP,
+    vhpiIsProtectedTypeP,
 ];
 pub(crate) const STR_PROPS: &[vhpiStrPropertyT] = &[
     vhpiNameP,
@@ -482,13 +483,13 @@ impl State {
             Layout::Array { elem, .. } => match &**elem {
                 Layout::Scalar(t) => Ok((t, l.count(), true)),
                 _ => Err((
-                    Fault::Unsupported,
-                    format!("{func} of an array of composites: use its elements"),
+                    Fault::Misuse,
+                    format!("{func}: an array of composites has only the format vhpiRawDataVal"),
                 )),
             },
             Layout::Record(_) => Err((
-                Fault::Unsupported,
-                format!("{func} of a record: use its elements"),
+                Fault::Misuse,
+                format!("{func}: a record has only the format vhpiRawDataVal"),
             )),
             Layout::Open => Err((
                 Fault::Misuse,
@@ -532,6 +533,9 @@ impl State {
                 .as_ref()
                 .and_then(|v| Read::from_const(ty.clone(), v))
                 .ok_or_else(|| misuse("this is a bug in yavs: no elaborated value")),
+            Origin::Var { .. } if self.design.protected.contains(&Self::base(obj).expect("var")) => {
+                Err(misuse("a protected object has no value; call its methods"))
+            }
             Origin::Var { .. } => {
                 let whole = self
                     .var(at.node, None)
@@ -546,6 +550,104 @@ impl State {
                 "vhpi_get_value of an object without an elaborated value".into(),
             )),
         }
+    }
+
+    /// A record or an array of composites, whose one value format is `vhpiRawDataVal`.
+    pub(crate) fn is_composite(&self, obj: &Object) -> bool {
+        match self.layout(obj) {
+            Some(Layout::Record(_)) => true,
+            Some(Layout::Array { elem, .. }) => !matches!(**elem, Layout::Scalar(_)),
+            _ => false,
+        }
+    }
+
+    /// The direct sub-elements of a record or an array of composites.
+    fn children(obj: &Object, count: u64) -> Vec<Object> {
+        let (base, path): (NodeId, &[u64]) = match obj {
+            Object::Node(n) => (*n, &[]),
+            Object::Elem { base, path } => (*base, path),
+            _ => return Vec::new(),
+        };
+        (0..count)
+            .map(|i| Object::Elem {
+                base,
+                path: path.iter().copied().chain([i]).collect(),
+            })
+            .collect()
+    }
+
+    /// `vhpiRawDataVal` of `obj`: its scalars in element order into `out`, counted in `n`.
+    pub(crate) fn raw_read(
+        &self,
+        obj: &Object,
+        res_fs: u64,
+        out: &mut Vec<u8>,
+        n: &mut usize,
+    ) -> Result<(), (Fault, String)> {
+        if self.is_composite(obj) {
+            let count = self.layout(obj).map_or(0, Layout::count);
+            for c in Self::children(obj, count) {
+                self.raw_read(&c, res_fs, out, n)?;
+            }
+            return Ok(());
+        }
+        let r = self.read(obj, |r| with_hook(|h| h.value(r)))?;
+        let bytes = r.raw(res_fs);
+        *n += bytes.len() / value::raw_size(&r.ty);
+        out.extend(bytes);
+        Ok(())
+    }
+
+    /// The scalars or arrays of scalars of `obj`, each with its value out of `bytes` from
+    /// `*at` on.
+    fn raw_split(
+        &self,
+        obj: &Object,
+        bytes: &[u8],
+        at: &mut usize,
+        out: &mut Vec<(Object, Read)>,
+    ) -> Result<(), (Fault, String)> {
+        let misuse = |m: String| (Fault::Misuse, format!("vhpi_put_value: {m}"));
+        if self.is_composite(obj) {
+            let count = self.layout(obj).map_or(0, Layout::count);
+            for c in Self::children(obj, count) {
+                self.raw_split(&c, bytes, at, out)?;
+            }
+            return Ok(());
+        }
+        let l = self
+            .layout(obj)
+            .ok_or_else(|| misuse("the object has no value".into()))?;
+        let (ty, len, array) = Self::scalars(l, "vhpi_put_value")?;
+        let size = value::raw_size(ty) * len as usize;
+        let part = (bytes.get(*at..*at + size))
+            .ok_or_else(|| misuse(format!("bufSize {} is too small", bytes.len())))?;
+        *at += size;
+        let res = self.clock.resolution.fs();
+        let r = Read::from_raw(ty.clone(), array.then_some(len as usize), part, res).map_err(
+            |e| match e {
+                value::Error::Unsupported(m) => (Fault::Unsupported, m),
+                value::Error::Mismatch(m) => misuse(m),
+            },
+        )?;
+        out.push((obj.clone(), r));
+        Ok(())
+    }
+
+    /// `vhpi_put_value` in `vhpiRawDataVal`: every scalar of `obj`, or none when `bytes` does
+    /// not fit it.
+    pub(crate) fn put_raw(
+        &mut self,
+        obj: &Object,
+        mode: vhpiPutValueModeT,
+        bytes: &[u8],
+    ) -> Result<(), (Fault, String)> {
+        let (mut parts, mut at) = (Vec::new(), 0);
+        self.raw_split(obj, bytes, &mut at, &mut parts)?;
+        for (o, r) in parts {
+            self.put(&o, mode, |_, _| Ok(r.clone()))?;
+        }
+        Ok(())
     }
 
     /// The sub-element path of a declaration (empty) or sub-element.
@@ -840,6 +942,12 @@ impl State {
         let node = Self::base(obj).map(|n| self.design.node(n));
         Some(match (obj, prop) {
             (_, vhpiKindP) => self.kind(obj),
+            (Object::Type(o), vhpiIsProtectedTypeP) => {
+                vhpiIntT::from(self.design.types.kind(*o) == vhpiProtectedTypeDeclK)
+            }
+            (Object::Node(n), vhpiIsProtectedTypeP) if node?.kind == vhpiVarDeclK => {
+                vhpiIntT::from(self.design.protected.contains(n))
+            }
             (Object::Type(o), _) => return self.design.types.int_property(*o, prop),
             (Object::Foreign(_) | Object::Call(_) | Object::Param { .. }, _) => {
                 return self.foreign_int(obj, prop);
@@ -945,7 +1053,7 @@ impl State {
                 })
             }
             (
-                vhpiType | DEPRECATED_vhpiSubtype | vhpiBaseType,
+                vhpiType | DEPRECATED_vhpiSubtype | vhpiBaseType | vhpiProtectedTypeDecl,
                 Some(o @ (Object::Node(_) | Object::Elem { .. })),
             ) => {
                 let t = self.obj_ty(o).ok_or(false)?;
@@ -954,6 +1062,12 @@ impl State {
                 } else {
                     t
                 };
+                if kind == vhpiProtectedTypeDecl
+                    && self.design.types.kind(TypeObj::Ty(self.design.types.base(t)))
+                        != vhpiProtectedTypeDeclK
+                {
+                    return Err(false);
+                }
                 Ok(Object::Type(TypeObj::Ty(t)))
             }
             (TYPE_RELATIONS!(), Some(Object::Type(o))) => self

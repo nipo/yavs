@@ -7,7 +7,7 @@ vhpi: non-propagating force: error: vhpi_put_value: the non-propagating mode vhp
 vhpi: put too short: error: vhpi_put_value: format vhpiBinStrVal: 3 elements for an array of 4
 vhpi: put bad literal: error: vhpi_put_value: format vhpiBinStrVal: no literal 'Q'
 vhpi: put too wide: error: vhpi_put_value: format vhpiHexStrVal: 1F is not a number of 4 bits
-vhpi: put record: error: vhpi_put_value of a record: use its elements: not implemented in yavs yet
+vhpi: put record: error: vhpi_put_value: a record has only the format vhpiRawDataVal
 vhpi: put real into integer: error: vhpi_put_value: format vhpiRealVal does not apply to an integer object
 vhpi: put NULL value: error: vhpi_put_value: NULL value_p
 vhpi: put hex: ok
