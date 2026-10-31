@@ -409,9 +409,10 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   design, packages and dead code included, is error `E2120` before time 0 (exit 2; the first 10
   locations are listed); `0 fs` and values such as `0.4 ns` under `ns` are legal. The built-in
   std and ieee sources are exempt. A design that ran with a coarse limit before can now fail.
-- `--stop-time=TIME` (e.g. `10ms` or `10 ns`; a bare number is `E0105`), `--threads=N` (at least 1; 0 is a usage error, exit 2, #839), `--shuffle`, `--load=LIB`,
+- `--stop-time=TIME` (e.g. `10ms` or `10 ns`; a bare number is `E0105`), `--threads=N` (at least 1; 0 is a usage error, exit 2, #839), `--shuffle`,
   `--vhpi=LIB[:ENTRY]`, `--dap=PORT`: not passed by the test runner, used through
-  `yavs.sim_flags` or simulator hooks (a test runner package can add `--load`).
+  `yavs.sim_flags` or simulator hooks. `--load=LIB` is taken by `yavs elab` as well as `yavs run`
+  (#943); `native_library_hooks` passes it to both through `elab_flags`.
 - Stuck and hung simulations (#582), `run` only, all as diagnostics (code, labels, notes, help; JSON
   with `--message-format=json`; `yavs --explain CODE`):
   - `E3002` (delta cycle limit) names the processes and signals of the loop found from the drivers
@@ -489,7 +490,7 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   that sleeps between samples: no signal or timer is used. Time in plugin callbacks (`--vhpi`) is
   in the kernel share. With `--dap` it is `E0125` (exit 2). Off by default and
   then free: no process is wrapped and no thread exists.
-- `--load=LIB[:args=LAYOUT]` (repeatable; `LAYOUT` is `length`, the default, or `fat-pointer`, see the VHPI guide; another name is `E0136`, exit 2; libraries load before elaboration): load a shared library for VHPIDIRECT foreign
+- `--load=LIB[:args=LAYOUT]` (repeatable; `LAYOUT` is `length`, the default, or `fat-pointer`, see the VHPI guide; another name is `E0136`, exit 2; libraries load before elaboration, in `yavs elab` too, since a signal's initial value may call them): load a shared library for VHPIDIRECT foreign
   subprograms. A bare name goes to the OS library search path, a path must exist.
   Every foreign subprogram the design calls is bound before the simulation starts:
   its symbol is looked up in the `--load` libraries in order, then in the

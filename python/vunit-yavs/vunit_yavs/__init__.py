@@ -164,11 +164,12 @@ class YavsInterface(SimulatorInterface):
     @staticmethod
     def native_library_hooks(library_file, args=None):
         """
-        The simulator hooks loading a native library: --load on every 'yavs run'.
+        The simulator hooks loading a native library: --load on every 'yavs elab' and 'yavs run' (a signal's
+        initial value may call it, so elaborating alone needs it too).
         args names the layout its functions take their arguments in (`"fat-pointer"`), default the usual one.
         """
         load = f"--load={library_file}" + (f":args={args}" if args else "")
-        return {"run_flags": lambda simulator_interface: [load]}
+        return {"elab_flags": lambda simulator_interface: [load]}
 
     @staticmethod
     def add_arguments(parser):

@@ -25,11 +25,11 @@ as ``--name=value``.
    * - ``yavs.a_flags``
      - ``yavs analyze`` (compile option).
    * - ``yavs.elab_flags``
-     - ``yavs elab`` and ``yavs run`` (sim option).
-   * - ``yavs.sim_flags``
-     - ``yavs run`` (sim option). A native library goes here with its argument layout, for example
+     - ``yavs elab`` and ``yavs run`` (sim option). A native library goes here with its argument layout, for example
        ``--load=./libhelpers.so:args=fat-pointer`` (:doc:`vhpi`); a package uses
        ``native_library_hooks(library, args="fat-pointer")`` (:doc:`vunit`).
+   * - ``yavs.sim_flags``
+     - ``yavs run`` (sim option).
    * - ``yavs.max_threads``
      - ``yavs run --threads=N``: the most threads one simulation uses (with the token server, ``-p N`` but at most 4 when not set). An integer of at least 1.
        It overrides ``--yavs-max-threads`` for a test. Not passed under ``--yavs-debug`` or to

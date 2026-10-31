@@ -81,8 +81,8 @@ documentation page on coverage. The coverage options need the yavs release that 
 A VUnit package that loads a native library can ask the simulator interface how: `YavsInterface`
 has `foreign_language_interface = "VHPIDIRECT"` (the VHDL calls the library through foreign
 subprograms with a `"VHPIDIRECT ..."` attribute) and `native_library_hooks(library_file)`, which
-returns the simulator hooks that pass `--load=<library_file>` to every `yavs run`; `native_library_hooks(library_file, args="fat-pointer")`
-selects that argument layout for the library (a `run.py` without a package gives `--load=LIB:args=fat-pointer` in `yavs.sim_flags`). A package registers them with
+returns the simulator hooks that pass `--load=<library_file>` to every `yavs elab` and `yavs run` (so `--elaborate` works for a design that calls the library while it is elaborated); `native_library_hooks(library_file, args="fat-pointer")`
+selects that argument layout for the library (a `run.py` without a package gives `--load=LIB:args=fat-pointer` in `yavs.elab_flags`). A package registers them with
 `context.register_simulator_hooks("yavs", **YavsInterface.native_library_hooks(library))`. The repository's
 `tests/project_foreign` is a package that builds a C library, with Python embedded where the host allows it, and a
 testbench that calls Python from VHDL. A VHDL string reaches the library as one byte per character, and yavs reads a

@@ -49,6 +49,11 @@ pub struct Common {
     /// print it), `-WCODE` (stays a warning under `-Werror`).
     #[arg(short = 'W', value_name = "FLAG")]
     warn: Vec<String>,
+    /// Load a shared library for foreign subprograms (E0106 when it cannot be loaded, E0107 when a
+    /// subprogram cannot be bound). Also loaded for `elab`, because a signal's initial value may call it. `:args=LAYOUT` says how its functions take their arguments:
+    /// `length` (default) or `fat-pointer` (E0136 for any other).
+    #[arg(long, value_name = "LIB[:args=LAYOUT]")]
+    load: Vec<String>,
     /// Neither read nor write the compilation cache of the work library.
     #[arg(long)]
     no_cache: bool,
@@ -190,11 +195,6 @@ pub struct RunArgs {
     /// With `--cov`: also leave `translate_off` ... `translate_on` regions out of the coverage.
     #[arg(long)]
     cov_exclude_translate_off: bool,
-    /// Load a shared library for foreign subprograms (E0106 when it cannot be loaded, E0107 when a
-    /// subprogram cannot be bound). `:args=LAYOUT` says how its functions take their arguments:
-    /// `length` (default) or `fat-pointer` (E0136 for any other).
-    #[arg(long, value_name = "LIB[:args=LAYOUT]")]
-    load: Vec<String>,
     /// Load a VHPI plugin, `LIB[:ENTRY]` (E0901 when it cannot be loaded, E0902 when the entry
     /// point is missing).
     #[arg(long, value_name = "LIB[:ENTRY]")]
@@ -662,6 +662,22 @@ fn load_libraries(load: &[String]) -> Result<Vec<yavs_vhpi::ForeignLib>, Box<Dia
     Ok(libs)
 }
 
+/// Loads the `--load` libraries and makes elaboration-time calls of foreign subprograms use them.
+fn install_foreign(load: &[String]) -> Result<Vec<yavs_vhpi::ForeignLib>, Box<Diagnostic>> {
+    let libs = load_libraries(load)?;
+    if !libs.is_empty() {
+        let libs = libs.clone();
+        yavs_interp::set_foreign_binder(std::sync::Arc::new(move |x| {
+            let f = yavs_vhpi::bind_foreign(&libs, &x.symbol, |l| x.signature(l))?;
+            Some(
+                f.map_err(|e| e.to_string())
+                    .and_then(|f| x.unsupported_in(f.layout()).map_or(Ok(f), Err)),
+            )
+        }));
+    }
+    Ok(libs)
+}
+
 /// Binds every foreign subprogram of the program to its symbol: in the libraries in order, then
 /// in the executable (ir.md 1.7).
 fn bind_foreign(
@@ -773,6 +789,15 @@ pub fn elab(
     color: bool,
     encoding: yavs_syntax::Encoding,
 ) -> ExitCode {
+    // The libraries stay loaded until the process ends (a design's initial values call them).
+    let _libs = match install_foreign(&a.load) {
+        Ok(libs) => libs,
+        Err(d) => {
+            let mut out = Out::new(format, color);
+            out.emit(&SourceMap::default(), &d);
+            return out.finish(2);
+        }
+    };
     match elaborate(
         &a,
         yavs_elab::LowerOptions::default(),
@@ -1318,7 +1343,7 @@ fn prepare(
         cov_expression: kind(CovKindArg::Expression),
         ..yavs_elab::LowerOptions::default()
     };
-    let libs = match load_libraries(&a.load) {
+    let libs = match install_foreign(&a.common.load) {
         Ok(libs) => libs,
         Err(d) => {
             let mut out = Out::new(format, color);
@@ -1326,16 +1351,6 @@ fn prepare(
             return Err((out, 2));
         }
     };
-    if !libs.is_empty() {
-        let libs = libs.clone();
-        yavs_interp::set_foreign_binder(std::sync::Arc::new(move |x| {
-            let f = yavs_vhpi::bind_foreign(&libs, &x.symbol, |l| x.signature(l))?;
-            Some(
-                f.map_err(|e| e.to_string())
-                    .and_then(|f| x.unsupported_in(f.layout()).map_or(Ok(f), Err)),
-            )
-        }));
-    }
     // A debugger or VHPI plugin may force or deposit any port: those runs keep ports apart.
     let collapse = !a.debugged() && a.vhpi.is_empty();
     let (mut out, db, e) = elaborate(
@@ -1732,7 +1747,7 @@ pub fn run(
             yavs_interp::census_dump(40);
         });
         let options = yavs_dap::Options {
-            no_restart: (!a.vhpi.is_empty() || !a.load.is_empty()).then(|| {
+            no_restart: (!a.vhpi.is_empty() || !a.common.load.is_empty()).then(|| {
                 "restart cannot reset the state of a library loaded with `--vhpi` or `--load`: \
                  start the run again"
                     .to_string()
@@ -1809,7 +1824,7 @@ pub fn run(
     let foreign =
         e.ir.as_ref()
             .is_some_and(|ir| ir.program.foreign.iter().next().is_some());
-    if a.vhpi.is_empty() && a.load.is_empty() && !foreign {
+    if a.vhpi.is_empty() && a.common.load.is_empty() && !foreign {
         crate::stdout::buffer();
     }
     if let Some(p) = &tokens {
@@ -1888,7 +1903,7 @@ pub fn run(
     hooks.after = launch
         .clone()
         .map(|(after, f)| (after, Box::new(move || f()) as _));
-    let keep_exit = !a.load.is_empty() || !a.vhpi.is_empty();
+    let keep_exit = !a.common.load.is_empty() || !a.vhpi.is_empty();
     if recorder.is_some() || cfg_profile.is_some() || activity.is_some() || a.assert_summary {
         let flag = if recorder.is_some() {
             &interrupted
@@ -2145,7 +2160,7 @@ pub fn run(
         if let Some(rt) = &rt {
             rt.close_files();
         }
-        t.end(code, !a.load.is_empty() || !a.vhpi.is_empty());
+        t.end(code, !a.common.load.is_empty() || !a.vhpi.is_empty());
     }
     // The process ends now: freeing the design and the runtime piece by piece only hands memory
     // back to an operating system that takes it anyway (a tenth of the run for a large design).

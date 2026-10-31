@@ -166,8 +166,8 @@ A record with composite fields and an array of composite elements are errors at 
 layouts. An unknown layout name is error `E0136`.
 
 The libraries load before elaboration, so a foreign function can give a signal or constant its
-initial value (`signal id : integer := open_image(name);`). With `yavs elab`, which has no `--load`,
-such a call is an error. A call during elaboration can run again when the simulation is built if
+initial value (`signal id : integer := open_image(name);`). `yavs elab` takes `--load` too, so a
+design like that elaborates alone (and under VUnit's `--elaborate`). A call during elaboration can run again when the simulation is built if
 elaboration cannot hand its package state over (coverage of statements, for example): keep such
 functions free of effects that cannot be repeated.
 

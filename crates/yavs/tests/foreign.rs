@@ -472,3 +472,57 @@ fn fat_pointer_layout() {
     );
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+const INIT_VHDL: &str = r#"
+entity init is end;
+architecture a of init is
+  function add1(x : integer) return integer;
+  attribute foreign of add1 : function is "VHPIDIRECT add1";
+  function add1(x : integer) return integer is begin return 0; end;
+  signal s : integer := add1(41);
+begin
+  process begin report "s=" & integer'image(s); wait; end process;
+end;
+"#;
+
+/// `elab` takes `--load` like `run`: a signal's initial value calls the library (#943).
+#[test]
+fn elab_loads_libraries() {
+    let tmp = tempdir("foreign_elab");
+    let c = tmp.join("c_test.c");
+    std::fs::write(&c, C).expect("write");
+    let so = tmp.join(if cfg!(windows) {
+        "c_test.dll"
+    } else {
+        "libc_test.so"
+    });
+    shared_lib(&c, &so);
+    let src = tmp.join("init.vhd");
+    std::fs::write(&src, INIT_VHDL).expect("write");
+    let lib = format!("--work=work:{}", tmp.join("lib").display());
+    let (code, err, _) = yavs(&["analyze", "--std=2008", &lib, &src.display().to_string()]);
+    assert_eq!(code, 0, "{err}");
+
+    let (code, err, _) = yavs(&["elab", "--std=2008", &lib, "init"]);
+    assert_eq!(code, 2, "{err}");
+    assert!(err.contains("error[E2107]"), "{err}");
+
+    let load = format!("--load={}", so.display());
+    let (code, err, _) = yavs(&["elab", "--std=2008", &lib, &load, "init"]);
+    assert_eq!(code, 0, "{err}");
+    let (code, err, out) = yavs(&["run", "--std=2008", &lib, &load, "init"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("s=42"), "{out}");
+
+    // The same parser as `run`: a layout, and the errors of a missing library or a bad layout.
+    let fat = format!("{load}:args=fat-pointer");
+    let (code, err, _) = yavs(&["elab", "--std=2008", &lib, &fat, "init"]);
+    assert_eq!(code, 0, "{err}");
+    let bad = format!("{load}:args=sideways");
+    let (code, err, _) = yavs(&["elab", "--std=2008", &lib, &bad, "init"]);
+    assert_eq!(code, 2, "{err}");
+    assert!(err.contains("error[E0136]"), "{err}");
+    let (code, err, _) = yavs(&["elab", "--std=2008", &lib, "--load=no_such_lib", "init"]);
+    assert_eq!(code, 2, "{err}");
+    assert!(err.contains("error[E0106]"), "{err}");
+}

@@ -512,7 +512,7 @@ class TestYavsInterface(unittest.TestCase):
         self.assertFalse(any(arg.startswith("--exit-severity") for arg in cmd))
 
     @mock.patch("vunit.sim_if.check_output", autospec=True, return_value="")
-    def test_native_library_hooks_load_the_library_on_run_only(self, check_output):
+    def test_native_library_hooks_load_the_library_on_elab_and_run(self, check_output):
         self.assertEqual(YavsInterface.foreign_language_interface, "VHPIDIRECT")
         library_file = Path("lib dir") / "libnative.so"
         registry = SimulatorHooks()
@@ -522,12 +522,12 @@ class TestYavsInterface(unittest.TestCase):
 
         self.simif.compile_project(self._project("2008"))
         self.assertNotIn(load, check_output.call_args[0][0])
-        # With the run flags, after yavs.sim_flags
+        # With the elaboration flags, once, in both commands
         _, run, _ = self._simulate(make_config(sim_options={"yavs.sim_flags": ["--stop-time=1ms"]}))
-        self.assertEqual(run[run.index("--stop-time=1ms") + 1], load)
+        self.assertLess(run.index(load), run.index("--stop-time=1ms"))
         self.assertEqual(run.count(load), 1)
         _, elab, _ = self._simulate(make_config(), elaborate_only=True)
-        self.assertNotIn(load, elab)
+        self.assertEqual(elab.count(load), 1)
 
     @mock.patch("vunit.sim_if.check_output", autospec=True, return_value="")
     def test_native_library_hooks_name_an_argument_layout(self, check_output):

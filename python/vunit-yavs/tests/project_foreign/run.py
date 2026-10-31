@@ -20,6 +20,7 @@ VU.add_vhdl_builtins()
 VU.add_package("native_demo", allow_setup=True)
 LIB = VU.add_library("lib")
 LIB.add_source_files(Path(__file__).parent / "tb_native.vhd")
+LIB.add_source_files(Path(__file__).parent / "tb_init.vhd")
 if os.environ.get("NATIVE_DEMO_PYTHON") == "1":
     LIB.add_source_files(Path(__file__).parent / "tb_python.vhd")
 if os.environ.get("NATIVE_DEMO_ARGS") == "fat-pointer":

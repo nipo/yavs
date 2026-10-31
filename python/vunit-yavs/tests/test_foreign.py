@@ -31,7 +31,7 @@ AVAILABLE = native_demo_setup.available()
 class TestForeignSubprograms(unittest.TestCase):
     """A package's native library is loaded into each simulation and its functions are called from VHDL"""
 
-    def _run(self, python, args=None):
+    def _run(self, python, args=None, vunit_args=()):
         with tempfile.TemporaryDirectory() as tempdir:
             xml = Path(tempdir) / "x.xml"
             env = dict(
@@ -44,7 +44,8 @@ class TestForeignSubprograms(unittest.TestCase):
             if args:
                 env["NATIVE_DEMO_ARGS"] = args
             proc = subprocess.run(
-                [sys.executable, str(PROJECT / "run.py"), "-o", str(Path(tempdir) / "out"), "-x", str(xml)],
+                [sys.executable, str(PROJECT / "run.py"), "-o", str(Path(tempdir) / "out"), "-x", str(xml)]
+                + list(vunit_args),
                 env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -53,15 +54,27 @@ class TestForeignSubprograms(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(proc.returncode, 0, proc.stdout)
-            return report(xml)
+            return proc.stdout if vunit_args else report(xml)
 
     def test_native_function(self):
-        self.assertEqual(self._run(python=False), {"lib.tb_native.A native library function is called": "passed"})
+        self.assertEqual(
+            self._run(python=False),
+            {
+                "lib.tb_init.A foreign function gives a signal its initial value": "passed",
+                "lib.tb_native.A native library function is called": "passed",
+            },
+        )
+
+    def test_elaborate_only_loads_the_library(self):
+        # A foreign call in a signal's initial value is evaluated while elaborating: --elaborate needs the library too
+        output = self._run(python=False, vunit_args=("--elaborate",))
+        self.assertIn("lib.tb_init", output)
 
     def test_fat_pointer_layout(self):
         self.assertEqual(
             self._run(python=False, args="fat-pointer"),
             {
+                "lib.tb_init.A foreign function gives a signal its initial value": "passed",
                 "lib.tb_native.A native library function is called": "passed",
                 "lib.tb_fat.A string reaches the library as a fat pointer": "passed",
             },
@@ -72,6 +85,7 @@ class TestForeignSubprograms(unittest.TestCase):
         self.assertEqual(
             self._run(python=True),
             {
+                "lib.tb_init.A foreign function gives a signal its initial value": "passed",
                 "lib.tb_native.A native library function is called": "passed",
                 "lib.tb_python.Python is called from VHDL": "passed",
                 "lib.tb_python.A Python error is printed by Python and returned": "passed",

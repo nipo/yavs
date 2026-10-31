@@ -5424,7 +5424,7 @@ format on stdout). Difftest: see `tests/corpus/RESULTS.md`; `generics/generic_ty
 
 ## ffi (`crates/yavs-ffi`)
 
-`--load=LIB:args=fat-pointer` (#928): one library in the other argument layout (`ArgLayout`, `ForeignRef::fat`, `Machine::fat_bounds`), checked by `crates/yavs/tests/foreign.rs` on interp, clift and clift-auto, and on the reference simulator with the same C; foreign functions run during elaboration. Microwatt's own C helpers run under it. Not supported: access values, composite results, composite fields and elements (errors).
+`--load=LIB:args=fat-pointer` (#928): one library in the other argument layout (`ArgLayout`, `ForeignRef::fat`, `Machine::fat_bounds`), checked by `crates/yavs/tests/foreign.rs` on interp, clift and clift-auto, and on the reference simulator with the same C; foreign functions run during elaboration. Microwatt's own C helpers run under it. `yavs elab` takes `--load` too and `native_library_hooks` passes it to the elaborate-only step (#943). Not supported: access values, composite results, composite fields and elements (errors).
 
 Done: VHPIDIRECT call trampolines without libffi (SysV x86_64, Win64, AAPCS64), argument
 classification in Rust, naked asm stubs, up to 64 arguments, and the VHDL to C mapping in the reference simulator's

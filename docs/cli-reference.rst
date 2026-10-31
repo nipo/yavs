@@ -229,6 +229,12 @@ Arguments:
 
    May be repeated.
 
+.. option:: --load=LIB[:args=LAYOUT]
+
+   Load a shared library for foreign subprograms (E0106 when it cannot be loaded, E0107 when a subprogram cannot be bound). Also loaded for ``elab``, because a signal's initial value may call it. ``:args=LAYOUT`` says how its functions take their arguments: ``length`` (default) or ``fat-pointer`` (E0136 for any other).
+
+   May be repeated.
+
 .. option:: --no-cache
 
    Neither read nor write the compilation cache of the work library.
@@ -246,6 +252,8 @@ Arguments:
    A generic of the top level, ``-gNAME=VALUE`` (the value is taken verbatim).
 
    May be repeated.
+
+Diagnostics named above: ``E0106``, ``E0107``, ``E0136``; ``yavs --explain CODE`` explains each.
 
 ``yavs run``
 ------------
@@ -296,6 +304,12 @@ Arguments:
 .. option:: -W FLAG
 
    Warning control: ``-Werror`` (every warning is an error), ``-Werror=CODE``, ``-Wno-CODE`` (do not print it), ``-WCODE`` (stays a warning under ``-Werror``).
+
+   May be repeated.
+
+.. option:: --load=LIB[:args=LAYOUT]
+
+   Load a shared library for foreign subprograms (E0106 when it cannot be loaded, E0107 when a subprogram cannot be bound). Also loaded for ``elab``, because a signal's initial value may call it. ``:args=LAYOUT`` says how its functions take their arguments: ``length`` (default) or ``fat-pointer`` (E0136 for any other).
 
    May be repeated.
 
@@ -432,12 +446,6 @@ Arguments:
 .. option:: --cov-exclude-translate-off
 
    With ``--cov``: also leave ``translate_off`` ... ``translate_on`` regions out of the coverage.
-
-.. option:: --load=LIB[:args=LAYOUT]
-
-   Load a shared library for foreign subprograms (E0106 when it cannot be loaded, E0107 when a subprogram cannot be bound). ``:args=LAYOUT`` says how its functions take their arguments: ``length`` (default) or ``fat-pointer`` (E0136 for any other).
-
-   May be repeated.
 
 .. option:: --vhpi=LIB[:ENTRY]
 
