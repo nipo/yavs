@@ -1107,3 +1107,201 @@ fn hook_going_away_fails_what_waits() {
         stderr(&o)
     );
 }
+
+const SHARED: &str = "package p is
+  type counter_t is protected
+    procedure incr;
+  end protected;
+end package;
+package body p is
+  type counter_t is protected body
+    variable n : integer := 0;
+    procedure incr is
+    begin
+      n := n + 1;
+    end procedure;
+  end protected body;
+end package body;
+use work.p.all;
+package q is
+  shared variable in_pkg : counter_t;
+  shared variable plain_pkg : integer := 11;
+end package;
+use work.p.all;
+use work.q.all;
+entity t is end;
+architecture a of t is
+  type rec is record x : integer; y : integer; end record;
+  shared variable sc : counter_t;
+  shared variable sn : integer := 5;
+  shared variable sr : rec := (1, 2);
+  signal s : bit;
+begin
+  g : for i in 0 to 1 generate
+    shared variable gs : integer := i;
+  begin
+  end generate;
+  process
+  begin
+    sc.incr;
+    sn := 6;
+    s <= '1';
+    wait for 1 ns;
+    sr.y := 9;
+    wait;
+  end process;
+end;
+";
+
+fn shared_design(name: &str) -> common::Tmp {
+    let d = tempdir(&format!("console-{name}"));
+    std::fs::write(d.join("t.vhd"), SHARED).expect("write");
+    let ok = yavs()
+        .current_dir(&d)
+        .args(["analyze", "--relaxed", "--work=work:lib", "t.vhd"])
+        .status()
+        .expect("yavs")
+        .success();
+    assert!(ok, "analyze failed");
+    d
+}
+
+fn shared_script(d: &Path, args: &[&str], cmds: &str) -> String {
+    let mut all = vec!["--relaxed".to_string(), format!("--do={cmds}")];
+    all.extend(args.iter().map(|a| a.to_string()));
+    let all: Vec<&str> = all.iter().map(String::as_str).collect();
+    let o = run(d, "t", &all);
+    stdout(&o) + &stderr(&o)
+}
+
+/// #938, #959: `examine`, `describe` and `find` of shared variables, at time 0 and inside the
+/// process that holds the shared state.
+#[test]
+fn shared_variables_in_the_console() {
+    let d = shared_design("shared");
+    let o = shared_script(
+        &d,
+        &[],
+        "examine sc; examine sn; examine sr.y; examine pkg_none; quit",
+    );
+    assert!(o.contains("protected\n5\n2\n"), "{o}");
+    assert!(o.contains("no variable or signal `pkg_none`"), "{o}");
+    let o = shared_script(
+        &d,
+        &[],
+        "examine in_pkg; examine plain_pkg; examine q.plain_pkg; examine work.q.plain_pkg; \
+         examine t.g(1).gs; examine sc.n; describe sc; describe sn; describe plain_pkg; \
+         find variables *; quit",
+    );
+    assert!(o.contains("protected\n11\n11\n11\n1\n0\n"), "{o}");
+    assert!(
+        o.contains(
+            "t.sc\n  kind       protected object\n  type       counter_t\n  declared   t.vhd:25\n  \
+             variables  fields n\n  value      protected\n"
+        ),
+        "{o}"
+    );
+    assert!(
+        o.contains(
+            "t.sn\n  kind      shared variable\n  type      INTEGER\n  declared  t.vhd:26\n  \
+             bounds    -2147483648 to 2147483647\n  value     5\n"
+        ),
+        "{o}"
+    );
+    assert!(
+        o.contains("work.q.plain_pkg\n  kind      shared variable"),
+        "{o}"
+    );
+    for row in [
+        "t.g(1).gs         shared variable",
+        "t.sc              protected object",
+        "work.q.in_pkg     protected object",
+    ] {
+        assert!(o.contains(row), "{row}: {o}");
+    }
+    // Inside the process, which holds the shared state: a read must not wait for it.
+    let o = shared_script(
+        &d,
+        &[],
+        "break t.vhd:38; run; examine sn; examine sc.n; describe sc; force sn 3",
+    );
+    assert!(o.contains("\n6\n1\nt.sc\n"), "{o}");
+    assert!(o.contains("`sn` is a shared variable, not a signal"), "{o}");
+    let o = shared_script(&d, &[], "force sn 3");
+    assert!(o.contains("`sn` is a shared variable, not a signal"), "{o}");
+    // A near name gets a suggestion.
+    let o = shared_script(&d, &[], "examine sq");
+    assert!(o.contains("`sc`"), "{o}");
+}
+
+/// #938, #959: waves name shared variables as the console does; a protected object is not recorded
+/// and the console says so.
+#[test]
+fn shared_variables_in_the_wave_file() {
+    let d = shared_design("shared-wave");
+    let o = shared_script(
+        &d,
+        &["--wave=w.fst"],
+        "run 2 ns; examine sn @ 1 ns; examine sr.y @ 1 ns; examine t.g(1).gs @ 1 ns; \
+         examine plain_pkg @ 1 ns; examine sc @ 1 ns",
+    );
+    assert!(o.contains("6\n9\n1\n11\n"), "{o}");
+    assert!(o.contains("`sc` is a protected object"), "{o}");
+    // A stop inside the process that holds the shared state, with a recording.
+    let o = shared_script(
+        &d,
+        &["--wave=w2.fst"],
+        "break t.vhd:38; run; examine sn; quit",
+    );
+    assert!(o.contains("\n6\n"), "{o}");
+}
+
+/// #939: on a terminal's session too, a report before an endless loop comes out at once.
+#[test]
+fn a_report_before_an_endless_loop_comes_out_at_once() {
+    let d = tempdir("console-live");
+    std::fs::write(
+        d.join("t.vhd"),
+        "entity t is end;
+architecture a of t is
+begin
+  process
+  begin
+    report \"before\";
+    loop
+      null;
+    end loop;
+  end process;
+end;
+",
+    )
+    .expect("write");
+    analyze(&d, "t.vhd");
+    let mut c = yavs()
+        .current_dir(&d)
+        .args(["run", "--work=work:lib", "t", "--do=run"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("yavs");
+    let pid = c.id();
+    // The watchdog: without the live path, nothing comes out and the kill ends the read.
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(30));
+        let _ = Command::new(if cfg!(windows) { "taskkill" } else { "kill" })
+            .args(if cfg!(windows) {
+                &["/F", "/PID"][..]
+            } else {
+                &[][..]
+            })
+            .arg(pid.to_string())
+            .status();
+    });
+    let mut r = BufReader::new(c.stdout.take().expect("stdout"));
+    let mut line = String::new();
+    r.read_line(&mut line).expect("stdout");
+    assert!(line.contains("before"), "{line}");
+    c.kill().expect("kill");
+    c.wait().expect("wait");
+}

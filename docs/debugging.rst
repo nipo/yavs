@@ -75,8 +75,10 @@ What you can do:
   "yavs: Break when a signal equals..." to stop when it takes a value.
 * **Step** over, into and out of subprograms; step to the next delta or the next time step; run
   for or until a time ("yavs: Run for...", "yavs: Run until..."); pause a running simulation.
-* **Inspect**: each process is a thread with its call stack; the Variables view shows locals,
-  signals, ports and generics, and a Hierarchy scope lists the design's instances. Hover a signal
+* **Inspect**: each process is a thread with its call stack, named by its path (``tb.stim``); one without a
+  label by what it is and where, such as ``tb.clk <= ... (tb.vhd:17)`` or ``tb.process (tb.vhd:20)``. The Variables
+  view shows locals, signals, ports and generics, the shared variables the process can see (a Shared Variables scope, when there are any;
+  a protected object shows as ``protected`` and expands to its variables), and a Hierarchy scope lists the design's instances. Hover a signal or a shared variable
   to see its value. An access value shows what it designates and expands as that does; in a method of a protected type,
   Locals lists the object's variables. A vector (``std_logic_vector``, ``unsigned``, ``bit_vector`` and the like) and a
   string show on one line; read one bit with ``dout(3)``. Records and arrays of vectors expand, and a vector longer than
@@ -96,7 +98,7 @@ What you can do:
   empty word (``step`` and a space) the list has nothing in common to offer, so a second Tab takes the entry it has
   selected. The first word offers commands only; a signal's name there is still evaluated when you press Enter.
 
-Reports go to the Debug Console, and the session ends with a line giving the exit status of the run. A launch that cannot
+Reports go to the Debug Console as they are made, also from a process that does not suspend, and the session ends with a line giving the exit status of the run. A launch that cannot
 start (no such top level, an elaboration error, no Surfer) prints its diagnostic there; a command line yavs refuses or a
 crash shows a notification with the command to try in a terminal.
 
@@ -109,6 +111,10 @@ fixed port in ``launch.json``:
 .. code-block:: json
 
     { "type": "yavs", "request": "attach", "name": "yavs: Attach", "port": 4711 }
+
+The Restart button of an attached session runs the same design again from time 0 in the same run, keeping the breakpoints,
+and stops at the first of them. It compiles nothing: to run changed sources, start the run again. A run with ``--vhpi`` or
+``--load`` cannot restart: a notification says so, and the session stays.
 
 A run compiled from rewritten copies of your files can show the originals: ``--source-map=COMPILED=ORIGINAL``
 (repeatable; the copy must keep the lines of the original).

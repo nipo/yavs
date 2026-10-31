@@ -124,6 +124,163 @@ async function run() {
   await launchThatCannotStart(folder);
   await attachWithNoConfiguration(folder, tb, () => waitFor('stopped when attached', 60000, (r) => (onStop = r)));
   await surferGoesToTheDeclaration(folder, tb, () => waitFor('stopped under Surfer', 60000, (r) => (onStop = r)));
+  const stoppedAgain = (what) => waitFor(what, 60000, (r) => (onStop = r));
+  await sharedVariablesAndThreads(folder, stoppedAgain);
+  await reportBeforeALoop(folder);
+  await restartWhenAttached(folder, tb, stoppedAgain);
+}
+
+const MORE = {
+  type: 'yavs',
+  request: 'launch',
+  name: 'Debug more_tb',
+  top: 'more_tb',
+  work: 'work:${workspaceFolder}/.yavs/work',
+  sources: ['${workspaceFolder}/more.vhd'],
+};
+
+/** #938, #959, #942: what the views ask of a shared variable, and the Threads and Call Stack names. */
+async function sharedVariablesAndThreads(folder, stoppedAgain) {
+  const more = vscode.Uri.joinPath(folder.uri, 'more.vhd');
+  vscode.debug.removeBreakpoints(vscode.debug.breakpoints);
+  vscode.debug.addBreakpoints([
+    new vscode.SourceBreakpoint(new vscode.Location(more, new vscode.Position(31, 0))),
+  ]);
+  const stopped = stoppedAgain('stopped in more_tb');
+  assert.ok(await vscode.debug.startDebugging(folder, MORE), 'startDebugging failed');
+  const s = await stopped;
+  const session = vscode.debug.activeDebugSession;
+  const threads = await session.customRequest('threads', {});
+  assert.deepEqual(threads.threads.map((t) => t.name), [
+    'more_tb.clk <= ... (more.vhd:21)',
+    'more_tb.process (more.vhd:23)',
+  ]);
+  const st = await session.customRequest('stackTrace', { threadId: s.threadId });
+  const top = st.stackFrames[0];
+  assert.equal(top.name, 'more_tb.process (more.vhd:23)');
+  const scopes = await session.customRequest('scopes', { frameId: top.id });
+  const shared = scopes.scopes.find((x) => x.name === 'Shared Variables');
+  assert.ok(shared, JSON.stringify(scopes));
+  const vars = await session.customRequest('variables', { variablesReference: shared.variablesReference });
+  assert.equal(vars.variables[0].value, 'protected');
+  const state = await session.customRequest('variables', { variablesReference: vars.variables[0].variablesReference });
+  assert.equal(state.variables[0].value, '3');
+  for (const context of ['watch', 'hover']) {
+    const v = await session.customRequest('evaluate', { expression: 'tally', frameId: top.id, context });
+    assert.equal(v.result, 'protected');
+  }
+  const d = await session.customRequest('evaluate', { expression: 'describe tally', frameId: top.id, context: 'repl' });
+  assert.match(d.result, /protected object/);
+  const found = await session.customRequest('yavs/find', { kind: 'variables', pattern: 'tally' });
+  assert.equal(found.items[0].path, 'more_tb.tally');
+  const ended = waitFor('end of more_tb', 60000, (r) => vscode.debug.onDidTerminateDebugSession(r));
+  vscode.debug.removeBreakpoints(vscode.debug.breakpoints);
+  await new Promise((r) => setTimeout(r, 500));
+  await session.customRequest('continue', { threadId: s.threadId });
+  await ended;
+}
+
+/** #939: the report reaches the Debug Console while the process still runs. */
+async function reportBeforeALoop(folder) {
+  let onOutput;
+  const output = waitFor('the report', 60000, (r) => (onOutput = r));
+  const reg = vscode.debug.registerDebugAdapterTrackerFactory('yavs', {
+    createDebugAdapterTracker: () => ({
+      onDidSendMessage: (m) => {
+        if (m.type === 'event' && m.event === 'output' && /before the loop/.test(m.body.output)) onOutput(m.body);
+      },
+    }),
+  });
+  const started = await vscode.debug.startDebugging(folder, { ...MORE, generics: { SPIN: 'true' } });
+  assert.ok(started, 'startDebugging failed');
+  await output;
+  reg.dispose();
+  const ended = waitFor('end of the loop', 60000, (r) => vscode.debug.onDidTerminateDebugSession(r));
+  await vscode.debug.stopDebugging(vscode.debug.activeDebugSession);
+  await ended;
+}
+
+/** A yavs run with `args` that waits for a client; its port. */
+async function waitingRun(folder, args) {
+  const run = cp.spawn('yavs', ['run', '--work=work:.yavs/work', ...args, '--dap=0', 'tb'], {
+    cwd: folder.uri.fsPath,
+    stdio: ['ignore', 'ignore', 'pipe'],
+  });
+  const port = await new Promise((resolve, reject) => {
+    run.on('error', reject);
+    run.stderr.on('data', (d) => {
+      const m = /listening on 127\.0\.0\.1:(\d+)/.exec(d.toString());
+      if (m) resolve(Number(m[1]));
+    });
+  });
+  return { run, port, exited: new Promise((resolve) => run.on('exit', resolve)) };
+}
+
+/** #963: the debug toolbar's Restart on an attached session runs again from time 0 in the same
+ * run, and when the run cannot, says why and keeps the session. */
+async function restartWhenAttached(folder, tb, stoppedAgain) {
+  vscode.debug.addBreakpoints([
+    new vscode.SourceBreakpoint(new vscode.Location(tb, new vscode.Position(19, 0))),
+  ]);
+  const { run, port, exited } = await waitingRun(folder, []);
+  const attach = { type: 'yavs', request: 'attach', name: 'yavs: Attach to the run', port };
+  let stopped = stoppedAgain('stopped when attached');
+  assert.ok(await vscode.debug.startDebugging(folder, attach), 'attach failed');
+  const first = await stopped;
+  const session = vscode.debug.activeDebugSession;
+  let ended = false;
+  const gone = vscode.debug.onDidTerminateDebugSession(() => (ended = true));
+  // To the second hit of the line: a time later than the first.
+  stopped = stoppedAgain('the second hit');
+  await session.customRequest('continue', { threadId: first.threadId });
+  const later = await stopped;
+  assert.match(later.description, /^breakpoint at 10 ns/);
+  stopped = stoppedAgain('stopped after the restart');
+  await vscode.commands.executeCommand('workbench.action.debug.restart');
+  const again = await stopped;
+  assert.match(again.description, /^breakpoint at 0 fs/);
+  assert.equal(ended, false);
+  assert.equal(vscode.debug.activeDebugSession.id, session.id);
+  assert.equal(run.exitCode, null);
+  gone.dispose();
+  const done = waitFor('end of the attached run', 60000, (r) => vscode.debug.onDidTerminateDebugSession(r));
+  await vscode.debug.stopDebugging(session);
+  await done;
+  await exited;
+  await restartRefused(folder, tb, stoppedAgain);
+}
+
+/** With `--load`, the run cannot restart: VS Code gets the reason as a notice and the session stays. */
+async function restartRefused(folder, tb, stoppedAgain) {
+  const { port, exited } = await waitingRun(folder, ['--load=libm.so.6']);
+  let onNotice;
+  const notice = waitFor('the notice', 60000, (r) => (onNotice = r));
+  const reg = vscode.debug.registerDebugAdapterTrackerFactory('yavs', {
+    createDebugAdapterTracker: () => ({
+      onDidSendMessage: (m) => {
+        if (m.type === 'event' && m.event === 'output' && m.body.category === 'important') onNotice(m.body);
+      },
+    }),
+  });
+  const stopped = stoppedAgain('stopped when attached');
+  const attach = { type: 'yavs', request: 'attach', name: 'yavs: Attach to the run', port };
+  assert.ok(await vscode.debug.startDebugging(folder, attach), 'attach failed');
+  const s = await stopped;
+  const session = vscode.debug.activeDebugSession;
+  let ended = false;
+  const gone = vscode.debug.onDidTerminateDebugSession(() => (ended = true));
+  await vscode.commands.executeCommand('workbench.action.debug.restart');
+  assert.match((await notice).output, /start the run again/);
+  reg.dispose();
+  const st = await session.customRequest('stackTrace', { threadId: s.threadId });
+  assert.equal(st.stackFrames[0].line, 20);
+  assert.equal(ended, false);
+  gone.dispose();
+  vscode.debug.removeBreakpoints(vscode.debug.breakpoints);
+  const done = waitFor('end of the refused run', 60000, (r) => vscode.debug.onDidTerminateDebugSession(r));
+  await vscode.debug.stopDebugging(session);
+  await done;
+  await exited;
 }
 
 /** A wrong `top`: the session does not start, and the adapter's answer holds the diagnostic that VS

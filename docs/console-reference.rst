@@ -81,6 +81,10 @@ A name in a command is a signal, a variable, a part of one, or a path:
   ``u_reg.q`` from a process of ``tb``, or between cycles.
 * A variable of a process has the path ``PROCESS.NAME``: ``tb.counter.total``. ``find variables``
   lists them. At a stop in that process ``total`` is enough.
+* A shared variable is a name like a signal: seen from the process stopped in, or by its path
+  (``tb.tally``). One of a package has the path ``LIBRARY.PACKAGE.NAME``; ``PACKAGE.NAME`` is
+  enough, and so is ``NAME`` if only one package has it. A protected object shows as ``protected``,
+  and its variables are parts of it: ``tally.total``. Calling a method is not a name.
 * A part of an object follows the name: a field (``rec.x``), an element (``v(3)``), a slice
   (``v(3 downto 0)``, ``v(0 to 1)``), through an access value (``p.next_node.value``). Spaces
   inside the parentheses are fine.
@@ -283,6 +287,9 @@ Besides these:
   one: ``--wave=FILE.fst``. Without one, ``trace x`` says since when a value was last changed
   rather than since when it has been unknown, and ``examine`` says how to get the value.
 * ``restart`` is refused in a run with ``--vhpi`` or ``--load``.
+* ``examine NAME @ TIME`` and ``wave add`` of a protected object say that it is not recorded: waves
+  hold the other shared variables, whose ``examine`` at a stop and whose history share one name.
+  ``force``, ``deposit``, ``release`` and ``drivers`` take signals only.
 * The ``vunit_*`` commands, and any others a test runner registers, exist only when the test
   runner started the session (`Test runner commands`_). ``help`` lists them when they do.
 
@@ -572,6 +579,8 @@ delete assert`` removes it.
     yavs> break assert error
     stop at assertions and reports of severity error, failure
     yavs> run
+    ** Error: 25000000fs+1: q is not high
+        Process :tb:check
     assertion of severity error at 25 ns, delta 1, /work/tb.vhd:53: q is not high
     yavs> where
     time 25 ns, delta 1
@@ -779,9 +788,10 @@ Type, bounds, resolution function, mode and declaration of a signal or variable.
 
 .. console-end
 
-Prints a table for a signal or variable: kind (signal, port with its mode, variable), type,
-bounds, resolution, where it is declared and its value now. For a variable of a process, use its
-path (``tb.counter.total``) or stop in the process.
+Prints a table for a signal or variable: kind (signal, port with its mode, variable, shared
+variable, protected object), type, bounds, resolution, where it is declared and its value now. For
+a variable of a process, use its path (``tb.counter.total``) or stop in the process. A protected
+object lists its variables.
 
 .. example:
 
@@ -1245,19 +1255,19 @@ find variables
 
 .. console-end
 
-Prints a table of the variables declared in processes: path and process. A shared variable and
-a variable of a subprogram are not listed.
+Prints a table of the variables declared in processes and the shared variables of the design: path
+and kind. A variable of a subprogram is not listed.
 
 .. example:
 
 .. code-block:: text
 
     yavs> find variables *
-      variable          process
-      tb.counter.total  tb.counter
+      variable          kind
+      tb.counter.total  variable of tb.counter
     yavs> find variables tot*
-      variable          process
-      tb.counter.total  tb.counter
+      variable          kind
+      tb.counter.total  variable of tb.counter
     yavs> find vars x
     error: `find vars`: expected `signals` or `variables`
 

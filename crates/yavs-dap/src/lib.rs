@@ -124,6 +124,8 @@ struct Link {
     ansi: AtomicBool,
     console: AtomicBool,
     stop_on_entry: AtomicBool,
+    /// The next run comes from a client's `restart`: it runs on, without the stop at time 0.
+    client_restart: AtomicBool,
     /// End of input from the client.
     eof: AtomicBool,
     kept: Mutex<console::Kept>,
@@ -134,6 +136,9 @@ struct Link {
     hook: OnceLock<console::Hook>,
     /// Why `restart` is refused, if it is.
     no_restart: Option<String>,
+    /// A client that attached over TCP: the run cannot be started again from its side, so its
+    /// restart button is `restart` here (#963).
+    attached: bool,
     source_map: Vec<(String, String)>,
     reload: Mutex<Option<ReloadFn>>,
     /// Where this testbench's wave layout is kept.
@@ -305,6 +310,13 @@ enum Node {
         sig: usize,
         path: Vec<usize>,
     },
+    /// A shared variable (`Design::shared`), and the path to the composite shown.
+    Shared {
+        var: usize,
+        path: Vec<usize>,
+    },
+    /// The Shared Variables scope of thread `tid`.
+    SharedScope(i64),
     /// Index into `Design::regions`.
     Region(usize),
     /// A value read at this stop: what an access value designates, a variable of a protected
@@ -324,7 +336,9 @@ impl Node {
     /// The node `k` further along the path of a local or a signal.
     fn below(&self, k: usize) -> Node {
         let mut n = self.clone();
-        if let Node::Local { path, .. } | Node::Signal { path, .. } = &mut n {
+        if let Node::Local { path, .. } | Node::Signal { path, .. } | Node::Shared { path, .. } =
+            &mut n
+        {
             path.push(k);
         }
         n
@@ -740,6 +754,7 @@ fn serve_stop(sh: &Shared, at: &At<'_, '_>, stopped: Json) -> Option<Next> {
             },
             "yavs/stepDelta" => Some(Next::Run(Run::Delta)),
             "yavs/stepTimestep" => Some(Next::Run(Run::Timestep)),
+            "restart" => restart_request(sh, &req).then_some(Next::Restart),
             "disconnect" | "terminate" => {
                 sh.stopped.store(false, Ordering::Relaxed);
                 stash_disconnect(sh, req);
@@ -841,6 +856,22 @@ fn leave(sh: &Shared, at: &At<'_, '_>, n: Next, req: Option<&Json>) -> Option<Ne
     Some(n)
 }
 
+/// `restart` of a client: whether it restarts, with what `stopOnEntry` asks for now and otherwise
+/// no stop at time 0, as after a launch (the console's `restart` stops there). A refusal is a notice
+/// and a successful answer: VS Code takes a failed `restart` for the end of the session, and an
+/// extension's requests to it no longer return.
+fn restart_request(sh: &Shared, req: &Json) -> bool {
+    if let Err(why) = console::restart(sh) {
+        sh.output("important", &format!("{why}\n"));
+        sh.respond(req, json!({}));
+        return false;
+    }
+    let entry = req["arguments"]["arguments"]["stopOnEntry"] == true;
+    sh.link.stop_on_entry.store(entry, Ordering::Relaxed);
+    sh.link.client_restart.store(true, Ordering::Relaxed);
+    true
+}
+
 /// The absolute time a `yavs/runFor` (relative) or `yavs/runUntil` (absolute) runs to.
 fn run_to(at: &At<'_, '_>, req: &Json) -> Result<Time, String> {
     let text = req["arguments"]["time"]
@@ -903,7 +934,7 @@ fn stack_trace(sh: &Shared, at: &At<'_, '_>, req: &Json) {
                     f.stmt(i)
                 };
                 let name = if i == 0 {
-                    console::dotted(&p.name)
+                    thread_label(sh, &p.name).to_string()
                 } else {
                     f.func_name(i).unwrap_or("?").to_string()
                 };
@@ -912,7 +943,7 @@ fn stack_trace(sh: &Shared, at: &At<'_, '_>, req: &Json) {
         }
         // A process not executing shows where it waits.
         _ if p.state == ProcState::Waiting => {
-            frames.push(frame(sh, tid << 16, &console::dotted(&p.name), p.wait));
+            frames.push(frame(sh, tid << 16, thread_label(sh, &p.name), p.wait));
         }
         _ => {}
     }
@@ -929,8 +960,18 @@ fn scopes(sh: &Shared, at: &At<'_, '_>, req: &Json) {
     }
     s.push(json!({"name": "Signals", "variablesReference": id << 2 | 2, "expensive": false}));
     s.push(json!({"name": "Generics", "variablesReference": id << 2 | 3, "expensive": false}));
+    let tid = id >> 16;
+    if thread_proc(sh, tid).is_some_and(|p| !p.shared.is_empty()) {
+        let r = node_ref(sh, Node::SharedScope(tid));
+        s.push(json!({"name": "Shared Variables", "variablesReference": r, "expensive": true}));
+    }
     s.push(json!({"name": "Hierarchy", "variablesReference": id << 2, "expensive": true}));
     sh.respond(req, json!({"scopes": s}));
+}
+
+/// What the Threads view and the Call Stack call the process named `name`.
+fn thread_label<'a>(sh: &'a Shared, name: &'a str) -> &'a str {
+    sh.design.proc(name).map_or(name, |p| &p.label)
 }
 
 /// The process name of thread `tid`.
@@ -961,17 +1002,64 @@ fn local(
 }
 
 /// What an access value or a protected object designates; `None` for `null`, or where nothing
-/// can read it (only the stopped process's heap can be read).
+/// can read it. A stopped process reads its own heap and, if it holds the shared state, the shared
+/// heap; else the shared heap is free to lock.
 fn deref(sh: &Shared, at: &At<'_, '_>, t: &LitType, v: &Lit) -> Option<(LitType, Lit)> {
-    let (LitType::Handle { target, .. }, Lit::Handle(h), At::Process(s)) = (t, v, at) else {
+    let (LitType::Handle { target, .. }, Lit::Handle(h)) = (t, v) else {
         return None;
     };
     if *h == 0 {
         return None;
     }
     let ty = yavs_ir::TyId(*target);
-    let c = yavs_elab::ir_decode_shown(&sh.prog, ty, &s.frames.deref(ty, *h).ok()?)?;
+    let shared = || {
+        let b = sh.built.get()?;
+        yavs_interp::shared_object(&b.rt, &b.shared, ty, *h).ok()
+    };
+    let cv = match at {
+        At::Process(s) if s.frames.holds_shared() => s.frames.deref(ty, *h).ok(),
+        At::Process(s) => s.frames.deref(ty, *h).ok().or_else(shared),
+        At::Kernel(_) => shared(),
+    }?;
+    let c = yavs_elab::ir_decode_shown(&sh.prog, ty, &cv)?;
     design::ir_lit(&sh.prog, ty, &c)
+}
+
+/// The type and value of a shared variable at this stop; `None`: it has no object (nothing of the
+/// design uses its region).
+fn shared_value(sh: &Shared, at: &At<'_, '_>, var: usize) -> Option<(LitType, Lit)> {
+    let v = &sh.design.shared[var];
+    let b = sh.built.get()?;
+    let key = (v.region, v.decl);
+    let cv = match (b.objects.get(&key), b.vars.get(&key), at) {
+        (Some(&h), ..) => yavs_interp::CallVal::Cell(h),
+        (_, Some(&(slot, _)), At::Process(s)) if s.frames.holds_shared() => {
+            s.frames.shared_var(slot, v.ty).ok()?
+        }
+        (_, Some(&(slot, _)), _) => yavs_interp::shared_var(&b.rt, &b.shared, slot, v.ty).ok()?,
+        _ => return None,
+    };
+    let c = yavs_elab::ir_decode_shown(&sh.prog, v.ty, &cv)?;
+    design::ir_lit(&sh.prog, v.ty, &c)
+}
+
+/// A shared variable as a variable.
+fn shared_var(sh: &Shared, at: &At<'_, '_>, var: usize) -> Json {
+    let v = &sh.design.shared[var];
+    let mut j = match shared_value(sh, at, var) {
+        Some((t, x)) => value_var(sh, at, &v.name, &t, &x, &|| Node::Shared {
+            var,
+            path: Vec::new(),
+        }),
+        None => {
+            json!({"name": v.name, "value": "no object: nothing uses its region", "variablesReference": 0})
+        }
+    };
+    if let Some(t) = design::declared_type(&sh.db, v.decl) {
+        j["type"] = json!(t);
+    }
+    j["evaluateName"] = json!(console::dotted(&v.path));
+    j
 }
 
 /// The variables of the protected object whose method frame `i` is: the fields of its state.
@@ -1045,7 +1133,8 @@ fn node_root(sh: &Shared, at: &At<'_, '_>, n: &Node) -> Option<(LitType, Lit)> {
             let s = &sh.design.sigs[*sig];
             Some((s.lit.clone(), s.value(&|r| at.read(r))?))
         }
-        Node::Region(_) => None,
+        Node::Shared { var, .. } => shared_value(sh, at, *var),
+        Node::Region(_) | Node::SharedScope(_) => None,
         Node::Value(t, v) => Some((t.clone(), v.clone())),
     }
 }
@@ -1055,7 +1144,8 @@ fn node_text(sh: &Shared, at: &At<'_, '_>, n: &Node) -> Option<String> {
     let mut text = match n {
         Node::Local { name, .. } => name.clone(),
         Node::Signal { sig, .. } => console::dotted(&sh.design.sigs[*sig].path),
-        Node::Region(_) | Node::Value(..) => return None,
+        Node::Shared { var, .. } => console::dotted(&sh.design.shared[*var].path),
+        Node::Region(_) | Node::SharedScope(_) | Node::Value(..) => return None,
     };
     let (mut t, _) = node_root(sh, at, n)?;
     for &k in node_path(n) {
@@ -1080,8 +1170,8 @@ fn node_text(sh: &Shared, at: &At<'_, '_>, n: &Node) -> Option<String> {
 
 fn node_path(n: &Node) -> &[usize] {
     match n {
-        Node::Local { path, .. } | Node::Signal { path, .. } => path,
-        Node::Region(_) | Node::Value(..) => &[],
+        Node::Local { path, .. } | Node::Signal { path, .. } | Node::Shared { path, .. } => path,
+        Node::Region(_) | Node::SharedScope(_) | Node::Value(..) => &[],
     }
 }
 
@@ -1225,6 +1315,8 @@ fn region_vars(sh: &Shared, at: &At<'_, '_>, regions: &[usize], r: Option<usize>
             .iter()
             .map(|&k| signal_var(sh, at, k)),
     );
+    let shared = sh.design.regions[r].shared.iter();
+    out.extend(shared.map(|&k| shared_var(sh, at, k)));
     out
 }
 
@@ -1243,6 +1335,11 @@ fn variables(sh: &Shared, at: &At<'_, '_>, req: &Json) {
         let vars = match &node {
             None => return sh.fail(req, &format!("no variables {r}")),
             Some(Node::Region(g)) => region_vars(sh, at, &sh.design.regions[*g].children, Some(*g)),
+            Some(Node::SharedScope(tid)) => thread_proc(sh, *tid)
+                .into_iter()
+                .flat_map(|p| &p.shared)
+                .map(|&k| shared_var(sh, at, k))
+                .collect(),
             Some(n) => match node_root(sh, at, n).and_then(|(t, v)| descend(t, v, node_path(n))) {
                 Some((LitType::Record(fs), Lit::Record(xs))) => {
                     let base = node_text(sh, at, n);
@@ -1317,8 +1414,8 @@ struct Names<'a, 'b, 'c> {
 }
 
 impl Names<'_, '_, '_> {
-    /// The local `name` names (frame and exact name), or the signal.
-    fn find(&self, name: &str) -> Option<Result<(usize, String), usize>> {
+    /// The local `name` names (frame and exact name), or the signal or the shared variable.
+    fn find(&self, name: &str) -> Option<Result<(usize, String), design::Named>> {
         if let Some(s) = stop_of(self.at, self.tid) {
             for i in self.frame.into_iter().chain([0]) {
                 let l = s.frames.locals(i);
@@ -1330,11 +1427,11 @@ impl Names<'_, '_, '_> {
         let proc = proc_name(self.sh, self.tid).and_then(|n| self.sh.design.proc(&n));
         let in_region = || {
             let r = self.region?;
-            self.sh.design.find(None, &format!("{r}{name}"))
+            self.sh.design.named(None, &format!("{r}{name}"))
         };
         in_region()
             .filter(|_| proc.is_none())
-            .or_else(|| self.sh.design.find(proc, name))
+            .or_else(|| self.sh.design.named(proc, name))
             .map(Err)
     }
 }
@@ -1361,8 +1458,13 @@ impl cond::Env for Names<'_, '_, '_> {
                 if let Some(v) = self.state_var(name) {
                     return Some(v);
                 }
-                let s = &self.sh.design.sigs[found?.err()?];
-                Some((s.lit.clone(), s.value(&|r| self.at.read(r))?))
+                match found?.err()? {
+                    design::Named::Signal(k) => {
+                        let s = &self.sh.design.sigs[k];
+                        Some((s.lit.clone(), s.value(&|r| self.at.read(r))?))
+                    }
+                    design::Named::Shared(k) => shared_value(self.sh, self.at, k),
+                }
             }
         }
     }
@@ -1373,8 +1475,11 @@ impl cond::Env for Names<'_, '_, '_> {
 
     fn type_name(&self, name: &str) -> Option<String> {
         match self.find(name)? {
+            Err(design::Named::Signal(k)) => Some(self.sh.design.sigs[k].ty.clone()),
+            Err(design::Named::Shared(k)) => {
+                design::declared_type(&self.sh.db, self.sh.design.shared[k].decl)
+            }
             Ok(_) => None,
-            Err(k) => Some(self.sh.design.sigs[k].ty.clone()),
         }
     }
 }
@@ -1453,7 +1558,12 @@ fn eval_var(sh: &Shared, at: &At<'_, '_>, tid: i64, i: usize, expr: &str) -> Res
                 }
             }
         }
-        Some(Err(k)) if names.state_var(expr).is_none() => signal_var(sh, at, k),
+        Some(Err(design::Named::Signal(k))) if names.state_var(expr).is_none() => {
+            signal_var(sh, at, k)
+        }
+        Some(Err(design::Named::Shared(k))) if names.state_var(expr).is_none() => {
+            shared_var(sh, at, k)
+        }
         // A variable by the path `find` lists: a process has no frame to expand it from.
         _ if let Some(shown) = tools::examine_path(sh, at, &console::dotted(expr)) => {
             json!({"value": shown?, "variablesReference": 0})
@@ -1787,6 +1897,10 @@ fn set_variable(sh: &Shared, at: &At<'_, '_>, req: &Json) {
                     path: Vec::new(),
                 })
                 .ok_or_else(|| format!("no signal `{name}` here")),
+            Some(Node::SharedScope(_)) => Err(
+                "a shared variable is shown, not written: only a local or a signal can be set"
+                    .into(),
+            ),
             Some(n) => child_pos(sh, at, &n, name).map(|k| n.below(k)),
             None => Err(format!("no variables {r}")),
         }
@@ -1875,8 +1989,8 @@ fn write_node(sh: &Shared, at: &At<'_, '_>, n: &Node, text: &str) -> Result<Stri
                 OpKind::Deposit,
             )?;
         }
-        Node::Region(_) => return Err("a region has no value".into()),
-        Node::Value(..) => {
+        Node::Region(_) | Node::SharedScope(_) => return Err("a region has no value".into()),
+        Node::Value(..) | Node::Shared { .. } => {
             return Err(
                 "this value is shown, not written: only a local or a signal can be set".into(),
             );
@@ -1906,6 +2020,9 @@ fn handle(sh: &Shared, tx: &Sender<Msg>, req: Json) {
                         {"filter": "note", "label": "Report: note", "default": false},
                     ],
             });
+            if sh.link.attached {
+                caps["supportsRestartRequest"] = json!(true);
+            }
             // For the extension's "Add to Wave".
             if sh.link.viewer.get().is_some() {
                 caps["yavsViewer"] = json!(true);
@@ -1951,7 +2068,7 @@ fn handle(sh: &Shared, tx: &Sender<Msg>, req: Json) {
                 .processes()
                 .iter()
                 .enumerate()
-                .map(|(i, p)| json!({"id": i + 1, "name": console::dotted(&p.name)}))
+                .map(|(i, p)| json!({"id": i + 1, "name": thread_label(sh, &p.name)}))
                 .collect();
             sh.respond(&req, json!({"threads": threads}));
         }
@@ -1978,6 +2095,17 @@ fn handle(sh: &Shared, tx: &Sender<Msg>, req: Json) {
                 i.stop();
             }
             let _ = tx.send(Msg::Request(req));
+        }
+        // While it runs: as a stop's `restart` leaves the stop (`leave`).
+        "restart" if !sh.stopped.load(Ordering::Relaxed) => {
+            if restart_request(sh, &req) {
+                sh.respond(&req, json!({}));
+                sh.terminating.store(true, Ordering::Relaxed);
+                sh.discard.store(true, Ordering::Relaxed);
+                if let Some(i) = sh.interrupt.get() {
+                    i.stop();
+                }
+            }
         }
         _ if sh.stopped.load(Ordering::Relaxed) => {
             let _ = tx.send(Msg::Request(req));
@@ -2541,6 +2669,7 @@ fn session(
         columns: std::sync::atomic::AtomicUsize::new(0),
         ansi: AtomicBool::new(false),
         stop_on_entry: AtomicBool::new(false),
+        client_restart: AtomicBool::new(false),
         eof: AtomicBool::new(false),
         kept: Mutex::default(),
         con: Mutex::default(),
@@ -2548,6 +2677,7 @@ fn session(
         viewer: OnceLock::new(),
         hook: OnceLock::new(),
         no_restart: options.no_restart,
+        attached: closer.is_some(),
         source_map: options.source_map,
         layout: options.layout,
         hang_report: options.hang_report,
@@ -2833,8 +2963,10 @@ fn one_run(
         }
     }
     // A console stops at time 0, before any process has run, and so does every restart.
-    let mut at_entry =
-        !sh.terminating.load(Ordering::Relaxed) && (!first || link.console.load(Ordering::Relaxed));
+    let by_client = link.client_restart.swap(false, Ordering::Relaxed);
+    let mut at_entry = !by_client
+        && !sh.terminating.load(Ordering::Relaxed)
+        && (!first || link.console.load(Ordering::Relaxed));
     if !at_entry && link.stop_on_entry.load(Ordering::Relaxed) {
         session.request_global_step();
     }
@@ -3057,17 +3189,36 @@ struct Output {
     names: Vec<String>,
 }
 
+/// Send a report as an `output` event.
+fn send_report(
+    sh: &Shared,
+    now: Time,
+    delta: u32,
+    severity: yavs_kernel::Severity,
+    message: &str,
+    at: &str,
+) {
+    if sh.discard.load(Ordering::Relaxed) {
+        return;
+    }
+    let sev = match severity {
+        yavs_kernel::Severity::Note => "Note",
+        yavs_kernel::Severity::Warning => "Warning",
+        yavs_kernel::Severity::Error => "Error",
+        yavs_kernel::Severity::Failure => "Failure",
+    };
+    let text = format!("** {sev}: {}fs+{delta}: {message}\n    {at}\n", now.as_fs());
+    sh.output("stdout", &text);
+}
+
+fn send_text(sh: &Shared, bytes: &[u8]) {
+    if !sh.discard.load(Ordering::Relaxed) {
+        sh.output("stdout", &String::from_utf8_lossy(bytes));
+    }
+}
+
 impl yavs_kernel::Observer for Output {
     fn report(&mut self, hook: &mut yavs_kernel::Hook<'_>, r: &yavs_kernel::Report) {
-        if self.sh.discard.load(Ordering::Relaxed) {
-            return;
-        }
-        let sev = match r.severity {
-            yavs_kernel::Severity::Note => "Note",
-            yavs_kernel::Severity::Warning => "Warning",
-            yavs_kernel::Severity::Error => "Error",
-            yavs_kernel::Severity::Failure => "Failure",
-        };
         let at = match (r.process, &r.context) {
             (Some(p), _) => format!(
                 "Process {}",
@@ -3075,20 +3226,43 @@ impl yavs_kernel::Observer for Output {
             ),
             (None, c) => format!("Function {}", c.as_deref().unwrap_or("?")),
         };
-        self.sh.output(
-            "stdout",
-            &format!(
-                "** {sev}: {}fs+{}: {}\n    {at}\n",
-                hook.now().as_fs(),
-                hook.delta(),
-                r.message
-            ),
+        send_report(
+            &self.sh,
+            hook.now(),
+            hook.delta(),
+            r.severity,
+            &r.message,
+            &at,
         );
     }
 
     fn output(&mut self, _: &mut yavs_kernel::Hook<'_>, _: yavs_kernel::ProcId, bytes: &[u8]) {
-        if !self.sh.discard.load(Ordering::Relaxed) {
-            self.sh.output("stdout", &String::from_utf8_lossy(bytes));
-        }
+        send_text(&self.sh, bytes);
+    }
+
+    // A report of a process that does not suspend reaches the client at once (#939).
+    fn live_sink(&self) -> Option<Arc<dyn yavs_kernel::LiveSink>> {
+        Some(Arc::new(LiveOutput(self.sh.clone())))
+    }
+}
+
+/// [`Output`] for what a process says while it runs.
+struct LiveOutput(Arc<Shared>);
+
+impl yavs_kernel::LiveSink for LiveOutput {
+    fn report(
+        &self,
+        now: Time,
+        delta: u32,
+        process: &str,
+        severity: yavs_kernel::Severity,
+        message: &str,
+    ) {
+        let at = format!("Process {process}");
+        send_report(&self.0, now, delta, severity, message, &at);
+    }
+
+    fn output(&self, bytes: &[u8]) {
+        send_text(&self.0, bytes);
     }
 }

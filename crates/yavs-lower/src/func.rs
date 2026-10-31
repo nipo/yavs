@@ -2643,6 +2643,8 @@ impl Fx<'_, '_> {
                         w: Width::B8,
                     },
                 );
+                let ty = self.ty(t, span)?;
+                self.cx.shared_vars.push((d, ty));
                 Ok(())
             }
             ObjClass::File => {

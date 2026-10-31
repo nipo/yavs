@@ -11,6 +11,7 @@ use yavs_kernel::{Elem, LogicVec, Range, SigRef, SignalId, Value};
 use yavs_logic::StdULogic;
 use yavs_sem::Db;
 use yavs_sem::decl::{DeclKind, Designator, ObjRole};
+use yavs_sem::hir::StmtKind;
 use yavs_sem::stat::{ConstValue, Elems};
 use yavs_sem::types::{Direction, TypeKind};
 use yavs_std::types::{
@@ -346,14 +347,37 @@ impl Sig {
     }
 }
 
+/// A shared variable. What it holds is in `Built`, which changes with every simulation.
+pub(crate) struct SharedVar {
+    pub name: String,
+    /// Lower-case path: `:top:u1:v`, of a package `:lib:pkg:v`. Waves name it the same.
+    pub path: String,
+    pub region: Option<ScopeId>,
+    pub decl: yavs_sem::DeclId,
+    pub ty: TyId,
+}
+
+/// What a name means, seen from a process or by path.
+#[derive(Clone, Copy)]
+pub(crate) enum Named {
+    /// Index into `Design::sigs`.
+    Signal(usize),
+    /// Index into `Design::shared`.
+    Shared(usize),
+}
+
 /// What one process sees.
 #[derive(Default)]
 pub(crate) struct Proc {
+    /// What the debugger's Threads and Call Stack call it (`thread_label`).
+    pub label: String,
     /// Path prefixes (`:top:u1:`) of its enclosing regions up to its instance, innermost
     /// first, for name lookup.
     regions: Vec<String>,
     /// Indices into `Design::sigs`.
     pub signals: Vec<usize>,
+    /// Indices into `Design::shared`: those of its enclosing regions, then of the packages.
+    pub shared: Vec<usize>,
     /// Name and value of each generic of its instance.
     pub generics: Vec<(String, String)>,
 }
@@ -366,6 +390,8 @@ pub(crate) struct Design {
     pub sigs: Vec<Sig>,
     /// Lower-case path (`:top:u1:s`) to `sigs` index.
     by_path: HashMap<String, usize>,
+    pub shared: Vec<SharedVar>,
+    shared_by_path: HashMap<String, usize>,
     /// By process name ([`Elaborated::proc_name`]).
     procs: HashMap<String, Proc>,
     /// The elaborated hierarchy: instances, blocks, generates and packages with signals.
@@ -385,6 +411,8 @@ pub(crate) struct Region {
     pub children: Vec<usize>,
     /// Indices into `Design::sigs`.
     pub sigs: Vec<usize>,
+    /// Indices into `Design::shared`.
+    pub shared: Vec<usize>,
     /// Process names ([`Elaborated::proc_name`]).
     pub procs: Vec<String>,
 }
@@ -461,6 +489,44 @@ fn shown_path(path: &str, source_map: &[(String, String)]) -> String {
     map.map_or(p, |(_, to)| absolute(to))
 }
 
+/// The name of a process in the Threads view and the Call Stack: its dotted path, or for one without
+/// a label, what it is and where (`tb.clk <= ... (tb.vhd:17)`). Reports and everything that takes a
+/// name keep `Elaborated::proc_name` (#942).
+fn thread_label(
+    db: &Db,
+    path: &str,
+    stmt: yavs_sem::StmtId,
+    source_map: &[(String, String)],
+) -> String {
+    let dotted = crate::console::dotted(path);
+    let (region, last) = dotted.rsplit_once('.').unwrap_or(("", &dotted));
+    if !last.starts_with('_') {
+        return dotted;
+    }
+    let st = &db.stmts[stmt];
+    let f = db.sources.get(st.span.file);
+    // The source as written, on one line.
+    let text = |s: yavs_diag::Span| {
+        let (a, b) = (f.text_offset(s.start), f.text_offset(s.end));
+        let t = f.text().get(a..b).unwrap_or_default();
+        t.split_whitespace().collect::<Vec<_>>().join(" ")
+    };
+    let what = match &st.kind {
+        StmtKind::Process { .. } => "process".to_string(),
+        StmtKind::ConcAssert { .. } => "assert".to_string(),
+        StmtKind::ConcSignalAssign { target, .. } => {
+            format!("{} <= ...", text(db.exprs[target.expr].span))
+        }
+        StmtKind::ConcProcCall { call, .. } => format!("{}(...)", db.decls[call.callee].name),
+        // The equivalent process of a port's expression: its statement is the instance.
+        _ => return dotted,
+    };
+    let shown = shown_path(&f.path, source_map);
+    let file = std::path::Path::new(&shown).file_name();
+    let file = file.map_or(shown.clone().into(), |n| n.to_string_lossy());
+    format!("{region}.{what} ({file}:{})", f.line_col(st.span.start).0)
+}
+
 impl Design {
     /// `source_map`: source paths as compiled, and as the debugger shows and takes them.
     pub fn new(db: &Db, e: &Elaborated, prog: &Program, source_map: &[(String, String)]) -> Design {
@@ -504,6 +570,8 @@ impl Design {
             lines,
             sigs: Vec::new(),
             by_path: HashMap::new(),
+            shared: Vec::new(),
+            shared_by_path: HashMap::new(),
             procs: HashMap::new(),
             regions: Vec::new(),
             roots: Vec::new(),
@@ -544,14 +612,23 @@ impl Design {
                 scope_sigs.entry(s).or_default().push(k);
             }
         }
+        let mut scope_shared = d.add_shared(db, e);
+        let package_shared: Vec<usize> = (0..d.shared.len())
+            .filter(|&k| d.shared[k].region.is_none())
+            .collect();
         for p in &e.procs {
             let inst = e.instance_of(p.scope);
-            let mut pr = Proc::default();
+            let mut pr = Proc {
+                label: thread_label(db, &e.proc_name(p), p.stmt, source_map),
+                ..Proc::default()
+            };
             let mut cur = e.hier.scope(p.scope).parent;
             while let Some(s) = cur {
                 pr.regions.push(e.hier.path_name(s, yavs_elab::Case::Lrm));
                 pr.signals
                     .extend(scope_sigs.get(&s).into_iter().flatten().copied());
+                pr.shared
+                    .extend(scope_shared.get(&s).into_iter().flatten().copied());
                 cur = if s == inst {
                     None
                 } else {
@@ -573,6 +650,7 @@ impl Design {
                     pr.generics.push((db.decls[decl].name.to_string(), v));
                 }
             }
+            pr.shared.extend(&package_shared);
             d.procs.insert(e.proc_name(p), pr);
         }
         // Regions: every scope but processes and components, attached to the nearest such
@@ -599,6 +677,7 @@ impl Design {
                 kind,
                 children: Vec::new(),
                 sigs: scope_sigs.remove(&s).unwrap_or_default(),
+                shared: scope_shared.remove(&s).unwrap_or_default(),
                 procs: Vec::new(),
             });
         }
@@ -626,6 +705,45 @@ impl Design {
             }
         }
         d
+    }
+
+    /// Fill `shared`, sorted by path; those of each region, by `shared` index.
+    fn add_shared(&mut self, db: &Db, e: &Elaborated) -> HashMap<ScopeId, Vec<usize>> {
+        let mut all = Vec::new();
+        for &(decl, thunk, ty) in e.ir.iter().flat_map(|ir| &ir.var_slots) {
+            let name = db.decls[decl].name.to_string();
+            let var = |region, prefix: String| SharedVar {
+                path: format!("{prefix}{name}").to_ascii_lowercase(),
+                name: name.clone(),
+                region,
+                decl,
+                ty,
+            };
+            if thunk.is_some() {
+                // ponytail: one of a package instance nested in a package is left out, as in
+                // waves; walk the instance regions too if one is ever wanted.
+                let unit = (db.units.iter()).find(|(_, u)| u.scope == db.decls[decl].scope);
+                if let Some((_, u)) = unit {
+                    let lib = &db.libs[u.lib].name.text;
+                    all.push(var(None, format!(":{lib}:{}:", u.name.text)));
+                }
+            }
+            let regions = e.shared_vars.iter().filter(|&&(_, x)| x == decl);
+            for &(r, _) in regions.filter(|_| thunk.is_none()) {
+                let path = e.hier.path_name(r, yavs_elab::Case::Lrm);
+                all.push(var(Some(r), path));
+            }
+        }
+        all.sort_by(|a, b| a.path.cmp(&b.path));
+        let mut scopes: HashMap<ScopeId, Vec<usize>> = HashMap::new();
+        for (k, v) in all.iter().enumerate() {
+            self.shared_by_path.insert(v.path.clone(), k);
+            if let Some(r) = v.region {
+                scopes.entry(r).or_default().push(k);
+            }
+        }
+        self.shared = all;
+        scopes
     }
 
     pub fn loc(&self, s: StmtId) -> Option<&Loc> {
@@ -732,6 +850,36 @@ impl Design {
             .flat_map(|p| &p.regions)
             .find_map(|r| self.by_path.get(&format!("{r}{colons}")));
         local.or_else(|| self.by_path.get(&path)).copied()
+    }
+
+    /// What `name` means: a signal or a shared variable by simple name seen from process `p`
+    /// (the innermost region first), by path, or a shared variable of a package by `pkg.v`, or
+    /// by `v` if only one package has it.
+    pub fn named(&self, p: Option<&Proc>, name: &str) -> Option<Named> {
+        let n = name.trim().to_ascii_lowercase();
+        let at = |path: &str| {
+            let signal = self.by_path.get(path).map(|&k| Named::Signal(k));
+            signal.or_else(|| self.shared_by_path.get(path).map(|&k| Named::Shared(k)))
+        };
+        let colons = n.replace('.', ":");
+        let path = if n.starts_with(':') {
+            colons.clone()
+        } else {
+            format!(":{colons}")
+        };
+        // Also a path from where the process stands: `u_reg.q`.
+        let seen =
+            (p.into_iter().flat_map(|p| &p.regions)).find_map(|r| at(&format!("{r}{colons}")));
+        seen.or_else(|| at(&path)).or_else(|| {
+            let tail = format!(":{colons}");
+            let of_package = |k: &usize| {
+                let v = &self.shared[*k];
+                v.region.is_none() && v.path.ends_with(&tail)
+            };
+            let mut found = (0..self.shared.len()).filter(of_package);
+            let k = found.next()?;
+            found.next().is_none().then_some(Named::Shared(k))
+        })
     }
 }
 

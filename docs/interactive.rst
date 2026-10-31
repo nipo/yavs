@@ -186,6 +186,8 @@ Stop on a failing assertion
     yavs> break assert error
     stop at assertions and reports of severity error, failure
     yavs> run
+    ** Error: 25000000fs+1: q is not high
+        Process :tb:check
     assertion of severity error at 25 ns, delta 1, /work/tb.vhd:53: q is not high
     yavs> where
     time 25 ns, delta 1
@@ -216,8 +218,8 @@ Read a past value
       signal  kind    type      value
       tb.cnt  signal  UNSIGNED  "0011"
     yavs> find variables tot*
-      variable          process
-      tb.counter.total  tb.counter
+      variable          kind
+      tb.counter.total  variable of tb.counter
 
 Add signals and variables to the wave
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

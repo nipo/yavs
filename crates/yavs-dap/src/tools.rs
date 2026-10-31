@@ -371,6 +371,67 @@ fn bounds(t: &LitType) -> String {
     }
 }
 
+/// The name of shared variable `k` in the wave file; `name` is what the user called it.
+pub(crate) fn recorded_shared(sh: &Shared, k: usize, name: &str) -> Result<String, String> {
+    let v = &sh.design.shared[k];
+    if sh
+        .built
+        .get()
+        .is_some_and(|b| b.objects.contains_key(&(v.region, v.decl)))
+    {
+        return Err(format!(
+            "`{name}` is a protected object, whose state is not recorded in waves: `examine` shows \
+             it at a stop"
+        ));
+    }
+    Ok(dotted(&v.path))
+}
+
+/// The rows of `describe` for shared variable `k`.
+fn describe_shared(sh: &Shared, at: &At<'_, '_>, k: usize) -> String {
+    let v = &sh.design.shared[k];
+    let shown = crate::shared_value(sh, at, k);
+    let protected = matches!(
+        &shown,
+        Some((
+            LitType::Handle {
+                protected: true,
+                ..
+            },
+            _
+        ))
+    );
+    let what = if protected {
+        "protected object"
+    } else {
+        "shared variable"
+    };
+    let mut rows = vec![vec!["kind".to_string(), what.to_string()]];
+    rows.extend(declared_rows(sh, v.decl));
+    match shown {
+        Some((t, x)) if protected => {
+            if let Some((state, _)) = crate::deref(sh, at, &t, &x) {
+                rows.push(vec!["variables".to_string(), bounds(&state)]);
+            }
+            rows.push(vec!["value".to_string(), "protected".to_string()]);
+        }
+        Some((t, x)) => {
+            rows.push(vec!["bounds".to_string(), bounds(&t)]);
+            rows.push(vec![
+                "value".to_string(),
+                yavs_std::value::literal_image(&x, &t),
+            ]);
+        }
+        None => rows.push(vec![
+            "value".to_string(),
+            "no object: nothing uses its region".to_string(),
+        ]),
+    }
+    format!("{}\n{}", dotted(&v.path), table(&rows))
+        .trim_end()
+        .to_string()
+}
+
 /// `describe NAME`.
 pub(crate) fn describe(sh: &Shared, at: &At<'_, '_>, name: &str) -> Result<String, String> {
     if name.is_empty() {
@@ -444,8 +505,12 @@ fn describe_variable(sh: &Shared, at: &At<'_, '_>, name: &str) -> Result<String,
         let head = format!("{proc}.{var}");
         return Ok(format!("{head}\n{}", table(&rows)).trim_end().to_string());
     }
+    let shared = || match shared_part(sh, at, name) {
+        Some((k, "")) => Ok(describe_shared(sh, at, k)),
+        _ => Err(crate::console::no_signal(sh, thread_of(at), name)),
+    };
     let At::Process(st) = at else {
-        return Err(crate::console::no_signal(sh, thread_of(at), name));
+        return shared();
     };
     let proc = sh
         .session()
@@ -484,7 +549,36 @@ fn describe_variable(sh: &Shared, at: &At<'_, '_>, name: &str) -> Result<String,
             .trim_end()
             .to_string());
     }
-    Err(crate::console::no_signal(sh, thread_of(at), name))
+    shared()
+}
+
+/// The shared variable `name` means at this stop (between cycles, seen from the top level), and
+/// the part of it after its name.
+pub(crate) fn shared_part<'n>(
+    sh: &Shared,
+    at: &At<'_, '_>,
+    name: &'n str,
+) -> Option<(usize, &'n str)> {
+    let seen = thread_proc(sh, thread_of(at));
+    let top = (at.process().is_none())
+        .then(|| sh.design.roots.first())
+        .flatten()
+        .map(|&r| sh.design.regions[r].path.as_str());
+    let means = |n: &str| {
+        let in_top = top.and_then(|t| sh.design.named(None, &format!("{t}{n}")));
+        in_top.or_else(|| sh.design.named(seen, n))
+    };
+    let ends = (name.char_indices())
+        .filter(|&(_, c)| c == '.' || c == '(')
+        .map(|(i, _)| i)
+        .chain([name.len()]);
+    let ends: Vec<usize> = ends.collect();
+    ends.into_iter()
+        .rev()
+        .find_map(|i| match means(&name[..i])? {
+            crate::design::Named::Shared(k) => Some((k, &name[i..])),
+            crate::design::Named::Signal(_) => None,
+        })
 }
 
 /// `examine tb.counter.total`, a name of `find variables`: in the process stopped in, its value;
@@ -534,8 +628,8 @@ pub(crate) fn matching_signals(sh: &Shared, pattern: &str) -> Vec<usize> {
         .collect()
 }
 
-/// `(dotted path, process)` of the variables of every process.
-fn process_variables(sh: &Shared) -> Vec<(String, String)> {
+/// `(dotted path, what it is)` of the variables of every process and the shared variables.
+fn all_variables(sh: &Shared) -> Vec<(String, String)> {
     let t: ProcTable = sh.elab.proc_table();
     let mut out = Vec::new();
     for (k, p) in sh.elab.procs.iter().enumerate() {
@@ -544,9 +638,24 @@ fn process_variables(sh: &Shared) -> Vec<(String, String)> {
         for l in func.iter().flat_map(|f| &f.locals) {
             // Not the compiler's own slots.
             if !l.name.starts_with('_') && l.name != "self" {
-                out.push((format!("{}.{}", dotted(&name), l.name), dotted(&name)));
+                let what = format!("variable of {}", dotted(&name));
+                out.push((format!("{}.{}", dotted(&name), l.name), what));
             }
         }
+        // Loop parameters may share a name.
+        out.dedup();
+    }
+    for v in &sh.design.shared {
+        let is_object = sh
+            .built
+            .get()
+            .is_some_and(|b| b.objects.contains_key(&(v.region, v.decl)));
+        let what = if is_object {
+            "protected object"
+        } else {
+            "shared variable"
+        };
+        out.push((dotted(&v.path), what.to_string()));
     }
     out
 }
@@ -592,16 +701,16 @@ pub(crate) fn find(sh: &Shared, at: &At<'_, '_>, rest: &str) -> Result<String, S
             Ok(table(&rows).trim_end().to_string())
         }
         "variables" | "variable" => {
-            let all = process_variables(sh);
+            let all = all_variables(sh);
             let found: Vec<_> = (all.iter())
                 .filter(|(p, _)| path_matches(pattern, p))
                 .collect();
             if found.is_empty() {
                 return Err(none("variable", all.iter().map(|v| v.0.clone()).collect()));
             }
-            let mut rows = vec![row(["variable", "process"])];
-            for (p, proc) in found {
-                rows.push(vec![p.clone(), proc.clone()]);
+            let mut rows = vec![row(["variable", "kind"])];
+            for (p, what) in found {
+                rows.push(vec![p.clone(), what.clone()]);
             }
             Ok(table(&rows).trim_end().to_string())
         }
@@ -621,12 +730,10 @@ pub(crate) fn find(sh: &Shared, at: &At<'_, '_>, rest: &str) -> Result<String, S
 pub(crate) fn find_list(sh: &Shared, kind: &str, pattern: &str) -> Vec<serde_json::Value> {
     let design = &sh.design;
     if kind == "variables" {
-        return process_variables(sh)
+        return all_variables(sh)
             .into_iter()
             .filter(|(p, _)| path_matches(pattern, p))
-            .map(
-                |(p, proc)| serde_json::json!({"path": p, "detail": format!("variable of {proc}")}),
-            )
+            .map(|(p, what)| serde_json::json!({"path": p, "detail": what}))
             .collect();
     }
     matching_signals(sh, pattern)
@@ -687,6 +794,9 @@ pub(crate) fn examine_at(sh: &Shared, at: &At<'_, '_>, text: &str) -> Result<Str
         return Err(format!(
             "{time} is still to come: the simulation is at {now}"
         ));
+    }
+    if let Some((k, _)) = shared_part(sh, at, name) {
+        recorded_shared(sh, k, name)?;
     }
     let path = sh.wave_path().ok_or_else(|| {
         format!(
@@ -759,6 +869,13 @@ fn wave_name(sh: &Shared, at: &At<'_, '_>, name: &str) -> String {
         {
             return format!("{}.{}", dotted(&p.name), name.to_ascii_lowercase());
         }
+    }
+    if let Some((k, part)) = shared_part(sh, at, name) {
+        return format!(
+            "{}{}",
+            dotted(&sh.design.shared[k].path),
+            part.to_ascii_lowercase()
+        );
     }
     name.replace(':', ".")
         .trim_matches('.')

@@ -201,6 +201,9 @@ pub struct Built {
     /// (`yavs_interp::shared_var`, #309). Every region's is listed, used by a process or not
     /// (#342).
     pub vars: HashMap<(Option<ScopeId>, yavs_sem::DeclId), (u64, yavs_ir::TyId)>,
+    /// The handle of each shared variable of a protected type, keyed as `vars`; filled only for a
+    /// debug session, which shows them (#938).
+    pub objects: HashMap<(Option<ScopeId>, yavs_sem::DeclId), u64>,
 }
 
 fn sim_err(m: String) -> SimError {
@@ -1333,7 +1336,12 @@ impl Elaborated {
         // (`once`, the cell's content), when a process of the design uses it; a package's
         // comes from its slot thunk.
         let mut vars = HashMap::new();
+        let mut objects = HashMap::new();
         for &(d, f, ty) in &ir.var_slots {
+            let object = matches!(rt.prog.types.get(ty), Some(yavs_ir::Ty::Protected { .. }));
+            if object && dbg.is_none() {
+                continue;
+            }
             match f {
                 Some(f) => {
                     let inst = Arc::new(InstData::default());
@@ -1348,7 +1356,11 @@ impl Elaborated {
                     let Some(CallVal::Cell(slot)) = v else {
                         return Err(sim_err("shared variable slot not found".into()));
                     };
-                    vars.insert((None, d), (slot, ty));
+                    if object {
+                        objects.insert((None, d), slot);
+                    } else {
+                        vars.insert((None, d), (slot, ty));
+                    }
                 }
                 None => {
                     // Sorted: the thunks of regions no process uses run in a fixed order.
@@ -1365,7 +1377,11 @@ impl Elaborated {
                             &rt, ir, r, d, &shared, &mut once, &mut insts, &mut base,
                         )?;
                         if let CallVal::Cell(slot) = v {
-                            vars.insert((Some(r), d), (slot, ty));
+                            if object {
+                                objects.insert((Some(r), d), slot);
+                            } else {
+                                vars.insert((Some(r), d), (slot, ty));
+                            }
                         }
                     }
                 }
@@ -1376,7 +1392,15 @@ impl Elaborated {
             rt: rt.clone(),
             shared: shared.clone(),
         }));
-        Ok((s, Some(Built { rt, shared, vars })))
+        Ok((
+            s,
+            Some(Built {
+                rt,
+                shared,
+                vars,
+                objects,
+            }),
+        ))
     }
 
     /// The equivalent process of an expression actual (`ProcInst::actual`): the region's

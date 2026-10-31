@@ -29,9 +29,9 @@ VS Code).
 | `package.json` | Manifest: `contributes.debuggers`, languages, breakpoints, snippets, `problemMatchers`, `keybindings` (Tab in the Debug Console of a yavs session with no list open opens the list, where VS Code would move the focus away) |
 | `extension.js` | The adapter descriptor factory (`runArgs`, `libArgs`) and the commands (`custom`) |
 | `extension.js`, more | `yavs.showDrivers` and `yavs.findSignals` go through `evaluate` with context `repl` and the server's `yavs/find`; the exception filters come from the server's capabilities, not the manifest |
-| `sample/` | A testbench workspace with `.vscode/launch.json` (used by the tests) |
+| `sample/` | A testbench workspace with `.vscode/launch.json` (used by the tests); `more.vhd` has a shared variable, processes without a label and, with `SPIN`, a process that reports and never suspends |
 | `test/client.js` | A VS Code style session through the DAP test client against `yavs run --dap=stdio`: data breakpoints, `setVariable`, force and release, a deposit of an element, conditional line breakpoints, a paged array, the Hierarchy scope and `yavs/hierarchy`, live waves (`yavs/waveSubscribe`, `yavs/waves` events, values decoded from base64 by the hierarchy's `encoding`) |
-| `test/vscode/run.js`, `suite.js` | A real VS Code (headless) on a copy of `sample/`: breakpoints with conditions VS Code sends, frame, scopes, an array paged as VS Code asks, `setVariable`, the force and release commands, the delta step command, a signal value breakpoint, continue to the end |
+| `test/vscode/run.js`, `suite.js` | A real VS Code (headless) on a copy of `sample/`: breakpoints with conditions VS Code sends, frame, scopes, an array paged as VS Code asks, `setVariable`, the force and release commands, the delta step command, a signal value breakpoint, continue to the end, the views of a shared variable, the names of threads, a report before an endless loop, the Restart button of an attached session |
 
 ## 3. Design decisions
 

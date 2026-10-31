@@ -324,6 +324,568 @@ fn pause() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A scratch directory with `src` analyzed into `lib`, with `flags`.
+fn design(name: &str, src: &str, flags: &[&str]) -> common::Tmp {
+    let d = tempdir(&format!("dap-{name}"));
+    std::fs::write(d.join("t.vhd"), src).expect("write");
+    let ok = yavs()
+        .current_dir(&d)
+        .args(["analyze", "--work=work:lib"])
+        .args(flags)
+        .arg("t.vhd")
+        .status()
+        .expect("yavs")
+        .success();
+    assert!(ok, "analyze failed");
+    d
+}
+
+/// #939: what a process says before it loops for ever reaches the client while it runs, with the
+/// text a report has always had.
+#[test]
+fn a_report_before_an_endless_loop_arrives_at_once() {
+    let d = design(
+        "live",
+        "use std.textio.all;
+entity t is end;
+architecture a of t is
+  procedure spin is
+  begin
+    loop
+      null;
+    end loop;
+  end procedure;
+begin
+  named : process
+    variable l : line;
+  begin
+    report \"before\";
+    write(l, string'(\"text\"));
+    writeline(output, l);
+    spin;
+    wait;
+  end process;
+end;
+",
+        &[],
+    );
+    let mut child = spawn(&d, "t", &["--dap=stdio"]);
+    // Without the live path nothing arrives, and this ends the session and the test.
+    let _w = Watchdog::new(child.id(), 60);
+    let mut c = stdio_client(&mut child);
+    c.request("initialize", json!({"adapterID": "yavs"}));
+    c.request("launch", json!({}));
+    c.request("configurationDone", json!({}));
+    let out = c.event("output");
+    assert_eq!(
+        out["body"]["output"], "** Note: 0fs+0: before\n    Process :t:named\n",
+        "{out}"
+    );
+    let out = c.event("output");
+    assert_eq!(out["body"]["output"], "text\n", "{out}");
+    c.request("pause", json!({"threadId": 1}));
+    assert_eq!(c.event("stopped")["body"]["reason"], "pause");
+    c.request("disconnect", json!({}));
+    drop(c.w);
+    child.wait().expect("wait");
+}
+
+/// #942: a process without a label has a name a user recognises in Threads and the Call Stack, and
+/// keeps its path everywhere a name is looked up or a report says where it comes from.
+#[test]
+fn threads_without_a_label_are_named_by_what_they_are() {
+    let d = design(
+        "threads",
+        "entity t is end;
+architecture a of t is
+  signal clk : bit := '0';
+  signal v : bit_vector(1 downto 0);
+  signal other : bit;
+  procedure pr(signal s : in bit) is
+  begin
+    null;
+  end procedure;
+begin
+  clk <= not clk after 5 ns when now < 10 ns;
+  v(1) <= clk;
+  labelled : other <= clk;
+  pr(clk);
+  assert clk = '0' or clk = '1';
+  process
+  begin
+    report \"here\";
+    wait;
+  end process;
+  g : for i in 0 to 0 generate
+    v(0) <= clk;
+  end generate;
+end;
+",
+        &[],
+    );
+    let path = std::path::absolute(d.join("t.vhd")).expect("path");
+    let mut child = spawn(&d, "t", &["--dap=stdio"]);
+    let _w = Watchdog::new(child.id(), 60);
+    let mut c = stdio_client(&mut child);
+    c.request("initialize", json!({"adapterID": "yavs"}));
+    c.request("launch", json!({}));
+    c.request(
+        "setBreakpoints",
+        json!({"source": {"path": path}, "breakpoints": [{"line": 18}]}),
+    );
+    c.request("configurationDone", json!({}));
+    let stop = c.event("stopped");
+    let threads = c.request("threads", json!({}));
+    let names: Vec<&str> = threads["body"]["threads"]
+        .as_array()
+        .expect("threads")
+        .iter()
+        .filter_map(|t| t["name"].as_str())
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "t.clk <= ... (t.vhd:11)",
+            "t.v(1) <= ... (t.vhd:12)",
+            "t.labelled",
+            "t.pr(...) (t.vhd:14)",
+            "t.assert (t.vhd:15)",
+            "t.process (t.vhd:16)",
+            "t.g(0).v(0) <= ... (t.vhd:22)",
+        ],
+        "{threads}"
+    );
+    // The frames of the stopped process and of one that waits.
+    let tid = stop["body"]["threadId"].as_i64().expect("thread");
+    let st = c.request("stackTrace", json!({"threadId": tid}));
+    assert_eq!(
+        st["body"]["stackFrames"][0]["name"], "t.process (t.vhd:16)",
+        "{st}"
+    );
+    // The paths stay: the console's tables, and a report.
+    let repl = |e: &str| json!({"expression": e, "context": "repl"});
+    let waits = c.request("evaluate", repl("waits"));
+    assert!(
+        waits["body"]["result"]
+            .as_str()
+            .unwrap_or("")
+            .contains("t._p4"),
+        "{waits}"
+    );
+    let h = c.request("yavs/hierarchy", json!({}));
+    assert!(h["body"].to_string().contains(":t:_p4"), "{h}");
+    let c2 = c.send("continue", json!({"threadId": tid}));
+    let out =
+        c.until(|m| m["event"] == "output" && m["body"]["output"].to_string().contains("here"));
+    assert!(
+        out["body"]["output"]
+            .as_str()
+            .unwrap_or("")
+            .contains("Process :t:_p4"),
+        "{out}"
+    );
+    c.until(|m| m["type"] == "response" && m["request_seq"] == c2 || m["event"] == "exited");
+    c.request("disconnect", json!({}));
+    drop(c.w);
+    child.wait().expect("wait");
+}
+
+/// A client over TCP on the port of `yavs run --dap=0` with `extra`, initialized.
+fn attach_tcp(
+    child: &mut Child,
+) -> (
+    Client<std::net::TcpStream, BufReader<std::net::TcpStream>>,
+    Value,
+) {
+    let mut err = BufReader::new(child.stderr.take().expect("stderr"));
+    let mut line = String::new();
+    while !line.contains("DAP listening on") {
+        line.clear();
+        err.read_line(&mut line).expect("stderr");
+    }
+    let port = line.trim().rsplit(':').next().expect("port").to_string();
+    std::thread::spawn(move || std::io::copy(&mut err, &mut std::io::sink()));
+    let s = std::net::TcpStream::connect(format!("127.0.0.1:{port}")).expect("connect");
+    let mut c = Client {
+        w: s.try_clone().expect("clone"),
+        r: BufReader::new(s),
+        seq: 0,
+        log: Vec::new(),
+    };
+    let init = c.request("initialize", json!({"adapterID": "yavs"}));
+    (c, init)
+}
+
+const RESTART: &str = "entity t is end;
+architecture a of t is
+  signal n : integer := 0;
+begin
+  process
+  begin
+    n <= n + 1;
+    wait for 1 ns;
+    n <= n + 1;
+    wait for 1 ns;
+    report \"done\";
+    wait;
+  end process;
+end;
+";
+
+/// #963: over TCP a client restarts the run in place (nothing else could start it again) and it
+/// runs to the same breakpoint with the state of time 0, the breakpoints kept; while it runs too.
+/// A session a client launched stays the client's to start again (it analyzes first).
+#[test]
+fn an_attached_client_restarts_the_run() {
+    let d = design("restart", RESTART, &[]);
+    let path = std::path::absolute(d.join("t.vhd")).expect("path");
+    let mut child = spawn(&d, "t", &["--dap=0"]);
+    let _w = Watchdog::new(child.id(), 60);
+    let (mut c, init) = attach_tcp(&mut child);
+    assert_eq!(init["body"]["supportsRestartRequest"], true, "{init}");
+    c.request("attach", json!({}));
+    c.request(
+        "setBreakpoints",
+        json!({"source": {"path": path}, "breakpoints": [{"line": 9}]}),
+    );
+    c.request("configurationDone", json!({}));
+    assert_eq!(c.event("stopped")["body"]["reason"], "breakpoint");
+    let n = c.request("evaluate", json!({"expression": ":t:n"}));
+    assert_eq!(n["body"]["result"], "1", "{n}");
+    let r = c.request("restart", json!({"arguments": {}}));
+    assert_eq!(r["success"], true, "{r}");
+    let stop = c.event("stopped");
+    assert_eq!(stop["body"]["reason"], "breakpoint", "{stop}");
+    assert!(
+        stop["body"]["description"]
+            .as_str()
+            .unwrap_or("")
+            .contains("at 1 ns"),
+        "{stop}"
+    );
+    // Asking for a stop at entry, then a restart while it runs.
+    let r = c.request("restart", json!({"arguments": {"stopOnEntry": true}}));
+    assert_eq!(r["success"], true, "{r}");
+    let stop = c.event("stopped");
+    assert_eq!(stop["body"]["reason"], "entry", "{stop}");
+    c.request(
+        "setBreakpoints",
+        json!({"source": {"path": path}, "breakpoints": []}),
+    );
+    c.request("disconnect", json!({}));
+    drop(c.w);
+    child.wait().expect("wait");
+
+    // Launched: no restart announced.
+    let mut child = spawn(&d, "t", &["--dap=stdio"]);
+    let _w = Watchdog::new(child.id(), 60);
+    let mut c = stdio_client(&mut child);
+    let init = c.request("initialize", json!({"adapterID": "yavs"}));
+    assert!(
+        init["body"].get("supportsRestartRequest").is_none(),
+        "{init}"
+    );
+    c.request("disconnect", json!({}));
+    drop(c.w);
+    child.wait().expect("wait");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// #963: a run with a loaded library cannot restart: the client gets a notice naming what to do
+/// and an ordinary answer (VS Code takes a failed `restart` for the end of the session), and the
+/// stop goes on.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_refused_restart_says_why_and_the_session_stays() {
+    let d = design("restart-no", RESTART, &[]);
+    let path = std::path::absolute(d.join("t.vhd")).expect("path");
+    let mut child = spawn(&d, "t", &["--load=libm.so.6", "--dap=0"]);
+    let _w = Watchdog::new(child.id(), 60);
+    let (mut c, _) = attach_tcp(&mut child);
+    c.request("attach", json!({}));
+    c.request(
+        "setBreakpoints",
+        json!({"source": {"path": path}, "breakpoints": [{"line": 9}]}),
+    );
+    c.request("configurationDone", json!({}));
+    let stop = c.event("stopped");
+    let tid = stop["body"]["threadId"].as_i64().expect("thread");
+    c.send("restart", json!({"arguments": {}}));
+    let out = c.event("output");
+    assert_eq!(out["body"]["category"], "important", "{out}");
+    assert!(
+        out["body"]["output"]
+            .to_string()
+            .contains("start the run again"),
+        "{out}"
+    );
+    let st = c.request("stackTrace", json!({"threadId": tid}));
+    assert_eq!(st["body"]["stackFrames"][0]["line"], 9, "{st}");
+    c.request("disconnect", json!({}));
+    drop(c.w);
+    child.wait().expect("wait");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// #963: a restart while the run is in a process that never suspends.
+#[test]
+fn an_attached_client_restarts_a_running_process() {
+    let d = design(
+        "restart-run",
+        "entity t is end;
+architecture a of t is
+begin
+  process
+  begin
+    report \"again\";
+    loop
+      null;
+    end loop;
+  end process;
+end;
+",
+        &[],
+    );
+    let mut child = spawn(&d, "t", &["--dap=0"]);
+    let _w = Watchdog::new(child.id(), 60);
+    let (mut c, _) = attach_tcp(&mut child);
+    c.request("attach", json!({}));
+    c.request("configurationDone", json!({}));
+    c.event("output");
+    let r = c.request("restart", json!({"arguments": {}}));
+    assert_eq!(r["success"], true, "{r}");
+    let out = c.event("output");
+    assert!(out["body"]["output"].to_string().contains("again"), "{out}");
+    c.request("disconnect", json!({}));
+    drop(c.w);
+    child.wait().expect("wait");
+}
+
+const SHARED: &str = "package p is
+  type counter_t is protected
+    procedure incr;
+  end protected;
+end package;
+package body p is
+  type counter_t is protected body
+    variable n : integer := 0;
+    procedure incr is
+    begin
+      n := n + 1;
+    end procedure;
+  end protected body;
+end package body;
+use work.p.all;
+package q is
+  shared variable in_pkg : counter_t;
+  shared variable plain_pkg : integer := 11;
+end package;
+use work.p.all;
+use work.q.all;
+entity t is end;
+architecture a of t is
+  type rec is record x : integer; y : integer; end record;
+  shared variable sc : counter_t;
+  shared variable sn : integer := 5;
+  shared variable sr : rec := (1, 2);
+begin
+  uses : process
+  begin
+    sc.incr;
+    in_pkg.incr;
+    sn := 6;
+    wait for 1 ns;
+    wait;
+  end process;
+  other : process
+    variable z : integer := 0;
+  begin
+    z := 1;
+    wait for 2 ns;
+    wait;
+  end process;
+end;
+";
+
+/// #938, #959: shared variables at every surface of a client, at a stop in a process that holds
+/// the shared state, in one that does not and between cycles.
+#[test]
+fn shared_variables_in_a_client() {
+    let d = design("shared", SHARED, &["--relaxed"]);
+    let path = std::path::absolute(d.join("t.vhd")).expect("path");
+    let mut child = spawn(&d, "t", &["--relaxed", "--dap=stdio"]);
+    let _w = Watchdog::new(child.id(), 60);
+    let mut c = stdio_client(&mut child);
+    c.request("initialize", json!({"adapterID": "yavs"}));
+    c.request("launch", json!({}));
+    // In `uses` (holds the shared state), in `other` (does not).
+    c.request(
+        "setBreakpoints",
+        json!({"source": {"path": path}, "breakpoints": [{"line": 34}, {"line": 41}]}),
+    );
+    c.request("configurationDone", json!({}));
+    for (line, count) in [(34, "1"), (41, "1")] {
+        let stop = c.event("stopped");
+        let tid = stop["body"]["threadId"].as_i64().expect("thread");
+        let st = c.request("stackTrace", json!({"threadId": tid}));
+        assert_eq!(st["body"]["stackFrames"][0]["line"], line, "{st}");
+        let frame = st["body"]["stackFrames"][0]["id"].as_i64().expect("frame");
+        let eval = |e: &str, ctx: &str| json!({"expression": e, "frameId": frame, "context": ctx});
+        // Watch and hover.
+        for ctx in ["watch", "hover"] {
+            let v = c.request("evaluate", eval("sc", ctx));
+            assert_eq!(v["body"]["result"], "protected", "{v}");
+            assert_eq!(v["body"]["type"], "counter_t", "{v}");
+            assert_eq!(v["body"]["evaluateName"], "t.sc", "{v}");
+        }
+        let v = c.request("evaluate", eval("sc.n", "watch"));
+        assert_eq!(v["body"]["result"], count, "{v}");
+        let v = c.request("evaluate", eval("in_pkg.n", "hover"));
+        assert_eq!(v["body"]["result"], count, "{v}");
+        let v = c.request("evaluate", eval("work.q.plain_pkg", "watch"));
+        assert_eq!(v["body"]["result"], "11", "{v}");
+        let v = c.request("evaluate", eval("sn", "watch"));
+        assert_eq!(v["body"]["result"], "6", "{v}");
+        // A record's children are named so that a Watch can take them.
+        let v = c.request("evaluate", eval("sr", "watch"));
+        let r = c.request(
+            "variables",
+            json!({"variablesReference": v["body"]["variablesReference"]}),
+        );
+        assert_eq!(r["body"]["variables"][1]["evaluateName"], "t.sr.y", "{r}");
+        // The Variables view.
+        let scopes = c.request("scopes", json!({"frameId": frame}));
+        let list = scopes["body"]["scopes"].as_array().expect("scopes");
+        let scope = list
+            .iter()
+            .find(|s| s["name"] == "Shared Variables")
+            .unwrap_or_else(|| panic!("{scopes}"));
+        let r = c.request(
+            "variables",
+            json!({"variablesReference": scope["variablesReference"]}),
+        );
+        let vars = r["body"]["variables"].as_array().expect("vars");
+        let shown: Vec<(&str, &str)> = vars
+            .iter()
+            .filter_map(|v| Some((v["name"].as_str()?, v["value"].as_str()?)))
+            .collect();
+        assert_eq!(
+            shown,
+            [
+                ("sc", "protected"),
+                ("sn", "6"),
+                ("sr", "(x => 1, y => 2)"),
+                ("in_pkg", "protected"),
+                ("plain_pkg", "11"),
+            ],
+            "{r}"
+        );
+        // A protected object expands to its variables.
+        let sc = c.request(
+            "variables",
+            json!({"variablesReference": vars[0]["variablesReference"]}),
+        );
+        assert_eq!(sc["body"]["variables"][0]["name"], "n", "{sc}");
+        assert_eq!(sc["body"]["variables"][0]["value"], count, "{sc}");
+        // Shown, not written; and not a signal.
+        let w = c.request(
+            "setVariable",
+            json!({"variablesReference": scope["variablesReference"], "name": "sn", "value": "9"}),
+        );
+        assert_eq!(w["success"], false, "{w}");
+        assert!(
+            w["message"].to_string().contains("shown, not written"),
+            "{w}"
+        );
+        let f = c.request(
+            "yavs/force",
+            json!({"signal": "sn", "value": "9", "frameId": frame}),
+        );
+        assert!(
+            f["message"].to_string().contains("is a shared variable"),
+            "{f}"
+        );
+        // The hierarchy lists a region's.
+        let h = list
+            .iter()
+            .find(|s| s["name"] == "Hierarchy")
+            .expect("Hierarchy");
+        let roots = c.request(
+            "variables",
+            json!({"variablesReference": h["variablesReference"]}),
+        );
+        let t = (roots["body"]["variables"].as_array().expect("roots").iter())
+            .find(|v| v["name"] == "t")
+            .unwrap_or_else(|| panic!("{roots}"));
+        let top = c.request(
+            "variables",
+            json!({"variablesReference": t["variablesReference"]}),
+        );
+        assert!(
+            top["body"]
+                .to_string()
+                .contains("\"evaluateName\":\"t.sc\""),
+            "{top}"
+        );
+        // A condition takes one, and `yavs/find` lists them.
+        let found = c.request("yavs/find", json!({"kind": "variables", "pattern": "s*"}));
+        let items = found["body"]["items"].to_string();
+        assert!(
+            items.contains("\"path\":\"t.sc\"") && items.contains("protected object"),
+            "{found}"
+        );
+        if line == 34 {
+            c.send("continue", json!({"threadId": tid}));
+        }
+    }
+    // Between cycles: nothing holds the shared state, no process is current.
+    c.request("yavs/runUntil", json!({"time": "1 ns"}));
+    c.event("stopped");
+    for (e, want) in [
+        ("sc", "protected"),
+        ("sc.n", "1"),
+        ("in_pkg.n", "1"),
+        ("sn", "6"),
+    ] {
+        let v = c.request("evaluate", json!({"expression": e}));
+        assert_eq!(v["body"]["result"], want, "{e}: {v}");
+    }
+    c.request("disconnect", json!({}));
+    drop(c.w);
+    child.wait().expect("wait");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// #938, #959: the conditions of a line breakpoint read a shared variable.
+#[test]
+fn a_breakpoint_condition_reads_a_shared_variable() {
+    let d = design("shared-cond", SHARED, &["--relaxed"]);
+    let path = std::path::absolute(d.join("t.vhd")).expect("path");
+    let mut child = spawn(&d, "t", &["--relaxed", "--dap=stdio"]);
+    let _w = Watchdog::new(child.id(), 60);
+    let mut c = stdio_client(&mut child);
+    c.request("initialize", json!({"adapterID": "yavs"}));
+    c.request("launch", json!({}));
+    let bp = c.request(
+        "setBreakpoints",
+        json!({"source": {"path": path}, "breakpoints": [
+            {"line": 33, "condition": "sn = 7"},
+            {"line": 34, "condition": "sn = 6 and sc.n = 1"},
+        ]}),
+    );
+    assert_eq!(bp["body"]["breakpoints"][1]["verified"], true, "{bp}");
+    c.request("configurationDone", json!({}));
+    let stop = c.event("stopped");
+    assert_eq!(stop["body"]["reason"], "breakpoint", "{stop}");
+    let tid = stop["body"]["threadId"].as_i64().expect("thread");
+    let st = c.request("stackTrace", json!({"threadId": tid}));
+    assert_eq!(st["body"]["stackFrames"][0]["line"], 34, "{st}");
+    c.request("disconnect", json!({}));
+    drop(c.w);
+    child.wait().expect("wait");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
 /// `YAVS_COUNTERS` reports a debugger session on stderr, including the counters that show
 /// activity observers and full signal histories are kept (#696).
 #[test]

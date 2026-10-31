@@ -868,6 +868,16 @@ pub(crate) fn explain(sh: &Shared, at: &At<'_, '_>, tid: i64, frame: usize, e: S
 
 /// "No such signal", with the help from the signals in scope.
 pub(crate) fn no_signal(sh: &Shared, tid: i64, name: &str) -> String {
+    // Without a process, a simple name means the top level's.
+    let top = (tid == 0).then(|| sh.design.roots.first()).flatten();
+    let full = top.map_or(name.to_string(), |&r| {
+        format!("{}{name}", sh.design.regions[r].path)
+    });
+    if let Some(crate::design::Named::Shared(_)) = sh.design.named(thread_proc(sh, tid), &full) {
+        return format!(
+            "`{name}` is a shared variable, not a signal: `examine` and `describe` show it"
+        );
+    }
     let in_scope = thread_proc(sh, tid).map_or_else(
         || sh.design.sigs.iter().map(|s| s.name.clone()).collect(),
         |p| {
@@ -904,11 +914,16 @@ pub(crate) fn names_here(sh: &Shared, at: &At<'_, '_>, tid: i64, frame: usize) -
         }
     }
     match thread_proc(sh, tid) {
-        Some(p) => out.extend(p.signals.iter().map(|&k| sh.design.sigs[k].name.clone())),
+        Some(p) => {
+            out.extend(p.signals.iter().map(|&k| sh.design.sigs[k].name.clone()));
+            out.extend(p.shared.iter().map(|&k| sh.design.shared[k].name.clone()));
+        }
         None => {
             let top = sh.design.roots.first();
             let sigs = top.into_iter().flat_map(|&r| &sh.design.regions[r].sigs);
             out.extend(sigs.map(|&k| sh.design.sigs[k].name.clone()));
+            let shared = top.into_iter().flat_map(|&r| &sh.design.regions[r].shared);
+            out.extend(shared.map(|&k| sh.design.shared[k].name.clone()));
         }
     }
     out.retain(|n| n != "self");
@@ -1394,12 +1409,13 @@ fn step(sh: &Shared, n: Next) -> Result<Exec, String> {
     Ok(Exec::Next(n))
 }
 
-fn restart(sh: &Shared) -> Result<Exec, String> {
+/// Ask for a run again from time 0 with this design, or say why not.
+pub(crate) fn restart(sh: &Shared) -> Result<(), String> {
     if let Some(why) = &sh.link.no_restart {
         return Err(why.clone());
     }
     *sh.restart.lock().unwrap_or_else(|p| p.into_inner()) = Some(None);
-    Ok(Exec::Next(Next::Restart))
+    Ok(())
 }
 
 /// `text` in lines of at most `width` columns, each after `indent` spaces but the first, which
@@ -1544,7 +1560,7 @@ fn exec(sh: &Shared, at: &At<'_, '_>, line: &str) -> Result<Exec, String> {
         "force" | "deposit" | "release" => change(sh, at, cmd, rest).map(Exec::Text),
         "where" => Ok(Exec::Text(where_text(sh, at))),
         "break" => break_cmd(sh, at, rest).map(Exec::Text),
-        "restart" | "reset" => restart(sh),
+        "restart" | "reset" => restart(sh).map(|()| Exec::Next(Next::Restart)),
         "wave" => wave(sh, at, rest).map(Exec::Text),
         "source" => {
             let text =
@@ -1688,6 +1704,9 @@ fn viewer_name(sh: &Shared, at: &At<'_, '_>, name: &str) -> Result<String, Strin
     }
     if let Some((k, part)) = split_part(sh, proc, &qualify(sh, at, name)) {
         return Ok(format!("{}{part}", dotted(&sh.design.sigs[k].path)));
+    }
+    if let Some((k, part)) = tools::shared_part(sh, at, name) {
+        return tools::recorded_shared(sh, k, name).map(|p| format!("{p}{part}"));
     }
     if !name.contains(['.', ':'])
         && let Some(&t) = sh.design.roots.first()

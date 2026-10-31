@@ -385,6 +385,17 @@ impl<'a> FrameView<'a> {
         crate::read_object(&m, target, p).map_err(crate::fault_text)
     }
 
+    /// Whether this process holds the shared state: then the mutex is locked by the run of this
+    /// very process, and shared variables and the shared heap are read here, not through it.
+    pub fn holds_shared(&self) -> bool {
+        self.m.borrow().sh.is_some()
+    }
+
+    /// [`crate::shared_var`] for a process that holds the shared state.
+    pub fn shared_var(&self, slot: u64, ty: TyId) -> Result<CallVal, String> {
+        crate::read_slot(&self.m.borrow(), ty, slot).map_err(crate::fault_text)
+    }
+
     /// A scalar local formatted the way VHDL `'image` shows it.
     pub fn format(&self, ty: TyId, bytes: &[u8]) -> Option<String> {
         format_scalar(self.prog, ty, bytes)

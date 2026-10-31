@@ -449,7 +449,7 @@ pub struct Elaborated {
     /// variables with it, as signals with theirs (#321).
     pub var_shapes: std::collections::HashMap<(Option<ScopeId>, yavs_sem::DeclId), Shape>,
     /// Shared variables by (declaring region, declaration): one object each (#249).
-    pub(crate) shared_vars: std::collections::HashSet<(ScopeId, yavs_sem::DeclId)>,
+    pub shared_vars: std::collections::HashSet<(ScopeId, yavs_sem::DeclId)>,
     /// The ranges of types and subtypes elaboration evaluated at their declarations, by
     /// declaring scope and left bound (`UnitIr::ranges`, #612).
     pub(crate) ranges: std::collections::HashMap<(ScopeId, yavs_sem::ExprId), Bounds>,

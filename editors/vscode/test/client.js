@@ -8,7 +8,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { spawnSync } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const { DebugClient } = require('@vscode/debugadapter-testsupport');
 
 const yavs = path.resolve(process.argv[2] || 'yavs');
@@ -279,10 +279,117 @@ async function failedLaunch() {
   await bad.stop();
 }
 
+const more = path.join(dir, 'more.vhd');
+
+/** A session on `more_tb`, with `generics` and started by `start`. */
+async function moreClient(generics, run) {
+  fs.copyFileSync(path.join(__dirname, '..', 'sample', 'more.vhd'), more);
+  const r = spawnSync(yavs, ['analyze', `--work=${work}`, more], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  const c = new DebugClient(q(yavs), `run ${q('--work=' + work)} ${generics} --dap=stdio more_tb`, 'yavs', {
+    shell: true,
+    cwd: dir,
+  });
+  c.defaultTimeout = 10000;
+  await c.start();
+  try {
+    await c.initializeRequest({ clientID: 'vscode', adapterID: 'yavs', linesStartAt1: true, columnsStartAt1: true });
+    await run(c);
+  } finally {
+    c.stopAdapter();
+  }
+}
+
+/** #938, #959, #942: a shared variable in the views and the names of unlabelled processes. */
+async function sharedAndThreads() {
+  await moreClient('', async (c) => {
+    await c.launchRequest({});
+    await c.setBreakpointsRequest({ source: { path: more }, breakpoints: [{ line: 32 }] });
+    const stopped = c.waitForEvent('stopped');
+    await c.configurationDoneRequest();
+    const s = await stopped;
+    const names = (await c.threadsRequest()).body.threads.map((t) => t.name);
+    assert.deepEqual(names, ['more_tb.clk <= ... (more.vhd:21)', 'more_tb.process (more.vhd:23)']);
+    const st = await c.stackTraceRequest({ threadId: s.body.threadId });
+    const top = st.body.stackFrames[0];
+    assert.equal(top.name, 'more_tb.process (more.vhd:23)');
+    const scopes = (await c.scopesRequest({ frameId: top.id })).body.scopes;
+    const shared = scopes.find((x) => x.name === 'Shared Variables');
+    assert.ok(shared, JSON.stringify(scopes));
+    const list = (await c.variablesRequest({ variablesReference: shared.variablesReference })).body.variables;
+    assert.equal(list[0].name, 'tally');
+    assert.equal(list[0].value, 'protected');
+    const state = await c.variablesRequest({ variablesReference: list[0].variablesReference });
+    assert.equal(state.body.variables[0].name, 'total');
+    assert.equal(state.body.variables[0].value, '3');
+    for (const context of ['watch', 'hover']) {
+      const v = await c.evaluateRequest({ expression: 'tally', frameId: top.id, context });
+      assert.equal(v.body.result, 'protected');
+    }
+    const part = await c.evaluateRequest({ expression: 'tally.total', frameId: top.id, context: 'watch' });
+    assert.equal(part.body.result, '3');
+    const repl = (expression) => c.evaluateRequest({ expression, frameId: top.id, context: 'repl' });
+    assert.match((await repl('describe tally')).body.result, /protected object/);
+    assert.match((await repl('find variables tally')).body.result, /more_tb\.tally +protected object/);
+    await c.disconnectRequest({});
+  });
+}
+
+/** #939: the report comes while the process is still running, and a pause still stops it. */
+async function liveReport() {
+  await moreClient('-gSPIN=true', async (c) => {
+    await c.launchRequest({});
+    const out = c.waitForEvent('output');
+    await c.configurationDoneRequest();
+    assert.match((await out).body.output, /before the loop/);
+    const stopped = c.waitForEvent('stopped');
+    await c.pauseRequest({ threadId: 1 });
+    await stopped;
+    await c.disconnectRequest({});
+  });
+}
+
+/** #963: an attached client's restart: the run starts again and stops at the breakpoint. */
+async function attachedRestart() {
+  const r = spawnSync(yavs, ['analyze', `--work=${work}`, src], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  const run = spawn(yavs, ['run', `--work=${work}`, '--dap=0', 'tb'], { cwd: dir, stdio: ['ignore', 'ignore', 'pipe'] });
+  const exited = new Promise((resolve) => run.on('exit', resolve));
+  const port = await new Promise((resolve) => {
+    run.stderr.on('data', (d) => {
+      const m = /listening on 127\.0\.0\.1:(\d+)/.exec(d.toString());
+      if (m) resolve(Number(m[1]));
+    });
+  });
+  const c = new DebugClient('unused', 'unused', 'yavs');
+  c.defaultTimeout = 10000;
+  await c.start(port);
+  const init = await c.initializeRequest({ clientID: 'vscode', adapterID: 'yavs', linesStartAt1: true, columnsStartAt1: true });
+  assert.equal(init.body.supportsRestartRequest, true);
+  await c.attachRequest({});
+  await c.setBreakpointsRequest({ source: { path: src }, breakpoints: [{ line: 22 }] });
+  let stopped = c.waitForEvent('stopped');
+  await c.configurationDoneRequest();
+  await stopped;
+  const before = await c.evaluateRequest({ expression: ':tb:cnt' });
+  stopped = c.waitForEvent('stopped');
+  await c.restartRequest({ arguments: {} });
+  const s = await stopped;
+  assert.equal(s.body.reason, 'breakpoint');
+  assert.match(s.body.description, /^breakpoint at 0 fs/);
+  assert.equal(before.body.result, '0');
+  await c.disconnectRequest({});
+  c.stopAdapter();
+  await exited;
+}
+
 // Exit 1 unless the session passed (an unsettled promise must not end as success).
 process.exitCode = 1;
 main()
   .then(failedLaunch)
+  .then(sharedAndThreads)
+  .then(liveReport)
+  .then(attachedRestart)
   .then(() => {
     fs.rmSync(dir, { recursive: true, force: true });
     console.log('ok: VS Code style session passed');

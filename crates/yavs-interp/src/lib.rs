@@ -2218,6 +2218,20 @@ pub fn shared_var(
     with_shared(rt, shared, |m| read_slot(m, ty, slot))
 }
 
+/// The object of IR type `ty` that shared handle `h` designates, read between cycles or at a stop
+/// of a process that does not hold the shared state (the debugger, #938).
+pub fn shared_object(
+    rt: &Arc<Runtime>,
+    shared: &Mutex<SharedState>,
+    ty: yavs_ir::TyId,
+    h: u64,
+) -> Result<CallVal, String> {
+    with_shared(rt, shared, |m| {
+        let p = m.deref(h, yavs_ir::CheckMsgId(0))?;
+        read_object(m, ty, p)
+    })
+}
+
 /// Whether the shared variable holds exactly `v`, compared in place (see
 /// [`InterpProcess::var_is`]).
 pub fn shared_var_is(

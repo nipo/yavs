@@ -455,8 +455,7 @@ pub(crate) struct Cx {
     /// Bytes of the shared variables area allocated so far (package files and non-protected
     /// shared variables).
     pub shared_size: u32,
-    /// Non-protected shared variables lowered so far and the IR types of their values
-    /// (`Lowerer::var_slots`).
+    /// Shared variables lowered so far and the IR types of their values (`Lowerer::var_slots`).
     pub shared_vars: Vec<(DeclId, TyId)>,
     /// The leaves of record signals, in leaf order.
     pub rec_leaves: HashMap<DeclId, Vec<RecLeaf>>,
@@ -1024,33 +1023,41 @@ impl<'a> Lowerer<'a> {
         }
     }
 
-    /// Each non-protected shared variable lowered so far and the IR type of its value; for a
-    /// package's, a thunk returning the address of its slot (a scalar, or `[data, desc, ..]` as
-    /// `VarShape` says). A region's slot address is what its instance cell holds. VHPI reads
-    /// and writes the variable there (#309).
+    /// Each shared variable lowered so far and the IR type of its value; for a package's, a thunk
+    /// returning the address of its slot (a scalar, or `[data, desc, ..]` as `VarShape` says), or
+    /// the handle of its object if it is of a protected type. A region's slot address or handle
+    /// is what its instance cell holds. VHPI reads and writes a variable there (#309); a debugger
+    /// reads objects through the handle (#938).
     pub fn var_slots(&mut self) -> Result<Vec<VarSlot>, Vec<Diagnostic>> {
         let mut out = Vec::new();
         for (d, ty) in self.cx.shared_vars.clone() {
-            let Some(
-                Obj::Scalar {
-                    space: Space::Shared,
-                    off,
-                    ..
-                }
-                | Obj::Array {
-                    space: Space::Shared,
-                    off,
-                },
-            ) = self.cx.objs.get(&d).copied()
-            else {
-                out.push((d, None, ty));
-                continue;
-            };
             let decl = &self.db.decls[d];
             let (name, span) = (format!("{}'slot", decl.name), decl.span);
-            let f = func::thunk(self.db, &mut self.pb, &mut self.cx, &name, span, |fx| {
-                Ok(fx.addr(Space::Shared, off))
-            });
+            let f = match self.cx.objs.get(&d).copied() {
+                Some(
+                    Obj::Scalar {
+                        space: Space::Shared,
+                        off,
+                        ..
+                    }
+                    | Obj::Array {
+                        space: Space::Shared,
+                        off,
+                    },
+                ) => func::thunk(self.db, &mut self.pb, &mut self.cx, &name, span, |fx| {
+                    Ok(fx.addr(Space::Shared, off))
+                }),
+                Some(Obj::Scalar {
+                    space: Space::Pkg(_),
+                    ..
+                }) => func::thunk(self.db, &mut self.pb, &mut self.cx, &name, span, |fx| {
+                    fx.obj_cell(d, span)
+                }),
+                _ => {
+                    out.push((d, None, ty));
+                    continue;
+                }
+            };
             self.drain();
             match f {
                 Ok(f) if self.cx.diags.is_empty() => out.push((d, Some(f), ty)),

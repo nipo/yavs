@@ -533,6 +533,8 @@ pub(crate) fn shared_var(
                 w: Width::B8,
             },
         );
+        let ty = crate::ty::lower(db, cx, pb, t, span)?;
+        cx.shared_vars.push((d, ty));
         crate::func::thunk(db, pb, cx, &name, span, |fx| {
             let h = fx.prot_new(t, true, span)?;
             fx.prot_name(d, t, h, span)?;

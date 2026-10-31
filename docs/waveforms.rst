@@ -28,7 +28,7 @@ Choosing what is recorded
 * ``--wave-variables`` also records process variables (in a scope named after the process, such as
   ``tb.main.count``) and shared variables. A variable shows its value at the end of each time step. A debug session
   (``--dap``, ``--interactive``, ``--do``) that records a wave does this without the flag. A local of a subprogram is never
-  recorded: it exists only during a call. A variable that holds an access value or a protected object is not either.
+  recorded: it exists only during a call. A variable that holds an access value or a protected object is not either; at a stop, ``examine`` shows it.
 * ``--wave-max-array=N`` (default 65536) leaves out arrays with more elements, such as large
   memories, with warning ``W0802``.
 
