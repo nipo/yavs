@@ -1094,6 +1094,12 @@ fn fake_surfer(d: &Path, body: &str) -> std::path::PathBuf {
 fn spawn_mode_connects_back() {
     let d = setup("spawn");
     let bin = fake_surfer(&d, "sleep 30");
+    // The rest of PATH for `sleep`: a fake that ends at once takes its port with it.
+    let path = format!(
+        "{}:{}",
+        bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
     let fake = Fake::default();
     let (fake2, dir) = (fake.clone(), d.to_path_buf());
     let t = std::thread::spawn(move || {
@@ -1112,7 +1118,7 @@ fn spawn_mode_connects_back() {
     });
     let o = yavs()
         .current_dir(&d)
-        .env("PATH", &bin)
+        .env("PATH", &path)
         .args(["run", "--work=work:build/work", "tb", "--surfer"])
         .stdin(Stdio::null())
         .output()
