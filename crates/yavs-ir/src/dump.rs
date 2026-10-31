@@ -63,7 +63,7 @@ impl fmt::Display for Program {
                 "{id} = foreign `{}` {} {:?}",
                 x.name,
                 x.symbol,
-                x.signature()
+                x.signature(yavs_ffi::ArgLayout::Length)
             )?;
         }
         for (id, _) in self.funcs.iter().filter(|(_, f)| !f.spare) {

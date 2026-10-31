@@ -24,6 +24,7 @@ fn setup(
         args,
         ret,
         model: None,
+        fat: Default::default(),
     });
     (x, pb.declare("fun", FuncKind::Function, None))
 }

@@ -425,9 +425,9 @@ Arguments:
 
    With ``--cov``: also leave ``translate_off`` ... ``translate_on`` regions out of the coverage.
 
-.. option:: --load=LIB
+.. option:: --load=LIB[:args=LAYOUT]
 
-   Load a shared library for foreign subprograms (E0106 when it cannot be loaded, E0107 when a subprogram cannot be bound).
+   Load a shared library for foreign subprograms (E0106 when it cannot be loaded, E0107 when a subprogram cannot be bound). ``:args=LAYOUT`` says how its functions take their arguments: ``length`` (default) or ``fat-pointer`` (E0136 for any other).
 
    May be repeated.
 
@@ -490,7 +490,7 @@ Arguments:
 
    May be repeated.
 
-Diagnostics named above: ``E0105``, ``E0106``, ``E0107``, ``E0120``, ``E0701``, ``E0801``, ``E0901``, ``E0902``, ``E3002``; ``yavs --explain CODE`` explains each.
+Diagnostics named above: ``E0105``, ``E0106``, ``E0107``, ``E0120``, ``E0136``, ``E0701``, ``E0801``, ``E0901``, ``E0902``, ``E3002``; ``yavs --explain CODE`` explains each.
 
 ``yavs cov merge``
 ------------------

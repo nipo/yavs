@@ -24,7 +24,10 @@ mod pmemo;
 mod pre;
 mod scan;
 pub use eloop::{ElemLoop, elem_loops};
-pub use foreign::{ForeignModel, ModelArg, ModelCall, ModelSignal, ModelTxn, ScalarKind};
+pub use foreign::{
+    ForeignBinder, ForeignModel, ModelArg, ModelCall, ModelSignal, ModelTxn, ScalarKind,
+    set_foreign_binder,
+};
 pub use scan::{Scan, ScanFrom, ScanShape, SearchLoop, scan_bytes, search_loops};
 mod heap;
 mod ieee;
@@ -1625,14 +1628,14 @@ impl Runtime {
                     "binding for missing foreign subprogram {id}"
                 )));
             };
-            if f.signature() != &x.signature() {
+            if f.signature() != &x.signature(f.layout()) {
                 return Err(usage(format!(
                     "foreign subprogram `{}` ({}): bound function has C signature {:?}, \
                      the declaration needs {:?}",
                     x.name,
                     x.symbol,
                     f.signature(),
-                    x.signature()
+                    x.signature(f.layout())
                 )));
             }
             foreign[id.0 as usize] = Some(f);

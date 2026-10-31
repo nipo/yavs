@@ -122,6 +122,55 @@ a pointer to its elements from left to right (a `std_logic` element is one byte,
 dimension. A record of scalars is a pointer to a C struct, an access value a pointer to the
 designated object.
 
+### The fat-pointer layout
+
+Some C code expects another argument layout. `--load=LIB:args=fat-pointer` selects it for the one
+library; every other library keeps the layout above, which `--load=LIB:args=length` also names. The
+layout belongs to the library that defines the symbol, so one run can mix both.
+
+An unconstrained array is then one pointer, to a struct that holds the data pointer and a pointer to
+its bounds. The bounds are one struct per dimension, in order and naturally aligned, whose `left` and
+`right` have the C type of that index type; `dir` is 0 for `to` and 1 for `downto`:
+
+```c
+struct bounds { int32_t left, right; uint8_t dir; uint32_t len; }; /* an index of 32 bits */
+struct fat_pointer { void *data; struct bounds *bounds; };
+
+int32_t str_len(struct fat_pointer *s) { return s->bounds->len; }
+```
+
+```vhdl
+function str_len (s : string) return integer;
+attribute foreign of str_len : function is "VHPIDIRECT str_len";
+```
+
+```
+yavs run --work=lib:out/lib --load=./libhelpers.so:args=fat-pointer tb
+```
+
+| VHDL | `length` (default) | `fat-pointer` |
+|---|---|---|
+| Integer type or subtype, by value | smallest of `int8_t` to `int64_t` that holds the subtype | `int32_t`, or `int64_t` when the base type does not fit 32 bits |
+| Enumeration | smallest unsigned type that holds its literals | `uint8_t`, or `uint32_t` above 256 literals |
+| `real`, physical type | `double`, `int64_t` | the same |
+| Scalar `out` or `inout` | pointer to the C type above | the same |
+| Constrained array | pointer to its elements, left to right | the same, in the element types above |
+| Unconstrained array | pointer to its elements, then one `int64_t` length per dimension | pointer to the struct shown above |
+| Array of `std_logic`, `bit`, `boolean`, `character` | one byte per element | the same |
+| Record of scalars | pointer to a naturally aligned C struct | the same, in the field types above |
+| Access value | pointer to the designated object | not supported: error `E0107` when the run starts |
+| Function result | scalar by value | the same |
+| Record or array result, access result | not supported: error `E2001` | the same |
+
+A record with composite fields and an array of composite elements are errors at the call in both
+layouts. An unknown layout name is error `E0136`.
+
+The libraries load before elaboration, so a foreign function can give a signal or constant its
+initial value (`signal id : integer := open_image(name);`). With `yavs elab`, which has no `--load`,
+such a call is an error. A call during elaboration can run again when the simulation is built if
+elaboration cannot hand its package state over (coverage of statements, for example): keep such
+functions free of effects that cannot be repeated.
+
 ## Full detail
 
 The per-area audit of the standard with the open issues, and call-by-call behaviour, are in

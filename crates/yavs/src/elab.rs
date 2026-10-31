@@ -182,8 +182,9 @@ pub struct RunArgs {
     #[arg(long)]
     cov_exclude_translate_off: bool,
     /// Load a shared library for foreign subprograms (E0106 when it cannot be loaded, E0107 when a
-    /// subprogram cannot be bound).
-    #[arg(long, value_name = "LIB")]
+    /// subprogram cannot be bound). `:args=LAYOUT` says how its functions take their arguments:
+    /// `length` (default) or `fat-pointer` (E0136 for any other).
+    #[arg(long, value_name = "LIB[:args=LAYOUT]")]
     load: Vec<String>,
     /// Load a VHPI plugin, `LIB[:ENTRY]` (E0901 when it cannot be loaded, E0902 when the entry
     /// point is missing).
@@ -596,20 +597,37 @@ fn top_not_found(top: &str, work: &str, miss: Diagnostic) -> Box<Diagnostic> {
     Box::new(d)
 }
 
-/// Loads the `--load` libraries and binds every foreign subprogram of the program to its
-/// symbol: in the libraries in order, then in the executable (ir.md 1.7).
-fn bind_foreign(
-    load: &[String],
-    e: &mut yavs_elab::Elaborated,
-    out: &mut Out,
-) -> Result<(), Box<Diagnostic>> {
-    let Some(ir) = e.ir.as_mut() else {
-        return Ok(());
-    };
+/// The library and the argument layout of a `--load` value, `LIB[:args=LAYOUT]`.
+fn load_value(value: &str) -> Result<(&str, yavs_vhpi::ArgLayout), Box<Diagnostic>> {
+    use yavs_vhpi::ArgLayout;
+    Ok(match value.rsplit_once(":args=") {
+        None => (value, ArgLayout::Length),
+        Some((lib, "length")) => (lib, ArgLayout::Length),
+        Some((lib, "fat-pointer")) => (lib, ArgLayout::FatPointer),
+        Some((_, other)) => {
+            let key = other.to_ascii_lowercase();
+            let layouts = ["length", "fat-pointer"].map(|l| (l, l));
+            let mut d = Diagnostic::error(
+                "E0136",
+                format!("unknown argument layout `{other}` in `--load={value}`"),
+            );
+            if let Some(h) = yavs_sem::suggest::suggest(&key, "layout", layouts.into_iter()) {
+                d = d.with_help(h);
+            }
+            return Err(Box::new(d.with_help(
+                "the layouts are `length` (the default) and `fat-pointer`",
+            )));
+        }
+    })
+}
+
+/// Loads the `--load` libraries, before elaboration: a signal's initial value may call them.
+fn load_libraries(load: &[String]) -> Result<Vec<yavs_vhpi::ForeignLib>, Box<Diagnostic>> {
     let mut libs = Vec::new();
     for l in load {
-        let lib = yavs_vhpi::load_foreign(l.as_ref()).map_err(|err| {
-            let d = Diagnostic::error("E0106", format!("cannot load library `{l}` (`--load`)"));
+        let (path, layout) = load_value(l)?;
+        let lib = yavs_vhpi::load_foreign(path.as_ref(), layout).map_err(|err| {
+            let d = Diagnostic::error("E0106", format!("cannot load library `{path}` (`--load`)"));
             Box::new(match err {
                 yavs_vhpi::LoadError::NotFound { tried, .. } => {
                     d.with_note(format!("no such file: {}", tried.display()))
@@ -626,6 +644,19 @@ fn bind_foreign(
         })?;
         libs.push(lib);
     }
+    Ok(libs)
+}
+
+/// Binds every foreign subprogram of the program to its symbol: in the libraries in order, then
+/// in the executable (ir.md 1.7).
+fn bind_foreign(
+    libs: &[yavs_vhpi::ForeignLib],
+    e: &mut yavs_elab::Elaborated,
+    out: &mut Out,
+) -> Result<(), Box<Diagnostic>> {
+    let Some(ir) = e.ir.as_mut() else {
+        return Ok(());
+    };
     let searched = libs
         .iter()
         .map(|l| format!("`{}`, ", l.path.display()))
@@ -661,8 +692,16 @@ fn bind_foreign(
             }
             continue;
         }
-        match yavs_vhpi::bind_foreign(&libs, &x.symbol, x.signature()) {
-            Some(Ok(f)) => ir.foreign.push((id, f)),
+        match yavs_vhpi::bind_foreign(libs, &x.symbol, |layout| x.signature(layout)) {
+            Some(Ok(f)) => {
+                if let Some(err) = x.unsupported_in(f.layout()) {
+                    return Err(Box::new(Diagnostic::error(
+                        "E0107",
+                        format!("foreign subprogram `{}` cannot be called: {err}", x.name),
+                    )));
+                }
+                ir.foreign.push((id, f));
+            }
             Some(Err(err)) => {
                 return Err(Box::new(Diagnostic::error(
                     "E0107",
@@ -1264,6 +1303,24 @@ fn prepare(
         cov_expression: kind(CovKindArg::Expression),
         ..yavs_elab::LowerOptions::default()
     };
+    let libs = match load_libraries(&a.load) {
+        Ok(libs) => libs,
+        Err(d) => {
+            let mut out = Out::new(format, color);
+            out.emit(&SourceMap::default(), &d);
+            return Err((out, 2));
+        }
+    };
+    if !libs.is_empty() {
+        let libs = libs.clone();
+        yavs_interp::set_foreign_binder(std::sync::Arc::new(move |x| {
+            let f = yavs_vhpi::bind_foreign(&libs, &x.symbol, |l| x.signature(l))?;
+            Some(
+                f.map_err(|e| e.to_string())
+                    .and_then(|f| x.unsupported_in(f.layout()).map_or(Ok(f), Err)),
+            )
+        }));
+    }
     // A debugger or VHPI plugin may force or deposit any port: those runs keep ports apart.
     let collapse = !a.debugged() && a.vhpi.is_empty();
     let (mut out, db, e) = elaborate(
@@ -1426,7 +1483,7 @@ fn prepare(
         },
     };
     let mut e = e;
-    let bound = bind_foreign(&a.load, &mut e, &mut out);
+    let bound = bind_foreign(&libs, &mut e, &mut out);
     if let Err(d) = bound {
         out.emit(&none, &d);
     }

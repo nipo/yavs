@@ -478,7 +478,7 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   that sleeps between samples: no signal or timer is used. Time in plugin callbacks (`--vhpi`) is
   in the kernel share. With `--dap` it is `E0125` (exit 2). Off by default and
   then free: no process is wrapped and no thread exists.
-- `--load=LIB` (repeatable): load a shared library for VHPIDIRECT foreign
+- `--load=LIB[:args=LAYOUT]` (repeatable; `LAYOUT` is `length`, the default, or `fat-pointer`, see the VHPI guide; another name is `E0136`, exit 2; libraries load before elaboration): load a shared library for VHPIDIRECT foreign
   subprograms. A bare name goes to the OS library search path, a path must exist.
   Every foreign subprogram the design calls is bound before the simulation starts:
   its symbol is looked up in the `--load` libraries in order, then in the

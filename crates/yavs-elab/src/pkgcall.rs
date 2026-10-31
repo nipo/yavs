@@ -1204,8 +1204,8 @@ impl Session {
         let sources = Sources::of(&prog, &db.sources);
         let before: Vec<usize> = self.order.iter().map(|&(_, n)| n).collect();
         let mut calls = Replay::new(&items, &self.log, &before);
-        // ponytail: foreign subprograms are bound only for the simulation (`yavs run
-        // --load`), so calling one during elaboration is a runtime error.
+        // Foreign subprograms are bound for the simulation (`yavs run --load`); a call during
+        // elaboration finds its function through `yavs_interp::set_foreign_binder`.
         let rt = init_packages(
             &prog,
             0,

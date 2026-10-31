@@ -229,6 +229,22 @@ impl Ty {
         layout(types, consts, ty, desc, 0)
     }
 
+    /// The C type of this scalar in the fat-pointer layout of a foreign call: an integer in
+    /// the 32 or 64 bits of its type, an enumeration in 8 or, above 256 literals, 32 bits.
+    pub fn fat_ctype(&self) -> Option<yavs_ffi::CType> {
+        use yavs_ffi::CType;
+        Some(match self {
+            Ty::Int { lo, hi } if *lo >= i64::from(i32::MIN) && *hi <= i64::from(i32::MAX) => {
+                CType::I32
+            }
+            Ty::Int { .. } | Ty::Physical { .. } => CType::I64,
+            Ty::Real => CType::F64,
+            Ty::Enum { lits, .. } if lits.len() <= 256 => CType::U8,
+            Ty::Enum { .. } => CType::U32,
+            _ => return None,
+        })
+    }
+
     /// The logic kind of the scalar leaf when `ty` is a (possibly nested) logic array.
     pub fn logic_leaf(types: &Types, ty: TyId) -> Option<LogicKind> {
         let mut t = ty;

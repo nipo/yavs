@@ -56,7 +56,7 @@ def setup(context):
         command.insert(2, "-fPIC")
     subprocess.run(command, check=True, cwd=build)
 
-    hooks = YavsInterface.native_library_hooks(library)
+    hooks = YavsInterface.native_library_hooks(library, args=os.environ.get("NATIVE_DEMO_ARGS"))
     # An embedded interpreter finds its standard library from the installation it was built for
     hooks["run_env"] = lambda simulator_interface, env: dict(env, PYTHONHOME=sys.base_prefix)
     context.register_simulator_hooks("yavs", **hooks)

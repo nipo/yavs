@@ -128,6 +128,8 @@ Syntax, command line, waveforms, coverage, debugger, plugins (E0 and W0)
      - ``yavs lint`` cannot use its configuration or waiver file: it cannot be read, is not valid YAML, or names a key, class or rule that does not exist.
    * - _`E0135`
      - ``yavs lint`` cannot write a report file, named by ``--json``, ``--sarif``, ``--junit``, ``--quality-report`` or ``--sonarqube``.
+   * - _`E0136`
+     - The argument layout in ``--load=LIB:args=LAYOUT`` does not exist: ``length`` is the default, ``fat-pointer`` the other one (see the VHPI guide).
    * - _`E0199`
      - A command option or combination is not implemented yet.
    * - _`E0701`

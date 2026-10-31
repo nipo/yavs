@@ -529,6 +529,14 @@ class TestYavsInterface(unittest.TestCase):
         _, elab, _ = self._simulate(make_config(), elaborate_only=True)
         self.assertNotIn(load, elab)
 
+    @mock.patch("vunit.sim_if.check_output", autospec=True, return_value="")
+    def test_native_library_hooks_name_an_argument_layout(self, check_output):
+        registry = SimulatorHooks()
+        registry.register("yavs", **YavsInterface.native_library_hooks(Path("h.so"), args="fat-pointer"))
+        self.simif.simulator_hooks = registry
+        _, run, _ = self._simulate(make_config())
+        self.assertIn("--load=h.so:args=fat-pointer", run)
+
     def test_simulate_failure_is_not_swallowed(self):
         status, _, _ = self._simulate(make_config(), returncode=1)
         self.assertFalse(status)

@@ -14,6 +14,18 @@
 
 EXPORT int32_t native_add1(int32_t x) { return x + 1; }
 
+/* For a library loaded in the fat-pointer argument layout. */
+struct native_bounds {
+  int32_t left, right;
+  uint8_t dir;
+  uint32_t len;
+};
+struct native_fat {
+  const char *data;
+  struct native_bounds *bounds;
+};
+EXPORT int32_t native_fat_len(struct native_fat *s) { return (int32_t)s->bounds->len + (s->data[0] == 'h'); }
+
 #ifdef WITH_PYTHON
 static PyObject *run(const char *chunk, int32_t length, int start) {
   PyObject *globals;

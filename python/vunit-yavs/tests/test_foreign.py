@@ -31,7 +31,7 @@ AVAILABLE = native_demo_setup.available()
 class TestForeignSubprograms(unittest.TestCase):
     """A package's native library is loaded into each simulation and its functions are called from VHDL"""
 
-    def _run(self, python):
+    def _run(self, python, args=None):
         with tempfile.TemporaryDirectory() as tempdir:
             xml = Path(tempdir) / "x.xml"
             env = dict(
@@ -41,6 +41,8 @@ class TestForeignSubprograms(unittest.TestCase):
                 PYTHONPATH=os.pathsep.join([str(PROJECT), os.environ.get("PYTHONPATH", "")]),
                 NATIVE_DEMO_PYTHON="1" if python else "0",
             )
+            if args:
+                env["NATIVE_DEMO_ARGS"] = args
             proc = subprocess.run(
                 [sys.executable, str(PROJECT / "run.py"), "-o", str(Path(tempdir) / "out"), "-x", str(xml)],
                 env=env,
@@ -55,6 +57,15 @@ class TestForeignSubprograms(unittest.TestCase):
 
     def test_native_function(self):
         self.assertEqual(self._run(python=False), {"lib.tb_native.A native library function is called": "passed"})
+
+    def test_fat_pointer_layout(self):
+        self.assertEqual(
+            self._run(python=False, args="fat-pointer"),
+            {
+                "lib.tb_native.A native library function is called": "passed",
+                "lib.tb_fat.A string reaches the library as a fat pointer": "passed",
+            },
+        )
 
     @unittest.skipUnless(AVAILABLE["python"], "needs a shared libpython and its headers (Linux)")
     def test_python_from_vhdl(self):

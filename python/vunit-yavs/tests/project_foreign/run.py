@@ -22,4 +22,6 @@ LIB = VU.add_library("lib")
 LIB.add_source_files(Path(__file__).parent / "tb_native.vhd")
 if os.environ.get("NATIVE_DEMO_PYTHON") == "1":
     LIB.add_source_files(Path(__file__).parent / "tb_python.vhd")
+if os.environ.get("NATIVE_DEMO_ARGS") == "fat-pointer":
+    LIB.add_source_files(Path(__file__).parent / "tb_fat.vhd")
 VU.main()

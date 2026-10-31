@@ -1,15 +1,29 @@
 //! VHPIDIRECT calls (ir.md 1.7): marshalling VHDL values to C arguments and back.
 
-use yavs_ffi::{Arg, CType, Ret};
+use std::sync::{Arc, Mutex, PoisonError};
+use yavs_ffi::ForeignFn;
+use yavs_ffi::{Arg, ArgLayout, CType, Ret};
 use yavs_ir::{
-    ForeignArg, ForeignId, ForeignMode, Func, LogicKind, Program, Regs, Ty, TyId, VhpiIndex,
-    VhpiModel, Width,
+    ForeignArg, ForeignId, ForeignMode, ForeignRef, Func, LogicKind, Program, Regs, Ty, TyId,
+    VhpiIndex, VhpiModel, Width,
 };
 
 use yavs_kernel::{Ctx, DelayMode, Elem, Time, Value};
 
 use crate::exec::{Fault, Machine, R, add_addr, ice, rt_err};
 use crate::heap::Obj;
+
+/// Finds the C function of a foreign subprogram: `None` if nothing defines it, an error if it
+/// cannot be called.
+pub type ForeignBinder = dyn Fn(&ForeignRef) -> Option<Result<ForeignFn, String>> + Send + Sync;
+
+static BINDER: Mutex<Option<Arc<ForeignBinder>>> = Mutex::new(None);
+
+/// What a call of a foreign subprogram no [`Bindings`](crate::Bindings) bound asks: the runtimes
+/// of elaboration-time calls have no bindings, the libraries are loaded before elaboration.
+pub fn set_foreign_binder(b: Arc<ForeignBinder>) {
+    *BINDER.lock().unwrap_or_else(PoisonError::into_inner) = Some(b);
+}
 
 /// The scalar type of a model call's value or array element.
 #[derive(Clone, Debug, PartialEq)]
@@ -131,6 +145,14 @@ fn ctype_of(t: &Ty) -> Option<CType> {
     lower_param(v, Mode::In).ok()?.first().copied()
 }
 
+/// The C type of an array element or record field in `layout`.
+fn ctype_in(t: &Ty, layout: ArgLayout) -> Option<CType> {
+    match layout {
+        ArgLayout::Length => ctype_of(t),
+        ArgLayout::FatPointer => t.fat_ctype(),
+    }
+}
+
 pub(crate) fn arg_bits(a: Arg) -> u64 {
     match a {
         Arg::I8(v) => v as u8 as u64,
@@ -237,6 +259,8 @@ enum Temp {
         data: u64,
         ty: TyId,
         n: u64,
+        /// The fat-pointer layout: what C gets a pointer to, and the bounds it points at.
+        fat: Option<Box<([u64; 2], Vec<u64>)>>,
     },
     Record {
         buf: Vec<u8>,
@@ -273,8 +297,44 @@ impl Machine {
         Ok((data, lens))
     }
 
-    /// The element type, its C type and whether it is a logic leaf (`Some(is_bit)`).
-    fn array_elem(&self, ty: TyId, name: &str) -> R<(Ty, CType, Option<bool>, u8)> {
+    /// The bounds the fat pointer of the array at `fat` points at: per dimension a C struct
+    /// `{ index left, right; uint8_t dir; uint32_t len; }` of index type `index[d]`, naturally
+    /// aligned, in words so that the buffer is aligned for any of them.
+    fn fat_bounds(&self, fat: u64, index: &[CType], name: &str) -> R<Vec<u64>> {
+        let dope = self.load(add_addr(fat, 8)?, Width::B8)?;
+        let mut b: Vec<u8> = Vec::new();
+        for (d, &ct) in index.iter().enumerate() {
+            let at = add_addr(dope, d as u64 * 24)?;
+            let l = self.load(at, Width::B8)?;
+            let r = self.load(add_addr(at, 8)?, Width::B8)?;
+            let dir = self.load(add_addr(at, 16)?, Width::B8)?;
+            let len = yavs_ir::dim_len(l as i64, r as i64, dir == 1)
+                .ok_or_else(|| Fault::Runtime("array too long for a foreign call".into()))?;
+            let cs = csize(ct);
+            let base = b.len().next_multiple_of(cs.max(4));
+            let at_len = (base + 2 * cs + 1).next_multiple_of(4);
+            b.resize((at_len + 4).next_multiple_of(cs.max(4)), 0);
+            put_c(&mut b, base, ct, l, name, 0)?;
+            put_c(&mut b, base + cs, ct, r, name, 0)?;
+            b[base + 2 * cs] = dir as u8;
+            b[at_len..at_len + 4].copy_from_slice(&(len as u32).to_le_bytes());
+        }
+        b.resize(b.len().next_multiple_of(8), 0);
+        Ok(b.as_chunks::<8>()
+            .0
+            .iter()
+            .map(|c| u64::from_le_bytes(*c))
+            .collect())
+    }
+
+    /// The element type, its C type in `layout` and whether it is a logic leaf
+    /// (`Some(is_bit)`).
+    fn array_elem(
+        &self,
+        ty: TyId,
+        name: &str,
+        layout: ArgLayout,
+    ) -> R<(Ty, CType, Option<bool>, u8)> {
         let Ty::Array { elem, dims, .. } = self.ty(ty)? else {
             return Err(ice(format!(
                 "foreign array argument of non-array type {ty}"
@@ -283,7 +343,7 @@ impl Machine {
         let et = self.ty(elem)?;
         let logic = Ty::logic_leaf(&self.rt.prog.types, ty);
         let nested = matches!(et, Ty::Array { .. });
-        match ctype_of(&et) {
+        match ctype_in(&et, layout) {
             Some(ct) if !nested => {
                 let bit = logic.map(|k| k != yavs_ir::LogicKind::StdULogic);
                 Ok((et, ct, bit, dims))
@@ -294,8 +354,14 @@ impl Machine {
         }
     }
 
-    fn marshal_array(&mut self, ty: TyId, fat: u64, name: &str) -> R<(Vec<u8>, u64, Vec<u64>)> {
-        let (et, ct, logic, dims) = self.array_elem(ty, name)?;
+    fn marshal_array(
+        &mut self,
+        ty: TyId,
+        fat: u64,
+        name: &str,
+        layout: ArgLayout,
+    ) -> R<(Vec<u8>, u64, Vec<u64>)> {
+        let (et, ct, logic, dims) = self.array_elem(ty, name, layout)?;
         let (data, lens) = self.fat(fat, dims)?;
         let n = lens.iter().try_fold(1u64, |a, &l| a.checked_mul(l));
         let n = n
@@ -378,6 +444,7 @@ impl Machine {
         Ok(out)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn unmarshal_array(
         &mut self,
         ty: TyId,
@@ -386,8 +453,9 @@ impl Machine {
         n: u64,
         name: &str,
         k: usize,
+        layout: ArgLayout,
     ) -> R<()> {
-        let (et, ct, logic, _) = self.array_elem(ty, name)?;
+        let (et, ct, logic, _) = self.array_elem(ty, name, layout)?;
         let cs = csize(ct);
         match logic {
             Some(bit) => {
@@ -428,7 +496,12 @@ impl Machine {
 
     /// Field types, VHDL offsets, C offsets and the C struct size of a record.
     #[allow(clippy::type_complexity)]
-    fn record_layout(&self, ty: TyId, name: &str) -> R<(Vec<(Ty, CType, u64)>, Vec<usize>, usize)> {
+    fn record_layout(
+        &self,
+        ty: TyId,
+        name: &str,
+        layout: ArgLayout,
+    ) -> R<(Vec<(Ty, CType, u64)>, Vec<usize>, usize)> {
         let Ty::Record { fields } = self.ty(ty)? else {
             return Err(ice(format!(
                 "foreign record argument of non-record type {ty}"
@@ -441,7 +514,7 @@ impl Machine {
         let (mut coffs, mut at, mut align) = (Vec::new(), 0usize, 1usize);
         for (f, &off) in fields.iter().zip(&l.offsets) {
             let ft = self.ty(f.ty)?;
-            let Some(ct) = ctype_of(&ft) else {
+            let Some(ct) = ctype_in(&ft, layout) else {
                 return rt_err(format!(
                     "foreign `{name}`: record field `{}` is not a scalar (ir.md 1.7)",
                     f.name
@@ -551,9 +624,9 @@ impl Machine {
                 ForeignArg::Value(_) => arg.cells = vec![v],
                 ForeignArg::ScalarRef(_, w) => arg.cells = vec![self.load(v, w)?],
                 ForeignArg::Array { ty, .. } => {
-                    let (buf, data, lens) = self.marshal_array(ty, v, name)?;
+                    let (buf, data, lens) = self.marshal_array(ty, v, name, ArgLayout::Length)?;
                     let n: u64 = lens.iter().product();
-                    let (_, ct, _, _) = self.array_elem(ty, name)?;
+                    let (_, ct, _, _) = self.array_elem(ty, name, ArgLayout::Length)?;
                     let cs = csize(ct);
                     arrays[starts.len() - 1] = Some((data, n));
                     arg.cells = (0..n as usize).map(|i| get_c(&buf, i * cs, ct)).collect();
@@ -569,7 +642,8 @@ impl Machine {
                                 vec![self.load(at, w)?]
                             }
                             Some(n) => {
-                                let (et, ct, logic, _) = self.array_elem(fty, name)?;
+                                let (et, ct, logic, _) =
+                                    self.array_elem(fty, name, ArgLayout::Length)?;
                                 let buf = self.marshal_data(&et, ct, logic, at, n, name)?;
                                 let cs = csize(ct);
                                 (0..n as usize).map(|i| get_c(&buf, i * cs, ct)).collect()
@@ -666,7 +740,7 @@ impl Machine {
                     let Some((data, n)) = arrays[k] else {
                         return Err(ice("array argument"));
                     };
-                    let (_, ct, _, _) = self.array_elem(ty, name)?;
+                    let (_, ct, _, _) = self.array_elem(ty, name, ArgLayout::Length)?;
                     if cells.len() as u64 != n {
                         return rt_err(format!(
                             "foreign `{name}` changed the length of argument {}",
@@ -678,7 +752,7 @@ impl Machine {
                     for (i, &c) in cells.iter().enumerate() {
                         put_c(&mut buf, i * cs, ct, c, name, k)?;
                     }
-                    self.unmarshal_array(ty, &buf, data, n, name, k)?;
+                    self.unmarshal_array(ty, &buf, data, n, name, k, ArgLayout::Length)?;
                 }
                 ForeignArg::Record { ty, .. } => {
                     let fields: Vec<Vec<u64>> =
@@ -696,13 +770,14 @@ impl Machine {
                                 self.store(at, w, c)?;
                             }
                             Some(n) => {
-                                let (_, ct, _, _) = self.array_elem(fty, name)?;
+                                let (_, ct, _, _) =
+                                    self.array_elem(fty, name, ArgLayout::Length)?;
                                 let cs = csize(ct);
                                 let mut buf = vec![0u8; n as usize * cs];
                                 for (i, &c) in cells.iter().enumerate() {
                                     put_c(&mut buf, i * cs, ct, c, name, k)?;
                                 }
-                                self.unmarshal_array(fty, &buf, at, n, name, k)?;
+                                self.unmarshal_array(fty, &buf, at, n, name, k, ArgLayout::Length)?;
                             }
                         }
                     }
@@ -743,7 +818,7 @@ impl Machine {
     /// `ix.left` in its direction.
     fn model_array(&mut self, ty: TyId, ix: VhpiIndex, cells: &[u64], name: &str) -> R<u64> {
         let n = cells.len() as u64;
-        let (et, ct, logic, _) = self.array_elem(ty, name)?;
+        let (et, ct, logic, _) = self.array_elem(ty, name, ArgLayout::Length)?;
         let size = match logic {
             Some(_) => n.div_ceil(64) * 32,
             None => n * et.elem_size().ok_or_else(|| ice("array element size"))?,
@@ -754,7 +829,7 @@ impl Machine {
         for (i, &c) in cells.iter().enumerate() {
             put_c(&mut buf, i * cs, ct, c, name, 0)?;
         }
-        self.unmarshal_array(ty, &buf, data, n, name, 0)?;
+        self.unmarshal_array(ty, &buf, data, n, name, 0, ArgLayout::Length)?;
         let span = i64::try_from(n).ok().and_then(|n| {
             if ix.downto {
                 ix.left.checked_sub(n - 1)
@@ -798,20 +873,44 @@ impl Machine {
             let regs = f.regs(args).ok_or_else(|| ice("operand list"))?.to_vec();
             return self.model_call(ctx, x.name.as_str(), id, m, &x.args, &regs);
         }
-        let Some(fun) = rt.foreign.get(id.0 as usize).and_then(|f| f.as_ref()) else {
-            return Err(Fault::Unbound(Box::new((
-                format!(
-                    "symbol `{}` of foreign subprogram `{}` is not defined",
-                    x.symbol, x.name
-                ),
-                rt.searched.clone(),
-            ))));
+        let late;
+        let fun = match rt.foreign.get(id.0 as usize).and_then(|f| f.as_ref()) {
+            Some(f) => f,
+            None => {
+                let binder = BINDER
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .clone();
+                match binder.and_then(|b| b(x)) {
+                    Some(Ok(f)) => {
+                        late = f;
+                        &late
+                    }
+                    Some(Err(e)) => {
+                        return rt_err(format!(
+                            "foreign subprogram `{}` cannot be called: {e}",
+                            x.name
+                        ));
+                    }
+                    None => {
+                        return Err(Fault::Unbound(Box::new((
+                            format!(
+                                "symbol `{}` of foreign subprogram `{}` is not defined",
+                                x.symbol, x.name
+                            ),
+                            rt.searched.clone(),
+                        ))));
+                    }
+                }
+            }
         };
         let regs = f.regs(args).ok_or_else(|| ice("operand list"))?.to_vec();
         let name = &x.name;
+        let layout = fun.layout();
+        let fargs = x.args_in(layout);
         let mut temps = Vec::with_capacity(regs.len());
         // Marshal into owned buffers first; pointers are taken once nothing moves.
-        for (k, (a, &r)) in x.args.iter().zip(&regs).enumerate() {
+        for (k, (a, &r)) in fargs.iter().zip(&regs).enumerate() {
             let v = self.r(r);
             temps.push(match *a {
                 ForeignArg::Value(_) | ForeignArg::Access => Temp::None,
@@ -823,13 +922,25 @@ impl Machine {
                     Temp::Scalar(Box::new([arg_bits(to_c(ct, cur, name, k)?)]), ct, w)
                 }
                 ForeignArg::Array { ty, .. } => {
-                    let (buf, data, lens) = self.marshal_array(ty, v, name)?;
+                    let (buf, data, lens) = self.marshal_array(ty, v, name, layout)?;
                     let n = lens.iter().product();
+                    let fat = match x.fat.index.get(k) {
+                        Some(ix) if layout == ArgLayout::FatPointer && !ix.is_empty() => {
+                            Some(Box::new(([0; 2], self.fat_bounds(v, ix, name)?)))
+                        }
+                        _ => None,
+                    };
                     // Lengths are pushed below from the dope again.
-                    Temp::Array { buf, data, ty, n }
+                    Temp::Array {
+                        buf,
+                        data,
+                        ty,
+                        n,
+                        fat,
+                    }
                 }
                 ForeignArg::Record { ty, .. } => {
-                    let (fields, coffs, size) = self.record_layout(ty, name)?;
+                    let (fields, coffs, size) = self.record_layout(ty, name, layout)?;
                     let mut buf = vec![0u8; size];
                     for ((ft, ct, off), co) in fields.iter().zip(&coffs) {
                         let w = width_of(ft.scalar_size().unwrap_or(8))?;
@@ -841,14 +952,31 @@ impl Machine {
             });
         }
         let mut cargs = Vec::with_capacity(regs.len() + 2);
-        for (k, ((a, &r), t)) in x.args.iter().zip(&regs).zip(temps.iter_mut()).enumerate() {
+        for (k, ((a, &r), t)) in fargs.iter().zip(&regs).zip(temps.iter_mut()).enumerate() {
             let v = self.r(r);
             match (*a, t) {
                 (ForeignArg::Value(ct), _) => cargs.push(to_c(ct, v, name, k)?),
                 (ForeignArg::Access, _) => cargs.push(Arg::Ptr(self.access_ptr(v)?)),
                 (_, Temp::Scalar(b, ..)) => cargs.push(Arg::Ptr(b.as_mut_ptr().cast())),
+                (
+                    ForeignArg::Array { .. },
+                    Temp::Array {
+                        buf, fat: Some(f), ..
+                    },
+                ) => {
+                    f.0 = [
+                        buf.as_mut_ptr() as usize as u64,
+                        f.1.as_ptr() as usize as u64,
+                    ];
+                    cargs.push(Arg::Ptr(f.0.as_mut_ptr().cast()));
+                }
                 (ForeignArg::Array { lengths, ty, .. }, Temp::Array { buf, .. }) => {
                     cargs.push(Arg::Ptr(buf.as_mut_ptr().cast()));
+                    let lengths = if layout == ArgLayout::FatPointer {
+                        0
+                    } else {
+                        lengths
+                    };
                     if lengths > 0 {
                         let Ty::Array { dims, .. } = self.ty(ty)? else {
                             return Err(ice("array type"));
@@ -867,7 +995,7 @@ impl Machine {
             Fault::Runtime(format!("foreign call of `{}` ({}): {e}", x.name, x.symbol))
         })?;
         drop(cargs);
-        for (k, (a, t)) in x.args.iter().zip(temps).enumerate() {
+        for (k, (a, t)) in fargs.iter().zip(temps).enumerate() {
             let v = self.r(regs[k]);
             match (*a, t) {
                 (ForeignArg::ScalarRef(..), Temp::Scalar(b, ct, w)) => {
@@ -877,9 +1005,11 @@ impl Machine {
                     ForeignArg::Array {
                         copy_back: true, ..
                     },
-                    Temp::Array { buf, data, ty, n },
+                    Temp::Array {
+                        buf, data, ty, n, ..
+                    },
                 ) => {
-                    self.unmarshal_array(ty, &buf, data, n, name, k)?;
+                    self.unmarshal_array(ty, &buf, data, n, name, k, layout)?;
                 }
                 (
                     ForeignArg::Record {
@@ -887,7 +1017,7 @@ impl Machine {
                     },
                     Temp::Record { buf, addr, ty },
                 ) => {
-                    let (fields, coffs, _) = self.record_layout(ty, name)?;
+                    let (fields, coffs, _) = self.record_layout(ty, name, layout)?;
                     for ((ft, ct, off), co) in fields.iter().zip(&coffs) {
                         let fv = get_c(&buf, *co, *ct);
                         check_back(ft, fv, name, k)?;

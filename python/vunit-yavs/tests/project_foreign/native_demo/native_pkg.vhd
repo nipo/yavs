@@ -5,6 +5,8 @@ package native_pkg is
 
   impure function native_add1(x : integer) return integer;
   attribute foreign of native_add1 : function is "VHPIDIRECT native_add1";
+  impure function native_fat_len(s : string) return integer;
+  attribute foreign of native_fat_len : function is "VHPIDIRECT native_fat_len";
   impure function py_exec(chunk : chunk_t; length : integer) return integer;
   attribute foreign of py_exec : function is "VHPIDIRECT py_exec";
   impure function py_eval_int(chunk : chunk_t; length : integer) return integer;
@@ -17,6 +19,7 @@ end package;
 
 package body native_pkg is
   impure function native_add1(x : integer) return integer is begin return 0; end;
+  impure function native_fat_len(s : string) return integer is begin return 0; end;
   impure function py_exec(chunk : chunk_t; length : integer) return integer is begin return 0; end;
   impure function py_eval_int(chunk : chunk_t; length : integer) return integer is begin return 0; end;
 

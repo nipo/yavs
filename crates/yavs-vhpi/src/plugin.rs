@@ -167,26 +167,31 @@ fn open_path(path: &Path) -> Result<libloading::Library, LoadError> {
 
 /// A shared library loaded with `--load` for VHPIDIRECT symbols. It stays loaded for the
 /// life of the process, since bound functions point into it.
+#[derive(Clone)]
 pub struct ForeignLib {
     pub path: PathBuf,
     lib: &'static libloading::Library,
+    layout: yavs_ffi::ArgLayout,
 }
 
-/// Loads a `--load` library (no VHPI registration runs).
-pub fn load_foreign(path: &Path) -> Result<ForeignLib, LoadError> {
+/// Loads a `--load` library (no VHPI registration runs) whose functions take their arguments
+/// in `layout`.
+pub fn load_foreign(path: &Path, layout: yavs_ffi::ArgLayout) -> Result<ForeignLib, LoadError> {
     let lib = Box::leak(Box::new(open_path(path)?));
     Ok(ForeignLib {
         path: path.to_path_buf(),
         lib,
+        layout,
     })
 }
 
-/// Binds `symbol` with C signature `sig`: the first `--load` library in `libs` that defines
-/// it, else the executable. `None` if nothing defines it.
+/// Binds `symbol`: the first `--load` library in `libs` that defines it, in that library's
+/// argument layout, else the executable in the default one; `sig` gives the C signature in a
+/// layout. `None` if nothing defines it.
 pub fn bind_foreign(
     libs: &[ForeignLib],
     symbol: &str,
-    sig: yavs_ffi::Signature,
+    sig: impl Fn(yavs_ffi::ArgLayout) -> yavs_ffi::Signature,
 ) -> Option<Result<yavs_ffi::ForeignFn, yavs_ffi::FfiError>> {
     // SAFETY: the address is only used as a function pointer by the trampoline, with the
     // signature the VHDL declaration gives it (the VHPIDIRECT contract).
@@ -195,12 +200,12 @@ pub fn bind_foreign(
             .ok()
             .map(|p| *p)
     };
-    let ptr = libs
+    let (ptr, layout) = libs
         .iter()
-        .find_map(|l| find(l.lib))
-        .or_else(|| this().ok().and_then(|l| find(&l)))?;
+        .find_map(|l| Some((find(l.lib)?, l.layout)))
+        .or_else(|| Some((find(&this().ok()?)?, yavs_ffi::ArgLayout::default())))?;
     // SAFETY: as above; the libraries are never unloaded.
-    Some(unsafe { yavs_ffi::ForeignFn::new(ptr, sig) })
+    Some(unsafe { yavs_ffi::ForeignFn::new(ptr, sig(layout)) }.map(|f| f.with_layout(layout)))
 }
 
 #[cfg(unix)]

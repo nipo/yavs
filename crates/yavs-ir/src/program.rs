@@ -1,7 +1,7 @@
 //! Programs, functions and their side tables (ir.md 1.1, 1.4, 1.6, 1.7).
 
 use yavs_diag::Span;
-use yavs_ffi::{CType, Signature};
+use yavs_ffi::{ArgLayout, CType, Signature};
 
 use crate::{
     BlockId, CaseTableId, CheckMsgId, ConstId, CovItem, ForeignId, FuncId, IdVec, Inst, NativeId,
@@ -1013,6 +1013,20 @@ pub struct ForeignRef {
     /// `Some` for a `'FOREIGN "VHPI library model"` subprogram: the plugin's registered model
     /// is called instead of a C function (`symbol` is the model name).
     pub model: Option<VhpiModel>,
+    /// The call in [`ArgLayout::FatPointer`]; which layout applies is known when the symbol is
+    /// bound, not here, because the program outlives one `--load` (compilation cache).
+    pub fat: FatLayout,
+}
+
+/// A VHPIDIRECT subprogram in [`ArgLayout::FatPointer`] (empty for a VHPI model).
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+pub struct FatLayout {
+    /// As [`ForeignRef::args`] with the C types of the base types. An `Array` with `lengths`
+    /// above 0 is passed as a pointer to the data and bounds pointers, without the lengths.
+    pub args: Vec<ForeignArg>,
+    /// Per argument, the C type of each index of an unconstrained array, for its bounds.
+    pub index: Vec<Vec<CType>>,
+    pub ret: Option<CType>,
 }
 
 /// The parameter mode of a VHPI foreign subprogram's formal.
@@ -1055,14 +1069,24 @@ pub struct VhpiIndex {
 }
 
 impl ForeignRef {
-    pub fn signature(&self) -> Signature {
+    /// The arguments as `layout` passes them.
+    pub fn args_in(&self, layout: ArgLayout) -> &[ForeignArg] {
+        match layout {
+            ArgLayout::Length => &self.args,
+            ArgLayout::FatPointer => &self.fat.args,
+        }
+    }
+
+    pub fn signature(&self, layout: ArgLayout) -> Signature {
+        let fat = layout == ArgLayout::FatPointer;
         Signature {
             params: self
-                .args
+                .args_in(layout)
                 .iter()
                 .flat_map(|a| match *a {
                     ForeignArg::Value(c) => vec![c],
                     ForeignArg::Array { lengths, .. } => {
+                        let lengths = if fat { 0 } else { lengths };
                         let mut v = vec![CType::Ptr];
                         v.extend(std::iter::repeat_n(CType::I64, lengths.into()));
                         v
@@ -1073,8 +1097,22 @@ impl ForeignRef {
                     ForeignArg::Signal { .. } => vec![],
                 })
                 .collect(),
-            ret: self.ret,
+            ret: if fat { self.fat.ret } else { self.ret },
         }
+    }
+
+    /// Why `layout` cannot call this subprogram, if it cannot.
+    pub fn unsupported_in(&self, layout: ArgLayout) -> Option<String> {
+        let k = self
+            .args_in(layout)
+            .iter()
+            .position(|a| matches!(a, ForeignArg::Access))?;
+        (layout == ArgLayout::FatPointer).then(|| {
+            format!(
+                "argument {} is an access value, which the `fat-pointer` layout does not support",
+                k + 1
+            )
+        })
     }
 }
 

@@ -36,6 +36,7 @@ Read the root `AGENTS.md` first. This file is for an agent about to change `crat
 | `CType` derives serde (the one dependency, `serde`, with its derive) | `ForeignRef` is part of the serialised IR (the compilation cache of lowered packages, #407) | `docs/decisions.md` "Compilation cache" |
 | `unsafe` denied crate-wide, allowed only in `sys` (crate opts out of the workspace `forbid`) | Root `AGENTS.md` rule 11 | `Cargo.toml` comment |
 | The reference simulator's VHDL to C type convention | Existing VHPIDIRECT C code works | `src/vhdl.rs`; `docs/plan.md` "Foreign subprograms" |
+| `ArgLayout` belongs to the bound `ForeignFn`, set by the binder: `Length` follows the reference simulator's convention above, `FatPointer` the other one (`--load=LIB:args=fat-pointer`) | Per library, and the lowered program is cached without regard to `--load` | `docs/decisions.md` "Foreign subprograms and `--load`", #928 |
 | More than 64 arguments is an error, never a crash | Fail early | `MAX_ARGS` |
 | Typed Rust callees bind without `unsafe` (`ForeignFn::from_fn`); real symbols are bound by the elaborator, the one unsafe step | Safe tests and natives | `docs/decisions.md` "IR and interpreter" (Foreign calls) |
 | All three platforms tier 1: test aarch64 under qemu-user, Windows under wine | Plan platforms | `docs/plan.md` "Platforms"; docs/STATUS.md "ffi" |

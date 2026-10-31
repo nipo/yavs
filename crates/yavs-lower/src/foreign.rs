@@ -172,6 +172,7 @@ impl Fx<'_, '_> {
         };
         let mut params = Vec::new();
         let mut args = Vec::new();
+        let mut fat = yavs_ir::FatLayout::default();
         for p in sp.params.iter() {
             let pname = p.name.text.to_string();
             let bad = |fx: &mut Self, what: &str| {
@@ -232,7 +233,7 @@ impl Fx<'_, '_> {
                     continue;
                 }
             }
-            args.push(match &db.types[t].kind {
+            let arg = match &db.types[t].kind {
                 TypeKind::Array { indexes, .. } => {
                     let full = matches!(
                         db.subtypes[p.subtype].constraint,
@@ -263,7 +264,29 @@ impl Fx<'_, '_> {
                         ForeignArg::Value(ct)
                     }
                 }
-            });
+            };
+            args.push(arg);
+            if vhpi.is_none() {
+                fat.args.push(match arg {
+                    ForeignArg::Value(_) => ForeignArg::Value(self.fat_ctype(t, span)?),
+                    ForeignArg::ScalarRef(_, w) => {
+                        ForeignArg::ScalarRef(self.fat_ctype(t, span)?, w)
+                    }
+                    a => a,
+                });
+                fat.index.push(match (&db.types[t].kind, arg) {
+                    (TypeKind::Array { indexes, .. }, ForeignArg::Array { lengths, .. })
+                        if lengths > 0 =>
+                    {
+                        let mut v = Vec::with_capacity(indexes.len());
+                        for &ix in indexes.iter() {
+                            v.push(self.fat_ctype(db.base(ix), span)?);
+                        }
+                        v
+                    }
+                    _ => Vec::new(),
+                });
+            }
         }
         let mut ret_index = None;
         let ret = match sp.ret {
@@ -296,12 +319,18 @@ impl Fx<'_, '_> {
                 ret_index,
             }),
         };
+        if model.is_none()
+            && let Some(r) = sp.ret
+        {
+            fat.ret = Some(self.fat_ctype(db.base(r), span)?);
+        }
         Ok(ForeignRef {
             name,
             symbol,
             args,
             ret,
             model,
+            fat,
         })
     }
 
@@ -362,6 +391,15 @@ impl Fx<'_, '_> {
                 len: None,
             }),
             None => Err(unsupported(self, "non-static index")),
+        }
+    }
+
+    /// The C type of scalar type `t` in the fat-pointer layout.
+    fn fat_ctype(&mut self, t: yavs_sem::TypeId, span: Span) -> R<CType> {
+        let id = self.ty(t, span)?;
+        match self.fb.program().types().get(id).and_then(Ty::fat_ctype) {
+            Some(ct) => Ok(ct),
+            None => Err(self.cx.ice(span, "foreign scalar type")),
         }
     }
 

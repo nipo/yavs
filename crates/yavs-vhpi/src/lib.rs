@@ -34,6 +34,7 @@ pub use plugin::{
     ForeignLib, LoadError, PluginSpec, bind_foreign, divert_stdout, load, load_foreign,
 };
 pub use sim::VhpiObserver;
+pub use yavs_ffi::ArgLayout;
 
 /// Keeps every exported `vhpi_*` symbol linked into the executable. An
 /// executable that exports them calls this once at startup; without a

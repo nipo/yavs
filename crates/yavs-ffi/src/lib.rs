@@ -29,6 +29,18 @@ mod typed;
 /// Most arguments one call may take. More is an error, not a crash.
 pub const MAX_ARGS: usize = 64;
 
+/// How a foreign library expects its arguments (`--load=LIB[:args=LAYOUT]`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ArgLayout {
+    /// An unconstrained array is its data pointer followed by one `int64_t` length per
+    /// dimension; an integer takes the smallest C type that holds its subtype.
+    #[default]
+    Length,
+    /// An unconstrained array is a pointer to `{ data pointer, bounds pointer }`; an integer
+    /// takes the 32 or 64 bits of its base type.
+    FatPointer,
+}
+
 /// The C types a foreign call can pass or return.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum CType {

@@ -721,6 +721,18 @@ impl Model {
         {
             return self.call(db, e, *callee, args, scope);
         }
+        // A foreign function (`signal id : integer := open_image(name);`) runs in the session
+        // as a thunk of the call too, its library loaded by the CLI before elaboration (#928).
+        if let ExprKind::Call {
+            callee,
+            method_of: None,
+            ..
+        } = &ex.kind
+            && let Some(sp) = db.decls[*callee].kind.subprogram()
+            && matches!(sp.body, yavs_sem::decl::Body::Foreign(_))
+        {
+            return self.method_call(db, e, *callee, scope);
+        }
         // A method call of a shared variable, in elaboration order like a function's (#912).
         if let ExprKind::Call {
             callee,

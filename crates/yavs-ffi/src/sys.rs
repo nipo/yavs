@@ -156,6 +156,7 @@ unsafe extern "C" fn trampoline(frame: *mut Frame) {
 pub struct ForeignFn {
     ptr: *const c_void,
     sig: Signature,
+    layout: crate::ArgLayout,
 }
 
 // SAFETY: the pointer is code, not data; `new`'s contract makes calling it
@@ -183,7 +184,11 @@ impl ForeignFn {
                 max: MAX_ARGS,
             });
         }
-        Ok(ForeignFn { ptr, sig })
+        Ok(ForeignFn {
+            ptr,
+            sig,
+            layout: crate::ArgLayout::default(),
+        })
     }
 
     /// Binds a Rust `extern "C"` function pointer. Safe: the signature
@@ -193,11 +198,21 @@ impl ForeignFn {
         ForeignFn {
             ptr: f.addr(),
             sig: F::signature(),
+            layout: crate::ArgLayout::default(),
         }
     }
 
     pub fn signature(&self) -> &Signature {
         &self.sig
+    }
+
+    /// The same function, whose caller marshals its arguments in `layout`.
+    pub fn with_layout(self, layout: crate::ArgLayout) -> Self {
+        ForeignFn { layout, ..self }
+    }
+
+    pub fn layout(&self) -> crate::ArgLayout {
+        self.layout
     }
 
     /// Calls the function. `args` must match the signature in number and

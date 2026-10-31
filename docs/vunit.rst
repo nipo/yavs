@@ -165,7 +165,8 @@ so a testbench calls Python (a golden model, a file reader) from VHDL. yavs bind
 to the libraries named by ``--load=LIB`` (:doc:`cli-reference`). ``vunit-yavs`` knows this: the
 simulator interface has ``foreign_language_interface = "VHPIDIRECT"`` and
 ``native_library_hooks(library_file)``, which returns the simulator hooks that pass
-``--load=library_file`` to every ``yavs run``. A package registers them from its setup function:
+``--load=library_file`` to every ``yavs run``; ``args="fat-pointer"`` selects that argument layout for
+the library (:doc:`vhpi`). A package registers them from its setup function:
 
 .. code-block:: python
 
