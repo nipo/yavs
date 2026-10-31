@@ -153,6 +153,11 @@ pub fn assert_summary_json(rt: Option<&Runtime>, sources: &SourceMap) -> serde_j
     serde_json::json!({"assert_summary": {"totals": totals, "places": places}})
 }
 
+/// A path (`:top:u1:s`) as the console's commands take it (`top.u1.s`).
+fn dotted(path: &str) -> String {
+    path.trim_matches(':').replace(':', ".")
+}
+
 /// `(count, name, place)` of the non-zero counts, busiest first.
 fn ranked(mut v: Vec<(u64, String, String)>) -> Vec<(u64, String, String)> {
     v.retain(|x| x.0 > 0);
@@ -182,13 +187,13 @@ fn activity(
     let procs = (runs.iter().zip(&names.procs).enumerate())
         .map(|(p, (&n, name))| {
             let at = place(sources, e.proc_place(t, ProcId(p as u32)));
-            (n, name.clone(), at)
+            (n, dotted(name), at)
         })
         .collect();
     let sigs = (events.iter().zip(&names.signals).enumerate())
         .map(|(s, (&n, name))| {
             let at = place(sources, t.signal_place(SignalId(s as u32)));
-            (n, name.clone(), at)
+            (n, dotted(name), at)
         })
         .collect();
     (ranked(procs), ranked(sigs))

@@ -280,7 +280,7 @@ fn asserts_and_activity_at_the_console_and_at_the_end() {
     );
     assert!(out.contains("debug_tools.vhd:43  cnt reached 3"), "{out}");
     assert!(out.contains("Process activations:"), "{out}");
-    assert!(out.contains(":debug_tools:clk"), "{out}");
+    assert!(out.contains("debug_tools.clk"), "{out}");
     let (out, ..) = session(&d, &["--assert-summary", "--activity"], "run; quit");
     assert!(
         out.contains("Assertion summary:") && out.contains("Signal activity:"),
@@ -334,4 +334,37 @@ fn help_lists_every_new_command() {
     ] {
         assert!(out.contains(c), "{c} in {out}");
     }
+}
+
+#[test]
+fn a_variable_as_find_lists_it_is_described_and_examined() {
+    let d = setup("variable");
+    let (out, err, _) = session(
+        &d,
+        &[],
+        "run 30 ns; describe debug_tools.counter.total; break debug_tools.vhd:35; run; describe total; examine debug_tools.counter.total; quit",
+    );
+    assert!(
+        out.contains("kind      variable of process debug_tools.counter"),
+        "{out}{err}"
+    );
+    assert!(
+        out.contains("type      integer") || out.contains("type      INTEGER"),
+        "{out}"
+    );
+    assert!(out.contains("declared  debug_tools.vhd:31"), "{out}");
+    assert!(out.contains("kind      variable of"), "{out}");
+    // Between cycles without a wave file: why not. With one: from the file.
+    fails_with(
+        &d,
+        &[],
+        "run 30 ns; examine debug_tools.counter.total",
+        "stop in that process",
+    );
+    let (out, err, _) = session(
+        &d,
+        &["--wave=v.fst"],
+        "run 30 ns; examine debug_tools.counter.total; quit",
+    );
+    assert!(out.lines().any(|l| l == "3"), "{out}{err}");
 }

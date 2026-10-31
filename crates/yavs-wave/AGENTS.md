@@ -12,7 +12,7 @@ The writer choice and the FST mapping are in `docs/decisions.md` "Waveform write
 - `src/sim.rs` (`record`, `Recorder`): builds the `Hierarchy` from an elaborated design and
   subscribes to the kernel's value-change bus; the writer sink itself stays kernel-free.
   `yavs run --wave` wires it (E0801-E0803, W0802).
-- Depends on: `wavefst` (writer, lz4; no C compiler), `signal-hook` (Unix), `ctrlc` (Windows); dev: `wellen` (read-back),
+- Depends on: `wavefst` (writer, lz4; no C compiler), `fst-reader` (`history.rs`), `signal-hook` (Unix), `ctrlc` (Windows); dev: `wellen` (read-back),
   `tempfile`. Called by: `yavs` (`run --wave`), `yavs-dap` (live waves, `record_to`), `examples/demo.rs`; `examples/waveq.rs` reads files only.
 
 ## 2. Map
@@ -21,6 +21,7 @@ The writer choice and the FST mapping are in `docs/decisions.md` "Waveform write
 |---|---|
 | `src/lib.rs` | Re-exports; the value byte layouts per `SigType` (crate docs) |
 | `src/model.rs` | `Hierarchy` (a flat depth-first list of `Item`s, names in one string, `SigType`s shared by index; walked with `Hierarchy::items` as `HierItem::{Scope, Signal, Up}`), `HierarchyBuilder` (`signal_shared` takes an `Arc<SigType>` that many signals share), `ScopeKind` (`Record`, `Array`, ...), `SignalId`, `SigType`, `ScalarType`, `EnumType`, `Bounds`, `Dir`, `ObjClass`, `PortDir`, `Skipped` (`elems: None`: a variable whose bounds are known only at run time, `HierarchyBuilder::unknown`) |
+| `src/history.rs` | `History`: past values of a file through `fst-reader`, read per question, for the console's `examine NAME @ TIME` and `trace x`; not `wellen`, which prints to stdout from the library |
 | `src/select.rs` | `Selection`: case-insensitive globs (`*` one level, `**` across, `?`), `max_array_elems` |
 | `src/writer.rs` | `WaveWriter` (`change`, `finish`, also on drop; one declaration plan per `Hierarchy` type, a slot of two `u32`s per signal), `WaveConfig` (timescale `-15` fs, `flush_interval` off by default, `block_change_limit`), `Error` |
 | `src/sim.rs` | `record` returns the recorder and the `Hierarchy` written (`--surfer` names what to show from it); `Sink` (where a recorder writes: `WaveWriter`, or the DAP live stream), `record_to` (a recorder into any sink, returns the hierarchy), `Recorder::start` (a recorder subscribed after the start), `record` (with `Option<&Built>` for `--wave-variables`), `Recorder`: elaborated design to `Hierarchy`; kernel changes to `change` calls, final value per time step in entry order (same file at any `--threads`) |

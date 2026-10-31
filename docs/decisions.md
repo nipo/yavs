@@ -12874,6 +12874,8 @@ duplicate implementations without changing diagnostics (issue #894; implemented 
   `SetVhdlAssertEnable` do not count, as in the assert counts; `ClearVhdlAssert` clears those counts, not this table, which
   is a history of the run. Reports of elaboration are a count in the header: they ran before the option could take effect.
   Human text by default, one object with `--message-format=json`, because CI already asks for JSON there.
+- **A report takes the assert lock once more, with or without `--assert-summary`.** Reports already take that lock twice;
+  an atomic flag in front of it would save little where a report also formats text and prints it.
 - **`--activity` is a wrapper and an observer, like `--profile`.** Without the option nothing is wrapped or subscribed, and
   `SimControl` has no new field (one moved the hot layout before). It counts runs of a process and, per signal, cycles
   with an event. Activations the kernel skips (pure clocked processes, gates) do not run, so they do not count.

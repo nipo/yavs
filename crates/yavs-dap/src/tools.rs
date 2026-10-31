@@ -401,10 +401,57 @@ pub(crate) fn describe(sh: &Shared, at: &At<'_, '_>, name: &str) -> Result<Strin
         .to_string())
 }
 
+/// The variable `name` of the process at dotted path `proc`, if it has one: its declaration.
+fn process_variable(sh: &Shared, proc: &str, name: &str) -> Option<yavs_sem::DeclId> {
+    let inst = sh
+        .elab
+        .procs
+        .iter()
+        .find(|p| dotted(&sh.elab.proc_name(p)) == proc)?;
+    let StmtKind::Process { scope, .. } = &sh.db.stmts[inst.stmt].kind else {
+        return None;
+    };
+    sh.db.scopes[*scope].order.iter().copied().find(|&d| {
+        sh.db.decls[d].name.to_string().eq_ignore_ascii_case(name)
+            && matches!(&sh.db.decls[d].kind, yavs_sem::decl::DeclKind::Object(_))
+    })
+}
+
+/// The rows of `describe` a declaration gives.
+fn declared_rows(sh: &Shared, d: yavs_sem::DeclId) -> Vec<Vec<String>> {
+    let mut rows = Vec::new();
+    if let Some(t) = crate::design::declared_type(&sh.db, d) {
+        rows.push(vec!["type".to_string(), t]);
+    }
+    rows.push(vec![
+        "declared".to_string(),
+        span_place(sh, sh.db.decls[d].name_span()),
+    ]);
+    rows
+}
+
 fn describe_variable(sh: &Shared, at: &At<'_, '_>, name: &str) -> Result<String, String> {
+    // `tb.counter.total`, as `find variables` lists it: known wherever the session stands.
+    let dotted_name = name.replace(':', ".");
+    if let Some((proc, var)) = dotted_name.trim_matches('.').rsplit_once('.')
+        && let Some(d) = process_variable(sh, proc, var)
+    {
+        let mut rows = vec![vec![
+            "kind".to_string(),
+            format!("variable of process {proc}"),
+        ]];
+        rows.extend(declared_rows(sh, d));
+        let head = format!("{proc}.{var}");
+        return Ok(format!("{head}\n{}", table(&rows)).trim_end().to_string());
+    }
     let At::Process(st) = at else {
         return Err(crate::console::no_signal(sh, thread_of(at), name));
     };
+    let proc = sh
+        .session()
+        .processes()
+        .get(st.process)
+        .map(|p| dotted(&p.name));
     for i in (0..st.frames.depth()).rev() {
         let locals = st.frames.locals(i);
         let Some(l) = locals.iter().find(|l| l.name.eq_ignore_ascii_case(name)) else {
@@ -412,20 +459,61 @@ fn describe_variable(sh: &Shared, at: &At<'_, '_>, name: &str) -> Result<String,
         };
         let (t, v, _) = crate::local(sh, st, i, l.name)
             .ok_or_else(|| format!("`{name}` cannot be read here"))?;
-        let rows = vec![
-            vec!["kind".to_string(), "variable".to_string()],
-            vec![
-                "in".to_string(),
-                st.frames.func_name(i).unwrap_or("?").to_string(),
-            ],
-            vec!["bounds".to_string(), bounds(&t)],
-            vec!["value".to_string(), yavs_std::value::literal_image(&v, &t)],
-        ];
+        let mut rows = vec![vec![
+            "kind".to_string(),
+            format!("variable of {}", st.frames.func_name(i).unwrap_or("?")),
+        ]];
+        // A process's own variable has its declaration; a subprogram's locals do not say.
+        match proc
+            .as_deref()
+            .filter(|_| i == 0)
+            .and_then(|p| process_variable(sh, p, l.name))
+        {
+            Some(d) => rows.extend(declared_rows(sh, d)),
+            None => rows.push(vec![
+                "declared".to_string(),
+                "not known for a local of a subprogram".to_string(),
+            ]),
+        }
+        rows.push(vec!["bounds".to_string(), bounds(&t)]);
+        rows.push(vec![
+            "value".to_string(),
+            yavs_std::value::literal_image(&v, &t),
+        ]);
         return Ok(format!("{}\n{}", l.name, table(&rows))
             .trim_end()
             .to_string());
     }
     Err(crate::console::no_signal(sh, thread_of(at), name))
+}
+
+/// `examine tb.counter.total`, a name of `find variables`: in the process stopped in, its value;
+/// elsewhere, the wave file at this time, or why it cannot be read. `None`: not such a name.
+pub(crate) fn examine_path(
+    sh: &Shared,
+    at: &At<'_, '_>,
+    name: &str,
+) -> Option<Result<String, String>> {
+    let (proc, var) = name.trim_matches('.').rsplit_once('.')?;
+    process_variable(sh, proc, var)?;
+    if let At::Process(st) = at
+        && sh
+            .session()
+            .processes()
+            .get(st.process)
+            .is_some_and(|p| dotted(&p.name) == proc)
+    {
+        let (t, v, _) = crate::local(sh, st, 0, var)?;
+        return Some(Ok(yavs_std::value::literal_image(&v, &t)));
+    }
+    if sh.wave_path().is_none() {
+        return Some(Err(format!(
+            "`{name}` is a variable of process {proc}: stop in that process to read it, or run \
+             with `--wave=FILE.fst` and read it from there"
+        )));
+    }
+    let now = at.now().map_or(0, Time::as_fs);
+    Some(examine_at(sh, at, &format!("{name} @ {now} fs")))
 }
 
 /// Whether `pattern` selects dotted path `p`: with a `.` over the whole path, else its last name.

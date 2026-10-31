@@ -3,6 +3,8 @@
 //! they print. `YAVS_BLESS=1` writes the output of a real run into the page. An example with
 //! `--surfer` needs the real viewer and a display (`YAVS_TEST_SURFER=1`).
 
+#![cfg(unix)]
+
 mod common;
 
 use std::io::Write;
@@ -67,7 +69,6 @@ fn run(dir: &Path, flags: &str, cmds: &[&str]) -> Vec<String> {
     out
 }
 
-#[cfg(unix)]
 #[test]
 fn the_examples_of_the_interactive_page_are_what_a_run_prints() {
     let page = root().join("docs/interactive.rst");

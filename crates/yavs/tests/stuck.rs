@@ -488,15 +488,15 @@ fn activity_lists_the_busiest_processes_and_signals() {
         let e = clean(&o);
         // A clock of three periods: six events, and the process of the clock runs for each and at the start.
         assert!(e.contains("Process activations: "), "{e}");
-        assert!(e.contains(":summary_asserts:clk"), "{e}");
+        assert!(e.contains("summary_asserts.clk"), "{e}");
         let row = e
             .lines()
-            .find(|l| l.contains(":summary_asserts:clk"))
+            .find(|l| l.contains("summary_asserts.clk"))
             .expect(&e);
         assert!(row.trim_start().starts_with("6 "), "{e}");
         let j: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&file).expect("json")).expect("json");
-        assert_eq!(j["signals"][0]["name"], ":summary_asserts:clk", "{j}");
+        assert_eq!(j["signals"][0]["name"], "summary_asserts.clk", "{j}");
         assert_eq!(j["signals"][0]["events"], 6, "{j}");
         assert!(j["processes"][0]["runs"].as_u64() >= Some(4), "{j}");
     }

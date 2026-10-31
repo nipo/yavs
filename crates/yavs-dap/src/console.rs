@@ -1153,7 +1153,9 @@ fn exec(sh: &Shared, at: &At<'_, '_>, line: &str) -> Result<Exec, String> {
         "examine" | "print" if rest.contains('@') => {
             tools::examine_at(sh, at, rest).map(Exec::Text)
         }
-        "examine" | "print" => examine(sh, at, rest).map(Exec::Text),
+        "examine" | "print" => tools::examine_path(sh, at, rest)
+            .unwrap_or_else(|| examine(sh, at, rest))
+            .map(Exec::Text),
         "drivers" => tools::drivers(sh, at, rest).map(Exec::Text),
         "describe" => tools::describe(sh, at, rest).map(Exec::Text),
         "find" => tools::find(sh, at, rest).map(Exec::Text),
@@ -1179,7 +1181,7 @@ fn exec(sh: &Shared, at: &At<'_, '_>, line: &str) -> Result<Exec, String> {
             {
                 return Ok(Exec::Call(cmd.to_string(), rest.to_string()));
             }
-            if cmd.starts_with("vunit_") {
+            if cmd.starts_with("vunit_") && sh.link.hook.get().is_none() {
                 return Err(format!(
                     "`{cmd}` is only available through the test runner interface: start the test \
                      with `python run.py lib.tb.test --yavs-interactive` (vunit-yavs), not with \

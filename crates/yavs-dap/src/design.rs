@@ -384,7 +384,7 @@ pub(crate) struct Region {
 }
 
 /// The name of the subtype an object is declared with (`std_logic`, not its base type).
-fn declared_type(db: &Db, d: yavs_sem::DeclId) -> Option<String> {
+pub(crate) fn declared_type(db: &Db, d: yavs_sem::DeclId) -> Option<String> {
     let DeclKind::Object(o) = &db.decls[d].kind else {
         return None;
     };
@@ -438,7 +438,11 @@ fn file_key(p: &str) -> String {
 }
 
 /// The file and line of a declaration, as the debugger shows them.
-fn decl_of(db: &Db, at: yavs_diag::Span, source_map: &[(String, String)]) -> Option<(String, u32)> {
+pub(crate) fn decl_of(
+    db: &Db,
+    at: yavs_diag::Span,
+    source_map: &[(String, String)],
+) -> Option<(String, u32)> {
     let f = db.sources.get(at.file);
     let (line, _) = f.line_col(at.start);
     Some((shown_path(&f.path, source_map), line as u32))

@@ -832,6 +832,19 @@ fn hook_commands_run_in_the_runner() {
         &value,
         &["--do=help; greet you there; where; drive; hidden; where; boom; where"],
     );
+    // A misspelled command of the runner is a misspelling here, not advice to start the runner.
+    let (value2, t2) = hook_server(
+        "y",
+        json!([{"name": "vunit_run", "help": "run it"}]),
+        |_, _, _| json!({"result": ""}),
+    );
+    let typo = with_hook(&d, "tb", &value2, &["--do=vunit_rn"]);
+    let e = stderr(&typo);
+    assert!(
+        e.contains("`vunit_run`") && !e.contains("--yavs-interactive"),
+        "{e}"
+    );
+    t2.join().expect("the runner");
     let out = stdout(&o);
     assert!(out.contains("greet: say hello\n"), "{out}");
     assert!(!out.contains("hidden:"), "{out}");

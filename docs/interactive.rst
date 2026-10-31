@@ -277,19 +277,19 @@ Diagnose a run
       tb.check       ended    nothing: `wait;`  tb.vhd:54
     yavs> activity
     Process activations: 33 runs in all, 6 shown
-      runs      %  name            place
-        10   30.3  :tb:_p0         tb.vhd:34
-         7   21.2  :tb:counter     tb.vhd:41
-         7   21.2  :tb:u_reg:flop  tb.vhd:14
-         4   12.1  :tb:_p2         tb.vhd:48
-         4   12.1  :tb:check       tb.vhd:52
-         1    3.0  :tb:_p1         tb.vhd:47
+      runs      %  name           place
+        10   30.3  tb._p0         tb.vhd:34
+         7   21.2  tb.counter     tb.vhd:41
+         7   21.2  tb.u_reg.flop  tb.vhd:14
+         4   12.1  tb._p2         tb.vhd:48
+         4   12.1  tb.check       tb.vhd:52
+         1    3.0  tb._p1         tb.vhd:47
     Signal activity: 17 events in all, 4 shown
-      events      %  name           place
-           6   35.3  :tb:clk        tb.vhd:28
-           6   35.3  :tb:u_reg:clk  tb.vhd:7
-           3   17.6  :tb:cnt        tb.vhd:31
-           2   11.8  :tb:level      tb.vhd:32
+      events      %  name          place
+           6   35.3  tb.clk        tb.vhd:28
+           6   35.3  tb.u_reg.clk  tb.vhd:7
+           3   17.6  tb.cnt        tb.vhd:31
+           2   11.8  tb.level      tb.vhd:32
 
 In the VS Code Debug Console
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -653,6 +653,28 @@ class TestRealYavs(unittest.TestCase):
         self.assertIn("waits for", out)
         self.assertIn("Assertion summary:", out)
         self.assertEqual(code, 0, out)
+        # Run options pass through `yavs.sim_flags`, and change no result.
+        run_py = project / "run_flags.py"
+        run_py.write_text(
+            (project / "run.py")
+            .read_text()
+            .replace("__file__", repr(str(project / "run.py")))
+            .replace("VU.main(", 'VU.set_sim_option("yavs.sim_flags", ["--assert-summary", "--activity"])\nVU.main(')
+        )
+        proc = subprocess.run(
+            [sys.executable, str(run_py), "-v", "--no-color", "-o", str(self.tempdir / "out2"), "-x", str(self.xml), PASS],
+            env=self._env(),
+            cwd=project,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=TIMEOUT,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout)
+        self.assertIn("Assertion summary:", proc.stdout)
+        self.assertIn("Process activations:", proc.stdout)
+        self.assertEqual(report(self.xml), {PASS: "passed"}, proc.stdout)
 
     def test_interactive_refuses(self):
         for args in [("-p", "2"), ("--yavs-debug=0",), ("--elaborate",)]:
