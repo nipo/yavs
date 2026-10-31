@@ -20,8 +20,10 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use yavs_elab::{Built, DataLeaf, Elaborated, ObjKind, ScopeId, Shape, leaf_locs};
 use yavs_interp::{CallVal, InterpProcess, Stamp};
+use yavs_ir::{Program, TyId};
 use yavs_kernel::{
-    Elem, Hook, Observer, Phase, PortMode, ProcId, Range, SigRef, SigView, SimControl, SimError,
+    Elem, Hook, Observer, Phase, PortMode, ProcId, Process, Range, SigRef, SigView, SimControl,
+    SimError,
 };
 use yavs_sem::Db;
 use yavs_sem::decl::Designator;
@@ -159,22 +161,25 @@ struct State {
     error: Option<Error>,
 }
 
-/// Where a debugger stop reads the signals: the stopped process's context, or the kernel between
+/// What a debugger stop can read: the stopped process's context and frames, or the kernel between
 /// cycles.
 pub trait Signals {
     fn view(&self, r: SigRef) -> Result<SigView<'_>, SimError>;
+    /// Whether the stop is inside a process. It then holds the shared state, and the other
+    /// processes cannot be reached.
+    fn inside_process(&self) -> bool;
+    /// Variable `name` of process `p`, if `p` is the stopped process.
+    fn stopped_var(&self, p: ProcId, name: &str) -> Option<(TyId, CallVal, &Program)>;
+    /// A shared variable, read through the stopped process.
+    fn stopped_shared(&self, ty: TyId, slot: u64) -> Option<(CallVal, &Program)>;
+    /// Runs `f` on process `p`, if it is suspended and can be reached.
+    fn with_process(&self, p: ProcId, f: &mut dyn FnMut(&mut dyn Process)) -> bool;
 }
 
-impl Signals for yavs_kernel::Ctx<'_> {
-    fn view(&self, r: SigRef) -> Result<SigView<'_>, SimError> {
-        yavs_kernel::Ctx::view(self, r)
-    }
-}
-
-impl Signals for SimControl {
-    fn view(&self, r: SigRef) -> Result<SigView<'_>, SimError> {
-        SimControl::view(self, r)
-    }
+/// Where the recorder reads variables: at the end of a time step, or at a debugger stop.
+enum Reach<'a, 'h> {
+    Step(&'a mut Hook<'h>),
+    Stop(&'a dyn Signals),
 }
 
 /// The waveform subscriber. Clone it into [`SimControl::subscribe`] and keep one handle for
@@ -374,8 +379,8 @@ impl Recorder {
 
     /// A debugger stop at `now` (fs): the file reaches it, with the values a stopped process
     /// reads. What changes later in this time step follows at the same time, and a reader takes
-    /// the last value of a time. Variables are read when their time step ends: only then is
-    /// every process suspended.
+    /// the last value of a time. Inside a process only its own variables and the shared ones can
+    /// be read: the others follow when the time step ends.
     pub fn sync_at(&self, now: u64, signals: &dyn Signals) {
         let mut guard = self.lock();
         let st = &mut *guard;
@@ -384,6 +389,8 @@ impl Recorder {
             return;
         }
         st.flush(|r| signals.view(r));
+        // At the time of the step, which may be before the stop.
+        st.sample_vars(&mut Reach::Stop(signals));
         if st.written < now {
             // A file's time ends at its last change, so nothing changed at `now` needs one that
             // changes nothing.
@@ -394,8 +401,6 @@ impl Recorder {
                 st.flush(|r| signals.view(r));
             }
         }
-        // ponytail: after a stop between cycles past the last time step (`run 10 ns`), variables
-        // that changed in that step are written at the stop; reading them needs a kernel hook.
         st.step = st.step.max(now);
         if st.error.is_none()
             && let Some(w) = st.writer.as_mut()
@@ -449,8 +454,8 @@ impl State {
     }
 
     /// Write the variable sub-elements that changed since the last sample, at the time of the
-    /// step that just ended (every process is suspended).
-    fn sample_vars(&mut self, hook: &mut Hook<'_>) {
+    /// step that just ended (every process is suspended) or of a debugger stop.
+    fn sample_vars(&mut self, reach: &mut Reach<'_, '_>) {
         let mut bytes = Vec::new();
         let mut idle: Option<ProcId> = None;
         for k in 0..self.vars.len() {
@@ -464,7 +469,7 @@ impl State {
                 continue;
             }
             VAR_READS.fetch_add(1, Ordering::Relaxed);
-            match self.read_var(hook, k) {
+            match self.read_var(reach, k) {
                 Ok(Read::Changed) => {}
                 Ok(Read::Same) => continue,
                 // The process has not started yet, has ended or has not run since: its last
@@ -554,7 +559,7 @@ impl State {
     /// Read variable `k` if it may differ from the last read: whether its raw value changed
     /// (then `Var::raw` is the new one and the plan is made). `false` while its process has
     /// no frame, has not run since, or the value is unchanged.
-    fn read_var(&mut self, hook: &mut Hook<'_>, k: usize) -> Result<Read, String> {
+    fn read_var(&mut self, reach: &mut Reach<'_, '_>, k: usize) -> Result<Read, String> {
         let bug =
             |what: &str| format!("this is a bug in yavs: reading a recorded variable: {what}");
         let var = &mut self.vars[k];
@@ -569,8 +574,8 @@ impl State {
             ..
         } = var;
         match &var.at {
-            VarAt::Proc { proc, name } => hook
-                .with_process(*proc, |p| {
+            VarAt::Proc { proc, name } => {
+                let mut read = |p: &mut dyn Process| {
                     let p = p
                         .as_any()
                         .and_then(|a| a.downcast_mut::<InterpProcess>())
@@ -590,8 +595,39 @@ impl State {
                     make_plan(paths, plan, plan_desc, p.program(), ty, &cv)?;
                     *old = raw.replace(cv);
                     Ok(Read::Changed)
-                })
-                .unwrap_or_else(|| Err(bug("no process"))),
+                };
+                match reach {
+                    Reach::Step(hook) => hook
+                        .with_process(*proc, |p| read(p))
+                        .unwrap_or_else(|| Err(bug("no process"))),
+                    Reach::Stop(s) if s.inside_process() => {
+                        // In the middle of a run: `execs` stays, so its time step's end reads it
+                        // again. What cannot be read yet (its declarations) is not a failure.
+                        let Some((ty, cv, prog)) = s.stopped_var(*proc, name) else {
+                            return Ok(Read::Idle);
+                        };
+                        make_plan(paths, plan, plan_desc, prog, ty, &cv)?;
+                        *old = raw.replace(cv);
+                        Ok(Read::Changed)
+                    }
+                    Reach::Stop(s) => {
+                        let mut out = Err(bug("no process"));
+                        s.with_process(*proc, &mut |p| out = read(p));
+                        out
+                    }
+                }
+            }
+            VarAt::Shared { slot, ty } if matches!(reach, Reach::Stop(s) if s.inside_process()) => {
+                let Reach::Stop(s) = reach else {
+                    return Ok(Read::Idle);
+                };
+                let Some((cv, prog)) = s.stopped_shared(*ty, *slot) else {
+                    return Ok(Read::Idle);
+                };
+                make_plan(paths, plan, plan_desc, prog, *ty, &cv)?;
+                *old = raw.replace(cv);
+                Ok(Read::Changed)
+            }
             VarAt::Shared { slot, ty } => {
                 let b = self.built.as_ref().ok_or_else(|| bug("no shared state"))?;
                 if let Some(r) = raw.as_ref()
@@ -839,14 +875,14 @@ impl Observer for Recorder {
             Phase::NextTimeStep => {
                 // The step in progress is complete: its signals, then its variables.
                 st.flush(|r| hook.view(r));
-                st.sample_vars(hook);
+                st.sample_vars(&mut Reach::Step(hook));
                 st.step_done();
                 st.step = hook.now().as_fs();
             }
             Phase::EndOfTimeStep => st.flush(|r| hook.view(r)),
             Phase::EndOfSim => {
                 st.flush(|r| hook.view(r));
-                st.sample_vars(hook);
+                st.sample_vars(&mut Reach::Step(hook));
                 st.step_done();
             }
             Phase::EndOfInit

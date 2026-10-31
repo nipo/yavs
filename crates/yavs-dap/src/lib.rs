@@ -513,11 +513,14 @@ impl At<'_, '_> {
         }
     }
 
-    /// The time and the signals of this stop; none during elaboration.
+    /// The time and what can be read at this stop; none during elaboration.
     fn signals(&self) -> Option<(u64, &dyn yavs_wave::Signals)> {
         match self {
-            At::Process(s) => Some((s.now?.as_fs(), s.ctx? as &dyn yavs_wave::Signals)),
-            At::Kernel(sim) => Some((sim.now().as_fs(), *sim as &dyn yavs_wave::Signals)),
+            At::Process(s) => {
+                s.ctx?;
+                Some((s.now?.as_fs(), self))
+            }
+            At::Kernel(sim) => Some((sim.now().as_fs(), self)),
         }
     }
 
@@ -526,6 +529,57 @@ impl At<'_, '_> {
         match self {
             At::Process(s) => Some(s.process),
             At::Kernel(_) => None,
+        }
+    }
+}
+
+impl yavs_wave::Signals for At<'_, '_> {
+    fn view(&self, r: SigRef) -> Result<yavs_kernel::SigView<'_>, yavs_kernel::SimError> {
+        match self {
+            At::Process(s) => s.ctx.expect("`signals` checked the context").view(r),
+            At::Kernel(sim) => sim.view(r),
+        }
+    }
+
+    fn inside_process(&self) -> bool {
+        matches!(self, At::Process(_))
+    }
+
+    fn stopped_var(
+        &self,
+        p: yavs_kernel::ProcId,
+        name: &str,
+    ) -> Option<(yavs_ir::TyId, yavs_interp::CallVal, &yavs_ir::Program)> {
+        let At::Process(s) = self else {
+            return None;
+        };
+        if s.ctx?.process() != p {
+            return None;
+        }
+        let (ty, v) = s.frames.value(0, name).ok()?;
+        Some((ty, v, s.frames.program()))
+    }
+
+    fn stopped_shared(
+        &self,
+        ty: yavs_ir::TyId,
+        slot: u64,
+    ) -> Option<(yavs_interp::CallVal, &yavs_ir::Program)> {
+        let At::Process(s) = self else {
+            return None;
+        };
+        let v = s.frames.shared_value(ty, slot).ok()?;
+        Some((v, s.frames.program()))
+    }
+
+    fn with_process(
+        &self,
+        p: yavs_kernel::ProcId,
+        f: &mut dyn FnMut(&mut dyn yavs_kernel::Process),
+    ) -> bool {
+        match self {
+            At::Process(_) => false,
+            At::Kernel(sim) => sim.with_process(p, f),
         }
     }
 }

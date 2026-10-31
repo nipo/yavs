@@ -12786,7 +12786,7 @@ duplicate implementations without changing diagnostics (issue #894; implemented 
 
 - **A stop writes what the stopped process reads, at the stop time** (agent, 2026-10-31): checked in the file: the time table ended at the last completed step, because changes wait for the end of their time step so that a step's deltas collapse. A stop now writes the pending ones. The price is a second value at the same time when a later delta changes the signal again, only in debugger sessions; readers take the last value of a time.
 - **A repeated value marks a stop time with no change** (agent, 2026-10-31): a file's time ends at its last change and FST has no other mark. The first recorded signal repeats its value at that time; it shows no edge.
-- **Variables stay at the end of their step** (agent, 2026-10-31): reading them needs a kernel hook and every process suspended, which a stop has not.
+- **Variables at a stop: what can be read** (agent, 2026-10-31, #965): between cycles every process is suspended and all are read. Inside a process its frames give its own variables, and the shared ones through it, since it holds the shared state; a read through another route would deadlock. The other processes are out of reach while the kernel runs one (the serial loop holds their slots), and the Variables view shows only the stopped process, so they follow when the time step ends. `execs` stays, so that end reads the stopped process again.
 
 ## Surfer and a hidden window (#952, 2026-10-31)
 

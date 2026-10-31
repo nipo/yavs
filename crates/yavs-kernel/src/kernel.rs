@@ -1733,6 +1733,15 @@ impl SimControl {
         Ok(s.cur.extract(r.offset as usize, r.len as usize).to_value())
     }
 
+    /// Runs `f` on process `p`, between cycles, when every process is suspended (a debugger stop).
+    pub fn with_process(&self, p: ProcId, f: &mut dyn FnMut(&mut dyn Process)) -> bool {
+        let Some(slot) = self.slots.get(p.0 as usize) else {
+            return false;
+        };
+        f(lock(slot).process.as_mut());
+        true
+    }
+
     /// Effective value read in place (see `Hook::view`).
     pub fn view(&self, r: impl Into<SigRef>) -> Result<SigView<'_>, SimError> {
         let (s, r) = self.check(r)?;

@@ -360,6 +360,15 @@ impl<'a> FrameView<'a> {
         Ok((ty, v))
     }
 
+    /// The value of the shared variable at `slot`: the stopped process holds the shared state.
+    pub fn shared_value(&self, ty: TyId, slot: u64) -> Result<CallVal, String> {
+        crate::read_slot(&self.m.borrow(), ty, slot).map_err(crate::fault_text)
+    }
+
+    pub fn program(&self) -> &'a Program {
+        self.prog
+    }
+
     /// Writes `v` into local `name` of frame `i`; a composite keeps its bounds.
     pub fn set_value(&self, i: usize, name: &str, v: &CallVal) -> Result<(), String> {
         let (ty, a) = self.slot(i, name)?;
