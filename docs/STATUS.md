@@ -5455,6 +5455,8 @@ runs the test as written.
 
 ## vhpi export (`crates/yavs-vhpi`, `crates/yavs`)
 
+Done (#829, 2026-10-31): equivalent processes as regions, `vhpiEqProcessStmts`, `vhpiSensitivities`, `vhpiSeqStmts`, `vhpiIsPassiveP`, `vhpiIsPostponedP`, `vhpiIsGuardedP`, `vhpiStaticnessP`. Not: statement, subprogram-call, suspend and resume callbacks, stack frames and expressions (`W0904`).
+
 Done (#831, 2026-10-31): aliases, files, implicit signals, components, configuration specifications, subprograms, package bodies, libraries, use clauses, attributes of units and labels, `vhpiEndLineNoP`; see `crates/yavs-vhpi/AGENTS.md`. Not: the value of an alias of a part of an object, file parameters of foreign subprograms, `vhpiConfigDecl`, attribute names as expressions.
 
 Done (#833, 2026-10-31): whole records and arrays of composites through `vhpiRawDataVal` (reads and puts, layout in `crates/yavs-vhpi/AGENTS.md`), `vhpiSmallPhysVal`, `vhpiSmallPhysVecVal`, `vhpi_protected_call`, `vhpiIsProtectedTypeP`, access, file and protected types as type objects, `vhpi_format_value` across kinds. No value for a protected object; `vhpiPtrVecVal` applies to nothing yavs models.

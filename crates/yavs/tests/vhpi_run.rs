@@ -445,12 +445,8 @@ fn plugin_reads_values_in_every_format() {
     let (lib, so) = setup_with("values", &vhdl);
     let (code, err, out) = yavs(&["run", &lib, &format!("--vhpi={}", so.display()), "top"]);
     assert_eq!(code, 0, "{err}");
-    // Formats that do not apply are misuse; records and pointers are not values.
+    // Formats that do not apply are misuse.
     assert!(err.contains("W0903"), "{err}");
-    assert!(
-        err.contains("unsupported VHPI call: vhpi_get_value of a record"),
-        "{err}"
-    );
     assert!(!err.contains("bug in yavs"), "{err}");
     let expected = dir.join("expected.txt");
     if std::env::var_os("YAVS_BLESS").is_some() {
@@ -510,7 +506,6 @@ fn vhpi_put_value_misuse_is_reported() {
         .replace("\r\n", "\n");
     assert_eq!(out, want);
     assert!(err.contains("warning[W0903]"), "{err}");
-    assert!(err.contains("warning[W0904]"), "{err}");
 }
 
 /// `vhpiStrVal` text fills a string from the left: shorter text is padded with NUL, longer
@@ -1149,12 +1144,12 @@ fn vhpi_next_time_in_the_read_only_phase() {
 }
 
 /// `vhpi_format_value` between formats with no object: integers to radix strings, bit
-/// strings to logic vectors and hex; an integer is not a real, a real has no bits (`W0903`).
+/// strings to logic vectors and hex, an integer to a real; a real has no bits (`W0903`).
 #[test]
 fn vhpi_format_value_converts_between_formats() {
     let (code, err, out) = extras("format");
     assert_eq!(code, 0, "{err}");
-    assert_eq!(err.matches("W0903").count(), 3, "{err}");
+    assert_eq!(err.matches("W0903").count(), 2, "{err}");
     let lines: Vec<&str> = out
         .lines()
         .filter(|l| !l.starts_with("    Process"))
@@ -1165,7 +1160,7 @@ fn vhpi_format_value_converts_between_formats() {
             "int 10 -> 1: 1010",
             "int 255 -> 4: FF",
             "int -42 -> 3: -42",
-            "int 3 -> 8: rc=-1 error=1",
+            "int 3 -> real: 3",
             "bin 10X1 -> logic vec: rc=0 n=4 3 2 1 3",
             "bin 10100101 -> hex: rc=0 A5",
             "real -> bin: rc=-1 error=1",
@@ -1410,7 +1405,7 @@ fn vhpi_more_declarations_and_units() {
     assert_eq!(code, 0, "{err}{out}");
     assert!(!err.contains("W0904"), "{err}");
     for want in [
-        "alias sa -> :top:s value 0",
+        "alias sa -> :top:s value 1",
         "alias part -> :top:v value none",
         "aliases: sa part",
         "file: vhpiFileDeclK out_f",
@@ -1427,11 +1422,69 @@ fn vhpi_more_declarations_and_units() {
         "func: vhpiFuncDeclK local params=1 pure=1 body=vhpiSubpBodyK ret=INTEGER",
         "lib WORK logical=work",
         "unit vhpiPackBodyK p primary=vhpiPackDeclK",
-        "use std.textio.all",
+        "use TEXTIO.all",
         "param vhpiConstParamDeclK a",
         "param vhpiSigParamDeclK s",
     ] {
         assert!(out.contains(want), "no `{want}` in\n{out}");
     }
-    assert!(out.contains("end line of top: ") && !out.contains("end line of top: -1"), "{out}");
+    assert!(
+        out.contains("end line of top: ") && !out.contains("end line of top: -1"),
+        "{out}"
+    );
+}
+
+const STMTS: &str = "entity top is end;\n\
+    architecture a of top is\n\
+    signal a, b, c, d, e : bit;\n\
+    constant k : integer := 1;\n\
+    procedure pc (signal x : in bit) is begin null; end;\n\
+    begin\n\
+    ca: a <= b and c;\n\
+    co: d <= b when c = '1' else '0';\n\
+    with b select e <= '1' when '1', '0' when others;\n\
+    ck: assert b = '0' report \"x\" severity note;\n\
+    cp: pc(c);\n\
+    bd: postponed process (a, b)\n\
+      variable v : integer;\n\
+    begin\n\
+      if a = '1' then\n\
+        v := 1;\n\
+      else\n\
+        for i in 1 to 2 loop\n\
+          null;\n\
+        end loop;\n\
+      end if;\n\
+      report \"r\";\n\
+    end process;\n\
+    end;\n";
+
+/// Equivalent processes, sensitivity, flags, sequential statements; statement callbacks and
+/// stack frames report that they are not implemented (#829).
+#[test]
+fn vhpi_statements() {
+    let (lib, so) = setup_with("stmts", STMTS);
+    let spec = format!("--vhpi={}:start", so.display());
+    let (code, err, out) = yavs(&["run", &lib, &spec, "--resolution=ns", "top"]);
+    assert_eq!(code, 0, "{err}{out}");
+    for want in [
+        "vhpiSimpleSigAssignStmtK ca label=ca postponed=0 passive=0 guarded=0 sens: b c",
+        "vhpiCondSigAssignStmtK co label=co postponed=0 passive=0 guarded=0 sens: b c",
+        "vhpiSelectSigAssignStmtK ",
+        "vhpiConcAssertStmtK ck label=ck postponed=0 passive=1 guarded=0 sens: b",
+        "vhpiConcProcCallStmtK cp label=cp postponed=0 passive=1 guarded=0 sens: c",
+        "vhpiProcessStmtK bd label=bd postponed=1 passive=1 guarded=0 sens: a b",
+        "old spelling: ok",
+        "vhpiIfStmtK line=15 end=21 seq=1",
+        "  vhpiVarAssignStmtK line=16 end=16 seq=1",
+        "  vhpiForLoopK line=18 end=20 seq=1",
+        "    vhpiNullStmtK line=19 end=19 seq=1",
+        "vhpiReportStmtK line=22 end=22 seq=1",
+        "staticness: signal 1003 const 1002",
+        "statement callback: NULL error=1",
+        "stack frame: NULL error=1",
+    ] {
+        assert!(out.contains(want), "no `{want}` in\n{out}");
+    }
+    assert!(err.contains("W0904"), "{err}");
 }

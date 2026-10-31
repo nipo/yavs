@@ -361,6 +361,8 @@ impl Design {
             attr_nodes: HashMap::new(),
             subps: HashMap::new(),
             decl_nodes: HashMap::new(),
+            sens_links: Vec::new(),
+            stmts: HashMap::new(),
             comp_links: Vec::new(),
         };
         for (id, a) in db.attr_values.iter() {
@@ -549,6 +551,10 @@ struct Builder<'a> {
     /// `vhpiCompDecl` to fill in once every declaration has its node: the referring node, its
     /// elaborated region and the component.
     comp_links: Vec<(NodeId, ScopeId, DeclId)>,
+    /// The signals a statement region is sensitive to: filled in as `comp_links` are.
+    sens_links: Vec<(NodeId, ScopeId, Vec<DeclId>)>,
+    /// The node of each sequential statement (made once).
+    stmts: HashMap<yavs_sem::StmtId, NodeId>,
 }
 
 impl Builder<'_> {
@@ -668,8 +674,138 @@ impl Builder<'_> {
         self.decl_nodes.get(&(None, d)).copied()
     }
 
+    /// What a process or an equivalent process says about itself: its flags, its sensitivity
+    /// and its sequential statements (#829).
+    fn statement(&mut self, n: NodeId, s: ScopeId, p: usize) {
+        let (db, e) = (self.db, self.e);
+        let ScopeKind::Process { stmt } = e.hier.scope(s).kind else {
+            return;
+        };
+        let st = &db.stmts[stmt];
+        let mut reads = Vec::new();
+        let mut guarded = false;
+        let mut body: &[yavs_sem::StmtId] = &[];
+        let postponed = match &st.kind {
+            StmtKind::Process {
+                postponed,
+                sensitivity,
+                info,
+                body: b,
+                ..
+            } => {
+                body = b;
+                match sensitivity {
+                    yavs_sem::hir::Sensitivity::List(l) => reads.extend(l.iter().cloned()),
+                    yavs_sem::hir::Sensitivity::All => {
+                        reads.extend(info.reads_all.iter().flatten().cloned())
+                    }
+                    yavs_sem::hir::Sensitivity::None => {}
+                }
+                *postponed
+            }
+            StmtKind::ConcSignalAssign {
+                postponed,
+                guarded: g,
+                ..
+            } => {
+                guarded = *g;
+                db.stmt_reads(stmt, &mut reads);
+                *postponed
+            }
+            StmtKind::ConcProcCall { postponed, .. } | StmtKind::ConcAssert { postponed, .. } => {
+                db.stmt_reads(stmt, &mut reads);
+                *postponed
+            }
+            _ => e.procs[p].postponed,
+        };
+        let ints = &mut self.d.extra.ints;
+        ints.insert((n, vhpiIsPostponedP), vhpiIntT::from(postponed));
+        ints.insert((n, vhpiIsGuardedP), vhpiIntT::from(guarded));
+        // LRM 11.3: a process with no signal assignment is passive.
+        let passive = e.procs[p].drivers.is_empty();
+        ints.insert((n, vhpiIsPassiveP), vhpiIntT::from(passive));
+        ints.insert((n, vhpiIsSeqStmtP), 0);
+        let mut roots: Vec<DeclId> = (reads.iter())
+            .filter_map(|l| match l.root {
+                yavs_sem::hir::ObjRoot::Decl(d) => Some(d),
+                _ => None,
+            })
+            .collect();
+        let mut seen = std::collections::HashSet::new();
+        roots.retain(|d| seen.insert(*d));
+        self.sens_links.push((n, s, roots));
+        for &x in body {
+            let c = self.seq_stmt(x);
+            self.link_many(n, vhpiSeqStmts, c);
+        }
+    }
+
+    /// The node of sequential statement `x` (one per statement of the source) and those inside.
+    fn seq_stmt(&mut self, x: yavs_sem::StmtId) -> NodeId {
+        use yavs_sem::hir::LoopScheme;
+        if let Some(&n) = self.stmts.get(&x) {
+            return n;
+        }
+        let st = &self.db.stmts[x];
+        let kind = match &st.kind {
+            StmtKind::Wait { .. } => vhpiWaitStmtK,
+            StmtKind::Assert { .. } => vhpiSeqAssertStmtK,
+            StmtKind::Report { .. } => vhpiReportStmtK,
+            StmtKind::SignalAssign { .. } | StmtKind::Force { .. } | StmtKind::Release { .. } => {
+                vhpiSeqSigAssignStmtK
+            }
+            StmtKind::VarAssign { .. } => vhpiVarAssignStmtK,
+            StmtKind::ProcCall(_) => vhpiSeqProcCallStmtK,
+            StmtKind::If { .. } => vhpiIfStmtK,
+            StmtKind::Case { .. } => vhpiCaseStmtK,
+            StmtKind::Loop { scheme, .. } => match scheme {
+                LoopScheme::Forever => vhpiForeverLoopK,
+                LoopScheme::While(_) => vhpiWhileLoopK,
+                LoopScheme::For { .. } => vhpiForLoopK,
+            },
+            StmtKind::Next { .. } => vhpiNextStmtK,
+            StmtKind::Exit { .. } => vhpiExitStmtK,
+            StmtKind::Return(_) => vhpiReturnStmtK,
+            _ => vhpiNullStmtK,
+        };
+        let label = st.label.as_ref().map(|l| l.text.to_string());
+        let n = self.bare(kind, label.clone().unwrap_or_default(), st.span);
+        self.stmts.insert(x, n);
+        self.end_line(n, st.span);
+        self.d.extra.ints.insert((n, vhpiIsSeqStmtP), 1);
+        if let Some(l) = label {
+            self.d.extra.strs.insert((n, vhpiLabelNameP), l);
+        }
+        let mut inner: Vec<yavs_sem::StmtId> = Vec::new();
+        match &st.kind {
+            StmtKind::If { branches, else_ } => {
+                inner.extend(branches.iter().flat_map(|(_, b)| b.iter().copied()));
+                inner.extend(else_.iter().flat_map(|b| b.iter().copied()));
+            }
+            StmtKind::Case { alts, .. } => {
+                inner.extend(alts.iter().flat_map(|(_, b)| b.iter().copied()));
+            }
+            StmtKind::Loop { body, .. } | StmtKind::SeqBlock { body, .. } => {
+                inner.extend(body.iter().copied());
+            }
+            _ => {}
+        }
+        for i in inner {
+            let c = self.seq_stmt(i);
+            self.link_many(n, vhpiSeqStmts, c);
+        }
+        n
+    }
+
     /// Fills in the relations that need every declaration's node.
     fn links(&mut self) {
+        for (n, s, roots) in std::mem::take(&mut self.sens_links) {
+            for d in roots {
+                if let Some(x) = self.find_decl(Some(s), d) {
+                    self.link_many(n, vhpiSensitivities, x);
+                }
+            }
+        }
         for (n, s, comp) in std::mem::take(&mut self.comp_links) {
             if let Some(c) = self.find_decl(Some(s), comp) {
                 self.d.extra.one.insert((n, vhpiCompDecl), c);
@@ -760,8 +896,19 @@ impl Builder<'_> {
                     sem_regions.push(*scope);
                     (vhpiProcessStmtK, None)
                 }
-                // ponytail: equivalent processes of concurrent statements are not regions
-                // yet; add vhpiEqProcessStmts when a plugin needs them.
+                // Equivalent processes of concurrent statements (#829).
+                StmtKind::ConcSignalAssign { rhs, .. } => (
+                    match rhs {
+                        yavs_sem::hir::Rhs::Simple(_) => vhpiSimpleSigAssignStmtK,
+                        yavs_sem::hir::Rhs::Conditional(_) => vhpiCondSigAssignStmtK,
+                        yavs_sem::hir::Rhs::Selected { .. } => vhpiSelectSigAssignStmtK,
+                    },
+                    None,
+                ),
+                StmtKind::ConcAssert { .. } => (vhpiConcAssertStmtK, None),
+                StmtKind::ConcProcCall { .. } => (vhpiConcProcCallStmtK, None),
+                // The processes of a port's expression actual and of a block's guard are
+                // the tool's, not statements of the design.
                 _ => return,
             },
             // Packages are listed by `packages`.
@@ -828,6 +975,7 @@ impl Builder<'_> {
         {
             self.d.net.proc_node.insert(p as u32, n);
             self.d.net.node_proc.insert(n, p as u32);
+            self.statement(n, s, p);
         }
         // After the region itself: the root instance is the first node.
         if let Some(u) = unit {
@@ -934,7 +1082,7 @@ impl Builder<'_> {
             (ObjRole::Param, ObjClass::File) => vhpiFileParamDeclK,
             (ObjRole::Generic, ObjClass::Constant) => vhpiGenericDeclK,
             (ObjRole::Port, ObjClass::Signal | ObjClass::Variable) => vhpiPortDeclK,
-            (ObjRole::Plain | ObjRole::Deferred, ObjClass::Signal) => vhpiSigDeclK,
+            (ObjRole::Plain | ObjRole::Deferred | ObjRole::Guard, ObjClass::Signal) => vhpiSigDeclK,
             (ObjRole::Plain | ObjRole::Deferred | ObjRole::GenerateParam, ObjClass::Constant) => {
                 vhpiConstDeclK
             }
@@ -1022,10 +1170,16 @@ impl Builder<'_> {
         });
         self.decl_nodes.insert((s, d), node);
         self.end_line(node, decl.span);
+        if o.signal_kind.is_some() {
+            self.d.extra.ints.insert((node, vhpiIsGuardedP), 1);
+        }
         if let Some(obj) = signal {
             self.d.net.obj_nodes.insert(obj, node);
         }
-        if matches!(db.types[db.base(o.subtype)].kind, TypeKind::Protected { .. }) {
+        if matches!(
+            db.types[db.base(o.subtype)].kind,
+            TypeKind::Protected { .. }
+        ) {
             self.d.protected.insert(node);
         }
         self.attr_specs(node, s, d);
@@ -1090,13 +1244,7 @@ impl Builder<'_> {
     /// the object as its `vhpiAliasedName` and no value.
     // ponytail: no value for an alias of a field, element or slice; a path into the layout when
     // a plugin needs one.
-    fn alias_decl(
-        &mut self,
-        n: NodeId,
-        s: Option<ScopeId>,
-        d: DeclId,
-        a: &yavs_sem::decl::Alias,
-    ) {
+    fn alias_decl(&mut self, n: NodeId, s: Option<ScopeId>, d: DeclId, a: &yavs_sem::decl::Alias) {
         let db = self.db;
         let decl = &db.decls[d];
         let full = format!("{}:{}", self.d.node(n).full, decl.name);
@@ -1467,7 +1615,10 @@ impl Builder<'_> {
         let count = vhpiIntT::try_from(sp.params.len()).unwrap_or(vhpiIntT::MAX);
         self.d.extra.ints.insert((n, vhpiNumParamsP), count);
         if let yavs_sem::decl::SubprogramKind::Function { pure } = sp.kind {
-            self.d.extra.ints.insert((n, vhpiIsPureP), vhpiIntT::from(pure));
+            self.d
+                .extra
+                .ints
+                .insert((n, vhpiIsPureP), vhpiIntT::from(pure));
         }
         for p in &sp.params {
             if let Some(pd) = p.decl {
@@ -1479,6 +1630,10 @@ impl Builder<'_> {
             let b = self.bare(vhpiSubpBodyK, name, span);
             self.d.extra.one.insert((n, vhpiSubpBody), b);
             self.d.extra.one.insert((b, vhpiSubpDecl), n);
+            for &x in stmts.iter() {
+                let c = self.seq_stmt(x);
+                self.link_many(b, vhpiSeqStmts, c);
+            }
         }
         n
     }

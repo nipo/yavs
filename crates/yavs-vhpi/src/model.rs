@@ -319,6 +319,11 @@ pub(crate) const INT_PROPS: &[vhpiIntPropertyT] = &[
     vhpiIsPureP,
     vhpiPredefAttrP,
     vhpiAttrKindP,
+    vhpiIsPostponedP,
+    vhpiIsPassiveP,
+    vhpiIsGuardedP,
+    vhpiIsSeqStmtP,
+    vhpiStaticnessP,
 ];
 pub(crate) const STR_PROPS: &[vhpiStrPropertyT] = &[
     vhpiNameP,
@@ -543,7 +548,12 @@ impl State {
                 .as_ref()
                 .and_then(|v| Read::from_const(ty.clone(), v))
                 .ok_or_else(|| misuse("this is a bug in yavs: no elaborated value")),
-            Origin::Var { .. } if self.design.protected.contains(&Self::base(obj).expect("var")) => {
+            Origin::Var { .. }
+                if self
+                    .design
+                    .protected
+                    .contains(&Self::base(obj).expect("var")) =>
+            {
                 Err(misuse("a protected object has no value; call its methods"))
             }
             Origin::Var { .. } => {
@@ -634,12 +644,13 @@ impl State {
             .ok_or_else(|| misuse(format!("bufSize {} is too small", bytes.len())))?;
         *at += size;
         let res = self.clock.resolution.fs();
-        let r = Read::from_raw(ty.clone(), array.then_some(len as usize), part, res).map_err(
-            |e| match e {
-                value::Error::Unsupported(m) => (Fault::Unsupported, m),
-                value::Error::Mismatch(m) => misuse(m),
-            },
-        )?;
+        let r =
+            Read::from_raw(ty.clone(), array.then_some(len as usize), part, res).map_err(|e| {
+                match e {
+                    value::Error::Unsupported(m) => (Fault::Unsupported, m),
+                    value::Error::Mismatch(m) => misuse(m),
+                }
+            })?;
         out.push((obj.clone(), r));
         Ok(())
     }
@@ -944,6 +955,11 @@ impl State {
                         | vhpiForGenerateK
                         | vhpiIfGenerateK
                         | vhpiProcessStmtK
+                        | vhpiSimpleSigAssignStmtK
+                        | vhpiCondSigAssignStmtK
+                        | vhpiSelectSigAssignStmtK
+                        | vhpiConcAssertStmtK
+                        | vhpiConcProcCallStmtK
                 ) =>
             {
                 let n = &node?.name;
@@ -989,6 +1005,14 @@ impl State {
             | (Object::NetDriver(_) | Object::Transaction(_), _) => {
                 return self.net_prop(obj, prop);
             }
+            // A signal, port or variable changes; a generic or constant is a value elaboration
+            // knows, or computes at run time.
+            (_, vhpiStaticnessP) => match &node?.origin {
+                Origin::Signal { .. } | Origin::Var { .. } => vhpiDynamic,
+                Origin::Decl { value: Some(_), .. } => vhpiGloballyStatic,
+                Origin::Decl { value: None, .. } => vhpiDynamic,
+                _ => return None,
+            },
             (_, vhpiLineNoP | vhpiStartLineNoP) => node?.line?,
             (Object::Node(n), vhpiNumPortsP | vhpiNumGensP)
                 if node?.layout.is_none() && node?.kind != vhpiAttrDeclK =>
@@ -1072,7 +1096,7 @@ impl State {
                 node.and_then(|n| n.unit).map(Object::Node).ok_or(false)
             }
             (vhpiPrimaryUnit, Some(Object::Node(_)))
-                if node.map(|n| n.kind) == Some(vhpiArchBodyK) =>
+                if matches!(node.map(|n| n.kind), Some(vhpiArchBodyK | vhpiPackBodyK)) =>
             {
                 node.and_then(|n| n.unit).map(Object::Node).ok_or(false)
             }
@@ -1102,7 +1126,10 @@ impl State {
                     t
                 };
                 if kind == vhpiProtectedTypeDecl
-                    && self.design.types.kind(TypeObj::Ty(self.design.types.base(t)))
+                    && self
+                        .design
+                        .types
+                        .kind(TypeObj::Ty(self.design.types.base(t)))
                         != vhpiProtectedTypeDeclK
                 {
                     return Err(false);
@@ -1134,17 +1161,42 @@ impl State {
         // The relations of `Design::extra` (#831); no entry is an empty iteration.
         if matches!(
             rel,
-            vhpiSigAttrs | vhpiAttrDecls | vhpiDesignUnits | vhpiUseClauses | vhpiConfigSpecs
+            vhpiSigAttrs
+                | vhpiAttrDecls
+                | vhpiDesignUnits
+                | vhpiUseClauses
+                | vhpiConfigSpecs
+                | vhpiSensitivities
+                | DEPRECATED_vhpiSensitivitys
+                | vhpiSeqStmts
         ) || rel == vhpiLibraryDecls && matches!(reference, Some(Object::Node(n)) if *n != ROOT)
         {
             let Some(Object::Node(n)) = reference else {
                 return Err(false);
             };
-            let items = self.design.extra.many.get(&(*n, rel));
-            return list(items.into_iter().flatten().map(|&x| Object::Node(x)).collect());
+            // One name for the misspelt constant of the standard's first version.
+            let key = if rel == DEPRECATED_vhpiSensitivitys {
+                vhpiSensitivities
+            } else {
+                rel
+            };
+            let items = self.design.extra.many.get(&(*n, key));
+            return list(
+                items
+                    .into_iter()
+                    .flatten()
+                    .map(|&x| Object::Node(x))
+                    .collect(),
+            );
         }
         if rel == vhpiLibraryDecls {
-            return list(self.design.libraries.iter().map(|&x| Object::Node(x)).collect());
+            return list(
+                self.design
+                    .libraries
+                    .iter()
+                    .map(|&x| Object::Node(x))
+                    .collect(),
+            );
         }
         if let (vhpiParamDecls, Some(o @ Object::Call(_))) = (rel, reference) {
             return list(self.foreign_params(o).ok_or(false)?);
@@ -1245,6 +1297,17 @@ impl State {
             // Child statements (#316); a process has none, an empty iteration without error.
             (vhpiBlockStmts, Some(n)) => regions(n, &|k| k == vhpiBlockStmtK),
             (vhpiCompInstStmts, Some(n)) => regions(n, &|k| k == vhpiCompInstStmtK),
+            (vhpiEqProcessStmts, Some(n)) => regions(n, &|k| {
+                matches!(
+                    k,
+                    vhpiProcessStmtK
+                        | vhpiSimpleSigAssignStmtK
+                        | vhpiCondSigAssignStmtK
+                        | vhpiSelectSigAssignStmtK
+                        | vhpiConcAssertStmtK
+                        | vhpiConcProcCallStmtK
+                )
+            }),
             (vhpiStmts, Some(n)) => regions(n, &|_| true),
             // Attribute specifications have their own iterator; they decorate the region.
             (vhpiDecls, Some(n)) => list(

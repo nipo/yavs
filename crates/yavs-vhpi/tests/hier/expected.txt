@@ -25,7 +25,7 @@ vhpiRootInstK Top name=TOP full=:TOP top.vhd:33 unit=vhpiArchBodyK:A of vhpiEnti
   vhpiForGenerateK G(0) name=G(0) full=:TOP:G(0) top.vhd:53 blocks=0 insts=1 stmts=1
     vhpiSigDeclK Local name=LOCAL full=:Top:G(0):Local top.vhd:54 composite=0 size=1
     vhpiConstDeclK I name=I full=:Top:G(0):I top.vhd:53 composite=0 size=1
-    vhpiCompInstStmtK U name=U full=:TOP:G(0):U top.vhd:56 unit=vhpiArchBodyK:Rtl of vhpiEntityDeclK:Leaf def=WORK.LEAF(RTL) blocks=0 insts=0 stmts=1
+    vhpiCompInstStmtK U name=U full=:TOP:G(0):U top.vhd:56 unit=vhpiArchBodyK:Rtl of vhpiEntityDeclK:Leaf def=WORK.LEAF(RTL) blocks=0 insts=0 stmts=2
       vhpiGenericDeclK W name=W full=:Top:G(0):U:W top.vhd:14 composite=0 size=1
       vhpiGenericDeclK Init name=INIT full=:Top:G(0):U:Init top.vhd:14 composite=1 size=2
         vhpiIndexedNameK Init(0) name=INIT(0) full=:Top:G(0):U:Init(0) composite=0 size=1
@@ -42,12 +42,13 @@ vhpiRootInstK Top name=TOP full=:TOP top.vhd:33 unit=vhpiArchBodyK:A of vhpiEnti
       vhpiSigDeclK Reg name=REG full=:Top:G(0):U:Reg top.vhd:19 composite=1 size=2
         vhpiIndexedNameK Reg(1) name=REG(1) full=:Top:G(0):U:Reg(1) composite=0 size=1
         vhpiIndexedNameK Reg(0) name=REG(0) full=:Top:G(0):U:Reg(0) composite=0 size=1
+      vhpiSimpleSigAssignStmtK _p0 name=_P0 full=:TOP:G(0):U:_P0 top.vhd:21 blocks=0 insts=0 stmts=0
       vhpiProcessStmtK P_Main name=P_MAIN full=:TOP:G(0):U:P_MAIN top.vhd:22 blocks=0 insts=0 stmts=0
         vhpiVarDeclK Cnt name=CNT full=:Top:G(0):U:P_Main:Cnt top.vhd:23 composite=0 size=1
   vhpiForGenerateK G(1) name=G(1) full=:TOP:G(1) top.vhd:53 blocks=0 insts=1 stmts=1
     vhpiSigDeclK Local name=LOCAL full=:Top:G(1):Local top.vhd:54 composite=0 size=1
     vhpiConstDeclK I name=I full=:Top:G(1):I top.vhd:53 composite=0 size=1
-    vhpiCompInstStmtK U name=U full=:TOP:G(1):U top.vhd:56 unit=vhpiArchBodyK:Rtl of vhpiEntityDeclK:Leaf def=WORK.LEAF(RTL) blocks=0 insts=0 stmts=1
+    vhpiCompInstStmtK U name=U full=:TOP:G(1):U top.vhd:56 unit=vhpiArchBodyK:Rtl of vhpiEntityDeclK:Leaf def=WORK.LEAF(RTL) blocks=0 insts=0 stmts=2
       vhpiGenericDeclK W name=W full=:Top:G(1):U:W top.vhd:14 composite=0 size=1
       vhpiGenericDeclK Init name=INIT full=:Top:G(1):U:Init top.vhd:14 composite=1 size=2
         vhpiIndexedNameK Init(0) name=INIT(0) full=:Top:G(1):U:Init(0) composite=0 size=1
@@ -64,12 +65,13 @@ vhpiRootInstK Top name=TOP full=:TOP top.vhd:33 unit=vhpiArchBodyK:A of vhpiEnti
       vhpiSigDeclK Reg name=REG full=:Top:G(1):U:Reg top.vhd:19 composite=1 size=2
         vhpiIndexedNameK Reg(1) name=REG(1) full=:Top:G(1):U:Reg(1) composite=0 size=1
         vhpiIndexedNameK Reg(0) name=REG(0) full=:Top:G(1):U:Reg(0) composite=0 size=1
+      vhpiSimpleSigAssignStmtK _p0 name=_P0 full=:TOP:G(1):U:_P0 top.vhd:21 blocks=0 insts=0 stmts=0
       vhpiProcessStmtK P_Main name=P_MAIN full=:TOP:G(1):U:P_MAIN top.vhd:22 blocks=0 insts=0 stmts=0
         vhpiVarDeclK Cnt name=CNT full=:Top:G(1):U:P_Main:Cnt top.vhd:23 composite=0 size=1
   vhpiBlockStmtK B1 name=B1 full=:TOP:B1 top.vhd:58 blocks=0 insts=0 stmts=0
     vhpiSigDeclK Inner name=INNER full=:Top:B1:Inner top.vhd:59 composite=0 size=1
   vhpiIfGenerateK IG name=IG full=:TOP:IG top.vhd:62 blocks=0 insts=1 stmts=1
-    vhpiCompInstStmtK E name=E full=:TOP:IG:E top.vhd:63 unit=vhpiArchBodyK:Rtl of vhpiEntityDeclK:Leaf def=WORK.LEAF(RTL) blocks=0 insts=0 stmts=1
+    vhpiCompInstStmtK E name=E full=:TOP:IG:E top.vhd:63 unit=vhpiArchBodyK:Rtl of vhpiEntityDeclK:Leaf def=WORK.LEAF(RTL) blocks=0 insts=0 stmts=2
       vhpiGenericDeclK W name=W full=:Top:IG:E:W top.vhd:14 composite=0 size=1
       vhpiGenericDeclK Init name=INIT full=:Top:IG:E:Init top.vhd:14 composite=1 size=2
         vhpiIndexedNameK Init(0) name=INIT(0) full=:Top:IG:E:Init(0) composite=0 size=1
@@ -86,6 +88,7 @@ vhpiRootInstK Top name=TOP full=:TOP top.vhd:33 unit=vhpiArchBodyK:A of vhpiEnti
       vhpiSigDeclK Reg name=REG full=:Top:IG:E:Reg top.vhd:19 composite=1 size=2
         vhpiIndexedNameK Reg(1) name=REG(1) full=:Top:IG:E:Reg(1) composite=0 size=1
         vhpiIndexedNameK Reg(0) name=REG(0) full=:Top:IG:E:Reg(0) composite=0 size=1
+      vhpiSimpleSigAssignStmtK _p0 name=_P0 full=:TOP:IG:E:_P0 top.vhd:21 blocks=0 insts=0 stmts=0
       vhpiProcessStmtK P_Main name=P_MAIN full=:TOP:IG:E:P_MAIN top.vhd:22 blocks=0 insts=0 stmts=0
         vhpiVarDeclK Cnt name=CNT full=:Top:IG:E:P_Main:Cnt top.vhd:23 composite=0 size=1
   vhpiIfGenerateK CG name=CG full=:TOP:CG top.vhd:65 blocks=0 insts=0 stmts=0
