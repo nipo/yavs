@@ -16,7 +16,7 @@ use yavs_sem::DeclId;
 use yavs_sem::stat::ConstValue;
 
 use crate::abi::{fire, hooked, with_state};
-use crate::callbacks::WATCHING;
+use crate::callbacks::{TRANSACTIONS, WATCHING};
 use crate::model::{Control, PutOp, State};
 use crate::sys::*;
 
@@ -199,7 +199,9 @@ impl yavs_kernel::Observer for VhpiObserver {
             with_state(|s| requests(s, hook, false));
         }
         // Transactions (#830): a driver's as the cycle starts, the rest after the update.
-        if phase == Phase::NextCycle {
+        if !TRANSACTIONS.load(Ordering::Relaxed) {
+            // Nothing to ask.
+        } else if phase == Phase::NextCycle {
             with_state(|s| s.note_driver_due(hook));
         } else if phase == Phase::StartOfProcesses {
             let ids = with_state(|s| s.transaction_due(hook));

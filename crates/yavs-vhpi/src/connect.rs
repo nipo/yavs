@@ -47,6 +47,8 @@ pub(crate) struct LeafInfo {
 pub(crate) struct Net {
     pub(crate) drivers: Vec<NetDriver>,
     pub(crate) conns: Vec<Conn>,
+    /// The associations each object is a side of.
+    pub(crate) conns_of: HashMap<ObjId, Vec<u32>>,
     pub(crate) leaves: Vec<LeafInfo>,
     /// The node of each elaborated object that has one (component ports have none).
     pub(crate) obj_nodes: HashMap<ObjId, NodeId>,
@@ -114,9 +116,12 @@ impl State {
         let hit = |&(o, s, r): &(ObjId, SignalId, Range)| {
             o == obj && elems.iter().any(|&(x, e)| x == s && e.overlaps(r))
         };
-        (self.design.net.conns.iter().enumerate())
-            .filter(|(_, c)| hit(&c.formal) && keep(c, true) || hit(&c.actual) && keep(c, false))
-            .map(|(i, _)| i as u32)
+        let net = &self.design.net;
+        (net.conns_of.get(&obj).into_iter().flatten().copied())
+            .filter(|&i| {
+                let c = &net.conns[i as usize];
+                hit(&c.formal) && keep(c, true) || hit(&c.actual) && keep(c, false)
+            })
             .collect()
     }
 
@@ -426,16 +431,17 @@ impl State {
     /// The callbacks of `vhpiCbTransaction` on a driver with a transaction due now: asked before
     /// the update of the cycle, the signals' side after it ([`State::transaction_due`]).
     pub(crate) fn note_driver_due(&mut self, h: &Hook<'_>) {
-        let mut due = HashSet::new();
+        if !self.txn_due.is_empty() {
+            self.txn_due.clear();
+        }
         for id in self.cbs.due(vhpiCbTransaction) {
             if let Some(Object::NetDriver(d)) = self.cbs.get(id).and_then(|cb| cb.obj.as_ref()) {
                 let nd = &self.design.net.drivers[*d as usize];
                 if kernel_drivers(h, nd).into_iter().any(|k| h.driver_due(k)) {
-                    due.insert(id);
+                    self.txn_due.insert(id);
                 }
             }
         }
-        self.txn_due = due;
     }
 
     /// The enabled `vhpiCbTransaction` callbacks with a transaction in this cycle, after the

@@ -15,7 +15,7 @@
 #![allow(non_upper_case_globals)]
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use yavs_diag::Span;
 use yavs_elab::{Bounds, Elaborated, ObjId, ScopeId, ScopeKind, Shape};
@@ -362,6 +362,11 @@ impl Design {
             subps: HashMap::new(),
             decl_nodes: HashMap::new(),
             sens_links: Vec::new(),
+            procs_at: (e.procs.iter().enumerate())
+                .map(|(i, p)| (p.scope, i))
+                .rev()
+                .collect(),
+            labels: RefCell::default(),
             stmts: HashMap::new(),
             comp_links: Vec::new(),
         };
@@ -553,6 +558,10 @@ struct Builder<'a> {
     comp_links: Vec<(NodeId, ScopeId, DeclId)>,
     /// The signals a statement region is sensitive to: filled in as `comp_links` are.
     sens_links: Vec<(NodeId, ScopeId, Vec<DeclId>)>,
+    /// The first kernel process of each process scope.
+    procs_at: HashMap<ScopeId, usize>,
+    /// The statement labels of each declarative region, by lower-case name (made once).
+    labels: RefCell<HashMap<yavs_sem::ScopeId, HashMap<String, DeclId>>>,
     /// The node of each sequential statement (made once).
     stmts: HashMap<yavs_sem::StmtId, NodeId>,
 }
@@ -654,12 +663,16 @@ impl Builder<'_> {
             p = e.hier.scope(x).parent;
         }
         let regions = e.regions.get(&p?)?;
-        let wanted = sc.name.text.to_string();
+        let wanted = sc.name.text.to_string().to_ascii_lowercase();
+        let mut labels = self.labels.borrow_mut();
         regions.iter().find_map(|&r| {
-            db.scopes[r].order.iter().copied().find(|&d| {
-                matches!(db.decls[d].kind, DeclKind::Label(_))
-                    && db.decls[d].name.to_string().eq_ignore_ascii_case(&wanted)
-            })
+            let of = labels.entry(r).or_insert_with(|| {
+                (db.scopes[r].order.iter().copied())
+                    .filter(|&d| matches!(db.decls[d].kind, DeclKind::Label(_)))
+                    .map(|d| (db.decls[d].name.to_string().to_ascii_lowercase(), d))
+                    .collect()
+            });
+            of.get(&wanted).copied()
         })
     }
 
@@ -971,7 +984,7 @@ impl Builder<'_> {
             }
         }
         if matches!(sc.kind, ScopeKind::Process { .. })
-            && let Some(p) = e.procs.iter().position(|p| p.scope == s)
+            && let Some(&p) = self.procs_at.get(&s)
         {
             self.d.net.proc_node.insert(p as u32, n);
             self.d.net.node_proc.insert(n, p as u32);
@@ -1305,10 +1318,16 @@ impl Builder<'_> {
                 .collect()
         };
         let mut on: HashMap<yavs_kernel::SignalId, Vec<(ObjId, Range)>> = HashMap::new();
+        let mut on_scope: HashMap<(yavs_kernel::SignalId, ScopeId), Vec<(ObjId, Range)>> =
+            HashMap::new();
         for i in 0..nets.objs.len() {
             let o = ObjId(i as u32);
             for (s, r) in cover(o) {
                 on.entry(s).or_default().push((o, r));
+                on_scope
+                    .entry((s, nets.obj(o).scope))
+                    .or_default()
+                    .push((o, r));
             }
         }
         let depth = |mut s: ScopeId| {
@@ -1318,31 +1337,29 @@ impl Builder<'_> {
             }
             d
         };
-        // Whether `outer` is `s` or encloses it.
-        let encloses = |outer: ScopeId, mut s: ScopeId| loop {
-            if s == outer {
-                return true;
-            }
-            match e.hier.scope(s).parent {
-                Some(p) => s = p,
-                None => return false,
-            }
-        };
         // A collapsed port shares its actual's elements, so the object a driver belongs to is
         // the innermost one on its elements whose scope holds the process.
         for (pi, p) in e.procs.iter().enumerate() {
             for &di in &p.drivers {
                 let d = &nets.drivers[di];
                 let (sig, range) = nets.kpart(d.leaf, d.range);
-                let objs: Vec<ObjId> = (on.get(&sig).into_iter().flatten())
-                    .filter(|&&(_, r)| r.overlaps(range))
-                    .map(|&(o, _)| o)
-                    .collect();
-                let inner = |o: &&ObjId| encloses(nets.obj(**o).scope, p.scope);
-                let obj = (objs.iter().filter(inner))
-                    .max_by_key(|o| depth(nets.obj(**o).scope))
-                    .or_else(|| objs.iter().min_by_key(|o| depth(nets.obj(**o).scope)));
-                let Some(&obj) = obj else {
+                // Up the scopes from the process: the first object on its elements.
+                let mut obj = None;
+                let mut at = Some(p.scope);
+                while let (None, Some(x)) = (obj, at) {
+                    obj = (on_scope.get(&(sig, x)).into_iter().flatten())
+                        .find(|&&(_, r)| r.overlaps(range))
+                        .map(|&(o, _)| o);
+                    at = e.hier.scope(x).parent;
+                }
+                // Driven from outside its scope (an external name): the outermost object.
+                let obj = obj.or_else(|| {
+                    (on.get(&sig).into_iter().flatten())
+                        .filter(|&&(_, r)| r.overlaps(range))
+                        .min_by_key(|&&(o, _)| depth(nets.obj(o).scope))
+                        .map(|&(o, _)| o)
+                });
+                let Some(obj) = obj else {
                     continue;
                 };
                 let ty = self.leaf_scalar(d.leaf);
@@ -1389,6 +1406,8 @@ impl Builder<'_> {
                 }
             }
         }
+        let own: HashSet<(ObjId, yavs_kernel::SignalId)> =
+            conns.iter().map(|c| (c.formal.0, c.formal.1)).collect();
         for i in 0..nets.objs.len() {
             let o = ObjId(i as u32);
             let (ObjKind::Port(m) | ObjKind::ComponentPort(m)) = nets.obj(o).kind else {
@@ -1396,37 +1415,39 @@ impl Builder<'_> {
             };
             for (s, r) in cover(o) {
                 // Its own elements have an edge when it is not collapsed.
-                if conns.iter().any(|c| c.formal.0 == o && c.formal.1 == s) {
+                if own.contains(&(o, s)) {
                     continue;
                 }
-                let scope = nets.obj(o).scope;
-                let up = (on.get(&s).into_iter().flatten())
-                    .filter(|&&(x, q)| {
-                        x != o
-                            && q.overlaps(r)
-                            && nets.obj(x).scope != scope
-                            && encloses(nets.obj(x).scope, scope)
-                    })
-                    .max_by_key(|&&(x, _)| depth(nets.obj(x).scope));
-                if let Some(&(x, q)) = up {
-                    conns.push(Conn {
-                        formal: (o, s, r),
-                        actual: (x, s, q),
-                        mode: mode_of(m),
-                    });
+                let mut at = e.hier.scope(nets.obj(o).scope).parent;
+                while let Some(x) = at {
+                    let up = (on_scope.get(&(s, x)).into_iter().flatten())
+                        .find(|&&(y, q)| y != o && q.overlaps(r));
+                    if let Some(&(y, q)) = up {
+                        conns.push(Conn {
+                            formal: (o, s, r),
+                            actual: (y, s, q),
+                            mode: mode_of(m),
+                        });
+                        break;
+                    }
+                    at = e.hier.scope(x).parent;
                 }
             }
         }
         let hidden = |o: ObjId| matches!(nets.obj(o).kind, ObjKind::ComponentPort(_));
         // Each association up to a component port continues to what that port is associated to.
+        let mut first_of: HashMap<ObjId, usize> = HashMap::new();
+        for (i, c) in conns.iter().enumerate() {
+            first_of.entry(c.formal.0).or_insert(i);
+        }
         let mut joined: Vec<Conn> = Vec::new();
         for c in conns.iter().filter(|c| !hidden(c.formal.0)) {
             let (mut a, mut guard) = (c.actual, 0);
             while hidden(a.0) && guard < 16 {
-                let Some(next) = conns.iter().find(|n| n.formal.0 == a.0) else {
+                let Some(&next) = first_of.get(&a.0) else {
                     break;
                 };
-                a = next.actual;
+                a = conns[next].actual;
                 guard += 1;
             }
             if !hidden(a.0) {
@@ -1435,6 +1456,13 @@ impl Builder<'_> {
                     actual: a,
                     mode: c.mode,
                 });
+            }
+        }
+        for (i, c) in joined.iter().enumerate() {
+            let by = &mut self.d.net.conns_of;
+            by.entry(c.formal.0).or_default().push(i as u32);
+            if c.actual.0 != c.formal.0 {
+                by.entry(c.actual.0).or_default().push(i as u32);
             }
         }
         self.d.net.conns = joined;

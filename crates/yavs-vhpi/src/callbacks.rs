@@ -86,6 +86,9 @@ pub(crate) struct Callback {
 /// The kernel elements a value-change callback watches.
 pub(crate) type Watched = Box<[(SignalId, Range)]>;
 
+/// Some transaction callback is enabled. Read without the state lock.
+pub(crate) static TRANSACTIONS: AtomicBool = AtomicBool::new(false);
+
 /// Some value-change callback is enabled. Read without the state lock.
 pub(crate) static WATCHING: AtomicBool = AtomicBool::new(false);
 
@@ -270,6 +273,9 @@ impl Callbacks {
                 set.insert(id);
             } else {
                 set.remove(&id);
+            }
+            if cb.base == vhpiCbTransaction {
+                TRANSACTIONS.store(!set.is_empty(), Ordering::Relaxed);
             }
             return;
         }
