@@ -219,7 +219,9 @@ def main():
         cap = [] if a.no_sandbox else ["systemd-run", "--user", "--scope", "-q", "-p", "MemoryMax=2G"]
         if WINDOWS:
             try:
-                p = subprocess.run(cmd, cwd=cd, env=env, text=True, capture_output=True, errors="replace", timeout=300)
+                # CreateProcess looks in the parent's PATH, not `env`'s
+                exe = shutil.which(cmd[0], path=env["PATH"]) or cmd[0]
+                p = subprocess.run([exe, *cmd[1:]], cwd=cd, env=env, text=True, capture_output=True, errors="replace", timeout=300)
             except subprocess.TimeoutExpired as e:
                 p = subprocess.CompletedProcess(cmd, 124, str(e.stdout), str(e.stderr))
         else:
