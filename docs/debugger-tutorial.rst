@@ -101,7 +101,7 @@ should do. The FIFO is right and the testbench is wrong: ``fails_on_purpose`` sh
 6. Ask the Debug Console
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-Type these in the Debug Console. They are the commands of the :doc:`interactive`.
+Type these in the Debug Console. They are the commands of the :doc:`interactive` (all of them in :doc:`console-reference`).
 
 .. code-block:: text
 
@@ -228,6 +228,7 @@ See also
 --------
 
 * :doc:`debugging`: the VS Code debugger and other editors.
-* :doc:`interactive`: every console command.
+* :doc:`interactive`: the prompt and worked examples.
+* :doc:`console-reference`: every console command, with its arguments, errors and examples.
 * :doc:`waveforms`: Surfer and waveform files.
 * :doc:`vunit-yavs`: the options of ``--yavs-debug``, ``--yavs-surfer`` and ``--yavs-interactive``.

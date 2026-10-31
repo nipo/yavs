@@ -44,128 +44,268 @@ const GROUPS: [&str; 8] = [
     "Session and scripts",
 ];
 
-/// The console's commands for the user guide: per group its `(syntax, meaning)` rows.
-pub fn commands() -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> {
+/// What a form of a command needs besides a stopped simulation.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Needs {
+    Nothing,
+    /// A viewer: `--surfer`.
+    Viewer,
+    /// A wave file: `--wave=FILE.fst`.
+    WaveFile,
+}
+
+/// A way to write a command. `sub` names its own section of the command reference (empty: the
+/// form is described with the command).
+pub struct Form {
+    pub sub: &'static str,
+    pub text: &'static str,
+    pub needs: Needs,
+}
+
+/// A command of the console, as `help`, Tab and the command reference (`docs/console-reference.rst`)
+/// know it. An alias has no forms and no meaning.
+pub struct Command {
+    pub name: &'static str,
+    pub group: &'static str,
+    pub forms: &'static [Form],
+    /// A phrase that follows the forms, lower case and without a full stop.
+    pub meaning: &'static str,
+    /// For another name of a command, that command.
+    pub alias_of: Option<&'static str>,
+}
+
+const fn form(sub: &'static str, text: &'static str) -> Form {
+    Form {
+        sub,
+        text,
+        needs: Needs::Nothing,
+    }
+}
+
+const fn needs(sub: &'static str, text: &'static str, needs: Needs) -> Form {
+    Form { sub, text, needs }
+}
+
+const fn alias(name: &'static str, group: &'static str, of: &'static str) -> Command {
+    Command {
+        name,
+        group,
+        forms: &[],
+        meaning: "",
+        alias_of: Some(of),
+    }
+}
+
+const fn command(
+    name: &'static str,
+    group: &'static str,
+    forms: &'static [Form],
+    meaning: &'static str,
+) -> Command {
+    Command {
+        name,
+        group,
+        forms,
+        meaning,
+        alias_of: None,
+    }
+}
+
+/// The commands of the console: per group, the rows `(syntax, meaning)` of `help` and of the user
+/// guide. The forms of a command are joined by ` | `.
+pub fn commands() -> Vec<(&'static str, Vec<(String, String)>)> {
     GROUPS
         .iter()
         .map(|&g| {
-            let rows = COMMANDS.iter().filter(|c| c.1 == g && !c.2.is_empty());
-            (g, rows.filter_map(|c| c.2.split_once(": ")).collect())
+            let rows = COMMANDS
+                .iter()
+                .filter(|c| c.group == g && !c.forms.is_empty());
+            let row = |c: &Command| {
+                let forms: Vec<&str> = c.forms.iter().map(|f| f.text).collect();
+                let also: Vec<String> = (COMMANDS.iter())
+                    .filter(|a| a.alias_of == Some(c.name))
+                    .map(|a| format!("`{}`", a.name))
+                    .collect();
+                let also = match also.is_empty() {
+                    true => String::new(),
+                    false => format!(" (also {})", also.join(", ")),
+                };
+                (forms.join(" | "), format!("{}{also}", c.meaning))
+            };
+            (g, rows.map(row).collect())
         })
         .collect()
+}
+
+/// The table behind `help`, Tab and the command reference.
+pub fn command_table() -> &'static [Command] {
+    COMMANDS
 }
 
 /// In `Severity as u8` order.
 pub(crate) const SEVERITIES: [&str; 4] = ["note", "warning", "error", "failure"];
 
-const COMMANDS: &[(&str, &str, &str)] = &[
-    (
+const COMMANDS: &[Command] = &[
+    command(
         "run",
         "Run and step",
-        "run [TIME | until CONDITION]: to the end or a breakpoint, for TIME, or until a change of a signal in the condition makes it true",
+        &[
+            form("", "run"),
+            form("", "run TIME"),
+            form("", "run until CONDITION"),
+        ],
+        "to the end or a breakpoint, for TIME, or until a change of a signal in the condition makes it true",
     ),
-    (
+    command(
         "step",
         "Run and step",
-        "step [delta | timestep]: to the next statement, entering calls; or to the end of the delta or time step",
+        &[
+            form("", "step"),
+            form("", "step delta"),
+            form("", "step timestep"),
+        ],
+        "to the next statement, entering calls; or to the end of the delta or time step",
     ),
-    (
+    command(
         "next",
         "Run and step",
-        "next: to the next statement, over calls",
+        &[form("", "next")],
+        "to the next statement, over calls",
     ),
-    (
+    command(
         "stop",
         "Run and step",
-        "stop: pause a running simulation (Ctrl-C on a terminal)",
+        &[form("", "stop")],
+        "pause a running simulation (Ctrl-C on a terminal)",
     ),
-    (
+    command(
         "examine",
         "Inspect",
-        "examine NAME [@ TIME]: the value of a local or a signal, or a field, element or slice of one; with a time, from the wave file (also `print`)",
+        &[
+            form("", "examine NAME"),
+            needs("at", "examine NAME @ TIME", Needs::WaveFile),
+        ],
+        "the value of a local or a signal, or a field, element or slice of one; with a time, from the wave file",
     ),
-    ("print", "Inspect", ""),
-    (
+    alias("print", "Inspect", "examine"),
+    command(
         "drivers",
         "Diagnose",
-        "drivers NAME: what drives a signal: each driver's value and source line, the resolved value, any force",
+        &[form("", "drivers NAME")],
+        "what drives a signal: each driver's value and source line, the resolved value, any force",
     ),
-    (
+    command(
         "describe",
         "Inspect",
-        "describe NAME: type, bounds, resolution function, mode and declaration of a signal or variable",
+        &[form("", "describe NAME")],
+        "type, bounds, resolution function, mode and declaration of a signal or variable",
     ),
-    (
+    command(
         "find",
         "Find",
-        "find signals PATTERN | find variables PATTERN: search the hierarchy; `*` within a level, `**` across, a pattern without a dot matches the last name",
+        &[
+            form("signals", "find signals PATTERN"),
+            form("variables", "find variables PATTERN"),
+        ],
+        "search the hierarchy; `*` within a level, `**` across, a pattern without a dot matches the last name",
     ),
-    (
+    command(
         "waits",
         "Diagnose",
-        "waits: where each process stands and what it waits for",
+        &[form("", "waits")],
+        "where each process stands and what it waits for",
     ),
-    (
+    command(
         "trace",
         "Diagnose",
-        "trace x NAME: follow an unknown value back through drivers and the signals they read",
+        &[form("x", "trace x NAME")],
+        "follow an unknown value back through drivers and the signals they read",
     ),
-    (
+    command(
         "activity",
         "Diagnose",
-        "activity: the processes that ran most often and the signals that changed most often, so far",
+        &[form("", "activity")],
+        "the processes that ran most often and the signals that changed most often, so far",
     ),
-    (
+    command(
         "asserts",
         "Diagnose",
-        "asserts: assertion failures and reports so far, by severity and source line",
+        &[form("", "asserts")],
+        "assertion failures and reports so far, by severity and source line",
     ),
-    (
+    command(
         "force",
         "Change values",
-        "force NAME VALUE [-out]: hold a signal at a value, from the next cycle",
+        &[form("", "force NAME VALUE [-out]")],
+        "hold a signal at a value, from the next cycle",
     ),
-    (
+    command(
         "deposit",
         "Change values",
-        "deposit NAME VALUE: give a signal a value once, in the next cycle",
+        &[form("", "deposit NAME VALUE")],
+        "give a signal a value once, in the next cycle",
     ),
-    (
+    command(
         "release",
         "Change values",
-        "release NAME [-out]: end a force",
+        &[form("", "release NAME [-out]")],
+        "end a force",
     ),
-    (
+    command(
         "where",
         "Inspect",
-        "where: time, delta, process and source line",
+        &[form("", "where")],
+        "time, delta, process and source line",
     ),
-    (
+    command(
         "break",
         "Breakpoints",
-        "break [FILE:]LINE [if CONDITION] | SIGNAL [= VALUE] [if CONDITION] | assert [note|warning|error|failure] | list | delete N | delete assert | delete all: stop at a line, at a change of a signal, or at a report of this severity and worse; list or delete them",
+        &[
+            form("line", "break [FILE:]LINE [if CONDITION]"),
+            form("signal", "break SIGNAL [= VALUE] [if CONDITION]"),
+            form("assert", "break assert [note|warning|error|failure]"),
+            form("list", "break list"),
+            form("delete", "break delete N"),
+            form("delete", "break delete assert"),
+            form("delete", "break delete all"),
+        ],
+        "stop at a line, at a change of a signal, or at a report of this severity and worse; list or delete them",
     ),
-    (
+    command(
         "wave",
         "Waves",
-        "wave add NAME|PATTERN... | wave cursor [TIME] | wave save [FILE] | wave load [FILE]: with `--surfer`, show signals or scopes in the viewer; move its cursor (default: now); save or load the signal list",
+        &[
+            needs("add", "wave add NAME|PATTERN...", Needs::Viewer),
+            needs("cursor", "wave cursor [TIME]", Needs::Viewer),
+            needs("save", "wave save [FILE]", Needs::Viewer),
+            needs("load", "wave load [FILE]", Needs::Viewer),
+        ],
+        "with `--surfer`, show signals or scopes in the viewer; move its cursor (default: now); save or load the signal list",
     ),
-    (
+    command(
         "restart",
         "Session and scripts",
-        "restart: back to time 0 with the same design and breakpoints (also `reset`)",
+        &[form("", "restart")],
+        "back to time 0 with the same design and breakpoints",
     ),
-    ("reset", "Session and scripts", ""),
-    (
+    alias("reset", "Session and scripts", "restart"),
+    command(
         "source",
         "Session and scripts",
-        "source FILE: run the commands of a file; the first failure ends it",
+        &[form("", "source FILE")],
+        "run the commands of a file; the first failure ends it",
     ),
-    ("help", "Session and scripts", "help: this list"),
-    (
+    command(
+        "help",
+        "Session and scripts",
+        &[form("", "help"), form("", "help COMMAND")],
+        "this list, or one command",
+    ),
+    command(
         "quit",
         "Session and scripts",
-        "quit [STATUS]: leave; the exit status is STATUS, else that of the ended run, else 0",
+        &[form("", "quit [STATUS]")],
+        "leave; the exit status is STATUS, else that of the ended run, else 0",
     ),
 ];
 
@@ -330,7 +470,7 @@ pub(crate) fn is_command(sh: &Shared, req: &Json) -> bool {
         .first()
         .and_then(|c| c.split_whitespace().next())
         .unwrap_or_default();
-    COMMANDS.iter().any(|(n, ..)| *n == word)
+    COMMANDS.iter().any(|c| c.name == word)
         || sh
             .link
             .hook
@@ -584,7 +724,7 @@ pub(crate) fn similar(word: &str, noun: &'static str, names: &[String]) -> Optio
 
 /// The help for a word that names no command.
 pub(crate) fn did_you_mean(sh: &Shared, word: &str) -> Option<String> {
-    let commands = COMMANDS.iter().map(|(n, ..)| n.to_string());
+    let commands = COMMANDS.iter().map(|c| c.name.to_string());
     let hook = sh.link.hook.get().into_iter().flat_map(|h| &h.commands);
     let all: Vec<String> = commands.chain(hook.map(|(n, _)| n.clone())).collect();
     similar(word, "command", &all)
@@ -690,7 +830,7 @@ pub(crate) fn completions(sh: &Shared, at: &At<'_, '_>, req: &Json) {
             let hook = sh.link.hook.get().into_iter().flat_map(|h| &h.commands);
             COMMANDS
                 .iter()
-                .map(|(n, ..)| n.to_string())
+                .map(|c| c.name.to_string())
                 .chain(hook.map(|(n, _)| n.clone()))
                 .chain(names())
                 .collect()
@@ -1123,19 +1263,69 @@ fn wrapped(line: &str, width: usize) -> String {
     out
 }
 
-fn help(sh: &Shared) -> String {
+fn help(sh: &Shared, rest: &str) -> Result<String, String> {
+    if !rest.is_empty() {
+        return help_for(sh, rest);
+    }
     let width = sh.link.columns.load(Ordering::Relaxed);
     let mut lines = Vec::new();
-    for g in GROUPS {
+    for (g, rows) in commands() {
         lines.push(format!("{g}:"));
-        let rows = COMMANDS.iter().filter(|c| c.1 == g && !c.2.is_empty());
-        lines.extend(rows.map(|c| wrapped(c.2, width)));
+        lines.extend(
+            rows.iter()
+                .map(|(a, b)| wrapped(&format!("{a}: {b}"), width)),
+        );
     }
     if let Some(h) = sh.link.hook.get() {
         let shown = h.commands.iter().filter(|(_, help)| !help.is_empty());
         lines.extend(shown.map(|(n, help)| wrapped(&format!("{n}: {help}"), width)));
     }
-    lines.join("\n")
+    Ok(lines.join("\n"))
+}
+
+/// `help COMMAND`: the forms and the meaning the command has in the table, or the help a test
+/// runner gave its command.
+fn help_for(sh: &Shared, name: &str) -> Result<String, String> {
+    let name = name.trim();
+    if let Some(h) = sh.link.hook.get()
+        && let Some((n, text)) = h.commands.iter().find(|(n, _)| n == name)
+    {
+        return Ok(format!("{n}: {text}"));
+    }
+    let Some(c) = COMMANDS.iter().find(|c| c.name == name) else {
+        let help = did_you_mean(sh, name).unwrap_or_else(|| "see `help`".to_string());
+        return Err(format!("no command `{name}`: {help}"));
+    };
+    let c = match c.alias_of {
+        Some(of) => COMMANDS.iter().find(|c| c.name == of).unwrap_or(c),
+        None => c,
+    };
+    let mut lines: Vec<String> = c.forms.iter().map(|f| f.text.to_string()).collect();
+    lines.push(format!("    {}", sentence(c.meaning)));
+    let others: Vec<&str> = (COMMANDS.iter())
+        .filter(|a| a.alias_of == Some(c.name))
+        .map(|a| a.name)
+        .collect();
+    if !others.is_empty() {
+        lines.push(format!("    Also written `{}`.", others.join("`, `")));
+    }
+    for f in c.forms.iter().filter(|f| f.needs != Needs::Nothing) {
+        let what = match f.needs {
+            Needs::Viewer => "a viewer: run with `--surfer`",
+            _ => "a wave file: run with `--wave=FILE.fst`",
+        };
+        lines.push(format!("    `{}` needs {what}.", f.text));
+    }
+    Ok(lines.join("\n"))
+}
+
+/// A meaning as a sentence: a capital letter and a full stop.
+pub fn sentence(meaning: &str) -> String {
+    let mut m = meaning.to_string();
+    if let Some(f) = m.get_mut(0..1) {
+        f.make_ascii_uppercase();
+    }
+    m + "."
 }
 
 fn exec(sh: &Shared, at: &At<'_, '_>, line: &str) -> Result<Exec, String> {
@@ -1173,7 +1363,7 @@ fn exec(sh: &Shared, at: &At<'_, '_>, line: &str) -> Result<Exec, String> {
                 std::fs::read_to_string(rest).map_err(|e| format!("cannot read `{rest}`: {e}"))?;
             Ok(Exec::Script(text.lines().flat_map(split).collect()))
         }
-        "help" => Ok(Exec::Text(help(sh))),
+        "help" => help(sh, rest).map(Exec::Text),
         "quit" => quit(sh, rest),
         _ => {
             if let Some(h) = sh.link.hook.get()
@@ -1425,7 +1615,7 @@ impl Hook {
             if name.is_empty() || name.contains(char::is_whitespace) {
                 return Err(format!("the hook registers a bad command name `{name}`"));
             }
-            if COMMANDS.iter().any(|(n, ..)| *n == name) {
+            if COMMANDS.iter().any(|c| c.name == name) {
                 return Err(format!("the hook registers `{name}`, a yavs command"));
             }
             commands.push((name, c["help"].as_str().unwrap_or_default().to_string()));

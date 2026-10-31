@@ -550,37 +550,47 @@ See also
 #[cfg(test)]
 const CONSOLE_PAGE: &str = "docs/console-commands.inc";
 
-/// The commands of the console, from its own table; the `vunit_*` ones from the help text of the
-/// test runner's package.
+/// The console command reference, in which every command has a block between `.. console: KEY`
+/// and `.. console-end` that is generated from the console's table.
 #[cfg(test)]
-fn console_page() -> String {
-    fn group(o: &mut String, title: &str, intro: &str, rows: &[(String, String)]) {
-        let _ = writeln!(o, "{title}\n{}\n", "~".repeat(title.len()));
-        if !intro.is_empty() {
-            let _ = writeln!(o, "{intro}\n");
-        }
-        let _ = writeln!(o, ".. list-table::\n   :widths: 40 60\n");
-        for (syntax, meaning) in rows {
-            let _ = writeln!(o, "   * - ``{syntax}``\n     - {meaning}");
-        }
-        o.push('\n');
+const CONSOLE_REFERENCE: &str = "docs/console-reference.rst";
+
+/// What a command needs, included in the command reference.
+#[cfg(test)]
+const CONSOLE_NEEDS: &str = "docs/console-needs.inc";
+
+/// The commands of a test runner, included in the command reference.
+#[cfg(test)]
+const CONSOLE_RUNNER: &str = "docs/console-runner-commands.inc";
+
+#[cfg(test)]
+const CONSOLE_NOTE: &str = "..\n   Generated from the console's command table: YAVS_BLESS=1 cargo test -p yavs --bin yavs cli_reference\n\n";
+
+#[cfg(test)]
+fn list_table(o: &mut String, rows: &[(String, String)]) {
+    let _ = writeln!(o, ".. list-table::\n   :widths: 40 60\n");
+    for (syntax, meaning) in rows {
+        let _ = writeln!(o, "   * - {syntax}\n     - {meaning}");
     }
-    let mut o = String::from(
-        "..\n   Generated from the console's command table: YAVS_BLESS=1 cargo test -p yavs --bin yavs cli_reference\n\n",
-    );
-    for (g, rows) in yavs_dap::console_commands() {
-        let rows: Vec<(String, String)> = rows
-            .iter()
-            .map(|(a, b)| {
-                let mut m = b.to_string();
-                if let Some(f) = m.get_mut(0..1) {
-                    f.make_ascii_uppercase();
-                }
-                (a.to_string(), format!("{m}."))
-            })
-            .collect();
-        group(&mut o, g, "", &rows);
+    o.push('\n');
+}
+
+#[cfg(test)]
+fn group(o: &mut String, title: &str, intro: &str, rows: &[(String, String)]) {
+    let _ = writeln!(o, "{title}\n{}\n", "~".repeat(title.len()));
+    if !intro.is_empty() {
+        let _ = writeln!(o, "{intro}\n");
     }
+    let rows: Vec<(String, String)> = rows
+        .iter()
+        .map(|(a, b)| (format!("``{a}``"), b.clone()))
+        .collect();
+    list_table(o, &rows);
+}
+
+/// The commands a test runner adds, from the help text of its package: `(syntax, meaning)`.
+#[cfg(test)]
+fn runner_commands() -> Vec<(String, String)> {
     let py = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../python/vunit-yavs/vunit_yavs/console.py");
     let py = std::fs::read_to_string(py).expect("the test runner package's console");
@@ -600,19 +610,193 @@ fn console_page() -> String {
             None => rows.push((line.to_string(), Vec::new())),
         }
     }
-    let rows: Vec<(String, String)> = rows
-        .into_iter()
+    rows.into_iter()
         .map(|(a, b)| (a, format!("{}.", b.join("; "))))
+        .collect()
+}
+
+#[cfg(test)]
+const RUNNER_INTRO: &str = "These are only available through the VUnit interface, that is \
+     ``vunit-yavs`` with ``python run.py lib.tb.test --yavs-interactive``, not in a plain \
+     ``yavs run --interactive``.";
+
+/// The commands of the console, from its own table; the `vunit_*` ones from the help text of the
+/// test runner's package.
+#[cfg(test)]
+fn console_page() -> String {
+    let mut o = String::from(CONSOLE_NOTE);
+    for (g, rows) in yavs_dap::console_commands() {
+        let rows: Vec<(String, String)> = rows
+            .iter()
+            .map(|(a, b)| (a.clone(), yavs_dap::sentence(b)))
+            .collect();
+        group(&mut o, g, "", &rows);
+    }
+    group(&mut o, "VUnit commands", RUNNER_INTRO, &runner_commands());
+    o.trim_end().to_string() + "\n"
+}
+
+/// The table of what commands need, for the command reference.
+#[cfg(test)]
+fn console_needs() -> String {
+    use yavs_dap::Needs;
+    let mut o = String::from(CONSOLE_NOTE);
+    let mut rows = Vec::new();
+    for (needs, what) in [
+        (
+            Needs::Viewer,
+            "A viewer: run with ``--surfer`` (:doc:`waveforms`)",
+        ),
+        (Needs::WaveFile, "A wave file: run with ``--wave=FILE.fst``"),
+    ] {
+        let mut forms = Vec::new();
+        for c in yavs_dap::command_table() {
+            forms.extend(c.forms.iter().filter(|f| f.needs == needs).map(|f| f.text));
+        }
+        let forms: Vec<String> = forms.iter().map(|f| format!("``{f}``")).collect();
+        rows.push((forms.join(", "), what.to_string()));
+    }
+    let names: Vec<String> = runner_commands()
+        .iter()
+        .map(|(a, _)| format!("``{}``", a.split_whitespace().next().unwrap_or(a)))
         .collect();
-    group(
+    let what = "The test runner's interface (``vunit-yavs``, ``--yavs-interactive``)";
+    rows.push((names.join(", "), what.to_string()));
+    list_table(&mut o, &rows);
+    o.trim_end().to_string() + "\n"
+}
+
+/// The `vunit_*` commands, for the command reference.
+#[cfg(test)]
+fn console_runner() -> String {
+    let mut o = String::from(CONSOLE_NOTE);
+    list_table(
         &mut o,
-        "VUnit commands",
-        "These are only available through the VUnit interface, that is ``vunit-yavs`` with \
-         ``python run.py lib.tb.test --yavs-interactive``, not in a plain \
-         ``yavs run --interactive``.",
-        &rows,
+        &runner_commands()
+            .iter()
+            .map(|(a, b)| (format!("``{a}``"), b.clone()))
+            .collect::<Vec<_>>(),
     );
     o.trim_end().to_string() + "\n"
+}
+
+/// The block of a command or of one of its subcommands (`KEY` is `NAME` or `NAME SUB`) in the
+/// command reference.
+#[cfg(test)]
+fn console_block(key: &str) -> Option<String> {
+    use yavs_dap::Needs;
+    let (name, sub) = match key.split_once(' ') {
+        Some((n, s)) => (n, Some(s)),
+        None => (key, None),
+    };
+    let c = yavs_dap::command_table()
+        .iter()
+        .find(|c| c.name == name && c.alias_of.is_none())?;
+    let forms: Vec<&yavs_dap::Form> = c
+        .forms
+        .iter()
+        .filter(|f| sub.is_none_or(|s| f.sub == s))
+        .collect();
+    if forms.is_empty() || sub.is_some_and(|s| s.is_empty()) {
+        return None;
+    }
+    let mut o = String::from(".. code-block:: text\n\n");
+    for f in &forms {
+        let _ = writeln!(o, "    {}", f.text);
+    }
+    let mut text = Vec::new();
+    if sub.is_none() {
+        text.push(yavs_dap::sentence(c.meaning));
+        let also: Vec<String> = yavs_dap::command_table()
+            .iter()
+            .filter(|a| a.alias_of == Some(c.name))
+            .map(|a| format!("``{}``", a.name))
+            .collect();
+        if !also.is_empty() {
+            text.push(format!("Also written {}.", also.join(", ")));
+        }
+    }
+    for (needs, what) in [
+        (Needs::Viewer, "a viewer: run with ``--surfer``"),
+        (Needs::WaveFile, "a wave file: run with ``--wave=FILE.fst``"),
+    ] {
+        let needing: Vec<&str> = (forms.iter())
+            .filter(|f| f.needs == needs)
+            .map(|f| f.text)
+            .collect();
+        if needing.len() == forms.len() {
+            text.push(format!("Needs {what}."));
+        } else if !needing.is_empty() {
+            text.push(format!("``{}`` needs {what}.", needing.join("``, ``")));
+        }
+    }
+    if !text.is_empty() {
+        let _ = write!(o, "\n{}\n", text.join(" "));
+    }
+    Some(o)
+}
+
+/// The command reference with every generated block as the table defines it now. The error says
+/// which command lacks its block (add `.. console: NAME` and `.. console-end` to the page), or
+/// which block names no command.
+#[cfg(test)]
+fn console_reference(page: &str) -> Result<String, String> {
+    const START: &str = ".. console: ";
+    const END: &str = ".. console-end";
+    let mut out: Vec<String> = Vec::new();
+    let mut seen: BTreeSet<String> = BTreeSet::new();
+    let mut lines = page.lines();
+    while let Some(l) = lines.next() {
+        out.push(l.to_string());
+        let Some(key) = l.strip_prefix(START) else {
+            continue;
+        };
+        let key = key.trim();
+        let block = console_block(key).ok_or_else(|| {
+            format!("`.. console: {key}` names no command or subcommand of the console's table")
+        })?;
+        if !seen.insert(key.to_string()) {
+            return Err(format!("`.. console: {key}` is there twice"));
+        }
+        out.push(String::new());
+        out.extend(block.lines().map(str::to_string));
+        out.push(String::new());
+        let mut closed = false;
+        for l in lines.by_ref() {
+            if l == END {
+                out.push(l.to_string());
+                closed = true;
+                break;
+            }
+        }
+        if !closed {
+            return Err(format!("`.. console: {key}` has no `{END}` after it"));
+        }
+    }
+    let mut missing = Vec::new();
+    for c in yavs_dap::command_table()
+        .iter()
+        .filter(|c| c.alias_of.is_none())
+    {
+        let mut keys = vec![c.name.to_string()];
+        for f in c.forms.iter().filter(|f| !f.sub.is_empty()) {
+            keys.push(format!("{} {}", c.name, f.sub));
+        }
+        missing.extend(keys.into_iter().filter(|k| !seen.contains(k)));
+    }
+    if !missing.is_empty() {
+        missing.sort();
+        missing.dedup();
+        return Err(format!(
+            "{CONSOLE_REFERENCE} has no entry for: {}. Describe each in a section of its own, \
+             starting with `.. console: NAME` (or `NAME SUB` for a subcommand), an empty line and \
+             `.. console-end`; the synopsis between them is generated",
+            missing.join(", ")
+        ));
+    }
+    let mut text = out.join("\n");
+    text.push('\n');
+    Ok(text)
 }
 
 #[cfg(test)]
@@ -622,11 +806,28 @@ mod tests {
     /// Every command of the console is in the user guide; `help` shows the same table.
     #[test]
     fn cli_reference_console_commands_is_current() {
-        check_page(
-            CONSOLE_PAGE,
-            &console_page(),
-            "a console command or its help text",
-        );
+        let what = "a console command or its help text";
+        check_page(CONSOLE_PAGE, &console_page(), what);
+        check_page(CONSOLE_NEEDS, &console_needs(), what);
+        check_page(CONSOLE_RUNNER, &console_runner(), what);
+    }
+
+    /// Every command and subcommand of the console has its entry in the command reference, with
+    /// the synopsis the table gives it.
+    #[test]
+    fn cli_reference_console_reference_is_current() {
+        let page = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .join(CONSOLE_REFERENCE);
+        let committed = std::fs::read_to_string(page).expect("the command reference");
+        match console_reference(&committed) {
+            Ok(now) => check_page(
+                CONSOLE_REFERENCE,
+                &now,
+                "a console command or its help text",
+            ),
+            Err(e) => panic!("{e}"),
+        }
     }
 
     /// A generated page is what its source defines now, or rewritten under `YAVS_BLESS`.

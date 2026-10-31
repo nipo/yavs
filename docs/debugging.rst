@@ -110,7 +110,7 @@ Add ``--surfer`` to follow the waveforms in Surfer, the cursor at each stop (:do
 flushes the file at every stop, so any viewer that reloads it shows the run up to the breakpoint.
 
 The Debug Console takes the commands of the :doc:`interactive` too (``run 10 ns``, ``restart``,
-``break list``, ``drivers q``, ``trace x q``).
+``break list``, ``drivers q``, ``trace x q``); the :doc:`console-reference` lists them all.
 
 The context menu of a signal in the Variables view has "Show Drivers". The command
 "yavs: Find Signals or Variables..." searches the hierarchy, lists matches in a quick pick, and adds
@@ -146,5 +146,6 @@ See also
 
 * :doc:`debugger-tutorial`: a step-by-step walk through a failing test, with runnable files.
 * :doc:`interactive`: the same from a terminal prompt.
+* :doc:`console-reference`: every console command.
 * :doc:`vunit`: debug one test of a run script.
 * :doc:`waveforms`: waves while debugging.

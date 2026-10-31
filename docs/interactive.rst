@@ -32,6 +32,9 @@ A second Tab lists what is left. The Debug Console of an editor asks the same qu
 All commands
 ------------
 
+This is the overview. :doc:`console-reference` has every command and subcommand with its arguments, errors
+and examples, and how names, values, times and conditions are written.
+
 Several commands go on a line with ``;``. ``#`` at the start of a command and ``--`` start a
 comment, except a ``--`` after a space and right before a letter inside a command, which is a flag
 (``vunit_load --stop-time=30ns``). Reports and text output go to standard output as in a batch run,
@@ -354,6 +357,7 @@ See also
 --------
 
 * :doc:`debugger-tutorial`: a failing test debugged step by step, in VS Code and at this prompt.
+* :doc:`console-reference`: every command, argument and error.
 * :doc:`debugging`: the same session in VS Code.
 * :doc:`vunit`: the console with a test of a run script.
 * :doc:`waveforms`: ``--surfer`` and the ``wave`` commands.

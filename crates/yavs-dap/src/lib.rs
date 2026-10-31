@@ -232,7 +232,7 @@ pub trait Viewer: Send + std::marker::Sync {
     fn items(&self) -> Result<Vec<String>, String>;
 }
 
-pub use console::commands as console_commands;
+pub use console::{Command, Form, Needs, command_table, commands as console_commands, sentence};
 pub use layout::{load as load_layout, save as save_layout};
 
 /// What `attach` adds to one simulation: what to do at its end and at each stop.

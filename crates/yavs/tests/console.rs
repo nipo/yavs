@@ -553,6 +553,37 @@ fn wave_commands_need_a_viewer() {
     }
 }
 
+/// `help COMMAND` prints the forms and the meaning of the table; an alias gives its command's.
+#[test]
+fn help_for_one_command() {
+    let d = setup("help");
+    let o = script(&d, "tb", "help break");
+    let out = stdout(&o);
+    assert!(
+        out.starts_with("break [FILE:]LINE [if CONDITION]\n"),
+        "{out}"
+    );
+    assert!(
+        out.contains("break delete all\n    Stop at a line"),
+        "{out}"
+    );
+    let o = script(&d, "tb", "help print");
+    let out = stdout(&o);
+    assert!(
+        out.starts_with("examine NAME\nexamine NAME @ TIME\n"),
+        "{out}"
+    );
+    assert!(out.contains("Also written `print`."), "{out}");
+    assert!(out.contains("needs a wave file"), "{out}");
+    let o = script(&d, "tb", "help brek");
+    assert_eq!(o.status.code(), Some(1));
+    assert!(
+        stderr(&o).contains("no command `brek`: a command with a similar name exists: `break`"),
+        "{}",
+        stderr(&o)
+    );
+}
+
 #[test]
 fn source_files() {
     let d = setup("source");

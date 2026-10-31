@@ -91,6 +91,7 @@ the :doc:`release_notes`, and pages say when a feature needs a release newer tha
    :hidden:
 
    cli-reference
+   console-reference
    lint-rules
    vunit-yavs
    environment

@@ -7,9 +7,9 @@ Run and step
 .. list-table::
    :widths: 40 60
 
-   * - ``run [TIME | until CONDITION]``
+   * - ``run | run TIME | run until CONDITION``
      - To the end or a breakpoint, for TIME, or until a change of a signal in the condition makes it true.
-   * - ``step [delta | timestep]``
+   * - ``step | step delta | step timestep``
      - To the next statement, entering calls; or to the end of the delta or time step.
    * - ``next``
      - To the next statement, over calls.
@@ -22,7 +22,7 @@ Breakpoints
 .. list-table::
    :widths: 40 60
 
-   * - ``break [FILE:]LINE [if CONDITION] | SIGNAL [= VALUE] [if CONDITION] | assert [note|warning|error|failure] | list | delete N | delete assert | delete all``
+   * - ``break [FILE:]LINE [if CONDITION] | break SIGNAL [= VALUE] [if CONDITION] | break assert [note|warning|error|failure] | break list | break delete N | break delete assert | break delete all``
      - Stop at a line, at a change of a signal, or at a report of this severity and worse; list or delete them.
 
 Inspect
@@ -31,7 +31,7 @@ Inspect
 .. list-table::
    :widths: 40 60
 
-   * - ``examine NAME [@ TIME]``
+   * - ``examine NAME | examine NAME @ TIME``
      - The value of a local or a signal, or a field, element or slice of one; with a time, from the wave file (also `print`).
    * - ``describe NAME``
      - Type, bounds, resolution function, mode and declaration of a signal or variable.
@@ -96,8 +96,8 @@ Session and scripts
      - Back to time 0 with the same design and breakpoints (also `reset`).
    * - ``source FILE``
      - Run the commands of a file; the first failure ends it.
-   * - ``help``
-     - This list.
+   * - ``help | help COMMAND``
+     - This list, or one command.
    * - ``quit [STATUS]``
      - Leave; the exit status is STATUS, else that of the ended run, else 0.
 
