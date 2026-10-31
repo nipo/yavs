@@ -30,6 +30,10 @@ def compiler():
 def python_flags():
     """Compiler flags that embed this Python, or None when its headers or library are missing"""
     include = Path(sysconfig.get_paths()["include"])
+    if sys.platform == "win32":
+        # MinGW links straight against the DLL of the installation; it is found again at run time through PATH
+        dll = Path(sys.base_prefix) / f"python{sys.version_info.major}{sys.version_info.minor}.dll"
+        return ["-DWITH_PYTHON", f"-I{include}", str(dll)] if (include / "Python.h").is_file() and dll.is_file() else None
     libdir = sysconfig.get_config_var("LIBDIR")
     lib = sysconfig.get_config_var("LDLIBRARY")
     if sys.platform != "linux" or not (include / "Python.h").is_file() or not libdir or not lib:
@@ -58,5 +62,8 @@ def setup(context):
 
     hooks = YavsInterface.native_library_hooks(library, args=os.environ.get("NATIVE_DEMO_ARGS"))
     # An embedded interpreter finds its standard library from the installation it was built for
-    hooks["run_env"] = lambda simulator_interface, env: dict(env, PYTHONHOME=sys.base_prefix)
+    # (on Windows the DLL is looked up on PATH)
+    hooks["run_env"] = lambda simulator_interface, env: dict(
+        env, PYTHONHOME=sys.base_prefix, PATH=os.pathsep.join([sys.base_prefix, env.get("PATH", "")])
+    )
     context.register_simulator_hooks("yavs", **hooks)

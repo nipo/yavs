@@ -80,7 +80,7 @@ class TestForeignSubprograms(unittest.TestCase):
             },
         )
 
-    @unittest.skipUnless(AVAILABLE["python"], "needs a shared libpython and its headers (Linux)")
+    @unittest.skipUnless(AVAILABLE["python"], "needs Python headers and a shared Python library")
     def test_python_from_vhdl(self):
         self.assertEqual(
             self._run(python=True),
