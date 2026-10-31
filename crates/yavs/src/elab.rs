@@ -1852,6 +1852,7 @@ pub fn run(
                 loaded,
                 &a.do_commands,
                 a.interactive,
+                color,
                 options,
                 attach,
                 report,

@@ -200,7 +200,7 @@ class TestConsolePty(unittest.TestCase):
         return term
 
     def test_leaving_a_stop_in_an_endless_subprogram_loop(self):
-        for leave in (b"quit\r", CTRL_D):
+        for leave in (b"quit\r", b"exit\r", CTRL_D):
             self.assertEqual(self._stopped_in_the_loop_status(leave), 0, leave)
         term = self._stopped_in_the_loop()
         term.send(b"restart\r")
@@ -225,14 +225,92 @@ class TestConsolePty(unittest.TestCase):
         term.send(b"quit\r")
         self.assertEqual(term.wait(), 0)
 
-    def test_tab_completes_commands_names_and_files(self):
+    def test_tab_completes_as_a_shell_does(self):
         term = self._console("clocked", ENDLESS)
+        # One match completes and ends the word.
         term.send(b"exam" + TAB)
-        term.expect(b"examine")
-        term.send(b" cl" + TAB)
-        term.expect(b"clk")
+        term.expect(b"examine ")
+        term.send(b"clk" + TAB)
+        term.expect(b"clk ")
         term.send(b"\r")
         term.expect(PROMPT)
+        # Several: the common prefix, nothing picked, and the second Tab lists all and redraws the line.
+        term.send(b"rele" + TAB)
+        term.expect(b"release ")
+        term.send(CTRL_C)
+        term.expect(PROMPT)
+        term.send(b"e" + TAB)
+        term.expect(b"x")
+        term.send(TAB)
+        listed = term.expect(PROMPT + b"ex")
+        self.assertIn(b"examine", listed)
+        self.assertIn(b"exit", listed)
+        term.send(b"am" + TAB + b"\r")
+        term.expect(PROMPT)
+        term.send(b"quit\r")
+        self.assertEqual(term.wait(), 0)
+
+    def _listed(self, term, line):
+        """What two Tabs after `line` list, up to the prompt that comes back with the line"""
+        term.send(line + TAB + TAB)
+        listed = term.expect(PROMPT + line.rstrip(), timeout=10)
+        term.send(CTRL_C)
+        term.expect(PROMPT)
+        return listed
+
+    def test_tab_offers_what_the_command_takes(self):
+        term = self._console("clocked", ENDLESS)
+        # The first word is a command, never a signal.
+        term.send(b"cl" + TAB + b"\r")
+        self.assertNotIn(b"clk", term.expect(PROMPT))
+        listed = self._listed(term, b"")
+        self.assertIn(b"examine", listed)
+        self.assertIn(b"exit", listed)
+        self.assertNotIn(b"clk", listed)
+        # Names, for each command that takes one.
+        for cmd in (b"examine ", b"describe ", b"drivers ", b"force "):
+            term.send(cmd + b"clk" + TAB)
+            term.expect(cmd + b"clk ")
+            term.send(CTRL_C)
+            term.expect(PROMPT)
+        # Subcommands.
+        listed = self._listed(term, b"wave ")
+        for sub in (b"add", b"cursor", b"save", b"load"):
+            self.assertIn(sub, listed)
+        self.assertNotIn(b"clk", listed)
+        self.assertIn(b"variables", self._listed(term, b"find "))
+        # Files, from the disk and of the design.
+        (self.dir / "commands.txt").write_text("where\n", encoding="utf-8")
+        term.send(b"source comm" + TAB)
+        term.expect(b"commands.txt ")
+        term.send(b"\r")
+        self.assertIn(b"time ", term.expect(PROMPT))
+        # Nothing where it takes a time or a value: Tab changes nothing.
+        for line in (b"run 1", b"force clk "):
+            term.send(line)
+            term.expect(line)
+            term.send(TAB)
+            self.assertEqual(term.expect(b"\x07"), b"")  # the bell, and no text
+            term.send(CTRL_C)
+            term.expect(PROMPT)
+        term.send(b"exit\r")
+        self.assertEqual(term.wait(), 0)
+
+    def test_help_is_bold_only_on_a_colour_terminal(self):
+        term = self._console("clocked", ENDLESS)
+        term.send(b"help\r")
+        self.assertIn(b"\x1b[1mexamine\x1b[0m NAME", term.expect(PROMPT))
+        term.send(CTRL_D)
+        self.assertEqual(term.wait(), 0)
+        self.env["NO_COLOR"] = "1"
+        term = self._console("clocked", ENDLESS)
+        term.send(b"help\r")
+        self.assertNotIn(b"\x1b[1m", term.expect(PROMPT))
+        term.send(b"quit\r")
+        self.assertEqual(term.wait(), 0)
+
+    def test_tab_completes_files_and_lists_subcommands(self):
+        term = self._console("clocked", ENDLESS)
         term.send(b"break clo" + TAB)
         term.expect(b"clocked.vhd:")
         term.send(b"6\r")
@@ -242,6 +320,7 @@ class TestConsolePty(unittest.TestCase):
         term.send(b"step " + TAB + TAB)
         term.expect(b"delta")
         term.expect(b"timestep")
+        term.expect(PROMPT + b"step ")  # the line is back, so Ctrl-C drops only that
         term.send(CTRL_C)
         term.expect(PROMPT)
         term.send(b"quit\r")

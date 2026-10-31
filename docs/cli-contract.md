@@ -541,8 +541,8 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   the signal's lower-case path `:top:u1:s`) and the custom request `yavs/setSignalBreakpoints`
   (`breakpoints: [{signal, value?}]`, `frameId` for names seen from a process; it replaces its
   own set): a stop after the cycle in which the signal changed (to `value`), reason `data
-  breakpoint`, `text` `PATH = VALUE`. `yavs/force` (`signal`, `value`, `mode` `in` or `out`,
-  default `in`), `yavs/deposit` (`signal`, `value`) and `yavs/release` (`signal`, `mode`) act on
+  breakpoint`, `text` `PATH = VALUE` (a dotted path, as in thread and frame names and the answers below; `dataId` keeps the `:top:u1:s` form). `yavs/force` (`signal`, `value`, `mode` `in` or `out`,
+  default `in`), `yavs/deposit` (`signal`, `value`) and `yavs/release` (`signal`, `mode`; no mode ends a force of either) act on
   a signal or a part of one (`signal` a name seen from `frameId` or the stopped process, or a
   path, optionally followed by fields, integer indices and a final slice in the signal's
   direction: `r.a`, `v(3)`, `:top:m(2).f`, `d(7 downto 4)`; the value is of the part's type) in
@@ -830,7 +830,7 @@ commands first, and without `--interactive` the process then exits. Both conflic
 session like `--dap`: interpreter, one thread (`W0109`), no `--cov` (`E0199`) or `--profile` (`E0125`).
 The session stops at time 0 before any process has run, and stays after the end of the run until `quit`.
 
-- Commands: `run [TIME | until COND]`, `step [delta | timestep]`, `next`, `stop`, `examine`/`print`, `force`, `deposit`, `release`, `where`, `break`, `restart`/`reset`, `source`, `help [COMMAND]` (the forms and meaning of one command, from the same table), `quit [STATUS]`, and the debugger tools of the user guide's command reference (`docs/console-reference.rst`, which lists every command and subcommand and is checked against the table). `;` separates; `#` at the start of a command and `--` start a comment (not a `--` after a space and before a letter inside a command: a flag of a runner's command). Tab at a terminal prompt is the DAP `completions` request.
+- Commands: `run [TIME | until COND]`, `step [delta | timestep]`, `next`, `stop`, `examine`/`print`, `force`, `deposit`, `release`, `where`, `break`, `restart`/`reset`, `source`, `help [COMMAND]` (the forms and meaning of one command, from the same table), `quit [STATUS]`/`exit [STATUS]`, and the debugger tools of the user guide's command reference (`docs/console-reference.rst`, which lists every command and subcommand and is checked against the table). `;` separates; `#` at the start of a command and `--` start a comment (not a `--` after a space and before a letter inside a command: a flag of a runner's command). Tab at a terminal prompt is the DAP `completions` request: the first word offers commands only, and after a command what it takes (table `TAKES`, `crates/yavs-dap/src/console.rs`). For a client that is not the console, several targets start with one that is their common prefix, as an editor's list takes its first item on Tab. A client that sends `supportsANSIStyling` in `initialize` gets `help` as an output event with bold command names and an empty result; piped output never has them.
 - Standard output: reports, textio output, results of commands (a `--do="run; quit"` session prints what a plain run prints, with the same exit status). Standard error: notices of stops and of the end, errors of commands, diagnostics.
 - Exit status: the `quit` argument; else the run's (section 5) when it has ended, else 0. A `--do` command that fails without `--interactive` ends the session with 1. End of input is `quit`.
 - A failed command does not end a session with `--interactive`. No prompt is printed when standard input is not a terminal.

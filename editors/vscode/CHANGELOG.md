@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Vectors show on one line in the Variables view, Watch and hover; `help` in the Debug Console has command names in bold; Tab in the Debug Console takes what the list has in common and opens the list when none is open.
+- Force and Release no longer ask for `in` or `out`; a value for a bit-like target needs no quotes (`1`, `0101`).
+- Watch and the call stack show dotted names, and a Watch of a name that does not exist shows an error with the nearest name.
 - "Show Drivers" in the context menu of a signal, and "Find Signals or Variables...": a quick pick of matches to add to the wave.
 - The Breakpoints view has filters that stop at a report of a severity, with the stack intact.
 - A launch that fails early shows why: the diagnostic in the Debug Console, or a notification with the command when yavs refuses its command line.

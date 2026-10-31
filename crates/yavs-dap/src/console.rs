@@ -238,7 +238,7 @@ const COMMANDS: &[Command] = &[
         "force",
         "Change values",
         &[form("", "force NAME VALUE [-out]")],
-        "hold a signal at a value, from the next cycle",
+        "hold a signal at a value, from the next cycle; with `-out` the driving value, not what readers see",
     ),
     command(
         "deposit",
@@ -250,7 +250,7 @@ const COMMANDS: &[Command] = &[
         "release",
         "Change values",
         &[form("", "release NAME [-out]")],
-        "end a force",
+        "end a force, or with `-out` only one on the driving value",
     ),
     command(
         "where",
@@ -308,7 +308,95 @@ const COMMANDS: &[Command] = &[
         &[form("", "quit [STATUS]")],
         "leave; the exit status is STATUS, else that of the ended run, else 0",
     ),
+    alias("exit", "Session and scripts", "quit"),
 ];
+
+/// What a command takes as its next word, for completion.
+enum Takes {
+    Nothing,
+    /// Signals and variables, by name in scope or by dotted path.
+    Names,
+    /// Files and directories, from where the simulator runs.
+    Files,
+    Words(&'static [&'static str]),
+    Commands,
+    /// `break`: its subcommands, a source file of the design, a signal.
+    BreakPlace,
+}
+
+/// What Tab offers after the words on the left (`*`: any word); with `true`, also after more words.
+/// A command that is not here takes nothing that can be listed: a time, a number.
+const TAKES: &[(&[&str], Takes, bool)] = &[
+    (&["examine"], Takes::Names, false),
+    (&["print"], Takes::Names, false),
+    (&["drivers"], Takes::Names, false),
+    (&["describe"], Takes::Names, false),
+    (&["force"], Takes::Names, false),
+    (&["deposit"], Takes::Names, false),
+    (&["release"], Takes::Names, false),
+    (&["run"], Takes::Words(&["until"]), false),
+    (&["run", "until"], Takes::Names, true),
+    (&["step"], Takes::Words(&["delta", "timestep"]), false),
+    (&["trace"], Takes::Words(&["x"]), false),
+    (&["trace", "x"], Takes::Names, false),
+    (&["find"], Takes::Words(&["signals", "variables"]), false),
+    (
+        &["wave"],
+        Takes::Words(&["add", "cursor", "save", "load"]),
+        false,
+    ),
+    (&["wave", "add"], Takes::Names, true),
+    (&["wave", "save"], Takes::Files, false),
+    (&["wave", "load"], Takes::Files, false),
+    (&["source"], Takes::Files, false),
+    (&["help"], Takes::Commands, false),
+    (&["break"], Takes::BreakPlace, false),
+    (&["break", "list"], Takes::Nothing, false),
+    (&["break", "assert"], Takes::Words(&SEVERITIES), false),
+    (
+        &["break", "delete"],
+        Takes::Words(&["all", "assert"]),
+        false,
+    ),
+    (&["break", "*"], Takes::Words(&["if"]), false),
+    (&["break", "*", "if"], Takes::Names, true),
+];
+
+/// The row of `TAKES` for the words before the one being completed.
+fn takes(words: &[&str]) -> &'static Takes {
+    let fits = |(p, _, more): &&(&[&str], Takes, bool)| {
+        (p.len() == words.len() || (*more && p.len() < words.len()))
+            && p.iter().zip(words).all(|(a, b)| *a == "*" || a == b)
+    };
+    let found = TAKES.iter().filter(fits).max_by_key(|(p, ..)| {
+        // The most exact row: more words, then fewer `*`.
+        (p.len(), p.iter().filter(|w| **w != "*").count())
+    });
+    found.map_or(&Takes::Nothing, |(_, t, _)| t)
+}
+
+/// The files and directories `word` can become: what a shell's Tab offers.
+fn file_names(word: &str) -> Vec<String> {
+    let (dir, name) = word.rsplit_once('/').map_or(("", word), |(d, n)| (d, n));
+    let (base, prefix) = match word.rfind('/') {
+        Some(i) => (&word[..=i], if dir.is_empty() { "/" } else { dir }),
+        None => ("", "."),
+    };
+    let Ok(entries) = std::fs::read_dir(prefix) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|e| {
+            let n = e.file_name().into_string().ok()?;
+            if n.starts_with('.') && !name.starts_with('.') {
+                return None;
+            }
+            let slash = if e.path().is_dir() { "/" } else { "" };
+            Some(format!("{base}{n}{slash}"))
+        })
+        .collect()
+}
 
 /// What the client asked for at breakpoints, kept over a restart and resolved again.
 #[derive(Default)]
@@ -403,6 +491,7 @@ fn state<'a>(link: &'a Link) -> MutexGuard<'a, State> {
 /// What a command leaves for the batch.
 enum Exec {
     Text(String),
+    Help,
     Next(Next),
     Script(Vec<String>),
     /// A runner's command and its arguments.
@@ -586,6 +675,15 @@ pub(crate) fn work(sh: &Shared, at: &At<'_, '_>) -> Option<Next> {
         let b = st.batches.last_mut().expect("a command keeps its batch");
         match r {
             Ok(Exec::Text(t)) => b.say(link, &t),
+            // A client's console shows ANSI styling in output, not in the result of an `evaluate`
+            // (VS Code keeps its bold for output only).
+            Ok(Exec::Help) => match b.origin {
+                Origin::Client(_) if link.ansi.load(Ordering::Relaxed) => {
+                    b.flush(link);
+                    link.output("console", &(help(link, true) + "\n"));
+                }
+                _ => b.say(link, &help(link, false)),
+            },
             Ok(Exec::Script(mut lines)) => {
                 lines.extend(std::mem::take(&mut b.lines));
                 b.lines = lines.into();
@@ -739,6 +837,17 @@ pub(crate) fn name_help(
     frame: usize,
     word: &str,
 ) -> Option<String> {
+    let word = word.split('(').next().unwrap_or(word).trim();
+    // A path is looked for among paths, and told in the dotted form.
+    if word.contains(['.', ':']) {
+        let paths: Vec<String> = sh.design.sigs.iter().map(|s| dotted(&s.path)).collect();
+        // From where the stop stands too: `u_reg.qq` is near `tb.u_reg.q`.
+        let scope = sh.design.scope(thread_proc(sh, tid));
+        let full = scope.iter().map(|r| format!("{r}{word}"));
+        return std::iter::once(dotted(word))
+            .chain(full.map(|f| dotted(&f)))
+            .find_map(|w| similar(&w, "signal", &paths));
+    }
     similar(word, "signal or variable", &names_here(sh, at, tid, frame))
 }
 
@@ -746,7 +855,11 @@ pub(crate) fn name_help(
 pub(crate) fn explain(sh: &Shared, at: &At<'_, '_>, tid: i64, frame: usize, e: String) -> String {
     let word = e
         .strip_prefix("no local or signal `")
-        .and_then(|r| r.split('`').next());
+        .and_then(|r| r.split('`').next())
+        .or_else(|| {
+            let r = e.strip_prefix('`')?;
+            r.strip_suffix("`: not an array, local or signal here")
+        });
     match word.and_then(|w| name_help(sh, at, tid, frame, w)) {
         Some(h) => format!("{e}: {h}"),
         None => e,
@@ -825,38 +938,51 @@ pub(crate) fn completions(sh: &Shared, at: &At<'_, '_>, req: &Json) {
     let word_start = line.rfind(char::is_whitespace).map_or(0, |i| i + 1);
     let (head, word) = line.split_at(word_start);
     let words: Vec<&str> = head.split_whitespace().collect();
-    let names = || names_here(sh, at, tid, frame);
-    let mut cands: Vec<String> = match words[..] {
-        [] => {
-            let hook = sh.link.hook.get().into_iter().flat_map(|h| &h.commands);
-            COMMANDS
+    let scope = sh.design.scope(thread_proc(sh, tid));
+    let names = || {
+        let mut n = names_here(sh, at, tid, frame);
+        // The way into a dotted path: the top levels, and the instances below where it stands.
+        let roots = sh.design.roots.iter();
+        n.extend(roots.map(|&r| dotted(&sh.design.regions[r].path) + "."));
+        for at in &scope {
+            let below = sh
+                .design
+                .regions
                 .iter()
-                .map(|c| c.name.to_string())
-                .chain(hook.map(|(n, _)| n.clone()))
-                .chain(names())
-                .collect()
+                .filter_map(|r| r.path.strip_prefix(at.as_str()));
+            n.extend(below.filter(|b| !b.is_empty()).map(|b| dotted(b) + "."));
         }
-        ["examine" | "print"] | ["force" | "deposit" | "release"] | ["run", "until"] => names(),
-        ["wave", "add", ..] => names(),
-        ["wave"] => ["add", "cursor", "save", "load"].map(String::from).to_vec(),
-        ["drivers" | "describe"] | ["trace", "x"] => names(),
-        ["trace"] => vec!["x".into()],
-        ["find"] => vec!["signals".into(), "variables".into()],
-        ["break", "assert"] => SEVERITIES.map(String::from).to_vec(),
-        ["step"] => vec!["delta".into(), "timestep".into()],
-        ["run"] => vec!["until".into()],
-        ["break"] => {
-            let files = sh.design.files().into_iter().map(|f| format!("{f}:"));
-            let subs = ["list", "delete", "assert"].into_iter().map(String::from);
-            subs.chain(files).chain(names()).collect()
+        n
+    };
+    let commands = || {
+        let hook = sh.link.hook.get().into_iter().flat_map(|h| &h.commands);
+        let table = COMMANDS.iter().map(|c| c.name.to_string());
+        table.chain(hook.map(|(n, _)| n.clone())).collect()
+    };
+    let (mut cands, paths): (Vec<String>, bool) = if words.is_empty() {
+        (commands(), false)
+    } else {
+        match takes(&words) {
+            Takes::Commands => (commands(), false),
+            Takes::Nothing => (Vec::new(), false),
+            Takes::Names => (names(), true),
+            Takes::Files => (file_names(word), false),
+            Takes::Words(w) => (w.iter().map(|s| s.to_string()).collect(), false),
+            Takes::BreakPlace => {
+                let files = sh.design.files().into_iter().map(|f| format!("{f}:"));
+                let subs = ["list", "delete", "assert"].into_iter().map(String::from);
+                let here = names_here(sh, at, tid, frame);
+                (subs.chain(files).chain(here).collect(), true)
+            }
         }
-        ["break", "delete"] => vec!["all".into(), "assert".into()],
-        ["break", ..] if words.contains(&"if") => names(),
-        ["break", _] => vec!["if".into()],
-        _ => Vec::new(),
     };
     // Inside a name: a field of a record, or through an access value.
-    if let Some((prefix, _)) = word.rsplit_once('.') {
+    if paths
+        && !cands
+            .iter()
+            .any(|c| c.ends_with(':') && c.starts_with(word))
+        && let Some((prefix, _)) = word.rsplit_once('.')
+    {
         let typed = cond::parse(prefix).ok().and_then(|c| {
             let top = (tid == 0).then(|| sh.design.roots.first()).flatten();
             let names = crate::Names {
@@ -892,6 +1018,15 @@ pub(crate) fn completions(sh: &Shared, at: &At<'_, '_>, req: &Json) {
                     .map(|s| dotted(&s.path))
                     .filter(|p| p.starts_with(&lower)),
             );
+            // And from where the stop stands.
+            for at in &scope {
+                let below = sh
+                    .design
+                    .sigs
+                    .iter()
+                    .filter_map(|s| s.path.strip_prefix(at.as_str()));
+                cands.extend(below.map(dotted).filter(|p| p.starts_with(&lower)));
+            }
         }
     }
     let lower = word.to_ascii_lowercase();
@@ -902,11 +1037,30 @@ pub(crate) fn completions(sh: &Shared, at: &At<'_, '_>, req: &Json) {
     labels.sort();
     labels.dedup();
     let length = word.len();
-    let targets: Vec<Json> = labels
+    let mut targets: Vec<Json> = labels
         .iter()
-        .map(|l| json!({"label": l, "length": length}))
+        .map(|l| json!({"label": l, "length": length, "sortText": format!("1{l}")}))
         .collect();
+    // An editor's suggestion list takes the first item on Tab: there, that is the common prefix.
+    if !sh.link.console.load(Ordering::Relaxed) && labels.len() > 1 {
+        let common = common_prefix(&labels);
+        if common.len() >= word.len().max(1) && !labels.contains(&common) {
+            targets.insert(
+                0,
+                json!({"label": common, "length": length, "sortText": "0"}),
+            );
+        }
+    }
     sh.respond(req, json!({"targets": targets}));
+}
+
+/// What all of `labels` start with (a sorted list: the first and the last differ first).
+fn common_prefix(labels: &[String]) -> String {
+    let (Some(a), Some(b)) = (labels.first(), labels.last()) else {
+        return String::new();
+    };
+    let same = a.chars().zip(b.chars()).take_while(|(x, y)| x == y);
+    same.map(|(x, _)| x).collect()
 }
 
 fn change(sh: &Shared, at: &At<'_, '_>, cmd: &str, rest: &str) -> Result<String, String> {
@@ -914,17 +1068,18 @@ fn change(sh: &Shared, at: &At<'_, '_>, cmd: &str, rest: &str) -> Result<String,
     if name.is_empty() {
         return Err(format!("`{cmd}` needs a signal"));
     }
-    let mode = if let Some(r) = rest.strip_suffix("-out") {
+    let out = rest.strip_suffix("-out");
+    if let Some(r) = out {
         rest = r.trim_end();
-        "out"
-    } else {
-        "in"
-    };
+    }
     if cmd != "release" && rest.is_empty() {
         return Err(format!("`{cmd}` needs a value"));
     }
     let name = qualify(sh, at, name);
-    let args = json!({"signal": name, "value": rest, "mode": mode});
+    let mut args = json!({"signal": name, "value": rest});
+    if out.is_some() {
+        args["mode"] = json!("out");
+    }
     let r = signal_change(sh, at, &format!("yavs/{cmd}"), &args)?;
     Ok(match r["value"].as_str() {
         Some(v) => format!("{} = {v}", r["signal"].as_str().unwrap_or_default()),
@@ -940,7 +1095,9 @@ fn where_text(sh: &Shared, at: &At<'_, '_>) -> String {
                 _ => "before time 0\n".to_string(),
             };
             let procs = sh.session().processes();
-            t += procs.get(s.process).map_or("?", |p| &p.name);
+            t += &procs
+                .get(s.process)
+                .map_or("?".to_string(), |p| dotted(&p.name));
             if let Some(l) = sh.design.loc(s.stmt) {
                 t += &format!(", {}:{}", l.path, l.line);
             }
@@ -1112,7 +1269,11 @@ fn break_list(sh: &Shared) -> String {
     for (set, list) in k.signals.iter().enumerate() {
         for b in list {
             let name = &b[if set == 0 { "dataId" } else { "signal" }];
-            let mut t = format!("{} {}", b["yavsId"], name.as_str().unwrap_or_default());
+            let mut t = format!(
+                "{} {}",
+                b["yavsId"],
+                dotted(name.as_str().unwrap_or_default())
+            );
             if let Some(v) = b["value"].as_str() {
                 t += &format!(" = {v}");
             }
@@ -1241,47 +1402,73 @@ fn restart(sh: &Shared) -> Result<Exec, String> {
     Ok(Exec::Next(Next::Restart))
 }
 
-/// `line` in lines of at most `width` columns (0: as it is), the later ones indented.
-fn wrapped(line: &str, width: usize) -> String {
-    const INDENT: &str = "    ";
-    if width == 0 {
-        return line.to_string();
-    }
+/// `text` in lines of at most `width` columns, each after `indent` spaces but the first, which
+/// starts at column `col`.
+fn fill(text: &str, width: usize, indent: usize, mut col: usize) -> String {
     let mut out = String::new();
-    let mut col = 0;
-    for word in line.split(' ') {
-        if col > 0 && col + 1 + word.len() > width {
+    let mut first = true;
+    for word in text.split(' ') {
+        if !first && col + 1 + word.len() > width {
             out += "\n";
-            out += INDENT;
-            col = INDENT.len();
-        } else if col > 0 {
+            out += &" ".repeat(indent);
+            col = indent;
+        } else if !first {
             out.push(' ');
             col += 1;
         }
         out += word;
         col += word.len();
+        first = false;
     }
     out
 }
 
-fn help(sh: &Shared, rest: &str) -> Result<String, String> {
-    if !rest.is_empty() {
-        return help_for(sh, rest);
+/// One row of `help`: the syntax with its command in bold if the client shows that, then the
+/// meaning in its column, or on the next line after a long syntax.
+fn help_row(syntax: &str, meaning: &str, width: usize, ansi: bool) -> String {
+    const LEFT: usize = 2;
+    const MEANING: usize = 32;
+    let shown = fill(syntax, width, LEFT + 2, LEFT);
+    let shown = match shown.split_once(|c: char| c.is_whitespace()) {
+        Some((name, rest)) if ansi => {
+            let sep = &shown[name.len()..=name.len()];
+            format!("\x1b[1m{name}\x1b[0m{sep}{rest}")
+        }
+        None if ansi => format!("\x1b[1m{shown}\x1b[0m"),
+        _ => shown,
+    };
+    let lead = " ".repeat(LEFT);
+    let text = fill(meaning, width, MEANING, MEANING);
+    if LEFT + syntax.len() + 2 > MEANING {
+        return format!("{lead}{shown}\n{}{text}", " ".repeat(MEANING));
     }
-    let width = sh.link.columns.load(Ordering::Relaxed);
+    let pad = " ".repeat(MEANING - LEFT - syntax.len());
+    format!("{lead}{shown}{pad}{text}")
+}
+
+fn help(link: &Link, ansi: bool) -> String {
+    // An editor's console does not say its width, and wraps what is wider by itself.
+    let width = match link.columns.load(Ordering::Relaxed) {
+        0 => 100,
+        w => w,
+    };
     let mut lines = Vec::new();
     for (g, rows) in commands() {
         lines.push(format!("{g}:"));
-        lines.extend(
-            rows.iter()
-                .map(|(a, b)| wrapped(&format!("{a}: {b}"), width)),
-        );
+        lines.extend(rows.iter().map(|(a, b)| help_row(a, b, width, ansi)));
     }
-    if let Some(h) = sh.link.hook.get() {
-        let shown = h.commands.iter().filter(|(_, help)| !help.is_empty());
-        lines.extend(shown.map(|(n, help)| wrapped(&format!("{n}: {help}"), width)));
+    if let Some(h) = link.hook.get() {
+        let shown: Vec<_> = h
+            .commands
+            .iter()
+            .filter(|(_, help)| !help.is_empty())
+            .collect();
+        if !shown.is_empty() {
+            lines.push("Test runner:".to_string());
+        }
+        lines.extend(shown.iter().map(|(n, help)| help_row(n, help, width, ansi)));
     }
-    Ok(lines.join("\n"))
+    lines.join("\n")
 }
 
 /// `help COMMAND`: the forms and the meaning the command has in the table, or the help a test
@@ -1364,8 +1551,9 @@ fn exec(sh: &Shared, at: &At<'_, '_>, line: &str) -> Result<Exec, String> {
                 std::fs::read_to_string(rest).map_err(|e| format!("cannot read `{rest}`: {e}"))?;
             Ok(Exec::Script(text.lines().flat_map(split).collect()))
         }
-        "help" => help(sh, rest).map(Exec::Text),
-        "quit" => quit(sh, rest),
+        "help" if rest.is_empty() => Ok(Exec::Help),
+        "help" => help_for(sh, rest).map(Exec::Text),
+        "quit" | "exit" => quit(sh, rest),
         _ => {
             if let Some(h) = sh.link.hook.get()
                 && h.commands.iter().any(|(n, _)| n == cmd)

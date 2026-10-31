@@ -78,11 +78,23 @@ What you can do:
 * **Inspect**: each process is a thread with its call stack; the Variables view shows locals,
   signals, ports and generics, and a Hierarchy scope lists the design's instances. Hover a signal
   to see its value. An access value shows what it designates and expands as that does; in a method of a protected type,
-  Locals lists the object's variables. A Watch takes a field, an element, a slice (``rec.x``, ``arr(i)``, ``p.all``,
-  ``slv(3 downto 0)``) or an expression (``cnt = 3``).
+  Locals lists the object's variables. A vector (``std_logic_vector``, ``unsigned``, ``bit_vector`` and the like) and a
+  string show on one line; read one bit with ``dout(3)``. Records and arrays of vectors expand, and a vector longer than
+  256 elements shows its start and keeps its elements below it. A Watch takes a name in scope, a dotted path
+  (``tb_fifo.dut.count``, a process variable ``tb_fifo.main.i``), a field, an element, a slice (``rec.x``, ``arr(i)``, ``p.all``,
+  ``slv(3 downto 0)``) or an expression (``cnt = 3``). ``:tb_fifo:dut:count`` is accepted too. A name that does not exist
+  shows an error with the nearest name as its value; VS Code adds the entry to the Watch view before it asks the server, so
+  the entry stays listed until you remove it.
 * **Change values**: "Set Value" deposits a signal or writes a variable; "Force a signal...",
   "Deposit a signal value..." and "Release a forced signal..." in the context menu. Values are
-  VHDL literals: ``'1'``, ``16#FF#``, ``x"A5"``, ``10 ns``, ``(others => '0')``.
+  VHDL literals: ``'1'``, ``16#FF#``, ``x"A5"``, ``10 ns``, ``(others => '0')``. A bit-like target needs no quotes: ``1`` for
+  ``'1'``, ``0101`` for ``"0101"``; an integer's ``1`` stays 1. A force holds what readers of the signal see (the console's
+  ``force NAME VALUE -out`` is for the driving value); a release ends any force. A value the target cannot take is an
+  error that names its type and what it takes.
+* **Debug Console**: the commands of :doc:`interactive` (``help`` lists them, names in bold). Typing shows VS Code's
+  list; Tab takes what all entries have in common and never a first guess, and Tab with no list open opens it. With an
+  empty word (``step`` and a space) the list has nothing in common to offer, so a second Tab takes the entry it has
+  selected. The first word offers commands only; a signal's name there is still evaluated when you press Enter.
 
 Reports go to the Debug Console, and the session ends with a line giving the exit status of the run. A launch that cannot
 start (no such top level, an elaboration error, no Surfer) prints its diagnostic there; a command line yavs refuses or a

@@ -23,6 +23,13 @@ fn setup(name: &str) -> common::Tmp {
     d
 }
 
+fn tempdir_with(name: &str, src: &str) -> common::Tmp {
+    let d = tempdir(&format!("console-{name}"));
+    std::fs::write(d.join("t.vhd"), src).expect("write");
+    analyze(&d, "t.vhd");
+    d
+}
+
 fn analyze(d: &Path, file: &str) {
     let ok = yavs()
         .current_dir(d)
@@ -133,7 +140,7 @@ fn force_deposit_release() {
     assert_eq!(
         stdout(&o),
         // The deposit, then `q` inverts it when the release changes `cnt`.
-        ":tb:cnt = 5\n5\n:tb:cnt\n:tb:v = \"1111\"\n\"0000\"\n"
+        "tb.cnt = 5\n5\ntb.cnt\ntb.v = \"1111\"\n\"0000\"\n"
     );
 }
 
@@ -147,7 +154,7 @@ fn breakpoints_on_lines_and_signals() {
     );
     let out = stdout(&o);
     assert!(out.contains("breakpoint 1: "), "{out}");
-    assert!(out.contains("breakpoint 2: :tb:cnt"), "{out}");
+    assert!(out.contains("breakpoint 2: tb.cnt"), "{out}");
     let times: Vec<&str> = out.lines().filter(|l| l.starts_with("time ")).collect();
     assert_eq!(
         times,
@@ -489,12 +496,113 @@ fn every_name_suggests() {
 }
 
 #[test]
-fn help_is_wrapped() {
+fn help_is_aligned_wrapped_and_plain_in_a_pipe() {
     let d = setup("helpwrap");
     let o = script(&d, "tb", "help");
     let out = stdout(&o);
-    assert!(out.contains("examine NAME"), "{out}");
     assert!(out.lines().all(|l| l.len() <= 80), "{out}");
+    assert!(!out.contains('\x1b'), "{out}");
+    // The meanings start in one column.
+    let at = |syntax: &str| {
+        let l = out.lines().find(|l| l.starts_with(syntax)).expect(syntax);
+        l.len() - l[syntax.len()..].trim_start().len()
+    };
+    assert_eq!(at("  next"), at("  waits"));
+    assert!(out.contains("exit"), "{out}");
+}
+
+/// A path from where a name is looked up, like the full one; a miss in it finds the full name.
+#[test]
+fn a_path_starts_from_the_scope_too() {
+    let d = tempdir_with(
+        "relpath",
+        "entity sub is end;
+architecture a of sub is signal q : integer := 7; begin end;
+entity t is end;
+architecture a of t is
+begin
+  u_reg : entity work.sub;
+  process begin wait for 1 ns; wait; end process;
+end;",
+    );
+    let o = script(
+        &d,
+        "t",
+        "run 1 ns; examine u_reg.q; examine t.u_reg.q; force u_reg.q 8",
+    );
+    assert_eq!(stdout(&o), "7\n7\nt.u_reg.q = 8\n", "{}", stderr(&o));
+    let o = script(&d, "t", "examine u_reg.qq");
+    assert!(stderr(&o).contains("`t.u_reg.q`"), "{}", stderr(&o));
+}
+
+/// A release with no `-out` ends a force of either kind (#953).
+#[test]
+fn release_ends_either_force() {
+    let d = setup("releaseboth");
+    let held = script(&d, "tb", "force cnt 99 -out; run 25 ns; examine cnt");
+    assert!(stdout(&held).ends_with("99\n"), "{}", stdout(&held));
+    let freed = script(
+        &d,
+        "tb",
+        "force cnt 99 -out; run 1 ns; release cnt; run 25 ns; examine cnt",
+    );
+    assert!(stdout(&freed).ends_with("6\n"), "{}", stdout(&freed));
+}
+
+/// `exit` is `quit`, its status too.
+#[test]
+fn exit_is_quit() {
+    let d = setup("exitquit");
+    let o = script(&d, "tb", "exit 3");
+    assert_eq!(o.status.code(), Some(3), "{}", stderr(&o));
+    let o = script(&d, "tb", "exit");
+    assert_eq!(o.status.code(), Some(0), "{}", stderr(&o));
+}
+
+/// One parser for values typed in force, deposit and break on value (#953).
+#[test]
+fn values_can_leave_out_the_quotes_of_a_bit_like_target() {
+    let d = tempdir_with(
+        "permissive",
+        "library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+entity t is end;
+architecture a of t is
+  signal sl : std_logic := '0';
+  signal b : bit := '0';
+  signal i : integer := 0;
+  signal slv : std_logic_vector(3 downto 0) := \"0000\";
+  signal u : unsigned(3 downto 0) := \"0000\";
+  signal s : string(1 to 2) := \"ab\";
+begin
+  process begin wait for 1 ns; wait; end process;
+end;",
+    );
+    let o = script(
+        &d,
+        "t",
+        "force sl 1; force b 1; force i 1; force slv 0101; force u 1010; force slv(0) 0; deposit b 0; run 1 ns; examine sl; examine i; examine slv; examine u",
+    );
+    assert_eq!(
+        stdout(&o),
+        "t.sl = '1'\nt.b = '1'\nt.i = 1\nt.slv = \"0101\"\nt.u = \"1010\"\nt.slv(0) = '0'\nt.b = '0'\n'1'\n1\n\"0100\"\n\"1010\"\n",
+        "{}",
+        stderr(&o)
+    );
+    let bad = |cmd: &str, want: &str| {
+        let o = script(&d, "t", cmd);
+        let e = stderr(&o);
+        assert!(e.contains(want), "{cmd}: {e}");
+        assert_eq!(o.status.code(), Some(1), "{cmd}: {e}");
+    };
+    bad("force sl 2", "`2` is not a value of `t.sl`, type STD_LOGIC");
+    bad("force slv 01", "type STD_LOGIC_VECTOR: expected 4 elements");
+    bad("deposit i 0x", "type INTEGER: expected an integer");
+    // The quotes stay where a target could take the text otherwise.
+    bad("force s ab", "type STRING");
+    bad("break sl = 2", "`2` is not a value of `t.sl`");
+    assert_eq!(script(&d, "t", "break sl = 1").status.code(), Some(0));
 }
 
 /// A typo in a command names the command; a condition on a number works and its error comes when
@@ -652,7 +760,7 @@ fn piped_standard_input() {
     // No prompt on a pipe; a failure does not end a session with a user; end of input is `quit`.
     assert!(out.starts_with("4\n"), "{out}");
     assert!(!out.contains("yavs>"), "{out}");
-    assert!(out.contains("restart: back to time 0"), "{out}");
+    assert!(out.contains("back to time 0"), "{out}");
     assert!(stderr(&o).contains("unknown command or signal `bogus`"));
     assert_eq!(o.status.code(), Some(0));
 }
@@ -877,13 +985,12 @@ fn hook_commands_run_in_the_runner() {
     );
     t2.join().expect("the runner");
     let out = stdout(&o);
-    assert!(out.contains("greet: say hello\n"), "{out}");
+    assert!(out.contains("say hello\n"), "{out}");
     assert!(!out.contains("hidden:"), "{out}");
     assert!(out.contains("hello you there\nfalse\n"), "{out}");
     // In the order of the commands, whatever the timing (#947).
     assert!(
-        out.find("greet: say hello").unwrap_or(usize::MAX)
-            < out.find("hello you there").unwrap_or(0),
+        out.find("say hello").unwrap_or(usize::MAX) < out.find("hello you there").unwrap_or(0),
         "{out}"
     );
     assert!(out.contains("** Note: 30000000fs+0: done"), "{out}");

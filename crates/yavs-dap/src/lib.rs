@@ -36,7 +36,7 @@ use yavs_kernel::{
     Config, EndReason, ForceMode, Interrupt, RunStatus, SigRef, SignalId, SimControl, Time, Value,
 };
 use yavs_sem::Db;
-use yavs_std::value::{Lit, LitType, literal, literal_image};
+use yavs_std::value::{Lit, LitType, literal_image};
 
 pub use console::HOOK_VAR;
 use design::Design;
@@ -120,6 +120,8 @@ struct Link {
     /// at the end of the run, say so at each stop.
     /// The width of a console's terminal (0: an editor, which wraps itself).
     columns: std::sync::atomic::AtomicUsize,
+    /// The client shows ANSI styling.
+    ansi: AtomicBool,
     console: AtomicBool,
     stop_on_entry: AtomicBool,
     /// End of input from the client.
@@ -847,7 +849,7 @@ fn stack_trace(sh: &Shared, at: &At<'_, '_>, req: &Json) {
                     f.stmt(i)
                 };
                 let name = if i == 0 {
-                    p.name.clone()
+                    console::dotted(&p.name)
                 } else {
                     f.func_name(i).unwrap_or("?").to_string()
                 };
@@ -856,7 +858,7 @@ fn stack_trace(sh: &Shared, at: &At<'_, '_>, req: &Json) {
         }
         // A process not executing shows where it waits.
         _ if p.state == ProcState::Waiting => {
-            frames.push(frame(sh, tid << 16, &p.name, p.wait));
+            frames.push(frame(sh, tid << 16, &console::dotted(&p.name), p.wait));
         }
         _ => {}
     }
@@ -1055,9 +1057,13 @@ fn value_var(
         }
         return j;
     }
-    let mut j = json!({"name": name, "value": literal_image(v, t), "variablesReference": 0});
+    let image = literal_image(v, t);
+    // A vector or a string is its one line: `v(3)` reads one element. Only what that line cuts
+    // short keeps its children.
+    let whole = image.ends_with('"');
+    let mut j = json!({"name": name, "value": image, "variablesReference": 0});
     match (t, v) {
-        (LitType::Array { .. }, Lit::Array(xs)) => {
+        (LitType::Array { .. }, Lit::Array(xs)) if !whole => {
             j["variablesReference"] = json!(node_ref(sh, node()));
             j["indexedVariables"] = json!(xs.len());
         }
@@ -1156,7 +1162,7 @@ fn region_vars(sh: &Shared, at: &At<'_, '_>, regions: &[usize], r: Option<usize>
             "name": name,
             "value": format!("process, {}", state.unwrap_or("?")),
             "variablesReference": 0,
-            "evaluateName": p,
+            "evaluateName": console::dotted(p),
         }));
     }
     out.extend(
@@ -1394,6 +1400,10 @@ fn eval_var(sh: &Shared, at: &At<'_, '_>, tid: i64, i: usize, expr: &str) -> Res
             }
         }
         Some(Err(k)) if names.state_var(expr).is_none() => signal_var(sh, at, k),
+        // A variable by the path `find` lists: a process has no frame to expand it from.
+        _ if let Some(shown) = tools::examine_path(sh, at, &console::dotted(expr)) => {
+            json!({"value": shown?, "variablesReference": 0})
+        }
         // A part of a local or a signal, or any expression: what a condition computes.
         _ => {
             let unknown = || {
@@ -1443,7 +1453,11 @@ fn signal_change(sh: &Shared, at: &At<'_, '_>, cmd: &str, a: &Json) -> Result<Js
             .ok_or_else(|| console::no_signal(sh, tid, name))?;
         let s = &sh.design.sigs[k];
         let (paths, ty) = select(&s.lit, suffix)?;
-        let target = format!("{}{}", s.path, suffix.to_ascii_lowercase());
+        let target = format!(
+            "{}{}",
+            console::dotted(&s.path),
+            suffix.to_ascii_lowercase()
+        );
         let mode = match a["mode"].as_str() {
             None | Some("in") => ForceMode::Effective,
             Some("out") => ForceMode::Driving,
@@ -1451,10 +1465,24 @@ fn signal_change(sh: &Shared, at: &At<'_, '_>, cmd: &str, a: &Json) -> Result<Js
         };
         if cmd == "yavs/release" {
             put(sh, at, k, &paths, None, OpKind::Release(mode))?;
+            // No mode asked for: whichever force it is, so nobody needs to remember which.
+            if a["mode"].is_null() {
+                put(sh, at, k, &paths, None, OpKind::Release(ForceMode::Driving))?;
+            }
             return Ok(json!({"signal": target}));
         }
         let text = a["value"].as_str().ok_or("expected a `value` argument")?;
-        let v = literal(text.as_bytes(), &ty).map_err(|e| e.to_string())?;
+        let v = design::typed_literal(text, &ty).map_err(|hint| {
+            let of = if suffix.is_empty() {
+                "type"
+            } else {
+                "a part of type"
+            };
+            format!(
+                "`{text}` is not a value of `{target}`, {of} {}: {hint}",
+                s.declared
+            )
+        })?;
         let kind = if cmd == "yavs/force" {
             OpKind::Force(mode)
         } else {
@@ -1772,7 +1800,9 @@ fn write_node(sh: &Shared, at: &At<'_, '_>, n: &Node, text: &str) -> Result<Stri
             _ => return Err("this is a bug in yavs: a path into a scalar".into()),
         };
     }
-    *pv = literal(text.as_bytes(), pt).map_err(|e| e.to_string())?;
+    let what = node_text(sh, at, n).unwrap_or_else(|| "this variable".to_string());
+    *pv = design::typed_literal(text, pt)
+        .map_err(|hint| format!("`{text}` is not a value of `{what}`: {hint}"))?;
     let shown = literal_image(pv, pt);
     match n {
         Node::Local {
@@ -1826,6 +1856,8 @@ fn handle(sh: &Shared, tx: &Sender<Msg>, req: Json) {
             if sh.link.viewer.get().is_some() {
                 caps["yavsViewer"] = json!(true);
             }
+            let ansi = req["arguments"]["supportsANSIStyling"] == true;
+            sh.link.ansi.store(ansi, Ordering::Relaxed);
             sh.respond(&req, caps);
             sh.event("initialized", json!({}));
         }
@@ -1865,7 +1897,7 @@ fn handle(sh: &Shared, tx: &Sender<Msg>, req: Json) {
                 .processes()
                 .iter()
                 .enumerate()
-                .map(|(i, p)| json!({"id": i + 1, "name": p.name}))
+                .map(|(i, p)| json!({"id": i + 1, "name": console::dotted(&p.name)}))
                 .collect();
             sh.respond(&req, json!({"threads": threads}));
         }
@@ -2070,7 +2102,8 @@ fn data_breakpoint_info(sh: &Shared, req: &Json) {
     let body = match found {
         Ok(Some(k)) => {
             let path = &sh.design.sigs[k].path;
-            json!({"dataId": path, "description": path, "accessTypes": ["write"], "canPersist": true})
+            let shown = console::dotted(path);
+            json!({"dataId": path, "description": shown, "accessTypes": ["write"], "canPersist": true})
         }
         Ok(None) => json!({"dataId": null, "description": format!("no signal `{name}` here")}),
         Err(m) => json!({"dataId": null, "description": m}),
@@ -2116,7 +2149,7 @@ fn apply_signals(sh: &Shared, set: usize) -> Vec<Json> {
             let k = sh
                 .design
                 .find(p, name)
-                .ok_or_else(|| console::no_signal(sh, bp["tid"].as_i64().unwrap_or(0), name))?;
+                .ok_or_else(|| console::no_signal(sh, tid, name))?;
             let value = match bp["value"].as_str() {
                 None => None,
                 Some(v) => Some(sh.design.sigs[k].parse(v)?),
@@ -2140,7 +2173,7 @@ fn apply_signals(sh: &Shared, set: usize) -> Vec<Json> {
         })();
         out.push(match r {
             Ok(b) => {
-                let d = &sh.design.sigs[b.sig].path;
+                let d = console::dotted(&sh.design.sigs[b.sig].path);
                 bps.push(b);
                 json!({"verified": true, "description": d})
             }
@@ -2212,13 +2245,15 @@ fn signal_hit(sh: &Shared, sim: &SimControl) -> (bool, Option<(&'static str, Str
         let fire = match held {
             Ok(true) => {
                 b.hits += 1;
-                fires(b.hit, b.hits)
-                    .then(|| ("data breakpoint", format!("{} = {}", s.path, s.show(&read))))
+                fires(b.hit, b.hits).then(|| {
+                    let name = console::dotted(&s.path);
+                    ("data breakpoint", format!("{name} = {}", s.show(&read)))
+                })
             }
             Ok(false) => None,
             Err(m) => Some((
                 "exception",
-                format!("{}: breakpoint condition: {m}", s.path),
+                format!("{}: breakpoint condition: {m}", console::dotted(&s.path)),
             )),
         };
         if stop.is_none() {
@@ -2450,6 +2485,7 @@ fn session(
         disconnect: Mutex::new(None),
         console: AtomicBool::new(false),
         columns: std::sync::atomic::AtomicUsize::new(0),
+        ansi: AtomicBool::new(false),
         stop_on_entry: AtomicBool::new(false),
         eof: AtomicBool::new(false),
         kept: Mutex::default(),

@@ -114,8 +114,13 @@ Set breakpoints, start the configuration with F5, and the run continues to the f
 - The Variables view shows locals, the signals and ports around the process, the generics of its
   instance and a Hierarchy scope. Records expand by field, large arrays in pages. "Set Value"
   writes a variable at once and deposits a signal.
-- Hover and the Watch view evaluate a local, a signal visible from the process, or a signal by
-  path (`:tb:u1:s` or `tb.u1.s`).
+- Hover and the Watch view evaluate a local, a signal visible from the process, or a signal or
+  process variable by dotted path (`tb.u1.s`; `:tb:u1:s` is accepted too). A vector shows on one
+  line; read one bit with `dout(3)`. A name that does not exist shows an error with the nearest name:
+  VS Code lists a Watch entry before it asks the debugger, so the entry stays until you remove it.
+- The Debug Console takes the console's commands (`help` lists them, names in bold). Tab takes what
+  the entries in the list have in common and, with no list open, opens it. After a space with an
+  empty word the list has nothing in common, and a second Tab takes the selected entry.
 - "Break on Value Change" on a signal in the Variables view stops after the cycle in which it
   changed.
 - Every stop shows the simulation time and delta. Reports go to the Debug Console.
@@ -136,7 +141,9 @@ Commands in the palette, available only while a `yavs` session runs:
 | yavs: Force a signal..., Deposit a signal value..., Release a forced signal... | also in the context menu of a signal in the Variables view; the target may be a field, an element or a slice |
 
 Values are VHDL literals of the target's type: `'1'`, `42`, `16#FF#`, `"01ZX"`, `x"A5"`, `10 ns`,
-aggregates. A force or deposit takes effect in the next simulation cycle.
+aggregates; a bit-like target needs no quotes (`1`, `0101`), and an integer's `1` stays 1. A force or
+deposit takes effect in the next simulation cycle. A force holds what readers of the signal see; a
+release ends any force.
 
 ## Waveforms
 

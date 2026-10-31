@@ -683,7 +683,7 @@ pub fn literal(s: &[u8], ty: &LitType) -> R<Lit> {
 
 /// `v` of type `ty` as text: scalars as [`literal`] reads them (physical values in the
 /// primary unit), arrays of characters as strings, other composites as aggregates; arrays
-/// longer than 256 elements end in `...`.
+/// longer than 256 elements end in `...` (a string: after its closing quote).
 pub fn literal_image(v: &Lit, ty: &LitType) -> String {
     const MAX: usize = 256;
     match (v, ty) {
@@ -719,8 +719,11 @@ pub fn literal_image(v: &Lit, ty: &LitType) -> String {
                     })
                     .collect();
                 let has_chars = t.lits.iter().any(|l| matches!(l, EnumLit::Char(_)));
-                if let Some(s) = chars.filter(|_| has_chars && xs.len() <= MAX) {
-                    return format!("\"{}\"", s.replace('"', "\"\""));
+                if let Some(s) = chars.filter(|_| has_chars) {
+                    // A long one still reads as a vector: its start, then `...`.
+                    let more = if xs.len() > MAX { "..." } else { "" };
+                    let s: String = s.chars().take(MAX).collect();
+                    return format!("\"{}\"{more}", s.replace('"', "\"\""));
                 }
             }
             let items: Vec<String> = xs

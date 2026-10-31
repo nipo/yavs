@@ -14,7 +14,7 @@ VS Code).
   session) send the server's custom requests: run for/until a time, next delta, next time step,
   signal value breakpoints (kept per session in the extension, since the request replaces the
   set), force, deposit and release of a signal (also in the Variables view's context menu of a
-  signal; called with `{signal, value, mode}` they ask nothing). "Break on Value Change" is VS Code's own (DAP data breakpoints).
+  signal; called with `{signal, value}` they ask nothing; there is no mode to ask for, a programmatic `mode` still reaches the server). "Break on Value Change" is VS Code's own (DAP data breakpoints).
 - `yavs: Attach` (`yavs.attach`, the dynamic configuration, and F5 with nothing configured, `Configurations`) needs no launch.json: port 4711, and an input box only if nothing listens there. The look at the port connects and closes, which the server takes for no session. Nothing is analyzed. The flow: `python run.py lib.tb.test --yavs-debug`, breakpoints, F5.
 - `surfer` in a launch configuration is `--surfer[=HOST:PORT]`; the custom event `yavs/showSource` (Surfer's go to declaration) opens the file at the line.
 - The Debug Console needs nothing here: it sends `evaluate` with context `repl`, and the server takes the console's commands that way (`run 10 ns`, `restart`, #904).
@@ -26,7 +26,7 @@ VS Code).
 
 | File | Responsibility |
 |---|---|
-| `package.json` | Manifest: `contributes.debuggers`, languages, breakpoints, snippets, `problemMatchers` |
+| `package.json` | Manifest: `contributes.debuggers`, languages, breakpoints, snippets, `problemMatchers`, `keybindings` (Tab in the Debug Console of a yavs session with no list open opens the list, where VS Code would move the focus away) |
 | `extension.js` | The adapter descriptor factory (`runArgs`, `libArgs`) and the commands (`custom`) |
 | `extension.js`, more | `yavs.showDrivers` and `yavs.findSignals` go through `evaluate` with context `repl` and the server's `yavs/find`; the exception filters come from the server's capabilities, not the manifest |
 | `sample/` | A testbench workspace with `.vscode/launch.json` (used by the tests) |

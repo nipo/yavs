@@ -39,6 +39,13 @@
         "language": "vhdl"
       }
     ],
+    "keybindings": [
+      {
+        "key": "tab",
+        "command": "editor.action.triggerSuggest",
+        "when": "inDebugRepl && debugType == 'yavs' && !suggestWidgetVisible"
+      }
+    ],
     "problemMatchers": [
       {
         "name": "yavs",

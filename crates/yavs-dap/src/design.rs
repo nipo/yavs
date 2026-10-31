@@ -277,9 +277,15 @@ impl Sig {
         self.leaves.iter().map(|&(s, _)| s)
     }
 
-    /// `text` as a value of the signal's type (`yavs_std::value::literal`).
+    /// `text` as a value of the signal's type ([`typed_literal`]).
     pub fn parse(&self, text: &str) -> Result<Lit, String> {
-        literal(text.as_bytes(), &self.lit).map_err(|e| e.to_string())
+        typed_literal(text, &self.lit).map_err(|hint| {
+            let name = crate::console::dotted(&self.path);
+            format!(
+                "`{text}` is not a value of `{name}`, type {}: {hint}",
+                self.declared
+            )
+        })
     }
 
     /// The kernel elements of the sub-elements at `paths` (field and element positions; an
@@ -697,20 +703,110 @@ impl Design {
         names
     }
 
+    /// The path prefixes (`:top:u1:`) a name is looked up from: those of process `p`, else the top
+    /// levels.
+    pub fn scope(&self, p: Option<&Proc>) -> Vec<String> {
+        match p {
+            Some(p) => p.regions.clone(),
+            None => self
+                .roots
+                .iter()
+                .map(|&r| self.regions[r].path.clone())
+                .collect(),
+        }
+    }
+
     /// A signal by simple name seen from process `p`, or by path (`:top:u1:s`, `top.u1.s`): its
     /// index into `sigs`.
     pub fn find(&self, p: Option<&Proc>, name: &str) -> Option<usize> {
         let n = name.trim().to_ascii_lowercase();
+        let colons = n.replace('.', ":");
         let path = if n.starts_with(':') {
-            n.clone()
+            colons.clone()
         } else {
-            format!(":{}", n.replace('.', ":"))
+            format!(":{colons}")
         };
+        // Also a path from where the process stands: `u_reg.q`.
         let local = p
             .into_iter()
             .flat_map(|p| &p.regions)
-            .find_map(|r| self.by_path.get(&format!("{r}{n}")));
+            .find_map(|r| self.by_path.get(&format!("{r}{colons}")));
         local.or_else(|| self.by_path.get(&path)).copied()
+    }
+}
+
+/// An enumeration of character literals only, with `'0'` and `'1'`: `bit`, `std_ulogic`, and the
+/// like (`character` has identifiers too).
+fn bit_like(t: &EnumType) -> bool {
+    let has = |c| t.lits.contains(&EnumLit::Char(c));
+    has(b'0') && has(b'1') && t.lits.iter().all(|l| matches!(l, EnumLit::Char(_)))
+}
+
+/// A value the user typed, for a target of type `ty`, or what that type takes. One path for force,
+/// deposit, Set Value and break on value: the VHDL literal first, so what is a literal of the type
+/// keeps its meaning (`1` of an integer stays 1), then the quotes a bit-like target leaves no doubt
+/// about (`1` is `'1'`, `0101` is `"0101"`). Rule: `docs/decisions.md` "Values typed in the debugger".
+pub(crate) fn typed_literal(text: &str, ty: &LitType) -> Result<Lit, String> {
+    let text = text.trim();
+    let first = match literal(text.as_bytes(), ty) {
+        Ok(v) => return Ok(v),
+        Err(e) => e,
+    };
+    let quoted = match ty {
+        LitType::Enum(t) if bit_like(t) && text.len() == 1 => Some(format!("'{text}'")),
+        LitType::Array { elem, .. } if !text.is_empty() && !text.contains('"') => match &**elem {
+            LitType::Enum(t) if bit_like(t) => Some(format!("\"{text}\"")),
+            _ => None,
+        },
+        _ => None,
+    };
+    if let Some(v) = quoted.and_then(|q| literal(q.as_bytes(), ty).ok()) {
+        return Ok(v);
+    }
+    Err(takes(text, ty, &first.to_string()))
+}
+
+/// What a value of `ty` looks like, for the message about `text`; `why` is the parser's reason,
+/// worth reading inside an aggregate.
+fn takes(text: &str, ty: &LitType, why: &str) -> String {
+    let lit = |l: &EnumLit| match l {
+        EnumLit::Char(c) => format!("'{}'", *c as char),
+        EnumLit::Ident(n) => String::from_utf8_lossy(n).into_owned(),
+    };
+    match ty {
+        LitType::Enum(t) => {
+            let all: Vec<String> = t.lits.iter().map(lit).collect();
+            let more = if all.len() > 16 { ", ..." } else { "" };
+            let shown = all.iter().take(16).cloned().collect::<Vec<_>>().join(", ");
+            let help = crate::console::similar(text, "value", &all)
+                .map_or(String::new(), |h| format!(": {h}"));
+            format!("expected one of {shown}{more}{help}")
+        }
+        LitType::Int(b) if *b == StdBounds::I64 => "expected an integer".to_string(),
+        LitType::Int(b) => format!("expected an integer from {} to {}", b.low, b.high),
+        LitType::Real(_) => "expected a real number".to_string(),
+        LitType::Phys(p, _) => format!(
+            "expected a number and a unit, such as 10 {}",
+            String::from_utf8_lossy(&p.primary().name)
+        ),
+        LitType::Array { len, elem, .. } => match &**elem {
+            LitType::Enum(t) if bit_like(t) => {
+                let ex = "01".repeat((*len).min(8) as usize / 2 + 1);
+                let ex = &ex[..(*len).min(8) as usize];
+                format!(
+                    "expected {len} elements, such as {ex} or \"{ex}\", x\"..\" or an aggregate"
+                )
+            }
+            LitType::Enum(_) => {
+                format!("expected {len} characters in double quotes, or an aggregate: {why}")
+            }
+            _ => format!("expected an aggregate of {len} elements: {why}"),
+        },
+        LitType::Record(fs) => {
+            let f = fs.first().map_or("field", |(n, _)| n.as_str());
+            format!("expected a record aggregate such as ({f} => ...): {why}")
+        }
+        LitType::Handle { .. } => "expected `null`".to_string(),
     }
 }
 

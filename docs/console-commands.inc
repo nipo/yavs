@@ -45,11 +45,11 @@ Change values
    :widths: 40 60
 
    * - ``force NAME VALUE [-out]``
-     - Hold a signal at a value, from the next cycle.
+     - Hold a signal at a value, from the next cycle; with `-out` the driving value, not what readers see.
    * - ``deposit NAME VALUE``
      - Give a signal a value once, in the next cycle.
    * - ``release NAME [-out]``
-     - End a force.
+     - End a force, or with `-out` only one on the driving value.
 
 Waves
 ~~~~~
@@ -99,7 +99,7 @@ Session and scripts
    * - ``help | help COMMAND``
      - This list, or one command.
    * - ``quit [STATUS]``
-     - Leave; the exit status is STATUS, else that of the ended run, else 0.
+     - Leave; the exit status is STATUS, else that of the ended run, else 0 (also `exit`).
 
 VUnit commands
 ~~~~~~~~~~~~~~

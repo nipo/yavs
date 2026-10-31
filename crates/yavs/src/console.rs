@@ -41,7 +41,14 @@ impl rustyline::completion::Completer for Tab {
             .recv_timeout(std::time::Duration::from_secs(2))
             .unwrap_or_default();
         let start = found.first().map_or(pos, |(_, n)| pos.saturating_sub(*n));
-        Ok((start, found.into_iter().map(|(l, _)| l).collect()))
+        let mut labels: Vec<String> = found.into_iter().map(|(l, _)| l).collect();
+        // One match ends the word, as in a shell, unless more of a path or `FILE:LINE` follows.
+        if let [only] = &mut labels[..]
+            && !only.ends_with(['/', ':', '.'])
+        {
+            only.push(' ');
+        }
+        Ok((start, labels))
     }
 }
 
@@ -188,9 +195,10 @@ fn driver(
     ev: &Receiver<Ev>,
     script: &[String],
     interactive: bool,
+    bold: bool,
     mut editor: Option<Box<Editor>>,
 ) {
-    c.request("initialize", json!({}));
+    c.request("initialize", json!({"supportsANSIStyling": bold}));
     // A pipe gets lines a person can read too.
     let columns = editor
         .as_mut()
@@ -240,6 +248,7 @@ pub(crate) fn serve(
     loaded: yavs_dap::Loaded,
     script: &[String],
     interactive: bool,
+    color: bool,
     options: yavs_dap::Options,
     attach: impl yavs_dap::Attach,
     report: yavs_dap::Report,
@@ -292,7 +301,9 @@ pub(crate) fn serve(
         std::thread::spawn(move || printer(cli_r, &c, &tx, &tab_tx))
     };
     let script = script.to_vec();
-    std::thread::spawn(move || driver(&c, &rx, &script, interactive, editor));
+    // Only on a terminal, whatever `--color` says: piped output stays plain.
+    let bold = color && std::io::stdout().is_terminal();
+    std::thread::spawn(move || driver(&c, &rx, &script, interactive, bold, editor));
     let code = yavs_dap::serve_on(
         loaded,
         Box::new(srv_r),

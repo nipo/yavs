@@ -4,7 +4,7 @@ end entity;
 
 architecture a of tb is
   signal cnt : integer := 0;
-  signal v : bit_vector(3 downto 0) := "0101";
+  signal v : bit_vector(3 downto 0) := "0101"; type pairs_t is array (0 to 1) of bit_vector(1 downto 0); signal pairs : pairs_t := ("01", "10");
 
   function twice(x : integer) return integer is
     variable r : integer;

@@ -77,7 +77,8 @@ A name in a command is a signal, a variable, a part of one, or a path:
   process stopped) a simple name is looked up at the top level.
 * A path names a signal anywhere. ``tb.u_reg.q``, ``:tb:u_reg:q`` and ``TB.U_REG.Q`` are the same
   signal; the dotted form is what ``find`` and the messages print. Case does not matter, and a
-  leading ``:`` starts a path of colons.
+  leading ``:`` starts a path of colons. A path may also start from where the name is looked up:
+  ``u_reg.q`` from a process of ``tb``, or between cycles.
 * A variable of a process has the path ``PROCESS.NAME``: ``tb.counter.total``. ``find variables``
   lists them. At a stop in that process ``total`` is enough.
 * A part of an object follows the name: a field (``rec.x``), an element (``v(3)``), a slice
@@ -96,6 +97,10 @@ record, subcommands, commands.
     "0000"
     yavs> examine :tb:cnt
     "0000"
+    yavs> examine u_reg.q
+    'U'
+    yavs> examine u_reg.qq
+    error: no variable or signal `u_reg.qq` here: a signal with a similar name exists: `tb.u_reg.q`
     yavs> examine TB.Cnt
     "0000"
     yavs> examine cnt(3 downto 2)
@@ -103,13 +108,13 @@ record, subcommands, commands.
     yavs> examine ctn
     error: no variable or signal `ctn` here: a signal or variable with a similar name exists: `cnt`
     yavs> examine tb.u_reg.qq
-    error: no variable or signal `tb.u_reg.qq` here
+    error: no variable or signal `tb.u_reg.qq` here: a signal with a similar name exists: `tb.u_reg.q`
 
 Values
 ~~~~~~
 
 ``force``, ``deposit`` and the value of ``break SIGNAL = VALUE`` are VHDL literals of the type of
-the target, written as in VHDL source:
+the target, written as in VHDL source, or with the quotes left out for a bit-like target (below):
 
 * An integer: ``42``, ``-3``, ``16#FF#``, ``1_000``. It must be in the range of the subtype.
 * A real: ``0.5``, ``1.0e-3``, ``2``.
@@ -123,6 +128,11 @@ the target, written as in VHDL source:
   ok => true, tag => '1')``), with an index range (``(7 downto 4 => '1', others => '0')``) and
   with ``others``.
 * ``null`` for an access value.
+
+A target of a bit-like type (``bit``, ``std_ulogic``, ``std_logic``, an enumeration of character literals with ``'0'`` and
+``'1'``) or a vector of one needs no quotes: ``1`` is ``'1'``, ``0101`` is ``"0101"``. What is already a literal of the
+target keeps its meaning, so an integer's ``1`` stays 1. Nothing is guessed elsewhere: ``5`` is not a value of an
+``unsigned``, and a ``string`` keeps its quotes.
 
 The value of a part is the type of the part: ``force bus8(1 downto 0) "11"``. ``examine`` prints
 values in the same forms, as ``"0101"``, ``'1'``, ``idle``, ``(x => 7, ok => TRUE, tag =>
@@ -189,11 +199,16 @@ Keys at the prompt
 The prompt of a terminal has line editing and history. The keys:
 
 ``Tab``
-    Completes the word at the cursor: command names and a test runner's commands at the start
-    of a command, then the subcommands of a command (``wave add``, ``break delete``), the
-    signals and variables in scope, their fields after a ``.``, and source files after
-    ``break``. A second Tab lists what is left. An editor's Debug Console asks the same
-    question.
+    Works as in a shell: one match completes and ends the word, several complete what they have
+    in common, and a second Tab lists them and gives the line back. It offers what fits at the
+    cursor. The first word is a command or a test runner's command, never a signal (a bare name
+    is still examined when typed in full). After a command, what that command takes: signals and
+    variables after ``examine``, ``describe``, ``drivers``, ``force`` and the like, down a dotted
+    path and through fields after a ``.``; files after ``source`` and ``wave save``; source files
+    and signals after ``break``; subcommands after ``wave``, ``find`` and ``step``; command names
+    after ``help``; nothing for a time after ``run`` or a value after ``force``. The Debug Console
+    of an editor uses the same table; there Tab takes what the list has in common, and with no
+    list open opens it.
 
 ``Ctrl-C``
     While a command runs, pauses the simulation at the next point where it can stop; the prompt
@@ -309,7 +324,7 @@ or earlier at a breakpoint or the end.
 
 ``run until CONDITION`` runs until a change of a signal named in ``CONDITION`` (`Conditions`_)
 makes it true, and stops there, saying which signal changed (``data breakpoint at 15 ns, delta
-1: :tb:cnt = "0010"``). Breakpoints still stop it. The condition is parsed at once; a type
+1: tb.cnt = "0010"``). Breakpoints still stop it. The condition is parsed at once; a type
 error shows at the first change as a stop with the reason (``exception at 15 ns, delta 1: ...``). A condition that names no
 signal, such as one on a variable alone, is refused: it would have nothing to watch.
 
@@ -320,7 +335,7 @@ signal, such as one on a variable alone, is refused: it would have nothing to wa
     yavs> run 12 ns
     step at 12 ns, delta 0
     yavs> run until cnt = "0010"
-    data breakpoint at 15 ns, delta 1: :tb:cnt = "0010"
+    data breakpoint at 15 ns, delta 1: tb.cnt = "0010"
     yavs> run
     ** Error: 25000000fs+1: q is not high
         Process :tb:check
@@ -384,7 +399,7 @@ To the next statement, over calls.
     step at 0 fs, delta 0, /work/types.vhd:53
     yavs> where
     time 0 fs, delta 0
-    :types_tb:build, /work/types.vhd:53
+    types_tb.build, /work/types.vhd:53
 
 .. _console-stop:
 
@@ -513,21 +528,21 @@ the closest names (``break`` cannot watch a variable).
 .. code-block:: text
 
     yavs> break cnt
-    breakpoint 1: :tb:cnt
+    breakpoint 1: tb.cnt
     yavs> break cnt = "0011"
-    breakpoint 2: :tb:cnt
+    breakpoint 2: tb.cnt
     yavs> break q = '1' if cnt > 1
-    breakpoint 3: :tb:q
+    breakpoint 3: tb.q
     yavs> break list
-    1 :tb:cnt
-    2 :tb:cnt = "0011"
-    3 :tb:q = '1' if cnt > 1
+    1 tb.cnt
+    2 tb.cnt = "0011"
+    3 tb.q = '1' if cnt > 1
     yavs> run
-    data breakpoint at 5 ns, delta 1: :tb:cnt = "0001"
+    data breakpoint at 5 ns, delta 1: tb.cnt = "0001"
     yavs> run
-    data breakpoint at 15 ns, delta 1: :tb:cnt = "0010"
+    data breakpoint at 15 ns, delta 1: tb.cnt = "0010"
     yavs> break cnt = 7
-    error: invalid bit_vector value "7" at "7": expected a string, a bit string such as x"F0" or an aggregate
+    error: `7` is not a value of `tb.cnt`, type UNSIGNED: expected 4 elements, such as 0101 or "0101", x".." or an aggregate
     yavs> break nosuch
     error: no signal `nosuch` here
 
@@ -560,7 +575,7 @@ delete assert`` removes it.
     assertion of severity error at 25 ns, delta 1, /work/tb.vhd:53: q is not high
     yavs> where
     time 25 ns, delta 1
-    :tb:check, /work/tb.vhd:53
+    tb.check, /work/tb.vhd:53
     yavs> break assert bogus
     error: `break assert bogus`: expected `note` or `warning` or `error` or `failure`
     yavs> break list
@@ -707,7 +722,7 @@ Inside a method of a protected type, the variables of the object are in scope:
     3
     yavs> where
     time 0 fs, delta 0
-    :types_tb:build, /work/types.vhd:30
+    types_tb.build, /work/types.vhd:30
 
 .. _console-examine-at:
 
@@ -781,7 +796,13 @@ path (``tb.counter.total``) or stop in the process.
       declared    tb.vhd:31
       value       "0000"
     yavs> describe u_reg.clk
-    error: no signal `u_reg.clk` here
+    tb.u_reg.clk
+      kind        port, mode in
+      type        STD_LOGIC
+      bounds      'U' to '-' (9 literals)
+      resolution  resolved
+      declared    tb.vhd:7
+      value       '0'
     yavs> describe tb.counter.total
     tb.counter.total
       kind      variable of process tb.counter
@@ -826,7 +847,7 @@ says so instead of a process; before the first cycle, ``time 0 fs, delta 0``.
     breakpoint at 15 ns, delta 0, /work/tb.vhd:43
     yavs> where
     time 15 ns, delta 0
-    :tb:counter, /work/tb.vhd:43
+    tb.counter, /work/tb.vhd:43
 
 Change values
 ~~~~~~~~~~~~~
@@ -834,7 +855,7 @@ Change values
 These change a signal; the change takes effect in the next cycle, not at once, so ``examine`` still
 shows the old value until the simulation has run on (``step delta`` is enough). ``NAME`` is a signal or a part of one (`Names`_): a field, an element or a
 slice, and ``VALUE`` is a literal of its type (`Values`_). The reply is the full path with the
-value as it was understood: ``:tb:cnt = "0101"``. Errors name the signal or the literal: no such
+value as it was understood: ``tb.cnt = "0101"``. Errors name the signal or the literal: no such
 signal (with the closest names), a value of the wrong kind, a string of the wrong length, an
 integer out of its range, an index out of range, a missing signal or value.
 
@@ -849,7 +870,7 @@ force
 
     force NAME VALUE [-out]
 
-Hold a signal at a value, from the next cycle.
+Hold a signal at a value, from the next cycle; with `-out` the driving value, not what readers see.
 
 .. console-end
 
@@ -865,7 +886,7 @@ shows both (``force: ...``, ``force out: ...``).
     yavs> run 22 ns
     step at 22 ns, delta 0
     yavs> force enable '1'
-    :tb:enable = '1'
+    tb.enable = '1'
     yavs> run 20 ns
     step at 42 ns, delta 0
     yavs> examine q
@@ -876,15 +897,17 @@ shows both (``force: ...``, ``force out: ...``).
       resolved by resolved
       force: '1'
     yavs> force enable 1
-    error: invalid enumeration value "1" at "1": expected an identifier or character literal
+    tb.enable = '1'
+    yavs> force cnt 0101
+    tb.cnt = "0101"
     yavs> force enable
     error: `force` needs a value
     yavs> force nosuch '1'
     error: no signal `nosuch` here
     yavs> force cnt "10"
-    error: string value "10" has 2 elements, expected 4
+    error: `"10"` is not a value of `tb.cnt`, type UNSIGNED: expected 4 elements, such as 0101 or "0101", x".." or an aggregate
     yavs> force q 'Z' -out
-    :tb:q = 'Z'
+    tb.q = 'Z'
     yavs> run 1 ns
     step at 43 ns, delta 0
     yavs> drivers q
@@ -919,9 +942,9 @@ next assignment. ``-out`` is accepted and has no meaning for a deposit.
     yavs> run 12 ns
     step at 12 ns, delta 0
     yavs> deposit cnt "0101"
-    :tb:cnt = "0101"
+    tb.cnt = "0101"
     yavs> deposit cnt(1 downto 0) "11"
-    :tb:cnt(1 downto 0) = "11"
+    tb.cnt(1 downto 0) = "11"
     yavs> deposit cnt(9) '0'
     error: index 9 is out of range
     yavs> step delta
@@ -944,13 +967,13 @@ release
 
     release NAME [-out]
 
-End a force.
+End a force, or with `-out` only one on the driving value.
 
 .. console-end
 
 ``release`` ends the force on the signal, and the signal takes the value its drivers give it, or
 keeps its value if it has none. With ``-out`` it ends the force on the driving value only; without,
-the one on the readers' value. A release of a signal that is not forced is not an error. The reply
+either force. A release of a signal that is not forced is not an error. The reply
 is the path.
 
 Values of every kind, on ``types.vhd``:
@@ -960,39 +983,39 @@ Values of every kind, on ``types.vhd``:
 .. code-block:: text
 
     yavs> force state done
-    :types_tb:state = done
+    types_tb.state = done
     yavs> force count 16#2A#
-    :types_tb:count = 42
+    types_tb.count = 42
     yavs> force count 300
-    error: integer value "300" is outside the range 0 to 255
+    error: `300` is not a value of `types_tb.count`, type INTEGER: expected an integer from 0 to 255
     yavs> force ratio 1.5e-3
-    :types_tb:ratio = 0.0015
+    types_tb.ratio = 0.0015
     yavs> force delay 5 us
-    :types_tb:delay = 5000000000 fs
+    types_tb.delay = 5000000000 fs
     yavs> force delay 5
-    error: invalid unit value "5" at "": expected an identifier or character literal
+    error: `5` is not a value of `types_tb.delay`, type TIME: expected a number and a unit, such as 10 fs
     yavs> force pair (x => 3, ok => true, tag => 'Z')
-    :types_tb:pair = (x => 3, ok => TRUE, tag => 'Z')
+    types_tb.pair = (x => 3, ok => TRUE, tag => 'Z')
     yavs> force pair (3, true, 'Z')
-    :types_tb:pair = (x => 3, ok => TRUE, tag => 'Z')
+    types_tb.pair = (x => 3, ok => TRUE, tag => 'Z')
     yavs> force pair.ok false
-    :types_tb:pair.ok = FALSE
+    types_tb.pair.ok = FALSE
     yavs> force words (1 => x"FF", others => x"00")
-    :types_tb:words = ("00000000", "11111111", "00000000", "00000000")
+    types_tb.words = ("00000000", "11111111", "00000000", "00000000")
     yavs> force words(2) x"AA"
-    :types_tb:words(2) = "10101010"
+    types_tb.words(2) = "10101010"
     yavs> force bus8 b"1010_1010"
-    :types_tb:bus8 = "10101010"
+    types_tb.bus8 = "10101010"
     yavs> force bus8 "0101"
-    error: string value "0101" has 4 elements, expected 8
+    error: `"0101"` is not a value of `types_tb.bus8`, type STD_LOGIC_VECTOR: expected 8 elements, such as 01010101 or "01010101", x".." or an aggregate
     yavs> force bus8 (7 downto 4 => '1', others => '0')
-    :types_tb:bus8 = "11110000"
+    types_tb.bus8 = "11110000"
     yavs> force bus8(9) '1'
     error: index 9 is out of range
     yavs> force bus8(7 downto 4) "1111"
-    :types_tb:bus8(7 downto 4) = "1111"
+    types_tb.bus8(7 downto 4) = "1111"
     yavs> release bus8
-    :types_tb:bus8
+    types_tb.bus8
     yavs> step delta
     step at 0 fs, delta 1
     yavs> examine pair
@@ -1574,7 +1597,8 @@ This list, or one command.
 .. console-end
 
 ``help`` alone prints every command with its synopsis and meaning, grouped as on this page, and the
-commands of the test runner if there is one; long lines are wrapped to the width of the terminal.
+commands of the test runner if there is one: the meanings in one column, long lines wrapped to the width of the terminal,
+and command names in bold on a colour terminal and in an editor's Debug Console (never in piped output).
 ``help COMMAND`` prints the synopsis and meaning of one command (``print`` and ``reset`` give those
 of ``examine`` and ``restart``), and the help text of a test runner's command. A word that is no
 command is an error with the closest command.
@@ -1612,50 +1636,67 @@ command is an error with the closest command.
     error: no command `brek`: a command with a similar name exists: `break`
     yavs> help
     Run and step:
-    run | run TIME | run until CONDITION: to the end or a breakpoint, for TIME, or
-        until a change of a signal in the condition makes it true
-    step | step delta | step timestep: to the next statement, entering calls; or to
-        the end of the delta or time step
-    next: to the next statement, over calls
-    stop: pause a running simulation (Ctrl-C on a terminal)
+      run | run TIME | run until CONDITION
+                                    to the end or a breakpoint, for TIME, or until a
+                                    change of a signal in the condition makes it
+                                    true
+      step | step delta | step timestep
+                                    to the next statement, entering calls; or to the
+                                    end of the delta or time step
+      next                          to the next statement, over calls
+      stop                          pause a running simulation (Ctrl-C on a
+                                    terminal)
     Breakpoints:
-    break [FILE:]LINE [if CONDITION] | break SIGNAL [= VALUE] [if CONDITION] | break
-        assert [note|warning|error|failure] | break list | break delete N | break
-        delete assert | break delete all: stop at a line, at a change of a signal,
-        or at a report of this severity and worse; list or delete them
+      break [FILE:]LINE [if CONDITION] | break SIGNAL [= VALUE] [if CONDITION] |
+        break assert [note|warning|error|failure] | break list | break delete N |
+        break delete assert | break delete all
+                                    stop at a line, at a change of a signal, or at a
+                                    report of this severity and worse; list or
+                                    delete them
     Inspect:
-    examine NAME | examine NAME @ TIME: the value of a local or a signal, or a
-        field, element or slice of one; with a time, from the wave file (also
-        `print`)
-    describe NAME: type, bounds, resolution function, mode and declaration of a
-        signal or variable
-    where: time, delta, process and source line
+      examine NAME | examine NAME @ TIME
+                                    the value of a local or a signal, or a field,
+                                    element or slice of one; with a time, from the
+                                    wave file (also `print`)
+      describe NAME                 type, bounds, resolution function, mode and
+                                    declaration of a signal or variable
+      where                         time, delta, process and source line
     Change values:
-    force NAME VALUE [-out]: hold a signal at a value, from the next cycle
-    deposit NAME VALUE: give a signal a value once, in the next cycle
-    release NAME [-out]: end a force
+      force NAME VALUE [-out]       hold a signal at a value, from the next cycle;
+                                    with `-out` the driving value, not what readers
+                                    see
+      deposit NAME VALUE            give a signal a value once, in the next cycle
+      release NAME [-out]           end a force, or with `-out` only one on the
+                                    driving value
     Waves:
-    wave add NAME|PATTERN... | wave cursor [TIME] | wave save [FILE] | wave load
-        [FILE]: with `--surfer`, show signals or scopes in the viewer; move its
-        cursor (default: now); save or load the signal list
+      wave add NAME|PATTERN... | wave cursor [TIME] | wave save [FILE] | wave load
+        [FILE]
+                                    with `--surfer`, show signals or scopes in the
+                                    viewer; move its cursor (default: now); save or
+                                    load the signal list
     Find:
-    find signals PATTERN | find variables PATTERN: search the hierarchy; `*` within
-        a level, `**` across, a pattern without a dot matches the last name
+      find signals PATTERN | find variables PATTERN
+                                    search the hierarchy; `*` within a level, `**`
+                                    across, a pattern without a dot matches the last
+                                    name
     Diagnose:
-    drivers NAME: what drives a signal: each driver's value and source line, the
-        resolved value, any force
-    waits: where each process stands and what it waits for
-    trace x NAME: follow an unknown value back through drivers and the signals they
-        read
-    activity: the processes that ran most often and the signals that changed most
-        often, so far
-    asserts: assertion failures and reports so far, by severity and source line
+      drivers NAME                  what drives a signal: each driver's value and
+                                    source line, the resolved value, any force
+      waits                         where each process stands and what it waits for
+      trace x NAME                  follow an unknown value back through drivers and
+                                    the signals they read
+      activity                      the processes that ran most often and the
+                                    signals that changed most often, so far
+      asserts                       assertion failures and reports so far, by
+                                    severity and source line
     Session and scripts:
-    restart: back to time 0 with the same design and breakpoints (also `reset`)
-    source FILE: run the commands of a file; the first failure ends it
-    help | help COMMAND: this list, or one command
-    quit [STATUS]: leave; the exit status is STATUS, else that of the ended run,
-        else 0
+      restart                       back to time 0 with the same design and
+                                    breakpoints (also `reset`)
+      source FILE                   run the commands of a file; the first failure
+                                    ends it
+      help | help COMMAND           this list, or one command
+      quit [STATUS]                 leave; the exit status is STATUS, else that of
+                                    the ended run, else 0 (also `exit`)
 
 .. _console-quit:
 
@@ -1668,13 +1709,13 @@ quit
 
     quit [STATUS]
 
-Leave; the exit status is STATUS, else that of the ended run, else 0.
+Leave; the exit status is STATUS, else that of the ended run, else 0. Also written ``exit``.
 
 .. console-end
 
 Ends the session. ``STATUS`` is the exit status of ``yavs``, 0 to 255; without it the
 status is that of the simulation if it has ended (1 after a reported error, as in a plain run),
-else 0. A value outside 0..255 is an error and the session goes on. Ctrl-D and the end of
+else 0. A value outside 0..255 is an error and the session goes on. ``exit`` is the same command. Ctrl-D at an empty prompt and the end of
 piped input are ``quit``. With ``--do`` and no ``--interactive`` the script ends with an implicit
 ``quit``.
 

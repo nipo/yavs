@@ -156,7 +156,8 @@ and a notification says why: a parameter exists only during a call.
 9. Watch a signal by its path
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-In the Watch view add ``:tb_fifo:dut:count``. Its value is 1.
+In the Watch view add ``tb_fifo.dut.count``. Its value is 1. A name that does not exist shows an error with the nearest
+name instead; remove that entry from the view.
 
 10. Stop only for the case you want
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -179,7 +180,7 @@ after the last word was read, and ``empty`` is ``'1'``.
 12. Force a signal and watch the test fail
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Right-click ``empty`` and pick "Force a signal...". Choose ``in`` and enter ``'0'``. Press F5. The value breakpoint can
+Right-click ``empty`` and pick "Force a signal...". Enter ``0``. Press F5. The value breakpoint can
 stop first, now at ``empty`` = ``'0'``; press F5 again. The test fails, and the Debug Console shows:
 
 .. code-block:: text

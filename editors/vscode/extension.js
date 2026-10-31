@@ -130,10 +130,10 @@ async function breakOnValue() {
   const s = vscode.debug.activeDebugSession;
   if (!s || s.type !== 'yavs') return;
   const signal = await vscode.window.showInputBox({
-    prompt: 'Signal (a name visible from the selected frame, or a path such as :tb:u1:s)',
+    prompt: 'Signal (a name visible from the selected frame, or a dotted path such as tb.u1.s)',
   });
   if (!signal) return;
-  const value = await vscode.window.showInputBox({ prompt: `Stop when ${signal} becomes`, placeHolder: "'1'" });
+  const value = await vscode.window.showInputBox({ prompt: `Stop when ${signal} becomes`, placeHolder: '1' });
   if (!value) return;
   const bps = [...(valueBps.get(s.id) || []), { signal, value }];
   await sendValueBps(s, bps);
@@ -188,28 +188,23 @@ async function addToWave(ctx) {
   }
 }
 
-/** Force (asking for the mode), deposit or release a signal: the variable of the Variables
- * view's context menu, the `signal` (and `value`, `mode`) of a programmatic call, or asked
- * for. */
+/** Force, deposit or release a signal: the variable of the Variables view's context menu, the
+ * `signal` (and `value`, `mode`) of a programmatic call, or asked for. The server takes the mode
+ * as optional: a force holds what readers see, a release ends either. */
 function signalOp(command, withValue) {
   return async (ctx) => {
     const s = vscode.debug.activeDebugSession;
     if (!s || s.type !== 'yavs') return;
-    const signal = ctx?.signal || ctx?.variable?.name || (await vscode.window.showInputBox({
-      prompt: 'Signal (a name visible from the selected frame, or a path such as :tb:u1:s)',
+    const signal = ctx?.signal || ctx?.variable?.evaluateName || ctx?.variable?.name || (await vscode.window.showInputBox({
+      prompt: 'Signal (a name visible from the selected frame, or a dotted path such as tb.u1.s)',
     }));
     if (!signal) return;
     const args = { signal, frameId: vscode.debug.activeStackItem?.frameId };
-    if (command !== 'yavs/deposit') {
-      args.mode = ctx?.mode || (await vscode.window.showQuickPick(['in', 'out'], {
-        placeHolder: 'in: the effective value (what readers see), out: the driving value',
-      }));
-      if (!args.mode) return;
-    }
+    if (ctx?.mode) args.mode = ctx.mode;
     if (withValue) {
       args.value = ctx?.value || (await vscode.window.showInputBox({
         prompt: `Value for ${signal}`,
-        placeHolder: `'1', 42, x"FF", (others => '0'), 10 ns`,
+        placeHolder: `1, 0101, 42, x"FF", (others => '0'), 10 ns`,
       }));
       if (!args.value) return;
     }

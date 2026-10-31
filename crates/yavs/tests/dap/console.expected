@@ -11,7 +11,7 @@
 > evaluate {"context":"repl","expression":"cnt"}
 < {"body":{"evaluateName":"tb.cnt","result":"0","type":"INTEGER","variablesReference":0},"command":"evaluate","request_seq":5,"success":true,"type":"response"}
 > evaluate {"context":"repl","expression":"where"}
-< {"body":{"result":"time 0 fs, delta 0\n:tb:p, $TMP/tb.vhd:16","variablesReference":0},"command":"evaluate","request_seq":6,"success":true,"type":"response"}
+< {"body":{"result":"time 0 fs, delta 0\ntb.p, $TMP/tb.vhd:16","variablesReference":0},"command":"evaluate","request_seq":6,"success":true,"type":"response"}
 > evaluate {"context":"repl","expression":"break tb.vhd:24; break list"}
 < {"body":{"result":"breakpoint 1: $TMP/tb.vhd:24\n1 $TMP/tb.vhd:24","variablesReference":0},"command":"evaluate","request_seq":7,"success":true,"type":"response"}
 > evaluate {"context":"repl","expression":"run 10 ns; examine cnt"}

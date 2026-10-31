@@ -31,10 +31,12 @@ async function run() {
   ]);
 
   const stops = [];
+  const outputs = [];
   let onStop;
   vscode.debug.registerDebugAdapterTrackerFactory('yavs', {
     createDebugAdapterTracker: () => ({
       onDidSendMessage: (m) => {
+        if (m.type === 'event' && m.event === 'output') outputs.push(m.body.output);
         if (m.type === 'event' && m.event === 'stopped') {
           stops.push(m.body);
           if (onStop) onStop(m.body);
@@ -61,11 +63,21 @@ async function run() {
   // The Variables view's scopes, and a composite expanded the way VS Code pages it.
   const scopeNames = (await session.customRequest('scopes', { frameId: top.id })).scopes.map((x) => x.name);
   assert.deepEqual(scopeNames, ['Locals', 'Signals', 'Generics', 'Hierarchy']);
-  const vv = await session.customRequest('evaluate', { expression: 'v', frameId: top.id });
+  const vv = await session.customRequest('evaluate', { expression: 'pairs', frameId: top.id });
   const el = await session.customRequest('variables', {
     variablesReference: vv.variablesReference, filter: 'indexed', start: 0, count: vv.indexedVariables,
   });
-  assert.deepEqual(el.variables.map((x) => x.value), ["'0'", "'1'", "'0'", "'1'"]);
+  assert.deepEqual(el.variables.map((x) => x.value), ['"01"', '"10"']);
+  const one = await session.customRequest('evaluate', { expression: 'v', frameId: top.id });
+  assert.deepEqual([one.result, one.variablesReference], ['"0101"', 0]);
+  // A Watch of nothing, and `help`, which VS Code shows bold from ANSI as it asks for them.
+  await assert.rejects(
+    session.customRequest('evaluate', { expression: 'tb.cn', frameId: top.id, context: 'watch' }),
+    /`tb\.cnt`/,
+  );
+  await session.customRequest('evaluate', { expression: 'help', context: 'repl' });
+  await new Promise((r) => setTimeout(r, 500));
+  assert.ok(outputs.some((o) => /\x1b\[1mexamine\x1b\[0m NAME/.test(o)), outputs.join(''));
 
   // "Set Value" on a local, then the extension's force command (as its context menu entry
   // on a signal calls it, with the answers given).
@@ -74,7 +86,7 @@ async function run() {
     variablesReference: sc.scopes[0].variablesReference, name: 'i', value: '5',
   });
   assert.equal(set.value, '5');
-  await vscode.commands.executeCommand('yavs.force', { signal: 'v', mode: 'in', value: '"1111"' });
+  await vscode.commands.executeCommand('yavs.force', { signal: 'v', value: '1111' });
 
   // The command palette's "yavs: Step to the next delta" ends the cycle stopped in.
   const stepped = waitFor('stopped after the delta step', 60000, (r) => (onStop = r));
@@ -88,7 +100,7 @@ async function run() {
   await step2;
   const ev = await session.customRequest('evaluate', { expression: ':tb:v' });
   assert.equal(ev.result, '"1111"');
-  await vscode.commands.executeCommand('yavs.release', { signal: ':tb:v', mode: 'in' });
+  await vscode.commands.executeCommand('yavs.release', { signal: ':tb:v' });
 
   // A signal value breakpoint (what "yavs: Break when a signal equals..." sends), without the
   // line breakpoint, which the process would hit first.
@@ -101,7 +113,7 @@ async function run() {
   await session.customRequest('continue', { threadId: 1 });
   const h = await hit;
   assert.equal(h.reason, 'data breakpoint');
-  assert.equal(h.text, ':tb:cnt = 6');
+  assert.equal(h.text, 'tb.cnt = 6');
   await session.customRequest('yavs/setSignalBreakpoints', { breakpoints: [] });
 
   const ended = waitFor('end of session', 60000, (r) => vscode.debug.onDidTerminateDebugSession(r));

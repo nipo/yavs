@@ -14,17 +14,25 @@ elaborates the design, stops at time 0 before any process has run, and waits at 
     yavs> examine cnt
     4
     yavs> force cnt 5
-    :tb:cnt = 5
+    tb.cnt = 5
     yavs> run
     breakpoint at 30 ns, delta 0, /home/me/tb.vhd:24
     yavs> restart
     yavs> quit
 
 The prompt has line editing and history. Ctrl-C pauses a running simulation and returns to the
-prompt; at the prompt it drops the line. Ctrl-D or the end of piped input is ``quit``. Tab completes:
-command names and their subcommands (``wave add``, ``break delete``), the signals and variables in
-scope, their fields (``rec.`` then Tab), source files after ``break``, and a test runner's commands.
-A second Tab lists what is left. The Debug Console of an editor asks the same question.
+prompt; at the prompt it drops the line. ``exit`` is ``quit``, and so is Ctrl-D at an empty prompt or the end of piped
+input.
+
+Tab works as in a shell: one match completes, several complete what they have in common, and a second Tab lists them and
+gives the line back. It offers what fits at the cursor: the first word is a command (or a test runner's command), never a
+signal; after a command, what that command takes: signals and variables after ``examine``, ``describe``, ``drivers``,
+``force`` and the like (``tb.`` then Tab goes down a dotted path, ``rec.`` then Tab through fields), files after ``source``
+and ``wave save``, source files and signals after ``break``, subcommands after ``wave``, ``find`` and ``step``, and nothing
+for a time after ``run`` or a value after ``force``. A bare name typed as the first word is still examined.
+
+``help`` lists the commands in columns, their names in bold on a colour terminal (not with ``NO_COLOR`` or
+``--color=never``, and never in piped output).
 
 .. contents:: On this page
    :local:
@@ -50,8 +58,10 @@ More on some of them:
   do (``examine to_integer(cnt) + 1``). Inside a method of a protected type the variables of the
   object are in scope. Between cycles, simple names are looked up at the top level; inside a
   process, where that process sees them. A bare name also works.
-* ``force``, ``deposit`` and ``release`` take effect from the next cycle. Values are VHDL literals.
-  ``-out`` at the end of ``force`` or ``release`` acts on the driving value.
+* ``force``, ``deposit`` and ``release`` take effect from the next cycle. Values are VHDL literals, and a bit-like target
+  needs no quotes: ``force clk 1``, ``force dout 0101``, the same in ``break rst = 1``. An integer target's ``1`` stays 1.
+  ``force`` holds what readers of the signal see; ``-out`` at the end holds the driving value instead. ``release`` ends
+  either force, ``release NAME -out`` only one on the driving value.
 * ``restart`` keeps the breakpoints; nothing is compiled, and a wave file is written again from the
   start. Runs with ``--vhpi`` or ``--load`` refuse it: start the run again.
 * ``find`` matches a pattern without a dot against the last name anywhere (``find signals *clk*``),
@@ -94,7 +104,7 @@ Stop at a line and inspect
     breakpoint at 5 ns, delta 0, /work/tb.vhd:43
     yavs> where
     time 5 ns, delta 0
-    :tb:counter, /work/tb.vhd:43
+    tb.counter, /work/tb.vhd:43
     yavs> examine cnt
     "0000"
     yavs> examine total
@@ -116,11 +126,11 @@ Break on a value
 .. code-block:: text
 
     yavs> break cnt = "0011"
-    breakpoint 1: :tb:cnt
+    breakpoint 1: tb.cnt
     yavs> run
     ** Error: 25000000fs+1: q is not high
         Process :tb:check
-    data breakpoint at 25 ns, delta 1: :tb:cnt = "0011"
+    data breakpoint at 25 ns, delta 1: tb.cnt = "0011"
     yavs> examine cnt
     "0011"
 
@@ -179,7 +189,7 @@ Stop on a failing assertion
     assertion of severity error at 25 ns, delta 1, /work/tb.vhd:53: q is not high
     yavs> where
     time 25 ns, delta 1
-    :tb:check, /work/tb.vhd:53
+    tb.check, /work/tb.vhd:53
     yavs> examine q
     'U'
     yavs> asserts
@@ -240,7 +250,7 @@ Change a value and continue
     yavs> run 22 ns
     step at 22 ns, delta 0
     yavs> force enable '1'
-    :tb:enable = '1'
+    tb.enable = '1'
     yavs> run 20 ns
     step at 42 ns, delta 0
     yavs> drivers enable
@@ -251,9 +261,9 @@ Change a value and continue
     yavs> examine q
     '1'
     yavs> release enable
-    :tb:enable
+    tb.enable
     yavs> deposit cnt "0000"
-    :tb:cnt = "0000"
+    tb.cnt = "0000"
     yavs> run 1 ns
     step at 43 ns, delta 0
     yavs> examine cnt

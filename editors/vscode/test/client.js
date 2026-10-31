@@ -68,7 +68,7 @@ async function main() {
   ]);
 
   const threads = await dc.threadsRequest();
-  assert.deepEqual(threads.body.threads.map((t) => t.name), [':tb:p', ':tb:q']);
+  assert.deepEqual(threads.body.threads.map((t) => t.name), ['tb.p', 'tb.q']);
 
   // The console's tools in the Debug Console, and the list behind the quick pick.
   const drivers = await dc.evaluateRequest({ expression: 'drivers cnt', context: 'repl' });
@@ -100,17 +100,36 @@ async function main() {
       (await dc.variablesRequest({ variablesReference: scopes.body.scopes[i].variablesReference }))
         .body.variables.map((v) => [v.name, v.value]));
   assert.deepEqual(await vars(0), { i: '0', k: '1' });
-  assert.deepEqual(await vars(1), { cnt: '0', v: '"0101"' });
+  assert.deepEqual(await vars(1), { cnt: '0', v: '"0101"', pairs: '("01", "10")' });
   assert.deepEqual(await vars(2), { N: '3', NAME: '"dap"' });
   const hover = await dc.evaluateRequest({ expression: 'v', frameId: top.id, context: 'hover' });
   assert.equal(hover.body.result, '"0101"');
 
-  // Composites expand: VS Code pages an array's elements through `indexedVariables`.
-  assert.equal(hover.body.indexedVariables, 4);
+  // A vector is its one line; one bit through an expression.
+  assert.equal(hover.body.variablesReference, 0);
+  assert.equal(hover.body.indexedVariables, undefined);
+  const bit = await dc.evaluateRequest({ expression: 'v(2)', frameId: top.id, context: 'watch' });
+  assert.equal(bit.body.result, "'1'");
+
+  // Other composites expand: VS Code pages an array's elements through `indexedVariables`, and a
+  // vector in them is one line.
+  const pairs = await dc.evaluateRequest({ expression: 'tb.pairs', frameId: top.id, context: 'watch' });
+  assert.equal(pairs.body.indexedVariables, 2);
   const elems = await dc.variablesRequest({
-    variablesReference: hover.body.variablesReference, filter: 'indexed', start: 1, count: 2,
+    variablesReference: pairs.body.variablesReference, filter: 'indexed', start: 1, count: 1,
   });
-  assert.deepEqual(elems.body.variables.map((v) => [v.name, v.value]), [['2', "'1'"], ['1', "'0'"]]);
+  assert.deepEqual(elems.body.variables.map((v) => [v.name, v.value, v.variablesReference]), [['1', '"10"', 0]]);
+
+  // A Watch of what does not exist is an error with the right name, in the dotted form.
+  await assert.rejects(
+    dc.evaluateRequest({ expression: 'tb.cn', frameId: top.id, context: 'watch' }),
+    /no variable or signal `tb\.cn` here: .*`tb\.cnt`/,
+  );
+  await assert.rejects(
+    dc.evaluateRequest({ expression: ':tb:cn', frameId: top.id, context: 'watch' }),
+    /`tb\.cnt`/,
+  );
+  assert.equal((await dc.evaluateRequest({ expression: ':tb:cnt', frameId: top.id, context: 'watch' })).body.result, '0');
 
   // The hierarchy: a custom request, and a scope whose regions expand.
   const h = await dc.customRequest('yavs/hierarchy');
@@ -121,7 +140,7 @@ async function main() {
   assert.deepEqual(roots.map((v) => [v.name, v.value]), [['tb', 'instance']]);
   const inTb = (await dc.variablesRequest({ variablesReference: roots[0].variablesReference }))
     .body.variables.map((v) => v.name);
-  assert.deepEqual(inTb, ['p', 'q', 'cnt', 'v']);
+  assert.deepEqual(inTb, ['p', 'q', 'cnt', 'v', 'pairs']);
 
   // "Set Value" in the Variables view: a local is written now, a signal deposited.
   assert.equal(init.body.supportsSetVariable, true);
@@ -132,21 +151,22 @@ async function main() {
   assert.equal((await vars(0)).i, '7');
   await assert.rejects(setv(0, 'i', 'x"7"'), /integer/);
   assert.equal((await setv(1, 'v', 'x"F"')).body.value, '"1111"');
-  // The extension's "Force a signal..." on `v` (mode in), released further down.
+  // The extension's "Force a signal..." on `v`: no mode, no quotes; released further down.
   const sigs = (await dc.variablesRequest({
     variablesReference: scopes.body.scopes[1].variablesReference,
   })).body.variables;
   assert.equal(sigs[1].__vscodeVariableMenuContext, 'signal');
-  const forced = await dc.customRequest('yavs/force', { signal: 'v', value: '"1010"', mode: 'in' });
-  assert.equal(forced.body.signal, ':tb:v');
-  const part = await dc.customRequest('yavs/deposit', { signal: 'v(0)', value: "'1'" });
-  assert.deepEqual([part.body.signal, part.body.value], [':tb:v(0)', "'1'"]);
+  const forced = await dc.customRequest('yavs/force', { signal: 'v', value: '1010' });
+  assert.equal(forced.body.signal, 'tb.v');
+  await assert.rejects(dc.customRequest('yavs/force', { signal: 'cnt', value: 'abc' }), /`abc` is not a value of `tb\.cnt`, type INTEGER/);
+  const part = await dc.customRequest('yavs/deposit', { signal: 'v(0)', value: '1' });
+  assert.deepEqual([part.body.signal, part.body.value], ['tb.v(0)', "'1'"]);
 
   // Step into the function, over its first statement, back out.
   await Promise.all([dc.stepInRequest({ threadId: 1 }), dc.waitForEvent('stopped')]);
   st = await dc.stackTraceRequest({ threadId: 1 });
   // The subprogram header, its variable declaration (initialised on entry), then its body.
-  assert.deepEqual(st.body.stackFrames.map((f) => [f.name, f.line]), [['twice', 9], [':tb:p', 20]]);
+  assert.deepEqual(st.body.stackFrames.map((f) => [f.name, f.line]), [['twice', 9], ['tb.p', 20]]);
   const lines = [];
   for (let n = 0; n < 2; n++) {
     await Promise.all([dc.nextRequest({ threadId: 1 }), dc.waitForEvent('stopped')]);
@@ -156,7 +176,7 @@ async function main() {
   assert.deepEqual(lines, [10, 12]);
   await Promise.all([dc.stepOutRequest({ threadId: 1 }), dc.waitForEvent('stopped')]);
   st = await dc.stackTraceRequest({ threadId: 1 });
-  assert.deepEqual(st.body.stackFrames.map((f) => [f.name, f.line]), [[':tb:p', 21]]);
+  assert.deepEqual(st.body.stackFrames.map((f) => [f.name, f.line]), [['tb.p', 21]]);
 
   await dc.setBreakpointsRequest({ source: { path: src }, lines: [], breakpoints: [] });
   // "Break on Value Change" on `cnt` in the Variables view: VS Code asks for its data id, then
@@ -179,7 +199,7 @@ async function main() {
   const stop = async (resume) => (await Promise.all([resume, dc.waitForEvent('stopped')]))[1].body;
   let s = await stop(dc.continueRequest({ threadId: 1 }));
   assert.deepEqual([s.reason, s.description, s.text],
-    ['data breakpoint', 'data breakpoint at 0 fs, delta 1', ':tb:cnt = 2']);
+    ['data breakpoint', 'data breakpoint at 0 fs, delta 1', 'tb.cnt = 2']);
 
   // The force holds while the process toggling `v` runs; release it.
   assert.equal((await dc.evaluateRequest({ expression: 'tb.v' })).body.result, '"1010"');
@@ -193,7 +213,7 @@ async function main() {
   assert.equal(eq.body.breakpoints[0].verified, true);
   s = await stop(dc.continueRequest({ threadId: 1 }));
   assert.deepEqual([s.reason, s.description, s.text],
-    ['data breakpoint', 'data breakpoint at 20 ns, delta 1', ':tb:cnt = 6']);
+    ['data breakpoint', 'data breakpoint at 20 ns, delta 1', 'tb.cnt = 6']);
   await dc.customRequest('yavs/setSignalBreakpoints', { breakpoints: [] });
 
   // Conditional line breakpoints: `report "done"` stops when cnt = 6, `wait;` never.
@@ -208,7 +228,7 @@ async function main() {
   assert.deepEqual([s.reason, s.description], ['breakpoint', 'breakpoint at 30 ns, delta 0']);
   // The console's commands in the Debug Console (context `repl`); other contexts stay evaluations.
   const repl = async (expression) => (await dc.evaluateRequest({ expression, context: 'repl' })).body.result;
-  assert.match(await repl('help'), /restart: back to time 0/);
+  assert.match(await repl('help'), /back to time 0/);
   assert.match(await repl('where'), /^time /);
   assert.match(await repl('break list'), /tb\.vhd|no breakpoints|:/);
   await assert.rejects(dc.evaluateRequest({ expression: 'where', context: 'hover' }), /no variable or signal/);

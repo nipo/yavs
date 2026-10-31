@@ -619,15 +619,154 @@ fn completions() {
     assert_eq!(ask("wave cu"), ["cursor"]);
     assert_eq!(ask("break del"), ["delete"]);
     assert_eq!(ask("break tb"), ["tb.vhd:"]);
-    assert_eq!(ask("run; st"), ["step", "stop"]);
-    assert!(
-        ask("examine cn").contains(&"cnt".to_string()),
-        "{:?}",
-        ask("examine cn")
-    );
+    // An editor's list takes its first item on Tab, so that is what all have in common.
+    assert_eq!(ask("run; st"), ["st", "step", "stop"]);
+    assert_eq!(ask("re"), ["re", "release", "reset", "restart"]);
+    assert_eq!(ask("e"), ["ex", "examine", "exit"]);
+    assert_eq!(ask("examine cn"), ["cnt"]);
     assert!(ask("help x").is_empty());
+    // The first word is a command, never a signal; what follows is what the command takes.
+    assert!(ask("cn").is_empty());
+    assert!(ask("").iter().all(|c| c != "cnt" && c != "v"));
+    assert!(ask("").contains(&"exit".to_string()));
+    assert!(ask("run ").iter().eq(["until"].iter()));
+    assert!(ask("run 1").is_empty());
+    assert!(ask("force cnt ").is_empty());
+    assert!(ask("where ").is_empty());
+    for cmd in [
+        "examine", "describe", "drivers", "force", "release", "trace x",
+    ] {
+        assert!(
+            ask(&format!("{cmd} ")).contains(&"cnt".to_string()),
+            "{cmd}"
+        );
+    }
+    assert_eq!(ask("find "), ["signals", "variables"]);
+    assert_eq!(ask("source t"), ["tb.vhd"]);
+    assert_eq!(ask("examine t"), ["tb."]);
+    assert_eq!(ask("examine tb.c"), ["tb.cnt"]);
+    assert_eq!(ask("help exa"), ["examine"]);
     let d2 = cl.request("disconnect", json!({}));
     assert_eq!(d2["success"], true);
+}
+
+/// A vector is one line; arrays of vectors and records expand, and each vector in them is one line.
+/// A name that resolves to nothing is an error with help, in the form it would have been (#953).
+#[test]
+fn vectors_are_one_line_and_watch_names_are_dotted() {
+    let d = tempdir("dap-vectors");
+    let src = "library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+entity t is end;
+architecture a of t is
+  type rec is record a : std_ulogic; v : unsigned(3 downto 0); end record;
+  type mem_t is array (0 to 1) of std_ulogic_vector(1 downto 0);
+  signal slv : std_logic_vector(3 downto 0) := \"0101\";
+  signal bv : bit_vector(1 downto 0) := \"01\";
+  signal r : rec := ('0', \"1010\");
+  signal mem : mem_t := (\"01\", \"10\");
+  signal long : bit_vector(299 downto 0);
+  signal count : natural := 2;
+begin
+  main : process
+    variable lv : signed(1 downto 0) := \"10\";
+    variable st : string(1 to 2) := \"ab\";
+  begin
+    wait for 1 ns;
+    wait;
+  end process;
+end;
+";
+    std::fs::write(d.join("t.vhd"), src).unwrap();
+    let st = yavs()
+        .current_dir(&*d)
+        .args(["analyze", "--work=work:lib", "t.vhd"])
+        .status()
+        .unwrap();
+    assert!(st.success());
+    let mut c = spawn(&d, "t", &["--dap=stdio"]);
+    let _w = Watchdog::new(c.id(), 120);
+    let mut cl = stdio_client(&mut c);
+    cl.request(
+        "initialize",
+        json!({"adapterID": "yavs", "supportsANSIStyling": true}),
+    );
+    cl.request("launch", json!({}));
+    let bp = cl.request(
+        "setBreakpoints",
+        json!({"source": {"path": d.join("t.vhd")}, "breakpoints": [{"line": 19}]}),
+    );
+    assert_eq!(bp["body"]["breakpoints"][0]["verified"], true, "{bp}");
+    cl.request("configurationDone", json!({}));
+    let tid = cl.until(|m| m["event"] == "stopped")["body"]["threadId"].clone();
+    let st = cl.request("stackTrace", json!({"threadId": tid}));
+    let frame = st["body"]["stackFrames"][0]["id"].clone();
+    let mut watch = |e: &str| {
+        cl.request(
+            "evaluate",
+            json!({"expression": e, "frameId": frame, "context": "watch"}),
+        )
+    };
+    let one_line = |r: &Value, shown: &str| {
+        assert_eq!(r["body"]["result"], shown, "{r}");
+        assert_eq!(r["body"]["variablesReference"], 0, "{r}");
+        assert!(r["body"]["indexedVariables"].is_null(), "{r}");
+    };
+    one_line(&watch("slv"), "\"0101\"");
+    one_line(&watch("bv"), "\"01\"");
+    one_line(&watch("t.r.v"), "\"1010\"");
+    one_line(&watch("lv"), "\"10\"");
+    one_line(&watch("st"), "\"ab\"");
+    one_line(&watch("slv(2)"), "'1'");
+    // The maintainer's two forms.
+    one_line(&watch("t.count"), "2");
+    one_line(&watch(":t:count"), "2");
+    one_line(&watch("t.main.lv"), "\"10\"");
+    // Cut short, so its elements stay reachable.
+    let l = watch("long");
+    assert!(
+        l["body"]["result"].as_str().unwrap().ends_with("\"..."),
+        "{l}"
+    );
+    assert_eq!(l["body"]["indexedVariables"], 300, "{l}");
+    let refused = |r: Value, want: &str| {
+        assert_eq!(r["success"], false, "{r}");
+        let m = r["message"].as_str().unwrap();
+        assert!(m.contains(want), "{m}");
+    };
+    refused(watch("t.cout"), "`t.count`");
+    refused(watch(":t:cout"), "`t.count`");
+    refused(watch("cout"), "`count`");
+    refused(watch("cout(1)"), "`count`");
+    refused(
+        watch("t.nosuchthing"),
+        "no variable or signal `t.nosuchthing`",
+    );
+    let m = watch("mem");
+    let r = watch("r");
+    let kids = |cl: &mut Client<_, _>, v: &Value| {
+        let k = cl.request(
+            "variables",
+            json!({"variablesReference": v["body"]["variablesReference"]}),
+        );
+        k["body"]["variables"].as_array().unwrap().clone()
+    };
+    let in_mem = kids(&mut cl, &m);
+    assert_eq!(in_mem.len(), 2);
+    assert_eq!(in_mem[1]["value"], "\"10\"");
+    assert_eq!(in_mem[1]["variablesReference"], 0);
+    assert_eq!(in_mem[1]["evaluateName"], "t.mem(1)");
+    let in_r = kids(&mut cl, &r);
+    assert_eq!(in_r[1]["variablesReference"], 0, "{in_r:?}");
+    // Bold for a client that says it shows it.
+    let h = cl.request("evaluate", json!({"expression": "help", "context": "repl"}));
+    assert_eq!(h["body"]["result"], "", "{h}");
+    let o = cl.until(|m| m["event"] == "output" && m["body"]["category"] == "console");
+    let text = o["body"]["output"].as_str().unwrap();
+    assert!(text.contains("\x1b[1mexamine\x1b[0m NAME"), "{text}");
+    assert!(text.contains("\x1b[1mhelp\x1b[0m "), "{text}");
+    cl.request("disconnect", json!({}));
 }
 
 /// What the Variables view and a Watch see of access values, protected bodies and parts (#930, #936).
