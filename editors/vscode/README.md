@@ -19,6 +19,10 @@ attaches to port 4711, and asks for a port only if nothing listens there. Breakp
 VUnit's location and check preprocessing on, and the stack shows your files. The Debug Console takes the yavs
 console's commands (`run 10 ns`, `restart`, `vunit_restart`).
 
+A step-by-step tutorial with runnable files (`docs/examples/fifo-debug`) walks through a failing test with this
+extension, Surfer and the console: [debugger tutorial](https://yavs.readthedocs.io/en/latest/debugger-tutorial.html).
+It needs a yavs release newer than 0.11.0.
+
 ## Install
 
 yavs 0.11.0 or newer must be on `PATH`, or set `yavsPath` in the launch configuration. The

@@ -144,6 +144,7 @@ Limits
 See also
 --------
 
+* :doc:`debugger-tutorial`: a step-by-step walk through a failing test, with runnable files.
 * :doc:`interactive`: the same from a terminal prompt.
 * :doc:`vunit`: debug one test of a run script.
 * :doc:`waveforms`: waves while debugging.

@@ -8,6 +8,7 @@ nothing else
 """
 
 import argparse
+import json
 import re
 import unittest
 from pathlib import Path
@@ -47,3 +48,51 @@ class TestOptionPage(unittest.TestCase):
         actions = parser._actions  # pylint: disable=protected-access
         defined = {s for a in actions for s in a.option_strings if s.startswith("--yavs-")}
         self.check("command-line flags", defined, r"``(--yavs-[a-z-]+)")
+
+
+TUTORIAL = Path(__file__).parents[3] / "docs" / "debugger-tutorial.rst"
+DEMO = TUTORIAL.parent / "examples" / "fifo-debug"
+
+
+@unittest.skipUnless(TUTORIAL.exists(), "Not run from the yavs repository")
+class TestDebuggerTutorial(unittest.TestCase):
+    """The files and lines the debugger tutorial names hold the text it says"""
+
+    text = TUTORIAL.read_text(encoding="utf-8") if TUTORIAL.exists() else ""
+
+    def test_every_named_line_holds_its_text(self):
+        # Written in the page as: ``fifo.vhd`` line 40 (``next_count := next_count + 1;``)
+        found = re.findall(r"``(\w+\.vhd)`` line (\d+) \(``([^`]+)``\)", self.text)
+        self.assertEqual(3, len(found), "the page names three lines in the form checked here")
+        for name, line, code in found:
+            actual = (DEMO / name).read_text(encoding="utf-8").splitlines()[int(line) - 1]
+            self.assertEqual(code, actual.strip(), f"{name} line {line} moved: fix the page")
+
+    def test_lines_in_shown_output_hold_their_text(self):
+        # Written in the page as: tb_fifo.vhd:20 (in output) or `break tb_fifo.vhd:62`
+        expected = {
+            "tb_fifo.vhd:20": "signal dout",
+            "tb_fifo.vhd:17": "signal wr",
+            "tb_fifo.vhd:35": "main : process",
+            "tb_fifo.vhd:62": "check_equal(full",
+        }
+        self.assertEqual(
+            set(expected), set(re.findall(r"\w+\.vhd:\d+", self.text)), "a line the page shows is not checked"
+        )
+        for ref, code in expected.items():
+            name, line = ref.split(":")
+            self.assertIn(code, (DEMO / name).read_text(encoding="utf-8").splitlines()[int(line) - 1], ref)
+
+    def test_attach_configuration_matches_the_page(self):
+        launch = json.loads((DEMO / ".vscode" / "launch.json").read_text(encoding="utf-8"))
+        (config,) = launch["configurations"]
+        self.assertEqual((config["request"], config["port"]), ("attach", 4711))
+        self.assertIn(config["name"], self.text)
+        self.assertIn("127.0.0.1:4711", self.text)
+
+    def test_run_script_does_not_point_at_a_local_binary(self):
+        script = (DEMO / "run.py").read_text(encoding="utf-8")
+        self.assertIn('setdefault("VUNIT_SIMULATOR", "yavs")', script)
+        self.assertNotIn('environ["VUNIT_YAVS_PATH"]', script)
+        self.assertNotIn('setdefault("VUNIT_YAVS_PATH"', script)
+        self.assertNotIn('ROOT / "bin"', script)

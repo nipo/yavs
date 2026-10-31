@@ -163,6 +163,33 @@ class TestRealYavs(unittest.TestCase):
         self.assertTrue((self.tempdir / "coverage.ycov").exists())
         self.assertTrue((self.tempdir / "cov-html" / "index.html").exists())
 
+    def test_debugger_tutorial_demo(self):
+        """docs/examples/fifo-debug, the demo of the debugger tutorial: only fails_on_purpose fails, as the page says"""
+        example = HERE.parents[2] / "docs" / "examples" / "fifo-debug" / "run.py"
+        if not example.exists():
+            self.skipTest("Not run from the yavs repository")
+        proc = subprocess.run(
+            [sys.executable, str(example), "--no-color", "-o", str(self.tempdir / "out"), "-x", str(self.xml)],
+            cwd=self.tempdir,
+            env=self._env(),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=TIMEOUT,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 1, proc.stdout)
+        self.assertEqual(
+            report(self.xml),
+            {
+                "lib.tb_fifo.fill_and_drain": "passed",
+                "lib.tb_fifo.write_to_full_is_ignored": "passed",
+                "lib.tb_fifo.fails_on_purpose": "failed",
+            },
+            proc.stdout,
+        )
+        self.assertIn("word 2 - Got 0010_0110 (38). Expected 0100_1011 (75).", proc.stdout)
+
     def test_run(self):
         proc = subprocess.run(
             self._command("--yavs-max-threads=2"),

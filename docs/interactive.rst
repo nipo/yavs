@@ -353,6 +353,7 @@ effect), no ``--cov`` or ``--profile``.
 See also
 --------
 
+* :doc:`debugger-tutorial`: a failing test debugged step by step, in VS Code and at this prompt.
 * :doc:`debugging`: the same session in VS Code.
 * :doc:`vunit`: the console with a test of a run script.
 * :doc:`waveforms`: ``--surfer`` and the ``wave`` commands.

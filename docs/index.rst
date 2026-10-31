@@ -70,6 +70,7 @@ the :doc:`release_notes`, and pages say when a feature needs a release newer tha
    waveforms
    debugging
    interactive
+   debugger-tutorial
    coverage
    running-faster
    threads
