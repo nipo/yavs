@@ -1956,6 +1956,7 @@ fn foreign_call() {
         ret: Some(CType::I32),
         model: None,
         fat: Default::default(),
+        ranges: Vec::new(),
     };
     let mut pb = ProgramBuilder::new();
     let int = integer(&mut pb);

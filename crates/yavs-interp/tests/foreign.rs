@@ -25,6 +25,7 @@ fn setup(
         ret,
         model: None,
         fat: Default::default(),
+        ranges: Vec::new(),
     });
     (x, pb.declare("fun", FuncKind::Function, None))
 }

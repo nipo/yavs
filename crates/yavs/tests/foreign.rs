@@ -537,10 +537,21 @@ const SCALAR_C: &str = r#"
 EXPORT void set_bool(uint8_t *b) { *b = 7; }
 EXPORT void set_nat(int32_t *n) { *n = -5; }
 EXPORT void set_ok(int32_t *n) { *n = 3; }
+EXPORT void set_vec(int32_t *v, int64_t n) { (void)n; v[0] = -5; }
+EXPORT void set_rec(int32_t *r) { r[0] = -5; }
+EXPORT void set_vec_ok(int32_t *v, int64_t n) { (void)n; v[0] = 4; v[1] = 5; }
 "#;
 
 const SCALAR_VHDL: &str = r#"
 package s is
+  type nat_vec is array (natural range <>) of natural;
+  type rec is record n : natural; end record;
+  procedure set_vec(v : out nat_vec);
+  attribute foreign of set_vec : procedure is "VHPIDIRECT set_vec";
+  procedure set_rec(r : out rec);
+  attribute foreign of set_rec : procedure is "VHPIDIRECT set_rec";
+  procedure set_vec_ok(v : out nat_vec);
+  attribute foreign of set_vec_ok : procedure is "VHPIDIRECT set_vec_ok";
   procedure set_bool(x : out boolean);
   attribute foreign of set_bool : procedure is "VHPIDIRECT set_bool";
   procedure set_nat(n : out natural);
@@ -549,6 +560,9 @@ package s is
   attribute foreign of set_ok : procedure is "VHPIDIRECT set_ok";
 end;
 package body s is
+  procedure set_vec(v : out nat_vec) is begin end;
+  procedure set_rec(r : out rec) is begin end;
+  procedure set_vec_ok(v : out nat_vec) is begin end;
   procedure set_bool(x : out boolean) is begin end;
   procedure set_nat(n : out natural) is begin end;
   procedure set_ok(n : inout natural) is begin end;
@@ -579,13 +593,39 @@ architecture a of nat_tb is begin
 end;
 
 use work.s.all;
+entity vec_tb is end;
+architecture a of vec_tb is begin
+  process
+    variable v : nat_vec(1 to 2);
+  begin
+    set_vec(v);
+    report integer'image(v(1));
+    wait;
+  end process;
+end;
+
+use work.s.all;
+entity rec_tb is end;
+architecture a of rec_tb is begin
+  process
+    variable r : rec;
+  begin
+    set_rec(r);
+    report integer'image(r.n);
+    wait;
+  end process;
+end;
+
+use work.s.all;
 entity ok_tb is end;
 architecture a of ok_tb is begin
   process
     variable n : natural := 0;
+    variable v : nat_vec(1 to 2);
   begin
     set_ok(n);
-    assert n = 3;
+    set_vec_ok(v);
+    assert n = 3 and v(1) = 4 and v(2) = 5;
     report "scalar ok";
     wait;
   end process;
@@ -593,7 +633,7 @@ end;
 "#;
 
 /// A scalar `out`/`inout` written back by C is range-checked against the formal's subtype, as
-/// array and record copy-backs are (#937), on every tier.
+/// array and record copy-backs are, and so are their elements and fields (#937, #976), on every tier.
 #[test]
 fn scalar_copy_back_is_range_checked() {
     let tmp = tempdir("foreign_scalar");
@@ -640,6 +680,18 @@ fn scalar_copy_back_is_range_checked() {
             ),
             "{tier:?}: {err}"
         );
+        // The elements of an array and the fields of a record are checked against their
+        // subtype too (#976).
+        for (top, proc) in [("vec_tb", "set_vec"), ("rec_tb", "set_rec")] {
+            let (code, err, _) = run(top);
+            assert_eq!(code, 1, "{tier:?}: {top}: {err}");
+            assert!(
+                err.contains(&format!(
+                    "foreign `{proc}` wrote an invalid value to argument 1: -5 is outside 0 to"
+                )),
+                "{tier:?}: {top}: {err}"
+            );
+        }
         let (code, err, out) = run("ok_tb");
         assert_eq!(code, 0, "{tier:?}: {err}");
         assert!(

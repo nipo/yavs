@@ -466,6 +466,7 @@ impl Machine {
         name: &str,
         k: usize,
         layout: ArgLayout,
+        range: Option<(i64, i64)>,
     ) -> R<()> {
         let (et, ct, logic, _) = self.array_elem(ty, name, layout)?;
         let cs = csize(ct);
@@ -499,6 +500,9 @@ impl Machine {
                 for i in 0..n {
                     let v = get_c(buf, i as usize * cs, ct);
                     check_back(&et, v, name, k)?;
+                    if let Some((lo, hi)) = range {
+                        check_range(v, lo, hi, name, k)?;
+                    }
                     self.store(add_addr(data, i * es)?, w, v)?;
                 }
                 Ok(())
@@ -764,7 +768,7 @@ impl Machine {
                     for (i, &c) in cells.iter().enumerate() {
                         put_c(&mut buf, i * cs, ct, c, name, k)?;
                     }
-                    self.unmarshal_array(ty, &buf, data, n, name, k, ArgLayout::Length)?;
+                    self.unmarshal_array(ty, &buf, data, n, name, k, ArgLayout::Length, None)?;
                 }
                 ForeignArg::Record { ty, .. } => {
                     let fields: Vec<Vec<u64>> =
@@ -789,7 +793,16 @@ impl Machine {
                                 for (i, &c) in cells.iter().enumerate() {
                                     put_c(&mut buf, i * cs, ct, c, name, k)?;
                                 }
-                                self.unmarshal_array(fty, &buf, at, n, name, k, ArgLayout::Length)?;
+                                self.unmarshal_array(
+                                    fty,
+                                    &buf,
+                                    at,
+                                    n,
+                                    name,
+                                    k,
+                                    ArgLayout::Length,
+                                    None,
+                                )?;
                             }
                         }
                     }
@@ -841,7 +854,7 @@ impl Machine {
         for (i, &c) in cells.iter().enumerate() {
             put_c(&mut buf, i * cs, ct, c, name, 0)?;
         }
-        self.unmarshal_array(ty, &buf, data, n, name, 0, ArgLayout::Length)?;
+        self.unmarshal_array(ty, &buf, data, n, name, 0, ArgLayout::Length, None)?;
         let span = i64::try_from(n).ok().and_then(|n| {
             if ix.downto {
                 ix.left.checked_sub(n - 1)
@@ -1026,7 +1039,7 @@ impl Machine {
                         buf, data, ty, n, ..
                     },
                 ) => {
-                    self.unmarshal_array(ty, &buf, data, n, name, k, layout)?;
+                    self.unmarshal_array(ty, &buf, data, n, name, k, layout, x.range(k, 0))?;
                 }
                 (
                     ForeignArg::Record {
@@ -1035,9 +1048,12 @@ impl Machine {
                     Temp::Record { buf, addr, ty },
                 ) => {
                     let (fields, coffs, _) = self.record_layout(ty, name, layout)?;
-                    for ((ft, ct, off), co) in fields.iter().zip(&coffs) {
+                    for (i, ((ft, ct, off), co)) in fields.iter().zip(&coffs).enumerate() {
                         let fv = get_c(&buf, *co, *ct);
                         check_back(ft, fv, name, k)?;
+                        if let Some((lo, hi)) = x.range(k, i) {
+                            check_range(fv, lo, hi, name, k)?;
+                        }
                         let w = width_of(ft.scalar_size().unwrap_or(8))?;
                         self.store(add_addr(addr, *off)?, w, fv)?;
                     }

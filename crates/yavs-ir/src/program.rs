@@ -1017,6 +1017,11 @@ pub struct ForeignRef {
     /// The call in [`ArgLayout::FatPointer`]; which layout applies is known when the symbol is
     /// bound, not here, because the program outlives one `--load` (compilation cache).
     pub fat: FatLayout,
+    /// Per argument, the static `(low, high)` of the subtype of what C writes back: one entry for
+    /// the elements of an `Array`, one per field for a `Record`; empty for the rest and for a
+    /// bound that is only known at run time (the base type's range then applies).
+    #[serde(default)]
+    pub ranges: Vec<Vec<Option<(i64, i64)>>>,
 }
 
 /// A VHPIDIRECT subprogram in [`ArgLayout::FatPointer`] (empty for a VHPI model).
@@ -1070,6 +1075,11 @@ pub struct VhpiIndex {
 }
 
 impl ForeignRef {
+    /// The subtype range of element or field `i` of argument `k` ([`ForeignRef::ranges`]).
+    pub fn range(&self, k: usize, i: usize) -> Option<(i64, i64)> {
+        self.ranges.get(k)?.get(i).copied().flatten()
+    }
+
     /// The arguments as `layout` passes them.
     pub fn args_in(&self, layout: ArgLayout) -> &[ForeignArg] {
         match layout {

@@ -172,6 +172,7 @@ impl Fx<'_, '_> {
         };
         let mut params = Vec::new();
         let mut args = Vec::new();
+        let mut ranges = Vec::new();
         let mut fat = yavs_ir::FatLayout::default();
         for p in sp.params.iter() {
             let pname = p.name.text.to_string();
@@ -230,6 +231,7 @@ impl Fx<'_, '_> {
                         out: copy_back,
                         cells: signal_cells(db, p) as u8,
                     });
+                    ranges.push(Vec::new());
                     continue;
                 }
             }
@@ -266,6 +268,14 @@ impl Fx<'_, '_> {
                 }
             };
             args.push(arg);
+            ranges.push(match &db.types[t].kind {
+                TypeKind::Array { elem, .. } if copy_back => vec![self.static_pos_range(*elem)],
+                TypeKind::Record { elems } if copy_back => elems
+                    .iter()
+                    .map(|e| self.static_pos_range(e.subtype))
+                    .collect(),
+                _ => Vec::new(),
+            });
             if vhpi.is_none() {
                 fat.args.push(match arg {
                     ForeignArg::Value(_) => ForeignArg::Value(self.fat_ctype(t, span)?),
@@ -331,6 +341,7 @@ impl Fx<'_, '_> {
             ret,
             model,
             fat,
+            ranges,
         })
     }
 

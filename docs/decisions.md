@@ -12997,3 +12997,6 @@ index (machine written; a damaged index says to re-analyze).
 - **Foreign scalar copy-back (#937):** `ForeignArg::ScalarRef` carries the formal's base type and its static
   `(low, high)` (none when the bounds are known at run time: the base type's range then applies), so an `out`
   or `inout` scalar is checked like the elements of arrays and the fields of records.
+- **Array elements and record fields (#976):** `ForeignRef::ranges` holds, per argument, the static
+  `(low, high)` of the element subtype (arrays) or of each field's subtype (records), so their copy-back is
+  checked against the subtype too, not only the base type. VHPI model arguments keep the base-type check.
