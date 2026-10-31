@@ -108,7 +108,8 @@ shown, such as a local of a subprogram, when Surfer does not answer because its 
 (:doc:`waveforms`).
 
 Add ``--surfer`` to follow the waveforms in Surfer, the cursor at each stop (:doc:`waveforms`). ``--wave=out.fst`` alone
-flushes the file at every stop, so any viewer that reloads it shows the run up to the breakpoint.
+writes the file at every stop, so any viewer that reloads it shows the run up to the stop time, with the signal values the
+Variables view shows. Process variables reach the file when their time step ends.
 
 The Debug Console takes the commands of the :doc:`interactive` too (``run 10 ns``, ``restart``,
 ``break list``, ``drivers q``, ``trace x q``); the :doc:`console-reference` lists them all.

@@ -204,7 +204,7 @@ pub type Finish = Box<dyn FnOnce(&SimControl) -> Option<Diagnostic>>;
 
 /// Work at every stop, before `stopped` is sent (the caller's `--wave` file flushed, so an
 /// editor's wave viewer can read every change up to the stop).
-pub type Sync = Box<dyn Fn() + Send + std::marker::Sync>;
+pub type Sync = Box<dyn Fn(Option<(u64, &dyn yavs_wave::Signals)>) + Send + std::marker::Sync>;
 
 /// Work after the run, with the final kernel statistics and interpreter runtime.
 pub type Report = Box<dyn FnOnce(yavs_kernel::Stats, Option<&yavs_interp::Runtime>)>;
@@ -458,10 +458,10 @@ impl Shared {
         self.wave_file.get().map(String::as_str)
     }
 
-    /// Everything recorded so far is in the file.
-    fn sync_wave(&self) {
+    /// Everything up to this stop is in the file.
+    fn sync_wave(&self, at: &At<'_, '_>) {
         if let Some(s) = self.sync.get() {
-            s();
+            s(at.signals());
         }
     }
 
@@ -508,6 +508,14 @@ impl At<'_, '_> {
         match self {
             At::Process(s) => s.now,
             At::Kernel(sim) => Some(sim.now()),
+        }
+    }
+
+    /// The time and the signals of this stop; none during elaboration.
+    fn signals(&self) -> Option<(u64, &dyn yavs_wave::Signals)> {
+        match self {
+            At::Process(s) => Some((s.now?.as_fs(), s.ctx? as &dyn yavs_wave::Signals)),
+            At::Kernel(sim) => Some((sim.now().as_fs(), *sim as &dyn yavs_wave::Signals)),
         }
     }
 
@@ -627,9 +635,7 @@ fn serve_stop(sh: &Shared, at: &At<'_, '_>, stopped: Json) -> Option<Next> {
     sh.stopped.store(true, Ordering::Relaxed);
     // The waves of the completed time steps, then the stop.
     sh.link.stream.push();
-    if let Some(sync) = sh.sync.get() {
-        sync();
-    }
+    sh.sync_wave(at);
     console::tell_viewer(sh, at, &stopped);
     console::on_stop(sh, at, &stopped);
     sh.event("stopped", stopped);

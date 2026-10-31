@@ -1240,6 +1240,16 @@ impl Ctx<'_> {
             })
     }
 
+    /// The current value of `r` read in place (see `Hook::view`).
+    pub fn view(&self, r: impl Into<SigRef>) -> Result<crate::kernel::SigView<'_>, SimError> {
+        let (s, r) = self.sig(r)?;
+        Ok(crate::kernel::SigView {
+            buf: &s.cur,
+            off: r.offset as usize,
+            len: r.len as usize,
+        })
+    }
+
     /// Current value of a logic signal.
     pub fn logic(&self, r: impl Into<SigRef>) -> Result<LogicVec, SimError> {
         let (s, r) = self.sig(r)?;

@@ -772,17 +772,19 @@ impl Wcp {
         Ok(())
     }
 
+    fn take_in(&mut self, m: &Json) {
+        self.on_event(m);
+        if matches!(m["type"].as_str(), Some("response" | "error")) {
+            self.take_late(m);
+        }
+    }
+
     /// Takes in what arrived, without waiting. An end of the connection shows here, also when
     /// nothing is being asked of Surfer.
     fn poll(&mut self) -> io::Result<()> {
         loop {
             match self.rx.try_recv() {
-                Ok(m) => {
-                    self.on_event(&m);
-                    if matches!(m["type"].as_str(), Some("response" | "error")) {
-                        self.take_late(&m);
-                    }
-                }
+                Ok(m) => self.take_in(&m),
                 Err(TryRecvError::Empty) => return Ok(()),
                 Err(TryRecvError::Disconnected) => return Err(closed()),
             }
@@ -1016,7 +1018,10 @@ impl View<'_> {
                 );
                 return Err(io::Error::new(ErrorKind::TimedOut, m));
             }
-            std::thread::sleep(Duration::from_millis(20));
+            // An answer or event wakes this: the end of a run should not lag.
+            if let Ok(m) = w.rx.recv_timeout(Duration::from_millis(20)) {
+                w.take_in(&m);
+            }
         }
         // The list of this session, for the next, unless it shows nothing.
         if let Some(f) = layout

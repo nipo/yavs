@@ -12782,6 +12782,12 @@ duplicate implementations without changing diagnostics (issue #894; implemented 
 - **1 s stays the default** (agent, 2026-10-31): only runs with `--surfer` pay for it. Measured with `--wave` on two long RTL benches, one thread, `--tier` default, median of three on a loaded host, so noisy: wall time about 2 to 5 percent more than no clock flush, the file at most 1 percent larger.
 - **Colours are reset to the default theme's green** (agent, 2026-10-31): WCP cannot clear an item's colour.
 
+## The waveform file at a debugger stop (#961, 2026-10-31)
+
+- **A stop writes what the stopped process reads, at the stop time** (agent, 2026-10-31): checked in the file: the time table ended at the last completed step, because changes wait for the end of their time step so that a step's deltas collapse. A stop now writes the pending ones. The price is a second value at the same time when a later delta changes the signal again, only in debugger sessions; readers take the last value of a time.
+- **A repeated value marks a stop time with no change** (agent, 2026-10-31): a file's time ends at its last change and FST has no other mark. The first recorded signal repeats its value at that time; it shows no edge.
+- **Variables stay at the end of their step** (agent, 2026-10-31): reading them needs a kernel hook and every process suspended, which a stop has not.
+
 ## Surfer and a hidden window (#952, 2026-10-31)
 
 - **The cause, what is known**: Surfer handles WCP commands in its `App::ui` only and has no `App::logic` (source of the 0.7.0 tag and of a later main), and the window toolkit runs `ui` only for a window it may paint. Measured on the real program on a private X server: with the window's state set to minimized it answered nothing for 35 s, and when restored it gave all answers at once, in order; an X11 window merely covered kept answering. From the toolkit's source (the later main only): on Wayland a redraw waits for the compositor's frame callback, and without one only `logic` runs. That a desktop compositor withheld those from the covered window of the report is inferred, from one run with the window covered and one beside the editor; a covered window on a private headless compositor kept answering.

@@ -447,10 +447,15 @@ struct Session {
 impl Session {
     /// Starts a session with `--surfer` on the fake and Surfer's answer wait in ms.
     fn start(d: &Path, addr: &str, wait_ms: u64) -> Self {
+        Self::with(d, addr, wait_ms, &[])
+    }
+
+    fn with(d: &Path, addr: &str, wait_ms: u64, more: &[&str]) -> Self {
         let mut child = yavs()
             .current_dir(d)
             .args(["run", "--work=work:build/work", "tb", "--interactive"])
             .arg(format!("--surfer={addr}"))
+            .args(more)
             .env("YAVS_SURFER_WAIT", wait_ms.to_string())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -655,6 +660,104 @@ fn a_lost_connection_is_told_when_it_happens() {
     assert_eq!(status, Some(0), "{rest}");
     assert!(rest.contains("W0131"), "{rest}");
     assert!(rest.contains("lost the connection to Surfer"), "{rest}");
+}
+
+const STOP_TB: &str = r#"
+library ieee;
+use ieee.std_logic_1164.all;
+entity tb is end;
+architecture a of tb is
+  signal clk : std_logic := '0';
+  signal dout : std_logic_vector(7 downto 0) := (others => 'U');
+  signal late : std_logic := '0';
+begin
+  clk <= not clk after 5 ns;
+  reg : process (clk)
+  begin
+    if rising_edge(clk) then
+      dout <= x"26";
+    end if;
+  end process;
+  chk : process
+  begin
+    wait until falling_edge(clk);
+    wait until falling_edge(clk);
+    late <= '1';                     -- line 21: stops at 20 ns, clk just fell
+    wait for 3 ns;
+    late <= '0';                     -- line 23: stops at 23 ns, nothing changed there
+    wait for 100 ns;
+    std.env.finish;
+  end process;
+end;
+"#;
+
+/// The last time in `file`, and the last value of `name` at or before `time`.
+fn wave_at(file: &Path, name: &str, time: u64) -> (u64, String) {
+    let mut w = wellen::simple::read(file).expect("a readable file");
+    let h = w.hierarchy();
+    let var = h
+        .all_vars()
+        .find(|&v| h[v].full_name(h) == name)
+        .unwrap_or_else(|| panic!("no {name}"));
+    let r = h[var].signal_ref();
+    w.load_signals(&[r]);
+    let table = w.time_table();
+    let end = *table.last().expect("a time");
+    let idx = table.partition_point(|&t| t <= time) - 1;
+    let s = w.get_signal(r).expect("signal");
+    // As the viewer reads it: the last change of a time.
+    let o = s.get_offset(idx as u32).expect("a value");
+    (end, s.get_value_at(&o, o.elements - 1).to_string())
+}
+
+/// At a stop the file reaches the stop time with what the stopped process reads (#961), also when
+/// nothing changed at that time, at a stop between cycles and with a filter; later changes of the
+/// same time step win.
+#[test]
+fn the_file_reaches_a_stop_with_the_values_at_the_stop() {
+    let d = tempdir("surfer-stopfile");
+    std::fs::write(d.join("tb.vhd"), STOP_TB).expect("write");
+    analyze(&d, "tb.vhd");
+    let fake = Fake::default();
+    let (addr, t) = fake.listen(vec![]);
+    let mut s = Session::with(&d, &addr, 5000, &["--wave=w.fst"]);
+    let f = d.join("w.fst");
+    s.send("break tb.vhd:21");
+    s.send("break tb.vhd:23");
+    s.send("run");
+    s.expect("breakpoint at 20 ns", SHORT);
+    assert_eq!(wave_at(&f, "tb.clk", 20_000_000), (20_000_000, "0".into()));
+    let (_, dout) = wave_at(&f, "tb.dout", 20_000_000);
+    assert_eq!(dout, "00100110");
+    s.send("run");
+    s.expect("breakpoint at 23 ns", SHORT);
+    // `late` changed in a later delta of 20 ns than the stop saw.
+    assert_eq!(wave_at(&f, "tb.late", 20_000_000), (23_000_000, "1".into()));
+    assert_eq!(wave_at(&f, "tb.clk", 23_000_000).1, "0");
+    s.send("run 1 ns");
+    s.expect("24 ns", SHORT);
+    assert_eq!(wave_at(&f, "tb.clk", 24_000_000).0, 24_000_000);
+    s.send("run");
+    let (status, rest) = s.quit();
+    t.join().expect("fake");
+    assert_eq!(status, Some(0), "{rest}");
+    assert!(!rest.contains("error"), "{rest}");
+    // What changed after a stop at its time is there, and a later step's too.
+    assert_eq!(wave_at(&f, "tb.late", 20_000_000).1, "1", "{rest}");
+    assert_eq!(wave_at(&f, "tb.late", 24_000_000).1, "0", "{rest}");
+
+    // Only one signal recorded: it marks the time.
+    let fake = Fake::default();
+    let (addr, t) = fake.listen(vec![]);
+    let mut s = Session::with(&d, &addr, 5000, &["--wave=f.fst", "--wave-include=tb.dout"]);
+    s.send("break tb.vhd:23");
+    s.send("run");
+    s.expect("breakpoint at 23 ns", SHORT);
+    let f = d.join("f.fst");
+    assert_eq!(wave_at(&f, "tb.dout", 23_000_000).0, 23_000_000);
+    let (status, rest) = s.quit();
+    t.join().expect("fake");
+    assert_eq!(status, Some(0), "{rest}");
 }
 
 #[test]

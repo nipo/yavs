@@ -430,7 +430,7 @@ impl WaveWriter {
         Ok(())
     }
 
-    /// Force a block to disk now (only call between time steps).
+    /// Force a block to disk now. Changes may go on at the same time after it (a debugger stop).
     pub fn flush(&mut self) -> Result<(), Error> {
         if let Some(f) = self.fst.as_mut() {
             f.flush()?;

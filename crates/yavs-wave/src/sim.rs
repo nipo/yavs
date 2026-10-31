@@ -149,12 +149,32 @@ struct State {
     pending: Vec<u32>,
     /// The time of the pending changes, fs.
     at: u64,
+    /// The time of the last signal change written, fs.
+    written: u64,
     vars: Vec<Var>,
     /// The shared state, for shared variables.
     built: Option<Built>,
     /// The time step in progress, fs (variables are written at its end).
     step: u64,
     error: Option<Error>,
+}
+
+/// Where a debugger stop reads the signals: the stopped process's context, or the kernel between
+/// cycles.
+pub trait Signals {
+    fn view(&self, r: SigRef) -> Result<SigView<'_>, SimError>;
+}
+
+impl Signals for yavs_kernel::Ctx<'_> {
+    fn view(&self, r: SigRef) -> Result<SigView<'_>, SimError> {
+        yavs_kernel::Ctx::view(self, r)
+    }
+}
+
+impl Signals for SimControl {
+    fn view(&self, r: SigRef) -> Result<SigView<'_>, SimError> {
+        SimControl::view(self, r)
+    }
 }
 
 /// The waveform subscriber. Clone it into [`SimControl::subscribe`] and keep one handle for
@@ -319,6 +339,7 @@ fn record_with(
         dirty: vec![false; n],
         pending: Vec::new(),
         at: 0,
+        written: 0,
         vars,
         built: built.cloned(),
         step: 0,
@@ -343,6 +364,39 @@ impl Recorder {
     pub fn sync(&self) {
         let mut guard = self.lock();
         let st = &mut *guard;
+        if st.error.is_none()
+            && let Some(w) = st.writer.as_mut()
+            && let Err(e) = w.sync()
+        {
+            st.error = Some(e);
+        }
+    }
+
+    /// A debugger stop at `now` (fs): the file reaches it, with the values a stopped process
+    /// reads. What changes later in this time step follows at the same time, and a reader takes
+    /// the last value of a time. Variables are read when their time step ends: only then is
+    /// every process suspended.
+    pub fn sync_at(&self, now: u64, signals: &dyn Signals) {
+        let mut guard = self.lock();
+        let st = &mut *guard;
+        // A stop after the run: the file is finished.
+        if st.writer.is_none() {
+            return;
+        }
+        st.flush(|r| signals.view(r));
+        if st.written < now {
+            // A file's time ends at its last change, so nothing changed at `now` needs one that
+            // changes nothing.
+            let first = (st.entries.iter()).position(|e| matches!(e.src, Src::Sig { .. }));
+            if let Some(i) = first {
+                st.at = now;
+                st.mark(i as u32);
+                st.flush(|r| signals.view(r));
+            }
+        }
+        // ponytail: after a stop between cycles past the last time step (`run 10 ns`), variables
+        // that changed in that step are written at the stop; reading them needs a kernel hook.
+        st.step = st.step.max(now);
         if st.error.is_none()
             && let Some(w) = st.writer.as_mut()
             && let Err(e) = w.sync()
@@ -631,6 +685,7 @@ impl State {
                 self.error = Some(e);
             }
         }
+        self.written = self.at;
         pending.clear();
         self.pending = pending;
         self.bytes = bytes;

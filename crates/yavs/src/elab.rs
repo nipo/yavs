@@ -1806,7 +1806,10 @@ pub fn run(
                     let finish: yavs_dap::Finish = Box::new(move |sim| {
                         rec.finish(sim).err().map(|err| wave_error(&path, err))
                     });
-                    let sync: yavs_dap::Sync = Box::new(move || r.sync());
+                    let sync: yavs_dap::Sync = Box::new(move |stop| match stop {
+                        Some((now, signals)) => r.sync_at(now, signals),
+                        None => r.sync(),
+                    });
                     (Some(finish), Some(sync))
                 }
                 None => (None, None),

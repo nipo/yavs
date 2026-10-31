@@ -254,9 +254,9 @@ struct Wakes {
 
 /// A signal range read in place (`Hook::view`).
 pub struct SigView<'a> {
-    buf: &'a crate::value::Buf,
-    off: usize,
-    len: usize,
+    pub(crate) buf: &'a crate::value::Buf,
+    pub(crate) off: usize,
+    pub(crate) len: usize,
 }
 
 impl SigView<'_> {

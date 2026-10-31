@@ -205,6 +205,9 @@ async function surferGoesToTheDeclaration(folder, tb, stoppedAgain) {
   const { showInputBox, showQuickPick } = vscode.window;
   vscode.window.showInputBox = async () => '*cn*';
   vscode.window.showQuickPick = async (items) => items;
+  // The file reaches even a stop at time 0: "Add to Wave" has gone to the viewer by now.
+  assert.ok(added.flat().includes('tb.cnt'), JSON.stringify(added));
+  assert.ok(added.flat().includes('tb.v'), JSON.stringify(added));
   added.length = 0;
   await vscode.commands.executeCommand('yavs.findSignals');
   vscode.window.showInputBox = showInputBox;
@@ -212,9 +215,12 @@ async function surferGoesToTheDeclaration(folder, tb, stoppedAgain) {
   const ended = waitFor('end of the Surfer session', 60000, (r) => vscode.debug.onDidTerminateDebugSession(r));
   await session.customRequest('continue', { threadId: 1 });
   await ended;
-  // Stopped before any value was written: what was asked for is added once there are values.
+  // What "Find Signals" picked. The viewer may be told after the session has ended.
+  const t1 = Date.now();
+  while (!added.flat().includes('tb.cnt') && Date.now() - t1 < 10000) {
+    await new Promise((r) => setTimeout(r, 50));
+  }
   assert.ok(added.flat().includes('tb.cnt'), JSON.stringify(added));
-  assert.ok(added.flat().includes('tb.v'), JSON.stringify(added));
   server.close();
 }
 

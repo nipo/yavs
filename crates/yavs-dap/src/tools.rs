@@ -694,7 +694,7 @@ pub(crate) fn examine_at(sh: &Shared, at: &At<'_, '_>, text: &str) -> Result<Str
              `--wave=FILE.fst`"
         )
     })?;
-    sh.sync_wave();
+    sh.sync_wave(at);
     let mut h = yavs_wave::history::History::open(path)?;
     let wanted = wave_name(sh, at, name);
     match h.value_at(&wanted, fs) {
@@ -788,7 +788,7 @@ pub(crate) fn trace_x(sh: &Shared, at: &At<'_, '_>, rest: &str) -> Result<String
         ));
     }
     let mut hist = sh.wave_path().and_then(|p| {
-        sh.sync_wave();
+        sh.sync_wave(at);
         yavs_wave::history::History::open(p).ok()
     });
     let now = at.now().map_or(u64::MAX, Time::as_fs);
