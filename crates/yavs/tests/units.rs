@@ -238,8 +238,8 @@ impl Env {
             .collect()
     }
 
-    /// The index of `work` with each record it names in its place, and this directory made
-    /// anonymous (the digests that name the records depend on it).
+    /// The index of `work` with each record it names in its place, without the file stamps, and
+    /// this directory made anonymous (the digests that name the records depend on it).
     fn manifest(&self) -> String {
         let dir = self.tmp.join("work");
         let index = std::fs::read_to_string(dir.join("yavs-lib.toml")).expect("manifest");
@@ -254,6 +254,9 @@ impl Env {
                             .expect("record"),
                     );
                 }
+                // The stamp is kept only for a file unmodified for two seconds (#426): whether it is
+                // there depends on how slow the machine is, and its time on when each Env wrote.
+                None if line.starts_with("size = ") || line.starts_with("mtime_ns = ") => {}
                 None => {
                     out.push_str(line);
                     out.push('\n');
