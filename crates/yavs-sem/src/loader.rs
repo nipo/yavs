@@ -110,6 +110,7 @@ pub struct Library {
     pub decl: DeclId,
     #[serde(with = "source_tag")]
     pub source: LibSource,
+    #[serde(serialize_with = "crate::ids::ser_map")]
     pub units: HashMap<UnitKey, UnitSlot>,
 }
 

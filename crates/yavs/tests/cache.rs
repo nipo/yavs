@@ -1330,6 +1330,79 @@ architecture a of tb is\n  function f (x : integer) return bit is begin return '
   package o is new work.outer_g generic map (a => integer, b => bit, f => f);\nbegin\n\
   process begin report \"k=\" & integer'image(o.i.k) & \" g=\" & bit'image(o.i.g(1)); wait; end process;\nend;\n";
 
+/// A closure with ieee packages too: more units in the store, and a body that completes a package.
+const WITH_IEEE: &str = "library ieee;\nuse ieee.std_logic_1164.all;\nuse ieee.numeric_std.all;\n\
+package p is\n  function inc (x : unsigned) return unsigned;\nend;\n\
+package body p is\n  function inc (x : unsigned) return unsigned is begin return x + 1; end;\nend;\n\
+library ieee;\nuse ieee.numeric_std.all;\nuse work.p.all;\nentity tb is end;\n\
+architecture a of tb is\nbegin\n\
+  process begin report \"k=\" & integer'image(to_integer(inc(to_unsigned(6, 8)))); wait; end process;\nend;\n";
+
+/// The analysis image does not depend on where the units came from: a shared std unit replayed
+/// from an entry made after another design, or analysed from source, numbers its symbols
+/// differently, and the hash maps of an image must not show that (#964).
+#[test]
+fn entries_do_not_depend_on_who_made_the_std_units() {
+    for (name, source) in [("nested", NESTED), ("ieee", WITH_IEEE)] {
+        // One directory, emptied between runs: the paths are part of the keys and the images.
+        let tmp = tempdir(&format!("whostd_{name}"));
+        let std_cache = tmp.join("std");
+        let yavs = |args: &[&str]| {
+            let o = Command::new(env!("CARGO_BIN_EXE_yavs"))
+                .current_dir(&tmp)
+                .env_remove("YAVS_STDLIB")
+                .env("YAVS_STD_CACHE", &std_cache)
+                .args(args)
+                .output()
+                .expect("run");
+            assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+            String::from_utf8_lossy(&o.stdout).into_owned()
+        };
+        let image = |before_image: &dyn Fn()| {
+            let _ = std::fs::remove_dir_all(tmp.join("work"));
+            std::fs::write(tmp.join("n.vhd"), source).expect("write");
+            let work = format!("work:{}", tmp.join("work").display());
+            yavs(&["analyze", "--work", &work, "n.vhd"]);
+            assert!(yavs(&["run", "--work", &work, "tb"]).contains("k=7"));
+            before_image();
+            assert!(yavs(&["run", "--work", &work, "tb"]).contains("k=7"));
+            let mut files: Vec<(String, Vec<u8>)> =
+                std::fs::read_dir(tmp.join("work").join("yavs-cache"))
+                    .expect("cache dir")
+                    .flatten()
+                    .filter(|f| f.file_name().to_string_lossy().ends_with(".img"))
+                    .map(|f| {
+                        let bytes = std::fs::read(f.path()).expect("read");
+                        (f.file_name().to_string_lossy().into_owned(), bytes)
+                    })
+                    .collect();
+            files.sort();
+            assert!(!files.is_empty());
+            files
+        };
+        let replayed = image(&|| {});
+        let from_source = image(&|| std::fs::remove_dir_all(&std_cache).expect("clear the store"));
+        // The store made by an analysis that met other names first.
+        let by_another = image(&|| {
+            std::fs::write(
+                tmp.join("o.vhd"),
+                "entity zz is end;\narchitecture a of zz is\n  type t is ('x', 'q', '?', zz_lit);\nbegin\nend;\n",
+            )
+            .expect("write");
+            std::fs::remove_dir_all(&std_cache).expect("clear the store");
+            let other = format!("other:{}", tmp.join("other").display());
+            yavs(&["analyze", "--work", &other, "o.vhd"]);
+        });
+        for (how, files) in [("from source", from_source), ("by another", by_another)] {
+            assert_eq!(files.len(), replayed.len(), "{name} {how}");
+            for (a, b) in replayed.iter().zip(&files) {
+                assert_eq!(a.0, b.0, "{name} {how}");
+                assert!(a.1 == b.1, "{name} {how}: {} differs", a.0);
+            }
+        }
+    }
+}
+
 /// The cache entries do not depend on the process: std hash maps are seeded per process, so
 /// an id or a byte that follows their order differs between runs (#557).
 #[test]

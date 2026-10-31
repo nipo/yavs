@@ -157,7 +157,11 @@ Module-local decisions go in this section and in the matching sem.md section, LR
   Neither may ids or cache bytes: no std `HashMap`/`HashSet` in `yavs-sem` (they are seeded per
   process; `GenericMap` is a `BTreeMap`, the rest `FxHashMap`/`FxHashSet`), and a loop over an
   `Fx` map that allocates ids sorts first. `cache.rs` `entries_are_the_same_in_every_process`
-  compares the entries of several processes byte for byte (#557).
+  compares the entries of several processes byte for byte (#557). An `Fx` map's order still follows
+  symbol numbers and insertion history, which depend on who made the units a process replays, so a
+  hash container reachable from `Db` is written with `#[serde(serialize_with = "crate::ids::ser_map")]`
+  (or `ser_set`): `Db::to_image` then orders it by its keys' bytes with symbols as text
+  (`entries_do_not_depend_on_who_made_the_std_units`, #964).
 - **xfail list.** A listed file that starts passing fails `diag_sem`: remove its line in the
   same commit (`YAVS_SEM_XFAIL_WRITE=1`, check the diff only removes lines). Any ICE fails the
   suite, xfail or not.

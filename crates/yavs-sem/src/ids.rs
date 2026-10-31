@@ -107,6 +107,86 @@ pub(crate) fn plain<R>(f: impl FnOnce() -> R) -> R {
     out
 }
 
+thread_local! {
+    static IMAGE_ORDER: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Run `f` (which writes an image) with the hash containers of `Db` in an order of their keys'
+/// bytes. Their own order follows the symbol numbers and the insertion history, which depend on
+/// where the units came from, so the image of one closure would differ between processes (#964).
+pub(crate) fn image_order<R>(f: impl FnOnce() -> R) -> R {
+    let before = IMAGE_ORDER.replace(true);
+    let r = f();
+    IMAGE_ORDER.set(before);
+    r
+}
+
+/// `items` in the order of their keys' bytes, with symbols as their text.
+fn in_image_order<T, K: serde::Serialize, E: serde::ser::Error>(
+    items: impl ExactSizeIterator<Item = T>,
+    key: impl Fn(&T) -> &K,
+) -> Result<Vec<T>, E> {
+    let mut bytes = Vec::new();
+    let mut all = Vec::with_capacity(items.len());
+    yavs_syntax::text_symbols(|| {
+        for item in items {
+            let start = bytes.len();
+            bytes =
+                postcard::to_extend(key(&item), std::mem::take(&mut bytes)).map_err(E::custom)?;
+            all.push((start, bytes.len(), item));
+        }
+        Ok(())
+    })?;
+    all.sort_unstable_by(|a, b| bytes[a.0..a.1].cmp(&bytes[b.0..b.1]));
+    Ok(all.into_iter().map(|e| e.2).collect())
+}
+
+/// Serializes a hash map like its derive does, in an image in the order of [`image_order`].
+pub(crate) fn ser_map<K, V, H, S>(
+    m: &std::collections::HashMap<K, V, H>,
+    s: S,
+) -> Result<S::Ok, S::Error>
+where
+    K: serde::Serialize,
+    V: serde::Serialize,
+    S: serde::Serializer,
+{
+    if m.len() < 2 || !IMAGE_ORDER.get() {
+        return s.collect_map(m);
+    }
+    s.collect_map(in_image_order::<_, _, S::Error>(m.iter(), |e| e.0)?)
+}
+
+/// [`ser_map`] for keys that order alike in every process (ids), much the most keys of an image.
+pub(crate) fn ser_id_map<K, V, H, S>(
+    m: &std::collections::HashMap<K, V, H>,
+    s: S,
+) -> Result<S::Ok, S::Error>
+where
+    K: serde::Serialize + Ord,
+    V: serde::Serialize,
+    S: serde::Serializer,
+{
+    if m.len() < 2 || !IMAGE_ORDER.get() {
+        return s.collect_map(m);
+    }
+    let mut all: Vec<_> = m.iter().collect();
+    all.sort_unstable_by_key(|e| e.0);
+    s.collect_map(all)
+}
+
+/// Serializes a hash set like its derive does, in an image in the order of [`image_order`].
+pub(crate) fn ser_set<K, H, S>(m: &std::collections::HashSet<K, H>, s: S) -> Result<S::Ok, S::Error>
+where
+    K: serde::Serialize,
+    S: serde::Serializer,
+{
+    if m.len() < 2 || !IMAGE_ORDER.get() {
+        return s.collect_seq(m);
+    }
+    s.collect_seq(in_image_order::<_, _, S::Error>(m.iter(), |k| *k)?)
+}
+
 fn reloc_on() -> bool {
     RELOC.with(|c| c.borrow().is_some())
 }

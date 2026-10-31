@@ -125,7 +125,8 @@ impl Db {
         }
         // Found now, while every page is decoded, instead of by every run that reads the image.
         self.run_time_pkgs = Some((self.run_time_key(), self.run_time_package_set()));
-        let (payload, table) = yavs_syntax::encode_table(|| postcard::to_stdvec(self));
+        let (payload, table) =
+            yavs_syntax::encode_table(|| crate::ids::image_order(|| postcard::to_stdvec(self)));
         let payload = payload.map_err(|e| e.to_string())?;
         let table = postcard::to_stdvec(&table).map_err(|e| e.to_string())?;
         let mut out = Vec::with_capacity(8 + table.len() + payload.len());

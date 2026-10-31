@@ -36,7 +36,7 @@ mod source;
 mod symbol;
 pub mod token;
 
-pub use symbol::{DecodeTable, Symbol, SymbolTable, encode_table, raw_symbols};
+pub use symbol::{DecodeTable, Symbol, SymbolTable, encode_table, raw_symbols, text_symbols};
 
 use yavs_diag::{Diagnostic, FileId, Severity, SourceFile, SourceMap, Span};
 

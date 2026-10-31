@@ -249,6 +249,16 @@ thread_local! {
     static ENC: std::cell::RefCell<Option<EncTable>> = const { std::cell::RefCell::new(None) };
     static DEC: std::cell::RefCell<Option<DecodeTable>> = const { std::cell::RefCell::new(None) };
     static RAW: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static TEXT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Run `f` with symbols written as their text: the bytes are the same in every process, whatever
+/// the symbols' numbers there. They are never read back, only compared.
+pub fn text_symbols<R>(f: impl FnOnce() -> R) -> R {
+    let before = TEXT.with(|t| t.replace(true));
+    let r = f();
+    TEXT.with(|t| t.set(before));
+    r
 }
 
 /// Run `f` with symbols written and read as their number in this process instead of through a
@@ -354,6 +364,9 @@ impl serde::Serialize for Symbol {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         if RAW.with(|r| r.get()) {
             return s.serialize_u32(self.0);
+        }
+        if TEXT.with(|t| t.get()) {
+            return s.serialize_str(self.as_str());
         }
         let i = ENC.with(|e| {
             let mut e = e.borrow_mut();

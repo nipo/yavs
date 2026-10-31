@@ -403,7 +403,7 @@ impl Store {
             let _ = fs::remove_file(&tmp);
             return Err(e);
         }
-        // Replacing an entry another process just wrote is fine: same key, same content.
+        // Replacing an entry another process just wrote is fine: same key, same meaning.
         if let Err(e) = fs::rename(&tmp, self.file(kind, key)) {
             let _ = fs::remove_file(&tmp);
             return Err(e);

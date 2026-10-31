@@ -40,7 +40,7 @@ Read the root `AGENTS.md` first. This file is for an agent about to change `crat
 - Bump `FORMAT` when the header layout changes. A change of the payload type is covered by `build_id`.
 - Key parts are length-prefixed (`KeyBuilder::part`): never concatenate before hashing.
 - Windows: `rename` over an entry another process has open or mapped fails; the writer drops its temporary
-  file and the existing entry (same key, same content) stays. A prune cannot remove a mapped entry either (ignored).
+  file and the existing entry (same key, same meaning) stays. A prune cannot remove a mapped entry either (ignored).
 - Never write to an entry file in place or truncate one: a run may hold it mapped (a damaged file is found when
   `get` validates it, not later). `unsafe` stays in `map.rs`.
 

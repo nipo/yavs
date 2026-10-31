@@ -214,6 +214,7 @@ pub struct Db {
     pub poison: Poison,
     pub(crate) root: ScopeId,
     /// `None`: the library is unknown and that was reported.
+    #[serde(serialize_with = "crate::ids::ser_map")]
     pub(crate) lib_by_key: HashMap<Symbol, Option<LibId>>,
     /// Parsed files per library: a file analyzed into several libraries is parsed once for
     /// each, as each library's units are separate (#290).

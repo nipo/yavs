@@ -23,8 +23,9 @@ pub(crate) type Touched = (H, Option<H>, Option<H>, usize);
 
 /// A `FxHashMap` whose writes are logged.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(transparent)]
+#[serde(transparent, bound(serialize = "K: Serialize, V: Serialize"))]
 pub struct TrackedMap<K: Eq + Hash, V> {
+    #[serde(serialize_with = "crate::ids::ser_map")]
     map: FxHashMap<K, V>,
     #[serde(skip, default = "Vec::new")]
     log: Vec<(K, Option<H>)>,
@@ -34,8 +35,9 @@ pub struct TrackedMap<K: Eq + Hash, V> {
 
 /// A `FxHashSet` whose writes are logged.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(transparent)]
+#[serde(transparent, bound(serialize = "K: Serialize"))]
 pub struct TrackedSet<K: Eq + Hash> {
+    #[serde(serialize_with = "crate::ids::ser_set")]
     set: FxHashSet<K>,
     #[serde(skip, default = "Vec::new")]
     log: Vec<(K, Option<H>)>,

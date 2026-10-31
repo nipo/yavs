@@ -2837,6 +2837,12 @@ Design: `docs/design/gui.md` (section 12 lists the same decisions).
   (memo tables, the parsed-file cache) is cleared by `Db::settle` after the closure on both paths, so a
   restored `Db` and a cold one continue from the same state. Symbols are written as indices into a
   per-image text table and interned when first read (`yavs_syntax::encode_table`/`DecodeTable`).
+- **The image of a closure is the same bytes whoever made the units behind it (#964).** Symbol numbers
+  depend on what a process interned first, so a shared std unit replayed from an entry another design
+  made, or analysed from source, used to change the order of the hash containers in the image.
+  `Db::to_image` writes those containers ordered by their keys' bytes with symbols as text
+  (`ids::image_order`); the wire format is unchanged. Unit entries are written in the hash order as before:
+  they are never compared, and two writers of one key give entries of the same meaning.
 - **Format.** `serde` with `postcard` (a maintained, specified, compact serde format), wrapped by
   `yavs-cache` in a header with magic, format version, key, length and an xxh3 checksum of the payload. Stored in
   `<work library dir>/yavs-cache/sem-<key>.img`; a write is a temporary file plus an atomic rename (no

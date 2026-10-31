@@ -192,13 +192,20 @@ pub(crate) enum Want {
 pub(crate) struct Remap {
     /// Regions whose content is cloned.
     roots: Vec<ScopeId>,
+    #[serde(serialize_with = "crate::ids::ser_id_map")]
     decls: FxHashMap<DeclId, DeclId>,
+    #[serde(serialize_with = "crate::ids::ser_id_map")]
     types: FxHashMap<TypeId, TypeId>,
+    #[serde(serialize_with = "crate::ids::ser_id_map")]
     subtypes: FxHashMap<SubtypeId, SubtypeId>,
+    #[serde(serialize_with = "crate::ids::ser_id_map")]
     scopes: FxHashMap<ScopeId, ScopeId>,
+    #[serde(serialize_with = "crate::ids::ser_id_map")]
     exprs: FxHashMap<ExprId, ExprId>,
+    #[serde(serialize_with = "crate::ids::ser_id_map")]
     stmts: FxHashMap<StmtId, StmtId>,
     /// Formal constants to actual expressions.
+    #[serde(serialize_with = "crate::ids::ser_id_map")]
     consts: FxHashMap<DeclId, ExprId>,
     /// First subtypes of formal types (a `subtype s is T` inherits the actual's constraint).
     /// Ordered: a hash set writes its elements in another order in every session.

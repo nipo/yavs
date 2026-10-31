@@ -42,6 +42,7 @@ pub struct Scope {
     /// The declaration this region belongs to, for expanded names (`proc_label.v`, `pkg.x`).
     pub owner: Option<DeclId>,
     /// Folded key to declarations, in declaration order.
+    #[serde(serialize_with = "crate::ids::ser_map")]
     pub names: HashMap<Symbol, Vec<DeclId>>,
     /// Declaration order, for cloning and for HIR consumers.
     pub order: Vec<DeclId>,
