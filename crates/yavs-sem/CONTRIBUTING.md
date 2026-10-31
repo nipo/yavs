@@ -282,7 +282,7 @@ generic.rs (S4) is in. What other modules can use, and what is still open:
 - Generic protected types (2019): generics analyzed opaquely, visible in the body; an object of
   one is `E1505`. `type t is new g generic map (...)` is `protected_instance` (generic.rs): the
   region is cloned at once, the body by `instance_body` (#29). A generic map in the protected
-  type header is still a not-implemented diagnostic.
+  type header makes the same kind of instance of a type that has no name (`protected_decl`, L169).
 - Open: anonymous generic types (`type is private` in an interface object, S7), formal packages
   with a map stay opaque inside the generic (their generics do not take the map's values). Mode
   views are cloned with their declaration (`r_view`; the converse of a clone is materialized

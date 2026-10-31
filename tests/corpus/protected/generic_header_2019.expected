@@ -1,0 +1,10 @@
+exit	0
+diag	note	0	0	:generic_header:blk:_p0	block pt 9
+diag	note	1000000	0	:generic_header:gen(1):_p0	gen 1 100
+diag	note	2000000	0	:generic_header:gen(2):_p0	gen 2 200
+diag	note	5000000	0	:generic_header:_p0	sh 42 44 30 40
+diag	note	5000000	0	:generic_header:_p0	copied 140
+diag	note	5000000	0	:generic_header:_p0	arch pt 4 arch
+diag	note	5000000	0	:generic_header:_p0	lp q
+diag	note	5000000	0	:generic_header:_p0	counters 1 3
+diag	note	5000000	0	:generic_header:_p0	generic_header ok

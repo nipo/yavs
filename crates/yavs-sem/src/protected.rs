@@ -157,6 +157,14 @@ impl Db {
         ))
     }
 
+    /// A protected type whose body is still to be written in its region: not an instance,
+    /// whose body comes from its generic, unless a header generic map made it one.
+    fn protected_body_pending(&self, t: TypeId) -> bool {
+        let t = self.generic.protected_header.get(&t).copied().unwrap_or(t);
+        matches!(self.types[t].kind, TypeKind::Protected { body: None, .. })
+            && !self.generic.protected.contains(&t)
+    }
+
     /// A shared variable of a protected type declared in the same region as the
     /// type, before its body: the body is not elaborated yet (14.4.2, `E1230`).
     /// In a package declaration the body is in the package body, so it is always
@@ -169,10 +177,7 @@ impl Db {
         span: Span,
     ) -> Result<(), Reported> {
         let t = self.base(st);
-        let TypeKind::Protected { body: None, .. } = self.types[t].kind else {
-            return Ok(());
-        };
-        if self.generic.protected.contains(&t) {
+        if !self.protected_body_pending(t) {
             return Ok(());
         }
         let tdecl = self.types[t].decl;
@@ -453,12 +458,7 @@ impl Db {
             .order
             .iter()
             .filter_map(|&d| match self.decls[d].kind {
-                DeclKind::Type(t)
-                    if matches!(self.types[t].kind, TypeKind::Protected { body: None, .. })
-                        && !self.generic.protected.contains(&t) =>
-                {
-                    Some(t)
-                }
+                DeclKind::Type(t) if self.protected_body_pending(t) => Some(t),
                 _ => None,
             })
             .collect();

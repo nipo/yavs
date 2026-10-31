@@ -62,7 +62,7 @@ For comparison, over the rows that have a probe, the references run the probe (`
 | 030 | Garbage collection | not applicable | - | - | - | - | implementation property, no source syntax; `deallocate` and heap reuse are covered by the access type tests |
 | 032 | `PATH_NAME` and `INSTANCE_NAME` with protected types | supported | ok/ok (output differs) | reject/ok | ok/ok (output differs) | ok | `pt'path_name` inside a method: yavs and two references give `:top:pt`, one gives `:top:sv:`, one `:top:sv:pt:` (catalogued as `protected-path-name`) |
 | 033 | Composition with protected types | supported | ok | ok | ok | ok | a protected variable inside a protected body |
-| 034 | Protected types with a generic clause | supported | reject | reject | reject | ok | `type t is new p.box generic map (..)` instantiates the type: methods, generics in the body, several instances (#29). A generic map in the protected type header is not implemented |
+| 034 | Protected types with a generic clause | supported | reject | reject | reject | ok | `type t is new p.box generic map (..)` instantiates the type: methods, generics in the body, several instances (#29). So does a generic map in the protected type header, `generic (w : integer); generic map (w => 4);` (L169) |
 | 036a | Conditional expressions in declarations | supported | ok | reject | ok | ok |  |
 | 041 | Record introspection and type reflection | supported | ok | reject | reject | ok (output differs) | `integer'reflect.simple_name` is `INTEGER` in yavs and sim1, `integer` in sim4 (sim2 and sim3 reject the probe; catalogued as `reflect-integer-simple-name`) |
 | 043 | Attributes for PSL | not tested | - | - | - | - | PSL is out of scope of this page |
@@ -125,9 +125,8 @@ The matrix above is the 2026-10-19 audit and is kept as written. These rows were
 
 - **006c Directory API**: besides existence and working-directory queries, `dir_open`, `dir_itemisdir`, `dir_itemisfile`,
   `dir_createdir` and `dir_deletedir` run and return `status_ok`. `dir_deletefile` and the other functions were not probed.
-- **034 Protected types with a generic clause**: a generic map in the protected type header (`type t is protected generic map (..)`)
-  is a syntax error (`E0002`, "expected `;`"), not a not-implemented diagnostic. The row stays partial: `type t is new p.box generic
-  map (..)` works (test `tests/corpus/protected/generic_instance_2019.vhd`).
+- **034 Protected types with a generic clause**: `type t is new p.box generic map (..)` works (test `tests/corpus/protected/generic_instance_2019.vhd`), and so does a generic map in the protected type header (test
+  `tests/corpus/protected/generic_header_2019.vhd`, L169). The 2026-10-28 note here reported a syntax error for a probe that left out the `;` between the generic clause and the generic map: `E0002` is right for that form.
 - **050 Assert API**: `SetVhdlAssertEnable` and `GetVhdlAssertEnable` run. `SetVhdlAssertFormat` and `GetVhdlAssertFormat` run (#922), and `PslAssertFailed` and `PslIsCovered` stop it with `E3009` "native subprogram ... is not implemented in
   yavs yet" (`lib/NATIVE.md` lists the unimplemented PSL state natives). The matrix row covers the counting functions only.
 - **055a, 071a, 082, 059a, 061**: the probes (`end;` of a component, a trailing semicolon in port, generic and parameter lists, an empty

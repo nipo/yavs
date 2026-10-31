@@ -157,8 +157,12 @@ pub struct GenericState {
     /// Instances of generic protected types (`protected_instance`): their body is cloned
     /// from the generic's at elaboration, not written in their region.
     pub(crate) protected: TrackedSet<TypeId>,
-    /// Uninstantiated subprograms of headers with a generic map (`header_instance`).
+    /// Uninstantiated subprograms and protected types of headers with a generic map
+    /// (`header_instance`, `Db::protected_decl`).
     pub(crate) header: TrackedSet<DeclId>,
+    /// The instance a protected type header with a generic map declares, to its
+    /// uninstantiated type, which holds the body.
+    pub(crate) protected_header: TrackedMap<TypeId, TypeId>,
     /// Generic constants, types and packages of packages and subprograms not yet
     /// looked up (`W1501`; `Db::lookup` removes them).
     pub(crate) unused: TrackedSet<DeclId>,
@@ -467,13 +471,16 @@ impl Db {
         span: Span,
     ) -> Result<(), Reported> {
         let t = self.base(st);
-        if !matches!(
-            self.types[t].kind,
-            TypeKind::Protected {
-                generics: Some(_),
-                ..
-            }
-        ) {
+        // In its own body, the name of a type with a header generic map is that generic.
+        if self.generic.header.contains(&self.types[t].decl)
+            || !matches!(
+                self.types[t].kind,
+                TypeKind::Protected {
+                    generics: Some(_),
+                    ..
+                }
+            )
+        {
             return Ok(());
         }
         let d = self.types[t].decl;
@@ -1261,12 +1268,13 @@ impl Db {
     ) -> Result<(), Reported> {
         let st = self.type_mark(scope, protected)?;
         let gt = self.base(st);
-        let TypeKind::Protected {
-            decl_scope: gscope,
-            generics: Some(formals),
-            ..
-        } = &self.types[gt].kind
-        else {
+        if !matches!(
+            self.types[gt].kind,
+            TypeKind::Protected {
+                generics: Some(_),
+                ..
+            }
+        ) {
             return Err(self.error(
                 Diagnostic::error(
                     diag::NOT_GENERIC,
@@ -1274,6 +1282,27 @@ impl Db {
                 )
                 .with_primary(protected.span, "expected an uninstantiated protected type"),
             ));
+        }
+        self.instantiate_protected(scope, d, name, gt, assocs, span)
+    }
+
+    /// Declare `d` as the instance of generic protected type `gt` with generic map `assocs`.
+    pub(crate) fn instantiate_protected(
+        &mut self,
+        scope: ScopeId,
+        d: DeclId,
+        name: ast::Ident,
+        gt: TypeId,
+        assocs: &[ast::AssocElem],
+        span: Span,
+    ) -> Result<(), Reported> {
+        let TypeKind::Protected {
+            decl_scope: gscope,
+            generics: Some(formals),
+            ..
+        } = &self.types[gt].kind
+        else {
+            return Err(self.ice(span, "instantiating a protected type without generics"));
         };
         let (gscope, formals) = (*gscope, formals.to_vec());
         let g = self.types[gt].decl;
@@ -1325,6 +1354,16 @@ impl Db {
         self.generic.maps.insert(inst, r);
         self.declare(scope, d);
         Ok(())
+    }
+
+    /// The uninstantiated type behind `d` when `d` is the instance a protected type header
+    /// with a generic map declared (`Db::protected_decl`).
+    pub(crate) fn header_protected(&self, d: DeclId) -> Option<DeclId> {
+        let DeclKind::Type(t) = self.decls[d].kind else {
+            return None;
+        };
+        let gt = *self.generic.protected_header.get(&t)?;
+        Some(self.types[gt].decl)
     }
 
     /// A subprogram declaration with a generic list and a generic map in its header

@@ -463,7 +463,9 @@ impl Db {
     }
 
     /// `type T is protected ... end protected;` (5.6.2). `T` is visible in its own
-    /// method profiles.
+    /// method profiles. With a generic clause and a generic map in the header, `T` is an
+    /// instance of an uninstantiated type that has no name of its own: `decl` is the
+    /// instance, a new declaration the generic (`Db::header_protected`).
     fn protected_decl(
         &mut self,
         scope: ScopeId,
@@ -472,6 +474,51 @@ impl Db {
         pt: &ast::ProtectedDecl,
         span: Span,
     ) -> Result<(), Reported> {
+        if let (None, Some(m)) = (&pt.generics, &pt.generic_map) {
+            let at = m.first().map_or(span, |a| a.span);
+            return Err(self.error(
+                Diagnostic::error(
+                    diag::NOT_GENERIC,
+                    format!("protected type `{}` has a generic map but no generic clause", name.text),
+                )
+                .with_primary(at, "nothing here for this map to associate with")
+                .with_note("LRM 5.6.2 (2019): the header is a generic clause, then optionally a generic map aspect")
+                .with_help("write `generic (...);` before `generic map (...);`"),
+            ));
+        }
+        let Some(assocs) = &pt.generic_map else {
+            let (ty, pscope) = self.new_protected(scope, decl, name, span);
+            self.declare(scope, decl);
+            return self.protected_region(ty, pscope, pt);
+        };
+        let g = self.new_decl(scope, Designator::Ident(name), DeclKind::Error, span);
+        self.generic.header.insert(g);
+        let (gt, pscope) = self.new_protected(scope, g, name, span);
+        // In its own region the name is the generic, which the instance's clone maps to itself.
+        self.scopes[scope]
+            .names
+            .entry(name.key)
+            .or_default()
+            .push(g);
+        let region = self.protected_region(gt, pscope, pt);
+        self.swap_name(scope, name.key, g, None);
+        region?;
+        self.instantiate_protected(scope, decl, name, gt, assocs, span)?;
+        let DeclKind::Type(ty) = self.decls[decl].kind else {
+            return Err(self.ice(span, "a protected instance without its type"));
+        };
+        self.generic.protected_header.insert(ty, gt);
+        Ok(())
+    }
+
+    /// The type of protected type declaration `decl` and its region, both still empty.
+    fn new_protected(
+        &mut self,
+        scope: ScopeId,
+        decl: DeclId,
+        name: Ident,
+        span: Span,
+    ) -> (TypeId, ScopeId) {
         let pscope = self.add_scope(crate::scope::ScopeKind::Protected, Some(scope), Some(decl));
         let ty = self.new_type(
             decl,
@@ -486,17 +533,19 @@ impl Db {
             span,
         );
         self.decls[decl].kind = DeclKind::Type(ty);
-        self.declare(scope, decl);
+        (ty, pscope)
+    }
+
+    /// The generics and declarative part of a protected type declaration.
+    fn protected_region(
+        &mut self,
+        ty: TypeId,
+        pscope: ScopeId,
+        pt: &ast::ProtectedDecl,
+    ) -> Result<(), Reported> {
         self.check_protected_decl_items(pt)?;
         if let Some(g) = &pt.generics {
-            // 2019 5.6.2: the generics are opaque here; a variable instantiates them.
-            if let Some(m) = pt.generic_map.as_ref().and_then(|m| m.first()) {
-                return Err(self.unsupported(
-                    m.span,
-                    "a generic map in a protected type header",
-                    "S7",
-                ));
-            }
+            // 2019 5.6.2: the generics are opaque here; an instance gives them values.
             let list = self.generic_list(pscope, g)?;
             if let TypeKind::Protected { generics, .. } = &mut self.types[ty].kind {
                 *generics = Some(list);
@@ -513,6 +562,15 @@ impl Db {
             let _ = self.check_protected_alias(a);
         }
         Ok(())
+    }
+
+    /// In `scope`, name `key` stops denoting `from` and denotes `to` instead, if any.
+    fn swap_name(&mut self, scope: ScopeId, key: Symbol, from: DeclId, to: Option<DeclId>) {
+        let Some(ds) = self.scopes[scope].names.get_mut(&key) else {
+            return;
+        };
+        ds.retain(|&d| d != from);
+        ds.extend(to);
     }
 
     /// `type T is protected body ... end protected body;` (5.6.3).
@@ -536,6 +594,26 @@ impl Db {
                 ));
             }
         };
+        // The body of a type with a generic map in its header is the generic's, as a body
+        // for a subprogram with one is; in it, the name is the generic.
+        let Some(g) = self.header_protected(ty_decl) else {
+            return self.protected_body_of(scope, ty_decl, name, b, span);
+        };
+        let region = self.decls[ty_decl].scope;
+        self.swap_name(region, name.key, ty_decl, Some(g));
+        let res = self.protected_body_of(scope, g, name, b, span);
+        self.swap_name(region, name.key, g, Some(ty_decl));
+        res
+    }
+
+    fn protected_body_of(
+        &mut self,
+        scope: ScopeId,
+        ty_decl: DeclId,
+        name: Ident,
+        b: &ast::ProtectedBody,
+        span: Span,
+    ) -> Result<(), Reported> {
         let bscope = self.add_scope(
             crate::scope::ScopeKind::ProtectedBody,
             Some(scope),

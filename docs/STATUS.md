@@ -2742,7 +2742,8 @@ An installed binary finds `lib/` next to itself (#43).
   types also work in formal subprograms, in subprograms with a generic list and in user operators called with operator syntax
   (#308; sem suite `v2019/anonymous_{formal_subprogram,generic_subprogram,operator}*`, difftest
   `generics/anonymous_subprograms_2019_hand`). Generic protected types are instantiated with `type t is new g generic map (...)` (#29; sem suite
-  `v2019/generic_protected_instance_*`, difftest `protected/generic_instance_2019`).
+  `v2019/generic_protected_instance_*`, difftest `protected/generic_instance_2019`), or with a generic map in the
+  protected type header (#445, L169; sem suite `prot/header_generic_map_*`, difftest `protected/generic_header_2019`).
 - 2019 mode views and private variables (S7, #32): view declarations (`E1901`, `E1902`),
   `'converse` (`E1621` on a non-view), view ports and signal parameters (`E1903`), views in
   generic units; private variables visible only in the protected body (`E1105`), method aliases

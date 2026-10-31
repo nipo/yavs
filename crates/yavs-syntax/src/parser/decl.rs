@@ -311,6 +311,13 @@ impl Parser<'_> {
                     )?;
                     TypeDef::ProtectedBody(ProtectedBody { decls, end_name })
                 } else {
+                    if self.at_kw(Kw::Generic) {
+                        let at = self.span();
+                        self.require_2019(
+                            at,
+                            "a generic clause or generic map in a protected type",
+                        );
+                    }
                     let (generics, generic_map) = self.generic_header()?;
                     let decls = self.decls(false);
                     let end_name = self.end(

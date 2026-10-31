@@ -78,7 +78,8 @@ Module-local decisions go in this section in the same commit; LRM readings go to
   `SeqStmt`, `AssocElem` when adding fields); nodes are moved by value through every parse step.
 - Any change to diagnostic text changes `tests/diag/*.stderr`: bless and review.
 - 2019 protected type instantiation, `type t is new g generic map (...)`, is
-  `TypeDef::ProtectedInstance` (#29).
+  `TypeDef::ProtectedInstance` (#29). A generic clause or generic map in a protected type header
+  needs 2019 (`E0004`, L169).
 
 ## 5. How to work here
 

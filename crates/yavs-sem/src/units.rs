@@ -3053,6 +3053,7 @@ tables! {
     map generic.call_insts;
     map generic.protected;
     map generic.header;
+    map generic.protected_header;
     map generic.unused;
     map generic.wants;
     map generic.entities;
