@@ -124,6 +124,7 @@ rule 24).
 
 ## 4. Invariants and pitfalls
 
+- **The lowering state is written into the `low` cache entry, in the order of its maps.** A map or set in `Cx` is an `FxHashMap`/`FxHashSet`, never a std one (seeded per process), or the entry differs in every process (`cache.rs` `entries_do_not_depend_on_who_made_the_std_units`, #973).
 - Lowering a unit with errors is an ICE: callers must stop after sem errors.
 - Every function goes through the yavs-ir verifier; a verifier error is an ICE of this crate,
   never "fixed" by relaxing the verifier.

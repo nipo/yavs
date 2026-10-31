@@ -2847,6 +2847,9 @@ Design: `docs/design/gui.md` (section 12 lists the same decisions).
   `Db::to_image` writes those containers ordered by their keys' bytes with symbols as text
   (`ids::image_order`); the wire format is unchanged. Unit entries are written in the hash order as before:
   they are never compared, and two writers of one key give entries of the same meaning.
+- **The `low` entry is the same bytes too (#973).** The hash maps of the lowering state (`Cx`) are
+  `FxHashMap`s, not std maps seeded per process: their keys are ids, so one closure fills them alike in
+  every process, and no sorting on write is needed.
 - **Format.** `serde` with `postcard` (a maintained, specified, compact serde format), wrapped by
   `yavs-cache` in a header with magic, format version, key, length and an xxh3 checksum of the payload. Stored in
   `<work library dir>/yavs-cache/sem-<key>.img`; a write is a temporary file plus an atomic rename (no

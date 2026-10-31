@@ -7,7 +7,8 @@
 //! HIR, so a warm analysis cache changes nothing, and use the one decision reading of
 //! `covcond.rs`, so a directive and the counters it waives agree on the inputs.
 
-use std::collections::{BTreeSet, HashMap};
+use rustc_hash::FxHashMap as HashMap;
+use std::collections::BTreeSet;
 
 use yavs_diag::{Diagnostic, FileId, Span};
 use yavs_ir::CovWaiver;
@@ -125,7 +126,7 @@ enum What {
 /// The constructs of `file` by the start of their first token (the label, or the keyword).
 fn sites(db: &Db, file: FileId) -> HashMap<u32, Vec<What>> {
     let text = db.sources.get(file).text();
-    let mut out: HashMap<u32, Vec<What>> = HashMap::new();
+    let mut out: HashMap<u32, Vec<What>> = HashMap::default();
     for (_, s) in db.stmts.iter().filter(|(_, s)| s.span.file == file) {
         let start = s.span.start;
         let mut add = |at: u32, w: What| out.entry(at).or_default().push(w);

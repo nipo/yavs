@@ -1338,12 +1338,17 @@ library ieee;\nuse ieee.numeric_std.all;\nuse work.p.all;\nentity tb is end;\n\
 architecture a of tb is\nbegin\n\
   process begin report \"k=\" & integer'image(to_integer(inc(to_unsigned(6, 8)))); wait; end process;\nend;\n";
 
-/// The analysis image does not depend on where the units came from: a shared std unit replayed
+/// A closure whose run-time packages are lowered into an entry of their own (`low`).
+const WITH_LOW: &str = "library ieee;\nuse ieee.float_pkg.all;\nentity tb is end;\n\
+architecture a of tb is\n  signal s : float32 := to_float(7.0);\nbegin\n\
+  process begin report \"k=\" & integer'image(to_integer(s)); wait; end process;\nend;\n";
+
+/// The entries do not depend on where the units came from: a shared std unit replayed
 /// from an entry made after another design, or analysed from source, numbers its symbols
 /// differently, and the hash maps of an image must not show that (#964).
 #[test]
 fn entries_do_not_depend_on_who_made_the_std_units() {
-    for (name, source) in [("nested", NESTED), ("ieee", WITH_IEEE)] {
+    for (name, source) in [("nested", NESTED), ("ieee", WITH_IEEE), ("low", WITH_LOW)] {
         // One directory, emptied between runs: the paths are part of the keys and the images.
         let tmp = tempdir(&format!("whostd_{name}"));
         let std_cache = tmp.join("std");
@@ -1381,6 +1386,14 @@ fn entries_do_not_depend_on_who_made_the_std_units() {
             files
         };
         let replayed = image(&|| {});
+        // Hash maps seeded per process would show here without any change of the store (#973).
+        let again = image(&|| {});
+        if name == "low" {
+            assert!(
+                replayed.iter().any(|f| f.0.starts_with("low-")),
+                "no low entry"
+            );
+        }
         let from_source = image(&|| std::fs::remove_dir_all(&std_cache).expect("clear the store"));
         // The store made by an analysis that met other names first.
         let by_another = image(&|| {
@@ -1393,7 +1406,11 @@ fn entries_do_not_depend_on_who_made_the_std_units() {
             let other = format!("other:{}", tmp.join("other").display());
             yavs(&["analyze", "--work", &other, "o.vhd"]);
         });
-        for (how, files) in [("from source", from_source), ("by another", by_another)] {
+        for (how, files) in [
+            ("again", again),
+            ("from source", from_source),
+            ("by another", by_another),
+        ] {
             assert_eq!(files.len(), replayed.len(), "{name} {how}");
             for (a, b) in replayed.iter().zip(&files) {
                 assert_eq!(a.0, b.0, "{name} {how}");

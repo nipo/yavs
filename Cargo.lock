@@ -2266,6 +2266,7 @@ name = "yavs-lower"
 version = "0.11.0"
 dependencies = [
  "postcard",
+ "rustc-hash",
  "serde",
  "tempfile",
  "yavs-diag",

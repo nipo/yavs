@@ -30,7 +30,7 @@ mod reflect;
 mod stmt;
 mod ty;
 
-use std::collections::HashMap;
+use rustc_hash::{FxHashMap as HashMap, FxHashSet};
 
 use yavs_diag::{Diagnostic, Span};
 use yavs_ir::{
@@ -408,7 +408,7 @@ impl VarShape {
 pub(crate) struct Cx {
     pub opts: LowerOptions,
     /// Files of the std/ieee libraries yavs provides: no coverage counters there.
-    pub cov_skip: std::collections::HashSet<yavs_diag::FileId>,
+    pub cov_skip: FxHashSet<yavs_diag::FileId>,
     /// The waivers of the coverage directives of each file read so far, by decision.
     #[serde(skip)]
     pub cov_dirs: HashMap<yavs_diag::FileId, HashMap<ExprId, Vec<yavs_ir::CovWaiver>>>,
@@ -738,31 +738,31 @@ impl<'a> Lowerer<'a> {
                     })
                     .map(|(_, u)| u.file)
                     .collect(),
-                cov_dirs: HashMap::new(),
+                cov_dirs: HashMap::default(),
                 diags: Vec::new(),
-                tys: HashMap::new(),
-                natives: HashMap::new(),
-                foreigns: HashMap::new(),
-                funcs: HashMap::new(),
+                tys: HashMap::default(),
+                natives: HashMap::default(),
+                foreigns: HashMap::default(),
+                funcs: HashMap::default(),
                 queue: Vec::new(),
-                scope_func: HashMap::new(),
-                proc_drivers: HashMap::new(),
-                method_self: HashMap::new(),
-                objs: HashMap::new(),
-                const_dope: HashMap::new(),
-                rec_tables: HashMap::new(),
-                refl: HashMap::new(),
+                scope_func: HashMap::default(),
+                proc_drivers: HashMap::default(),
+                method_self: HashMap::default(),
+                objs: HashMap::default(),
+                const_dope: HashMap::default(),
+                rec_tables: HashMap::default(),
+                refl: HashMap::default(),
                 inst_size: 0,
                 names: Vec::new(),
-                sig_dopes: HashMap::new(),
-                decl_ranges: HashMap::new(),
+                sig_dopes: HashMap::default(),
+                decl_ranges: HashMap::default(),
                 pkg_sigs: Vec::new(),
                 arch_scopes: Vec::new(),
                 shared_size: 0,
                 shared_vars: Vec::new(),
-                rec_leaves: HashMap::new(),
-                actuals: HashMap::new(),
-                ext_sigs: HashMap::new(),
+                rec_leaves: HashMap::default(),
+                actuals: HashMap::default(),
+                ext_sigs: HashMap::default(),
                 ext_unbound: None,
                 ext_early: false,
                 context_funcs: Vec::new(),
@@ -770,7 +770,7 @@ impl<'a> Lowerer<'a> {
                 capture_vars: false,
                 free_objs: Vec::new(),
                 free_readers: Vec::new(),
-                region_inits: HashMap::new(),
+                region_inits: HashMap::default(),
             },
             packages: Vec::new(),
             units: Vec::new(),
@@ -853,8 +853,8 @@ impl<'a> Lowerer<'a> {
     /// The design is elaborated: the external aliases of subprograms are bound except
     /// `unbound` (alias, why), which make their subprograms fail when called (#255). Call it
     /// before lowering any subprogram that uses external names.
-    pub fn externals_bound(&mut self, unbound: HashMap<DeclId, String>) {
-        self.cx.ext_unbound = Some(unbound);
+    pub fn externals_bound(&mut self, unbound: std::collections::HashMap<DeclId, String>) {
+        self.cx.ext_unbound = Some(unbound.into_iter().collect());
     }
 
     /// The subprograms lowered so far that cannot be lowered ahead of the design: one that reads

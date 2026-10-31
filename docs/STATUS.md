@@ -7360,7 +7360,8 @@ ids already sorted. Test: `entries_are_the_same_in_every_process` (`crates/yavs/
 A closure's image also followed the symbol numbers of the process that made it, through the order of the `Fx` maps keyed by symbols, so
 the same closure gave other bytes when a shared std unit was analysed from source or came from an entry another design wrote (#964, a rare
 red `entries_are_the_same_in_every_process` on a fresh store). `Db::to_image` writes the hash containers ordered by their keys' bytes with
-symbols as text. Test: `entries_do_not_depend_on_who_made_the_std_units`. The `low` entry still differs per process (#973).
+symbols as text. Test: `entries_do_not_depend_on_who_made_the_std_units`. The `low` entry differed in every process because the lowering state held
+std hash maps, which are seeded per process; they are `FxHashMap`s now and the same test compares it (#973).
 
 ## llvm: protected-method calls compiled, calls from the interpreter on native frames (#510, 2026-10-22)
 
