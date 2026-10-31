@@ -39,6 +39,10 @@ pub struct Args {
     /// print it), `-WCODE` (stays a warning under `-Werror`).
     #[arg(short = 'W', value_name = "FLAG")]
     warn: Vec<String>,
+    /// What to do with the `-- yavs coverage exclude` directives in the sources: `apply` (check
+    /// them) or `ignore` (read none of them; a note says how many were left out).
+    #[arg(long, value_enum, value_name = "MODE", default_value = "apply")]
+    coverage_directives: crate::elab::DirectivesArg,
     /// Allow `std` and `ieee` as `--work` or `--map`: for building the standard libraries from their sources.
     #[arg(long)]
     bootstrap: bool,
@@ -318,10 +322,14 @@ pub fn run(a: Args, format: MessageFormat, color: bool, encoding: Encoding) -> E
             current.set(i);
             // Stamped before the read: an edit in between is never trusted.
             let stamp = yavs_lib::Stamp::of(file);
-            let hash = std::fs::read(file).map(|b| yavs_lib::hash_content(&b));
+            let bytes = std::fs::read(file);
+            let hash = bytes.as_ref().map(|b| yavs_lib::hash_content(b));
             let before = out.errors;
             let h = hash.as_deref().ok();
-            let r = if shadow.is_some() {
+            // A file with coverage directives is loaded whole, to check them.
+            let directives = a.coverage_directives == crate::elab::DirectivesArg::Apply
+                && bytes.as_ref().is_ok_and(|b| yavs_elab::covdir::mentions(b));
+            let r = if shadow.is_some() || directives {
                 db.analyze_file_hashed(work, file, rev, h)
             } else {
                 db.analyze_file_lazy(work, file, rev, h)
@@ -347,6 +355,11 @@ pub fn run(a: Args, format: MessageFormat, color: bool, encoding: Encoding) -> E
                 }
             }
             shown = db.diagnostics().len();
+            if directives && r.is_ok() && out.errors == before {
+                for d in yavs_elab::covdir::check_paths(&db, &[file.as_path()]) {
+                    out.emit(&db.sources, &d);
+                }
+            }
             let records = match r {
                 Ok(r) if out.errors == before => r,
                 _ => return Some(i),

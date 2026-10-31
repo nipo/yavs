@@ -94,6 +94,9 @@ pub struct Options {
     /// and fail when that finds a change the write log of the table missed (`units.rs`
     /// `Db::diff`). Default: debug builds; `YAVS_UNIT_CHECK=1` sets it for `yavs analyze`.
     pub unit_audit: bool,
+    /// Check the `-- yavs coverage exclude` directives of the files analysed (`--coverage-directives`,
+    /// done by the CLI after analysis; part of the key of the compilation cache).
+    pub cov_directives: bool,
 }
 
 /// The store of the analysed-unit cache (`docs/decisions.md` "Analysed-unit cache"): entries by
@@ -201,6 +204,7 @@ impl Options {
             unit_audit: cfg!(debug_assertions),
             stages: None,
             units: None,
+            cov_directives: true,
         }
     }
 }

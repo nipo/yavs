@@ -1127,6 +1127,9 @@ pub enum CovKind {
     Condition(u32),
     /// The same for a logic expression on the right side of an assignment.
     Expression(u32),
+    /// One combination of the inputs of a decision or logic expression (`state`: two bits per
+    /// input, 0 not evaluated, 1 false, 2 true), a requirement of [`CovComb`].
+    Combination(u32),
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
@@ -1137,6 +1140,8 @@ pub struct CovInfo {
     pub row: Option<CovRow>,
     /// A branch arm: what names it in reports.
     pub arm: Option<CovArm>,
+    /// A combination: the index of its decision in `Program::cov_conds`.
+    pub cond: Option<u32>,
 }
 
 /// What names a branch arm in a report (`if rst = '1'`, `else`, `when IDLE`).
@@ -1189,12 +1194,44 @@ pub enum CovNode {
 /// value `v` is `first + 2 * k + v`, `k` the number of non-constant inputs before `i`.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
 pub struct CovCond {
-    pub first: CovItem,
+    /// The counter of the first focused-expression row; `None` when only combinations are
+    /// measured.
+    pub first: Option<CovItem>,
     /// The number of inputs, at most [`COV_INPUTS`].
     pub inputs: u8,
     /// Inputs that are constant after elaboration (bit `i`): evaluated, but they have no rows.
     pub consts: u32,
     pub nodes: Vec<CovNode>,
+    /// The combination requirements of the same decision (`--cov-kind=combination`).
+    pub comb: Option<CovComb>,
+}
+
+/// The combinations of the inputs a decision can show: each reachable state is a requirement
+/// with its own counter. Short-circuit evaluation is part of the state: an input never
+/// evaluated is code 0, distinct from false.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
+pub struct CovComb {
+    /// The counter of `states[0]`; the others follow.
+    pub first: CovItem,
+    /// The reachable states, sorted. A state with an input of another value (code 3, a
+    /// `std_ulogic` that is not 0, 1, L or H) is not a combination.
+    pub states: Vec<u32>,
+    /// The source of each input, in the order patterns address them.
+    pub inputs: Vec<yavs_diag::Span>,
+    /// The `-- yavs coverage exclude` directives that waive combinations of this decision.
+    pub waivers: Vec<CovWaiver>,
+}
+
+/// A waiver of the combinations a pattern matches: state `s` matches when `s & care == want`.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct CovWaiver {
+    pub care: u32,
+    pub want: u32,
+    /// The directive as written after `exclude` (without the reason), for reports.
+    pub rule: String,
+    pub reason: String,
+    /// The directive's comment.
+    pub at: yavs_diag::Span,
 }
 
 /// The most inputs of a condition that is measured (two bits of the state each).
@@ -1207,6 +1244,9 @@ impl CovCond {
     /// while the other evaluated inputs keep their values; an input not evaluated is masked:
     /// it may take any value.
     pub fn hits(&self, state: u64) -> u64 {
+        if self.first.is_none() {
+            return 0;
+        }
         let n = usize::from(self.inputs);
         let code = |i: usize| (state >> (2 * i)) & 3;
         if (0..n).any(|i| code(i) == 3) {
@@ -1223,6 +1263,13 @@ impl CovCond {
             }
         }
         hits
+    }
+
+    /// The counter of the combination `state` is, if it is one: its index in `comb.states`.
+    pub fn comb_index(&self, state: u64) -> Option<usize> {
+        let c = self.comb.as_ref()?;
+        let s = u32::try_from(state).ok()?;
+        c.states.binary_search(&s).ok()
     }
 
     /// The results the tree can have: bit 0 false, bit 1 true. Input `flip` has the other
@@ -1360,10 +1407,11 @@ mod cov_tests {
 
     fn cond(nodes: &[CovNode], inputs: u8) -> CovCond {
         CovCond {
-            first: CovItem(0),
+            first: Some(CovItem(0)),
             inputs,
             consts: 0,
             nodes: nodes.to_vec(),
+            comb: None,
         }
     }
 

@@ -170,6 +170,18 @@ class TestPackage(unittest.TestCase):
                 vu.get_simulator_name()
             self.assertIn("expected a percentage from 0 to 100", stderr.getvalue())
 
+    def test_coverage_directives_argument(self):
+        vu = self._vunit("--yavs-cov-directives=ignore")
+        vu.get_simulator_name()
+        self.assertEqual(vu._args.yavs_cov_directives, "ignore")  # pylint: disable=protected-access
+        vu = self._vunit()
+        vu.get_simulator_name()
+        self.assertIsNone(vu._args.yavs_cov_directives)  # pylint: disable=protected-access
+        vu = self._vunit("--yavs-cov-directives=maybe")
+        with mock.patch("sys.stderr", new_callable=io.StringIO) as stderr, self.assertRaises(SystemExit):
+            vu.get_simulator_name()
+        self.assertIn("invalid choice", stderr.getvalue())
+
     def test_coverage_options(self):
         self._vunit().get_simulator_name()
         self.factory.check_sim_option("enable_coverage", True)
@@ -422,6 +434,20 @@ class TestYavsInterface(unittest.TestCase):
         self.assertFalse(any(arg.startswith("--cov") for arg in cmd))
         _, cmd, _ = self._simulate(make_config())
         self.assertFalse(any(arg.startswith("--cov") for arg in cmd))
+
+    def test_coverage_directives_reach_analyze_elab_and_run(self):
+        # Before the raw flags, so a flag of the project wins; not there without the argument
+        _, cmd, _ = self._simulate(make_config(), cov_directives="ignore")
+        self.assertIn("--coverage-directives=ignore", cmd)
+        _, cmd, _ = self._simulate(make_config(), elaborate_only=True, cov_directives="ignore")
+        self.assertIn("--coverage-directives=ignore", cmd)
+        _, cmd, _ = self._simulate(make_config(), cov_directives=None)
+        self.assertFalse(any(arg.startswith("--coverage-directives") for arg in cmd))
+        self.simif = YavsInterface(prefix="prefix", output_path=self.output_path, cov_directives="ignore")
+        project = self._project("2008")
+        self.simif.setup_library_mapping(project)
+        analyze = self.simif.compile_vhdl_file_command(project.get_source_files_in_order()[0])
+        self.assertIn("--coverage-directives=ignore", analyze)
 
     def test_command_line_enables_coverage_without_kinds(self):
         _, cmd, _ = self._simulate(make_config(), coverage=CoverageArgs(enabled=True))

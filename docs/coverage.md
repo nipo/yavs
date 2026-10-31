@@ -57,6 +57,7 @@ tells you whether one of the two tests adds nothing the other lacks.
 | `toggle` | for every `bit` and `std_ulogic`/`std_logic` scalar of every signal and port, the 0 to 1 and 1 to 0 changes |
 | `condition` | for every `if`/`elsif`, conditional assignment, `while`, `exit when` or `next when` with two or more inputs, one row per input and value |
 | `expression` | the same for the logic expression assigned to a signal or variable |
+| `combination` | for the same conditions and logic expressions, each combination of the values of the inputs that can occur (see Combinations); opt in with `--cov-kind` |
 
 ## Flags for `yavs run`
 
@@ -64,6 +65,7 @@ tells you whether one of the two tests adds nothing the other lacks.
 |------|---------|
 | `--cov[=FILE]` | turn coverage on; write the database to `FILE` (default `yavs.ycov` in the working directory). Write the `=` form: `--cov FILE` does not take the file |
 | `--cov-kind=LIST` | comma separated kinds from the table above; default `statement,branch,toggle` |
+| `--coverage-directives=MODE` | `apply` (default) checks the `-- yavs coverage exclude` directives in the sources and waives what they name; `ignore` reads none of them and says how many it left out. Also on `yavs analyze` and `yavs elab` |
 | `--cov-toggle-max=N` | leave signals with more than `N` scalars (default 65536, for example large memories) out of toggle coverage |
 | `--cov-test=NAME` | the name of this run's test in the database |
 | `--cov-exclude-translate-off` | also leave `translate_off` ... `translate_on` regions out |
@@ -86,12 +88,13 @@ Report options:
 | `--cobertura FILE.xml` | Cobertura XML for CI services, one entry per source line (it has no toggles, so those are only in the text and HTML reports) |
 | `--html DIR` | static pages that open from disk (`index.html`) |
 | `--root DIR` | the prefix stripped from the source paths in every report (default: the current directory) |
-| `--kind=LIST` (newer than 0.11.0) | report only these kinds (`statement`, `branch`, `toggle`, `condition`, `expression`, comma separated); `--total` and `--fail-under` then count only them |
+| `--kind=LIST` (newer than 0.11.0) | report only these kinds (`statement`, `branch`, `toggle`, `condition`, `expression`, `combination`, comma separated); `--total` and `--fail-under` then count only them |
 | `--total` (newer than 0.11.0) | print only the total coverage as one percentage such as `74.3%`: the items that ran over all items, after exclusions; cannot be combined with `--uncovered` or `--tests` |
 | `--fail-under=PCT` (newer than 0.11.0) | exit with status 1 when the total is below PCT (`80`, `92.5`); the report is printed as usual and `error[E0114]: coverage 70.0% is below the required 80.0%` follows on standard error. With `--total` the percentage is printed too |
 | `--uncovered[=yaml]` | one exclusion row per item that never ran, with file, line and the statement as a comment; `=yaml` prints a YAML exclusion file |
 | `--tests` | one row per item that ran, followed by `# tests:` and the tests that hit it; cannot be combined with `--uncovered` |
 | `--exclude FILE` | apply an exclusion file (see Exclusions) |
+| `--exclusions[=json]` | print the exclusion report instead of the summary (see The exclusion report); the HTML report gets the same page |
 
 ## Coverage in CI
 
@@ -127,6 +130,122 @@ the total is below 85%. Further arguments for `yavs cov report` go in
 `merge_coverage("coverage", args=["--cobertura", "coverage.xml"])`. Coverage is not available
 under `--yavs-debug`.
 
+## Combinations
+
+`--cov-kind=combination` measures, for every condition or logic expression with two or more inputs,
+which combinations of the input values occurred. The inputs are the operands of the logic
+operators (`and`, `or`, `nand`, `nor`, `xor`, `xnor`, `not`): in `count > 3 and ready` they are
+`count > 3` and `ready`, left to right as written. Each input is *false*, *true* or *not
+evaluated*: `and`, `or`, `nand` and `nor` on `boolean` and `bit` do not evaluate the right operand when the left
+one decides, and that is a combination of its own, not a false. `std_ulogic` operators evaluate both
+operands. For `if valid and ready` on booleans the requirements are `valid` false (with `ready`
+not evaluated), `valid` true and `ready` false, and both true. A `std_ulogic` input counts when it is
+`'0'`, `'L'`, `'1'` or `'H'`; any other value is no combination. Two readings of one object in a
+condition (`a and not a`) agree. Nothing is evaluated extra and no operand's order changes. Combinations are separate from
+the `condition` and `expression` rows (focused expression coverage), which stay as they are.
+
+A decision with an input that is constant after elaboration (a generic, a constant), more than 8
+inputs, or more than 512 combinations is not measured; with `--cov-kind=combination` that is warning
+`W2023` (its other coverage is unaffected).
+
+## Excluding combinations in the source
+
+A requirement that cannot occur is waived with a comment before the decision or assignment,
+one comment per exclusion, with an optional reason after `:`:
+
+```vhdl
+-- yavs coverage exclude condition (valid=false, ready=true): impossible handshake
+-- yavs coverage exclude condition (valid=false, ready=false): idle state
+if valid and ready then
+  transfer_data;
+end if;
+```
+
+The short forms are the same exclusions:
+
+```vhdl
+-- yavs cov exclude 01: impossible handshake       -- one symbol per input, in source order
+-- yavs cov exclude (valid=false, ready=true)      -- named inputs; the others are unrestricted
+-- yavs cov exclude 1--: reset handled elsewhere   -- for: if reset or (valid and ready) then
+active <= enable and not fault;                    -- an assignment: exclude expression ... or the short form
+```
+
+| Symbol | Meaning |
+|--------|---------|
+| `0` | the input was evaluated and false |
+| `1` | the input was evaluated and true |
+| `-` | anything, also not evaluated |
+
+- The positions are the inputs in source order, before any optimisation, and values refer to the input
+  itself, before a `not` in front of it: for `enable and not fault`, `01` is `enable` false,
+  `fault` true. Reordering the operands changes what a positional exclusion means; the named form does not
+  care. Exactly one symbol per input: a pattern is never padded.
+- A named input must be a plain name (`valid`); other operands (a relation, a function call) are
+  addressed by position. A name that is two inputs, or not an input, is an error.
+- Consecutive comments (comments and blank lines may stand between them) apply to the construct
+  that follows. Before an `if` they apply to its condition only, not to its `elsif`s or nested
+  decisions; a comment right before an `elsif` applies to that condition. A directive before a
+  conditional or selected assignment is ambiguous and is an error.
+- A waiver changes the requirements only: statements, branches and the other kinds count as before.
+  The count of a waived combination is still recorded; if it runs, that is shown, not an error.
+  Waived requirements leave the totals, which show `-` when none are left.
+- The directives and their reasons are saved in the `.ycov` file, so a report never reads the source
+  again. Merging a database that waives a combination with one that requires it is an error (`E0137`).
+  Editing a comment never changes the identity of a decision.
+
+Directives are checked when the sources are analysed, with or without coverage:
+
+```
+error[E2021]: exclusion has 2 positions, but the expression has 3 inputs
+  --> src/fifo.vhd:41:5
+   |
+41 |     -- yavs cov exclude 01
+   |     ^^^^^^^^^^^^^^^^^^^^^^ wrong number of positions
+42 |     if reset or (valid and ready) then
+   |        ------------------------------ the expression
+   |
+   = note: expected order: reset, valid, ready
+   = help: provide one symbol per input; use `-` for an unrestricted input
+```
+
+A malformed directive is an error (codes `E2020` to `E2025`: syntax, pattern, operand name, value,
+target, command), with a hint when a name is close (`vlaid` for `valid`). It is never repaired or
+partly applied. A duplicate or already covered exclusion is warning `W2020`, exclusions that waive
+every combination `W2021`, one that matches no combination `W2022` (on booleans the right operand
+is not evaluated when the left one decides, so `(valid=false, ready=true)` matches nothing: write
+`0-`), and `W2023` is a decision that is not measured. Warnings follow `-W`/`-Werror`.
+Only comments that start `-- yavs cov` or `-- yavs coverage` are read: other comments, text in a
+string and block comments are not. `--coverage-directives=ignore` reads none of them and prints a note with
+the number it left out.
+
+## The exclusion report
+
+`yavs cov report DB --exclusions` lists every rule that takes requirements out of the totals, the
+directives in the source and the rows of `--exclude FILE` together:
+
+```
+coverage exclusions: 2 rules, 3 requirements excluded
+
+  1. src/fifo.vhd:41  (in the source)  applied
+       rule:    condition (valid=false, ready=true)
+       reason:  impossible handshake
+       matches: 1 requirement, 0 of them ran
+         :tb:dut  src/fifo.vhd:43  valid is false, ready is true  in valid and ready  [0 hits]
+  ...
+kind         before       excluded   after
+combination  5/8 62.5%    3 (1 ran)  2/5 40.0%
+```
+
+For each rule: where it is, its text and reason, what it matched (with the operand values written out for a
+combination), the hits and the tests that ran it, and whether it was applied, is redundant (every
+requirement is excluded by an earlier rule), matches nothing, or is about a metric that these runs
+did not collect. A requirement more than one rule matches is listed under each and counted once. `--exclusions=json`
+prints the same as versioned JSON (`"version": 1`), the HTML report gets an `exclusions.html` page. A database written by an
+older yavs does not record in-source exclusions and the report says that instead of showing none.
+An exclusion file can also waive combinations: `combination INSTANCE HEX12.OCC PATTERN [FILE:LINE]`
+(YAML: `kind: combination`, `pattern`), where the pattern uses `0`, `1` and `-` as above and may
+match several requirements; `--uncovered` prints these rows.
+
 ## Excluding code
 
 In the source:
@@ -153,7 +272,7 @@ file */generated/*.vhd
 unit work.pkg_tools
 ```
 
-Row types are `statement`, `branch`, `condition`, `expression`, `toggle`, `instance`, `unit`
+Row types are `statement`, `branch`, `condition`, `expression`, `combination`, `toggle`, `instance`, `unit`
 and `file`; `*` and `?` match in instance paths, toggle paths, signal names and file
 patterns. A file whose name ends in `.yaml` or `.yml` is read as YAML:
 
@@ -181,6 +300,7 @@ there to read (a stale line is warning `W0110`). `yavs cov report --uncovered DB
 |-----|--------|
 | `statement`, `branch` | `INSTANCE HASH [FILE:LINE]` (YAML: `instance`, `hash`, `line`) |
 | `condition`, `expression` | `INSTANCE HEX12.OCC ROW` (YAML: plus `row: N`) |
+| `combination` | `INSTANCE HEX12.OCC PATTERN [FILE:LINE]` (YAML: `pattern`) |
 | `toggle` | `PATH SCALAR [rise\|fall]` (YAML: `instance`, `signal`, `direction`) |
 | `instance` | an instance path and everything below it |
 | `unit` | a package, such as `work.pkg_tools` |

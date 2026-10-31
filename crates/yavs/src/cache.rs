@@ -40,8 +40,8 @@ fn key(kind: &str, opts: &Options, files: &[ClosureFile]) -> Key {
     let mut k = KeyBuilder::new(kind);
     k.text(opts.rev.as_str())
         .text(&format!(
-            "{} {} {:?}",
-            opts.relaxed, opts.psl, opts.encoding
+            "{} {} {:?} {}",
+            opts.relaxed, opts.psl, opts.encoding, opts.cov_directives
         ))
         .text(&opts.stdlib.to_string_lossy());
     for (n, v) in &opts.defines {
@@ -416,8 +416,19 @@ fn debug(msg: String) {
 }
 
 /// Analyze `files` into `db`.
-fn analyze(db: &mut Db, files: &[ClosureFile]) -> Result<(), Reported> {
-    db.analyze_closure(files)
+fn analyze(db: &mut Db, files: &[ClosureFile], directives: bool) -> Result<(), Reported> {
+    db.analyze_closure(files)?;
+    if !directives {
+        return Ok(());
+    }
+    // Reported with the analysis, so that a cache hit replays them without reading the sources.
+    let paths: Vec<&Path> = files.iter().map(|f| f.path.as_path()).collect();
+    let mut bad = false;
+    for d in yavs_elab::covdir::check_paths(db, &paths) {
+        bad |= d.severity == yavs_diag::Severity::Error;
+        db.report(d);
+    }
+    if bad { Err(Reported) } else { Ok(()) }
 }
 
 /// Load the package bodies elaboration needs (`yavs_elab::load_bodies`), so that the image holds
@@ -477,8 +488,9 @@ pub fn analyze_closure(
         opts.units = Units::store_for(&opts, work_dir, shared_std, false);
     }
     if !enabled {
+        let directives = opts.cov_directives;
         let mut db = Db::new(opts);
-        let r = analyze(&mut db, files).and_then(|()| bodies(&mut db));
+        let r = analyze(&mut db, files, directives).and_then(|()| bodies(&mut db));
         db.settle();
         return (db, r);
     }
@@ -538,7 +550,7 @@ pub fn analyze_closure(
     }
     let first = start;
     for &b in bounds.iter().filter(|&&b| b > first) {
-        if let Err(r) = analyze(&mut db, &files[start..b]) {
+        if let Err(r) = analyze(&mut db, &files[start..b], opts.cov_directives) {
             return (db, Err(r));
         }
         start = b;
@@ -576,7 +588,7 @@ pub fn analyze_closure(
             }
         }
     }
-    let r = analyze(&mut db, &files[start..]);
+    let r = analyze(&mut db, &files[start..], opts.cov_directives);
     let r = r.and_then(|()| bodies(&mut db));
     db.settle();
     if r.is_err() {

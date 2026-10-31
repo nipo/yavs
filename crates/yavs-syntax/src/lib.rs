@@ -29,6 +29,7 @@
 pub mod ast;
 pub mod directive;
 mod lexer;
+pub use lexer::LineComment;
 mod parser;
 pub mod protect;
 mod source;
@@ -204,6 +205,18 @@ pub fn lexical_elements(text: &str, std: Std) -> Vec<(token::Tok, &str)> {
         .filter(|t| t.kind != token::Tok::Eof)
         .map(|t| (t.kind, &text[t.start as usize..t.end as usize]))
         .collect()
+}
+
+/// The `--` comments of `text` with the start of the token after each, found by the lexer: a
+/// `--` inside a string literal or a block comment is not one (what in-source pragmas read).
+pub fn line_comments(source: &SourceFile, std: Std) -> Vec<LineComment> {
+    let src = source::Src {
+        bytes: source.bytes(),
+        latin1: source.is_latin1(),
+    };
+    let mut out = Vec::new();
+    lexer::lex_with(FileId(0), src, std, false, &mut Vec::new(), Some(&mut out));
+    out
 }
 
 /// Parse UTF-8 text that is not in a [`SourceMap`] (tests and tools).

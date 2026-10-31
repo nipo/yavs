@@ -741,15 +741,35 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   ...`) and per test its items and the items no other test hit. `yavs cov` exits 0, or 1 with `E0111` (a database cannot be
   read), `E0114`, `E0115`, `E0112` (an exclusion file cannot be read or has a malformed row) or `E0110` (a file
   cannot be written), or when `-Werror` makes a warning an error; `run` exits at least 1 when the database cannot be written (`E0110`). The
-  database format (a `yavs-coverage 5` line, a tests section of `test`, id, name lines with
+  database format (a `yavs-coverage 6` line, a tests section of `test`, id, name lines with
   ids numbering the names in sorted order, then one tab-separated item per line: kind `s` or
   `bN`, path, statement text hash, occurrence, count, tests, line, file, statement text for
   display; conditions and expressions: kind `cN` or `eN` (N = 2 * input + value), the same fields with the
   input's text before the display text (the result the input decides alone, a space, the whole
   condition); toggles: kind `t1` (0->1) or `t0` (1->0), path, scalar name, count, tests, line,
-  file; tests is the comma-separated ids of the tests that hit the item, `-` for none) is
-  yavs's own and may change with its version line; versions 2 to 4 are still read (2 and 3 without
-  tests, 2 to 4 without conditions). Cobertura output has no toggles.
+  file; combinations: kind `mS` (S = the state: two bits per input, 0 not evaluated, 1 false, 2 true),
+  the condition fields, the input texts separated by U+001F before the display text, and last the
+  in-source waivers (`-` for none; else rule, reason, file and line separated by U+001F, waivers
+  by U+001E); tests is the comma-separated ids of the tests that hit the item, `-` for none) is
+  yavs's own and may change with its version line; versions 2 to 5 are still read (2 and 3 without
+  tests, 2 to 4 without conditions, 2 to 5 without combinations and in-source exclusions, so
+  `cov report --exclusions` says it has no record). Cobertura output has no toggles and no
+  combinations.
+
+  `--cov-kind=combination` (#883) counts, per condition or logic expression with two or more
+  inputs, each combination of input values that can occur (an input a short-circuit operator
+  skips is "not evaluated", distinct from false; at most 8 inputs and 512 combinations, else
+  warning `W2023`). `-- yavs coverage exclude ...` comments (`-- yavs cov` is the same) waive
+  combinations of the decision, `elsif` or assignment right after them; they are checked at analysis
+  by `analyze`, `elab` and `run`, with or without coverage: `E2020` to `E2025` are errors,
+  `W2020` to `W2023` warnings (`docs/coverage.md`). `--coverage-directives=apply|ignore`
+  (`analyze`, `elab`, `run`) chooses whether they are read at all; with `ignore` they are neither
+  checked nor applied and a note counts them. Waived combinations are out of the totals like other
+  exclusions, their raw counts stay in the database, and `cov merge` of a database that waives
+  one with a database that requires it is `E0137`. `cov report --exclusions[=text|json]` prints
+  the exclusion report of in-source directives and `--exclude` rows together (JSON `"version": 1`),
+  and `--html` adds `exclusions.html`; exclusion files take `combination INSTANCE HEX12.OCC
+  PATTERN` rows.
 
 ## 5a. `yavs lint`
 
@@ -850,5 +870,4 @@ the run's speed); `never` is the default; any other value is error E0801.
 
 ## 8. Not covered yet
 
-Condition-combination exclusions (#883): inline `-- yavs cov exclude ...` directives and the
-opt-in combination metric they refine are not implemented.
+Nothing at present.

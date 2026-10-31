@@ -15,7 +15,30 @@ pub(crate) fn lex(
     psl: bool,
     diags: &mut Vec<Diagnostic>,
 ) -> Vec<Token> {
+    lex_with(file, src, std, psl, diags, None)
+}
+
+/// A `--` comment: its bytes (from the dashes to the end of the line) and the start of the
+/// token after it (`None` at the end of the file).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LineComment {
+    pub start: u32,
+    pub end: u32,
+    pub next: Option<u32>,
+}
+
+/// [`lex`], with the `--` comments (not PSL pragmas) added to `comments` when it is given.
+pub(crate) fn lex_with(
+    file: FileId,
+    src: Src,
+    std: Std,
+    psl: bool,
+    diags: &mut Vec<Diagnostic>,
+    comments: Option<&mut Vec<LineComment>>,
+) -> Vec<Token> {
     let mut lx = Lexer {
+        comments,
+        waiting: 0,
         file,
         src,
         b: src.bytes,
@@ -41,6 +64,10 @@ struct Lexer<'a> {
     diags: &'a mut Vec<Diagnostic>,
     toks: Vec<Token>,
     pragma: Pragma,
+    /// Where the `--` comments go, if asked for, and how many of the last ones wait for the
+    /// next token to give them its start.
+    comments: Option<&'a mut Vec<LineComment>>,
+    waiting: usize,
 }
 
 /// Where the lexer is relative to a `-- psl` comment pragma: its text is lexed as tokens, and
@@ -161,6 +188,13 @@ impl Lexer<'_> {
         if self.pragma == Pragma::Open {
             self.pragma = Pragma::Off;
         }
+        if let Some(c) = self.comments.as_deref_mut() {
+            let n = c.len();
+            for x in &mut c[n - self.waiting..] {
+                x.next = Some(start as u32);
+            }
+            self.waiting = 0;
+        }
         self.toks.push(Token {
             kind,
             start: start as u32,
@@ -250,7 +284,19 @@ impl Lexer<'_> {
             self.pos += 2;
             self.pragma = Pragma::Line;
         } else {
+            let start = self.pos;
             self.skip_line();
+            let end = self.b[start..self.pos]
+                .strip_suffix(b"\r")
+                .map_or(self.pos, |t| start + t.len());
+            if let Some(c) = self.comments.as_deref_mut() {
+                c.push(LineComment {
+                    start: start as u32,
+                    end: end as u32,
+                    next: None,
+                });
+                self.waiting += 1;
+            }
         }
     }
 

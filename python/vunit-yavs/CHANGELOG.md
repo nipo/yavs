@@ -4,6 +4,9 @@
 
 - `native_library_hooks` passes `--load` to the elaborate-only step (`--elaborate`) as well as to the run, because a foreign
   function may be called while the design is elaborated; it returns `elab_flags` instead of `run_flags`.
+- `yavs.cov_kind` takes `combination`, and `--yavs-cov-directives apply|ignore` passes `--coverage-directives` to
+  `yavs analyze`, `elab` and `run`: the `-- yavs coverage exclude` comments of the sources are checked when compiling
+  (a malformed one fails the compile step) unless `ignore` is given. Needs a yavs with combination coverage.
 - `native_library_hooks(library_file, args="fat-pointer")` loads a native library in that argument layout.
 - `VUNIT_YAVS_MAX_THREADS` sets the thread cap for run scripts that parse their own command line (no `--yavs-max-threads`).
 - The token server: a simulation uses at most 4 threads unless `yavs.max_threads` or `--yavs-max-threads` says more (many

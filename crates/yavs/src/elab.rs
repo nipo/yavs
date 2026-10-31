@@ -61,6 +61,11 @@ pub struct Common {
     /// else `yavs/std` in the user's cache directory).
     #[arg(long, value_name = "DIR|off")]
     std_cache: Option<std::ffi::OsString>,
+    /// What to do with the `-- yavs coverage exclude` directives in the sources: `apply` (check
+    /// them and waive the combinations they name) or `ignore` (read none of them; a note says how
+    /// many were left out).
+    #[arg(long, value_enum, value_name = "MODE", default_value = "apply")]
+    coverage_directives: DirectivesArg,
     /// Keep every `in` port its own signal instead of an alias of its actual (to compare against
     /// the default).
     #[arg(long)]
@@ -74,6 +79,16 @@ pub struct Common {
     /// A generic of the top level, `-gNAME=VALUE` (the value is taken verbatim).
     #[arg(short = 'g', value_name = "NAME=VALUE", value_parser = crate::parse_define)]
     generics: Vec<(String, String)>,
+}
+
+/// What `--coverage-directives` takes.
+#[cfg_attr(test, derive(Debug))]
+#[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum DirectivesArg {
+    /// Check the directives and waive what they name.
+    Apply,
+    /// Read none of them.
+    Ignore,
 }
 
 #[cfg_attr(test, derive(Debug))]
@@ -412,6 +427,9 @@ pub enum CovKindArg {
     Condition,
     /// The same for the logic expression assigned to a signal or variable.
     Expression,
+    /// Each combination of the inputs of conditions and logic expressions that can occur
+    /// (an input a short-circuit operator skips counts as not evaluated, not as false).
+    Combination,
 }
 
 #[cfg_attr(test, derive(Debug))]
@@ -520,6 +538,7 @@ fn elaborate(
     let mut opts = Options::new(rev, yavs_sem::default_stdlib());
     opts.libraries = libs;
     opts.relaxed = c.relaxed;
+    opts.cov_directives = lowering.cov_directives;
     opts.psl = c.psl;
     opts.defines = c.defines.clone();
     opts.encoding = encoding;
@@ -545,6 +564,10 @@ fn elaborate(
         out.emit(&db.sources, d);
     }
     if analyzed.is_err() || out.errors > 0 {
+        return Err((out, 2));
+    }
+    coverage_directives(&mut out, &db, &lowering);
+    if out.errors > 0 {
         return Err((out, 2));
     }
     crate::timing::mark("analyze");
@@ -579,6 +602,31 @@ fn elaborate(
                 out.emit(&db.sources, d);
             }
             Err((out, 2))
+        }
+    }
+}
+
+/// Say that the in-source coverage directives are left out (`--coverage-directives=ignore`), or,
+/// when combinations are measured, warn about the decisions that cannot be. Their checks ran with
+/// the analysis (`cache.rs`), whether or not coverage is collected.
+fn coverage_directives(out: &mut Out, db: &Db, lowering: &yavs_elab::LowerOptions) {
+    if !lowering.cov_directives {
+        if let n @ 1.. = yavs_elab::covdir::count(db) {
+            out.emit(
+                &db.sources,
+                &Diagnostic::new(
+                    yavs_diag::Severity::Note,
+                    "",
+                    format!(
+                        "`--coverage-directives=ignore`: {n} `-- yavs coverage exclude` directive{} left out, none checked or applied",
+                        if n == 1 { "" } else { "s" }
+                    ),
+                ),
+            );
+        }
+    } else if lowering.cov_combination {
+        for d in yavs_elab::covdir::unmeasured_all(db) {
+            out.emit(&db.sources, &d);
         }
     }
 }
@@ -1353,11 +1401,14 @@ fn prepare(
     let lowering_counters = kind(CovKindArg::Statement)
         || kind(CovKindArg::Branch)
         || kind(CovKindArg::Condition)
-        || kind(CovKindArg::Expression);
+        || kind(CovKindArg::Expression)
+        || kind(CovKindArg::Combination);
     let lowering = yavs_elab::LowerOptions {
         coverage: kind(CovKindArg::Statement) || kind(CovKindArg::Branch),
         cov_condition: kind(CovKindArg::Condition),
         cov_expression: kind(CovKindArg::Expression),
+        cov_combination: kind(CovKindArg::Combination),
+        cov_directives: a.common.coverage_directives == DirectivesArg::Apply,
         ..yavs_elab::LowerOptions::default()
     };
     let libs = match install_foreign(&a.common.load) {
@@ -2151,6 +2202,7 @@ pub fn run(
             yavs_cov::Kind::Toggle(_) => false,
             yavs_cov::Kind::Condition(_) => kind(CovKindArg::Condition),
             yavs_cov::Kind::Expression(_) => kind(CovKindArg::Expression),
+            yavs_cov::Kind::Combination(_) => kind(CovKindArg::Combination),
         });
         if let Some(t) = &toggles {
             t.add_to(&mut cov);

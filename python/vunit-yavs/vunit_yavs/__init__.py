@@ -243,6 +243,13 @@ class YavsInterface(SimulatorInterface):
             "it is set for. Merge and report with results.merge_coverage() in the post_run function.",
         )
         group.add_argument(
+            "--yavs-cov-directives",
+            choices=["apply", "ignore"],
+            default=None,
+            help="What yavs does with the '-- yavs coverage exclude' comments in the sources, when analysing, "
+            "elaborating and running: apply (yavs's default) or ignore (read none of them).",
+        )
+        group.add_argument(
             "--yavs-cov-html",
             default=None,
             metavar="DIR",
@@ -301,6 +308,7 @@ class YavsInterface(SimulatorInterface):
             max_threads=getattr(args, "yavs_max_threads", None) or _max_threads_from_environment(),
             tokens=tokens,
             lint=getattr(args, "yavs_lint", False),
+            cov_directives=getattr(args, "yavs_cov_directives", None),
             coverage=CoverageArgs(
                 enabled=getattr(args, "yavs_cov", False),
                 html=getattr(args, "yavs_cov_html", None),
@@ -327,9 +335,11 @@ class YavsInterface(SimulatorInterface):
         tokens=None,
         coverage=None,
         lint=False,
+        cov_directives=None,
     ):  # pylint: disable=too-many-arguments
         SimulatorInterface.__init__(self, output_path, False)
         self._lint = lint
+        self._cov_directives = cov_directives
         self._coverage = coverage or CoverageArgs()
         self._coverage_files = set()  # The database of every simulation run with coverage
         self._prefix = prefix
@@ -462,6 +472,10 @@ class YavsInterface(SimulatorInterface):
 
         for library in self._project.get_libraries():
             cmd += [f"--map={library.name}:{library.directory}"]
+
+        if self._cov_directives is not None:
+            # Before the raw flags, so --coverage-directives in yavs.global_flags wins
+            cmd += [f"--coverage-directives={self._cov_directives}"]
 
         # Keep the shared std/ieee units in the output directory, not the user's cache. A --std-cache in the raw
         # flags, which come later, wins (last one wins in yavs).

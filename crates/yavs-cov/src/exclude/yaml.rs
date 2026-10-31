@@ -20,11 +20,12 @@ use saphyr_parser::{Event, Parser};
 use yavs_diag::suggest::tail;
 
 /// The kinds of exclusion an entry may have.
-pub(super) const KINDS: [&str; 8] = [
+pub(super) const KINDS: [&str; 9] = [
     "statement",
     "branch",
     "condition",
     "expression",
+    "combination",
     "toggle",
     "instance",
     "unit",
@@ -155,6 +156,10 @@ fn entry(line: usize, n: Node) -> Result<Row, String> {
             &["kind", "instance", "hash", "row", "line", "reason"],
             &["instance", "hash", "row"],
         ),
+        "combination" => (
+            &["kind", "instance", "hash", "pattern", "line", "reason"],
+            &["instance", "hash", "pattern"],
+        ),
         "toggle" => (
             &["kind", "instance", "signal", "direction", "reason"],
             &["instance", "signal"],
@@ -190,11 +195,11 @@ fn entry(line: usize, n: Node) -> Result<Row, String> {
     }
     let bad = |m: &str| err(line, &format!("{m}: kind `{kind}`"));
     let rule = match kind {
-        "statement" | "branch" | "condition" | "expression" => item_rule(
+        "statement" | "branch" | "condition" | "expression" | "combination" => item_rule(
             ItemKind::word(kind).unwrap_or(ItemKind::Statement),
             find("instance").unwrap_or_default(),
             find("hash").unwrap_or_default(),
-            find("row"),
+            find("row").or_else(|| find("pattern")),
             find("line").filter(|s| !s.is_empty()),
             &bad,
         )?,
@@ -207,8 +212,17 @@ fn entry(line: usize, n: Node) -> Result<Row, String> {
         "unit" => Rule::Unit(find("unit").unwrap_or_default().into()),
         _ => Rule::File(find("file").unwrap_or_default().into()),
     };
+    let text = std::iter::once(kind.to_string())
+        .chain(
+            get.iter()
+                .filter(|f| f.1 != "kind" && f.1 != "reason")
+                .map(|f| format!("{}={}", f.1, f.2)),
+        )
+        .collect::<Vec<_>>()
+        .join(" ");
     Ok(Row {
         rule,
+        text,
         reason: find("reason").unwrap_or_default().trim().to_string(),
         line,
     })

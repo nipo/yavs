@@ -13,6 +13,7 @@ mod access;
 mod assoc;
 mod composite;
 mod covcond;
+pub mod covdir;
 mod edge;
 mod expr;
 mod file;
@@ -56,6 +57,10 @@ pub struct LowerOptions {
     pub cov_condition: bool,
     /// Emit expression coverage of the values of assignments.
     pub cov_expression: bool,
+    /// Emit the combinations of the inputs of decisions and logic expressions.
+    pub cov_combination: bool,
+    /// Apply the `-- yavs coverage exclude` directives (`--coverage-directives`).
+    pub cov_directives: bool,
     /// Run the subprograms of `yavs_ir::ieee` from their VHDL bodies (the environment variable `YAVS_NO_NATIVE_IEEE`).
     pub no_native_ieee: bool,
 }
@@ -63,7 +68,7 @@ pub struct LowerOptions {
 impl LowerOptions {
     /// Any counters at all: code lowered for a run without them is not the code to reuse.
     pub fn any_coverage(&self) -> bool {
-        self.coverage || self.cov_condition || self.cov_expression
+        self.coverage || self.cov_condition || self.cov_expression || self.cov_combination
     }
 }
 
@@ -75,6 +80,8 @@ impl Default for LowerOptions {
             coverage: false,
             cov_condition: false,
             cov_expression: false,
+            cov_combination: false,
+            cov_directives: true,
             no_native_ieee: std::env::var_os("YAVS_NO_NATIVE_IEEE").is_some(),
         }
     }
@@ -402,6 +409,9 @@ pub(crate) struct Cx {
     pub opts: LowerOptions,
     /// Files of the std/ieee libraries yavs provides: no coverage counters there.
     pub cov_skip: std::collections::HashSet<yavs_diag::FileId>,
+    /// The waivers of the coverage directives of each file read so far, by decision.
+    #[serde(skip)]
+    pub cov_dirs: HashMap<yavs_diag::FileId, HashMap<ExprId, Vec<yavs_ir::CovWaiver>>>,
     /// Empty in an image (`Lowerer::image` refuses otherwise).
     #[serde(skip)]
     pub diags: Vec<Diagnostic>,
@@ -596,7 +606,26 @@ impl Cx {
         on && !self.cov_skip.contains(&file)
     }
 
-    /// The counter of row `kind` of a condition or expression at `span`.
+    /// Whether the combinations of a decision in file `file` are measured.
+    pub fn cov_comb_on(&self, file: yavs_diag::FileId) -> bool {
+        self.opts.cov_combination && !self.cov_skip.contains(&file)
+    }
+
+    /// The waivers the directives of the file give the decision `e` (empty under
+    /// `--coverage-directives=ignore`). Errors in the directives were reported at analysis.
+    pub fn cov_waivers(&mut self, db: &Db, e: ExprId) -> Vec<yavs_ir::CovWaiver> {
+        if !self.opts.cov_directives {
+            return Vec::new();
+        }
+        self.cov_dirs
+            .entry(db.exprs[e].span.file)
+            .or_insert_with_key(|&f| covdir::resolve(db, f).waivers)
+            .remove(&e)
+            .unwrap_or_default()
+    }
+
+    /// The counter of row `kind` of a condition or expression at `span`; a combination also
+    /// names its decision (`cond`).
     pub fn cover_cond(
         &mut self,
         pb: &mut ProgramBuilder,
@@ -604,6 +633,7 @@ impl Cx {
         span: Span,
         kind: CovKind,
         row: yavs_ir::CovRow,
+        cond: Option<u32>,
     ) -> CovItem {
         let _ = span;
         pb.cov(CovInfo {
@@ -611,6 +641,7 @@ impl Cx {
             kind,
             row: Some(row),
             arm: None,
+            cond,
         })
     }
 
@@ -628,6 +659,7 @@ impl Cx {
                 kind,
                 row: None,
                 arm,
+                cond: None,
             })
         })
     }
@@ -707,6 +739,7 @@ impl<'a> Lowerer<'a> {
                     })
                     .map(|(_, u)| u.file)
                     .collect(),
+                cov_dirs: HashMap::new(),
                 diags: Vec::new(),
                 tys: HashMap::new(),
                 natives: HashMap::new(),

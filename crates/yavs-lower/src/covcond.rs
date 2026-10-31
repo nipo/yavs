@@ -6,18 +6,18 @@
 //! covered rows when the tree is done. Evaluation order and side effects are the ones of the
 //! tree without coverage: an input never evaluated (short-circuit) stays 0 in the state.
 
-use yavs_ir::{COV_INPUTS, CovCond, CovKind, CovNode, CovRow, Inst, Ty};
-use yavs_sem::ExprId;
+use yavs_ir::{COV_INPUTS, CovCond, CovKind, CovNode, CovRow, Inst};
 use yavs_sem::decl::{Body, DeclKind, ObjRole};
 use yavs_sem::hir::{Actual, ExprKind, Staticness};
 use yavs_sem::implicit::Family;
+use yavs_sem::{Db, ExprId};
 
 use crate::R;
 use crate::expr::V;
 use crate::func::Fx;
 
 /// A condition tree.
-enum T {
+pub(crate) enum T {
     In(usize),
     Not(Box<T>),
     Bin(CovNode, Box<T>, Box<T>),
@@ -30,137 +30,151 @@ pub(crate) struct Active {
     inputs: Vec<ExprId>,
 }
 
-impl Fx<'_, '_> {
-    /// The scalar logic kind of expression `e`'s type: `Some(true)` for `std_ulogic`, `Some(false)`
-    /// for `bit` and `boolean`.
-    fn cov_scalar(&mut self, e: ExprId) -> Option<bool> {
-        let db = self.db;
-        let ex = &db.exprs[e];
-        let tid = self.ty(db.base(ex.subtype), ex.span).ok()?;
-        match self.fb.program().types().get(tid)? {
-            Ty::Enum { logic: Some(k), .. } => Some(*k == yavs_ir::LogicKind::StdULogic),
-            _ => None,
-        }
-    }
+/// An input of a decision: a leaf of its logic tree.
+pub struct Leaf {
+    pub expr: ExprId,
+    /// A `std_ulogic` position (`'0'`/`'L'` false, `'1'`/`'H'` true), else `bit` or `boolean`.
+    pub ulogic: bool,
+    /// The same value in every evaluation after elaboration: no rows, no position to address.
+    pub konst: bool,
+}
 
-    /// The operator and operands of tree node `e`: `and` ... `not` of `bit`/`boolean` (predefined)
-    /// and of `std_ulogic` (the `std_logic_1164` gates).
-    fn cov_op(&self, e: ExprId) -> Option<(CovNode, Vec<ExprId>)> {
-        let db = self.db;
-        let ExprKind::Call {
-            callee,
-            args,
-            method_of: None,
-            implicit_cond: false,
-        } = &db.exprs[e].kind
-        else {
-            return None;
-        };
-        let sp = db.decls[*callee].kind.subprogram()?;
-        let node = match &sp.body {
-            Body::Implicit(op) => match op.family {
-                Family::And => CovNode::And,
-                Family::Or => CovNode::Or,
-                Family::Nand => CovNode::Nand,
-                Family::Nor => CovNode::Nor,
-                Family::Xor => CovNode::Xor,
-                Family::Xnor => CovNode::Xnor,
-                Family::Not => CovNode::Not,
-                _ => return None,
-            },
-            Body::Hir { .. } => {
-                use yavs_ir::ieee::{Gate, Op};
-                let sym = yavs_ir::ieee::native_symbol(sp.mangled.as_str())?;
-                match yavs_ir::ieee::symbol_key(&sym).and_then(yavs_ir::ieee::parse)? {
-                    Op::Gate(Gate::And) => CovNode::And,
-                    Op::Gate(Gate::Or) => CovNode::Or,
-                    Op::Gate(Gate::Nand) => CovNode::Nand,
-                    Op::Gate(Gate::Nor) => CovNode::Nor,
-                    Op::Gate(Gate::Xor) => CovNode::Xor,
-                    Op::Gate(Gate::Xnor) => CovNode::Xnor,
-                    Op::Not => CovNode::Not,
-                    _ => return None,
-                }
-            }
+/// The most inputs of a decision whose combinations are measured.
+pub const COMB_INPUTS: usize = 8;
+/// The most combinations (reachable states) of one decision that are measured.
+pub const COMB_STATES: usize = 512;
+
+/// A decision (an `if`, `elsif`, `while`, `exit`, `next` or `when` condition) or the logic
+/// expression an assignment gives its target, read from the HIR: the tree of `and`, `or`,
+/// `nand`, `nor`, `xor`, `xnor` and `not` and the inputs at its leaves, left to right in the
+/// source.
+pub struct Decision {
+    /// The expression, without the `??` of a condition (3.6).
+    pub whole: ExprId,
+    tree: T,
+    pub leaves: Vec<Leaf>,
+}
+
+/// The scalar logic kind of expression `e`'s type: `Some(true)` for `std_ulogic`, `Some(false)`
+/// for `bit` and `boolean`.
+fn scalar_logic(db: &Db, e: ExprId) -> Option<bool> {
+    let ex = &db.exprs[e];
+    match crate::ty::logic_kind(db, db.base(ex.subtype))? {
+        yavs_ir::LogicKind::StdULogic => Some(true),
+        yavs_ir::LogicKind::Bit | yavs_ir::LogicKind::Boolean => Some(false),
+    }
+}
+
+/// The operator and operands of tree node `e`: `and` ... `not` of `bit`/`boolean` (predefined)
+/// and of `std_ulogic` (the `std_logic_1164` gates).
+fn cov_op(db: &Db, e: ExprId) -> Option<(CovNode, Vec<ExprId>)> {
+    let ExprKind::Call {
+        callee,
+        args,
+        method_of: None,
+        implicit_cond: false,
+    } = &db.exprs[e].kind
+    else {
+        return None;
+    };
+    let sp = db.decls[*callee].kind.subprogram()?;
+    let node = match &sp.body {
+        Body::Implicit(op) => match op.family {
+            Family::And => CovNode::And,
+            Family::Or => CovNode::Or,
+            Family::Nand => CovNode::Nand,
+            Family::Nor => CovNode::Nor,
+            Family::Xor => CovNode::Xor,
+            Family::Xnor => CovNode::Xnor,
+            Family::Not => CovNode::Not,
             _ => return None,
-        };
-        let ops: Vec<ExprId> = args
-            .iter()
-            .map(|a| match a.actual {
-                Actual::Expr(x) => Some(x),
-                _ => None,
-            })
-            .collect::<Option<_>>()?;
-        (ops.len() == if node == CovNode::Not { 1 } else { 2 }).then_some((node, ops))
-    }
+        },
+        // Whether the body is analysed yet or not: analysis alone must see the same tree.
+        _ => {
+            use yavs_ir::ieee::{Gate, Op};
+            let sym = yavs_ir::ieee::native_symbol(sp.mangled.as_str())?;
+            match yavs_ir::ieee::symbol_key(&sym).and_then(yavs_ir::ieee::parse)? {
+                Op::Gate(Gate::And) => CovNode::And,
+                Op::Gate(Gate::Or) => CovNode::Or,
+                Op::Gate(Gate::Nand) => CovNode::Nand,
+                Op::Gate(Gate::Nor) => CovNode::Nor,
+                Op::Gate(Gate::Xor) => CovNode::Xor,
+                Op::Gate(Gate::Xnor) => CovNode::Xnor,
+                Op::Not => CovNode::Not,
+                _ => return None,
+            }
+        }
+    };
+    let ops: Vec<ExprId> = args
+        .iter()
+        .map(|a| match a.actual {
+            Actual::Expr(x) => Some(x),
+            _ => None,
+        })
+        .collect::<Option<_>>()?;
+    (ops.len() == if node == CovNode::Not { 1 } else { 2 }).then_some((node, ops))
+}
 
-    /// Whether `e` has the same value in every evaluation after elaboration: a folded value, or
-    /// a static expression of literals, generics, generate parameters and constants of those.
-    /// Parameters of a subprogram are static to sem but new at every call, so they are not.
-    fn cov_const(&self, e: ExprId) -> bool {
-        let db = self.db;
-        let x = &db.exprs[e];
-        if x.value.is_some() {
-            return true;
-        }
-        if x.stat == Staticness::None {
-            return false;
-        }
-        match &x.kind {
-            ExprKind::Const(_) => true,
-            ExprKind::Obj(d) => match &db.decls[*d].kind {
-                DeclKind::Object(o) => match o.role {
-                    ObjRole::Generic | ObjRole::GenerateParam => true,
-                    ObjRole::Plain | ObjRole::Deferred => {
-                        o.default.is_none_or(|i| self.cov_const(i))
-                    }
-                    _ => false,
-                },
+/// Whether `e` has the same value in every evaluation after elaboration: a folded value, or
+/// a static expression of literals, generics, generate parameters and constants of those.
+/// Parameters of a subprogram are static to sem but new at every call, so they are not.
+fn cov_const(db: &Db, e: ExprId) -> bool {
+    let x = &db.exprs[e];
+    if x.value.is_some() {
+        return true;
+    }
+    if x.stat == Staticness::None {
+        return false;
+    }
+    match &x.kind {
+        ExprKind::Const(_) => true,
+        ExprKind::Obj(d) => match &db.decls[*d].kind {
+            DeclKind::Object(o) => match o.role {
+                ObjRole::Generic | ObjRole::GenerateParam => true,
+                ObjRole::Plain | ObjRole::Deferred => o.default.is_none_or(|i| cov_const(db, i)),
                 _ => false,
             },
-            ExprKind::Call {
-                args,
-                method_of: None,
-                ..
-            } => args
-                .iter()
-                .all(|a| matches!(a.actual, Actual::Expr(x) if self.cov_const(x))),
-            ExprKind::Qualified { operand, .. }
-            | ExprKind::Conv { operand, .. }
-            | ExprKind::ImplicitConv { operand } => self.cov_const(*operand),
             _ => false,
-        }
+        },
+        ExprKind::Call {
+            args,
+            method_of: None,
+            ..
+        } => args
+            .iter()
+            .all(|a| matches!(a.actual, Actual::Expr(x) if cov_const(db, x))),
+        ExprKind::Qualified { operand, .. }
+        | ExprKind::Conv { operand, .. }
+        | ExprKind::ImplicitConv { operand } => cov_const(db, *operand),
+        _ => false,
     }
+}
 
-    /// The tree below `e`, its inputs added to `leaves` (the expression, `std_ulogic`).
-    fn cov_tree(&mut self, e: ExprId, leaves: &mut Vec<(ExprId, bool)>) -> Option<T> {
-        let u = self.cov_scalar(e)?;
-        let db = self.db;
-        if !self.cov_const(e)
-            && db.edge_shape(e).is_none()
-            && let Some((n, ops)) = self.cov_op(e)
-        {
-            let a = self.cov_tree(ops[0], leaves)?;
-            if n == CovNode::Not {
-                return Some(T::Not(Box::new(a)));
-            }
-            let b = self.cov_tree(ops[1], leaves)?;
-            return Some(T::Bin(n, Box::new(a), Box::new(b)));
+/// The tree below `e`, its inputs added to `leaves` (the expression, `std_ulogic`).
+fn cov_tree(db: &Db, e: ExprId, leaves: &mut Vec<(ExprId, bool)>) -> Option<T> {
+    let u = scalar_logic(db, e)?;
+    if !cov_const(db, e)
+        && db.edge_shape(e).is_none()
+        && let Some((n, ops)) = cov_op(db, e)
+    {
+        let a = cov_tree(db, ops[0], leaves)?;
+        if n == CovNode::Not {
+            return Some(T::Not(Box::new(a)));
         }
-        if leaves.len() >= COV_INPUTS {
-            return None;
-        }
-        leaves.push((e, u));
-        Some(T::In(leaves.len() - 1))
+        let b = cov_tree(db, ops[1], leaves)?;
+        return Some(T::Bin(n, Box::new(a), Box::new(b)));
     }
+    if leaves.len() >= COV_INPUTS {
+        return None;
+    }
+    leaves.push((e, u));
+    Some(T::In(leaves.len() - 1))
+}
 
-    /// Start the coverage of `e`, a condition or (`expr`) the value of an assignment: `None`
-    /// when it has fewer than two inputs or coverage is off for it.
-    fn cov_begin(&mut self, mut e: ExprId, expr: bool) -> Option<Active> {
-        if !self.cov {
-            return None;
-        }
-        let db = self.db;
+impl Decision {
+    /// The decision of `e`, a condition or the value of an assignment; `None` when it is not
+    /// a logic tree of `bit`, `boolean` or `std_ulogic`, or has too many inputs for the state.
+    pub fn new(db: &Db, mut e: ExprId) -> Option<Decision> {
         // The `??` of a condition (3.6) is not an operator of it.
         while let ExprKind::Call {
             args,
@@ -172,28 +186,161 @@ impl Fx<'_, '_> {
         {
             e = x;
         }
-        let whole = db.exprs[e].span;
-        let (stmt, _) = self.cur?;
-        if !self.cx.cov_cond_on(expr, whole.file) {
-            return None;
-        }
         let mut leaves = Vec::new();
-        let tree = self.cov_tree(e, &mut leaves)?;
-        // Inputs that are constant after elaboration (generics, constants, folded values) are
-        // evaluated but get no rows; fewer than two others leave nothing to measure.
-        let consts = leaves
+        let tree = cov_tree(db, e, &mut leaves)?;
+        Some(Decision {
+            whole: e,
+            tree,
+            leaves: leaves
+                .into_iter()
+                .map(|(expr, ulogic)| Leaf {
+                    expr,
+                    ulogic,
+                    konst: cov_const(db, expr),
+                })
+                .collect(),
+        })
+    }
+
+    /// The inputs that are constant after elaboration (bit `i`).
+    pub fn consts(&self) -> u32 {
+        self.leaves
             .iter()
             .enumerate()
-            .filter(|(_, l)| self.cov_const(l.0))
-            .fold(0u32, |m, (i, _)| m | 1 << i);
-        if leaves.len() - (consts.count_ones() as usize) < 2 {
+            .filter(|(_, l)| l.konst)
+            .fold(0u32, |m, (i, _)| m | 1 << i)
+    }
+
+    /// The states of the combinations the decision can show, sorted: two bits per input
+    /// (0 not evaluated, 1 false, 2 true). `and`, `or`, `nand` and `nor` of `bit` and `boolean`
+    /// do not evaluate their right operand when the left one decides (9.2.2); every other
+    /// operator evaluates both. Evaluated leaves that read the same object agree. `Err` says
+    /// why the decision has no combinations to measure.
+    pub fn combinations(&self, db: &Db) -> Result<Vec<u32>, String> {
+        let n = self.leaves.len();
+        if n < 2 {
+            return Err("it has fewer than two inputs".into());
+        }
+        if let Some(i) = self.leaves.iter().position(|l| l.konst) {
+            return Err(format!(
+                "input {} is constant after elaboration, so it has no value to combine",
+                i + 1
+            ));
+        }
+        if n > COMB_INPUTS {
+            return Err(format!(
+                "it has {n} inputs; combinations are measured up to {COMB_INPUTS}"
+            ));
+        }
+        let mut out = self.states(&self.tree);
+        // Leaves of one object take one value in an evaluation.
+        let object = |i: usize| match &db.exprs[self.leaves[i].expr].kind {
+            ExprKind::Obj(d) => Some(*d),
+            _ => None,
+        };
+        out.retain(|&(s, _)| {
+            (0..n).all(|i| {
+                (0..i).all(|j| {
+                    let (a, b) = (s >> (2 * i) & 3, s >> (2 * j) & 3);
+                    a == 0 || b == 0 || object(i).is_none() || object(i) != object(j) || a == b
+                })
+            })
+        });
+        let mut states: Vec<u32> = out.into_iter().map(|(s, _)| s).collect();
+        states.sort_unstable();
+        states.dedup();
+        if states.len() > COMB_STATES {
+            return Err(format!(
+                "it has {} combinations; the limit is {COMB_STATES}",
+                states.len()
+            ));
+        }
+        Ok(states)
+    }
+
+    /// The (state, result) pairs of the evaluations of `t`.
+    fn states(&self, t: &T) -> Vec<(u32, bool)> {
+        match t {
+            T::In(i) => vec![(1 << (2 * i), false), (2 << (2 * i), true)],
+            T::Not(a) => self.states(a).into_iter().map(|(s, v)| (s, !v)).collect(),
+            T::Bin(n, a, b) => {
+                let (left, right) = (self.states(a), self.states(b));
+                // `ulogic` operators never short-circuit.
+                let short = !self.is_ulogic(a)
+                    && matches!(n, CovNode::And | CovNode::Or | CovNode::Nand | CovNode::Nor);
+                let gate = |x: bool, y: bool| match n {
+                    CovNode::And => x & y,
+                    CovNode::Nand => !(x & y),
+                    CovNode::Or => x | y,
+                    CovNode::Nor => !(x | y),
+                    CovNode::Xor => x ^ y,
+                    _ => !(x ^ y),
+                };
+                let mut out = Vec::new();
+                for &(sa, va) in &left {
+                    // The left operand decides: `false and _`, `true or _`.
+                    let decided = match n {
+                        CovNode::And | CovNode::Nand => !va,
+                        _ => va,
+                    };
+                    if short && decided {
+                        out.push((sa, gate(va, va)));
+                        continue;
+                    }
+                    out.extend(right.iter().map(|&(sb, vb)| (sa | sb, gate(va, vb))));
+                }
+                out.sort_unstable();
+                out.dedup();
+                out
+            }
+        }
+    }
+
+    /// Whether the leaves below `t` are `std_ulogic` (a node has operands of one type).
+    fn is_ulogic(&self, t: &T) -> bool {
+        match t {
+            T::In(i) => self.leaves[*i].ulogic,
+            T::Not(a) | T::Bin(_, a, _) => self.is_ulogic(a),
+        }
+    }
+}
+
+impl Fx<'_, '_> {
+    /// Start the coverage of `e`, a condition or (`expr`) the value of an assignment: `None`
+    /// when nothing about it is measured (coverage is off for it, or it has fewer than two
+    /// inputs).
+    fn cov_begin(&mut self, e: ExprId, expr: bool) -> Option<Active> {
+        if !self.cov {
+            return None;
+        }
+        let db = self.db;
+        let whole = db.exprs[e].span;
+        let (stmt, _) = self.cur?;
+        let file = whole.file;
+        let (fec_on, comb_on) = (self.cx.cov_cond_on(expr, file), self.cx.cov_comb_on(file));
+        if !fec_on && !comb_on {
+            return None;
+        }
+        let d = Decision::new(db, e)?;
+        let whole = db.exprs[d.whole].span;
+        let leaves = &d.leaves;
+        // Inputs that are constant after elaboration (generics, constants, folded values) are
+        // evaluated but get no rows; fewer than two others leave nothing to measure.
+        let consts = d.consts();
+        let fec = fec_on && leaves.len() - (consts.count_ones() as usize) >= 2;
+        let states = if comb_on {
+            d.combinations(db).ok()
+        } else {
+            None
+        };
+        if !fec && states.is_none() {
             return None;
         }
         let mut nodes = Vec::new();
         let mut parity: Vec<Option<bool>> = vec![None; leaves.len()];
-        flatten(&tree, Some(false), &mut nodes, &mut parity);
+        flatten(&d.tree, Some(false), &mut nodes, &mut parity);
         let mut first = None;
-        for (i, &(l, _)) in leaves.iter().enumerate() {
+        for (i, l) in leaves.iter().enumerate().filter(|_| fec) {
             if consts >> i & 1 == 1 {
                 continue;
             }
@@ -210,30 +357,62 @@ impl Fx<'_, '_> {
                 };
                 let info = CovRow {
                     whole,
-                    input: db.exprs[l].span,
+                    input: db.exprs[l.expr].span,
                     result,
                 };
                 let item = self
                     .cx
-                    .cover_cond(self.fb.program(), stmt, whole, kind, info);
+                    .cover_cond(self.fb.program(), stmt, whole, kind, info, None);
                 first.get_or_insert(item);
             }
         }
+        let index = self.fb.program().cov_conds_len();
+        let comb = match states {
+            Some(states) => {
+                let mut first = None;
+                for &s in &states {
+                    let info = CovRow {
+                        whole,
+                        input: whole,
+                        result: '?',
+                    };
+                    let item = self.cx.cover_cond(
+                        self.fb.program(),
+                        stmt,
+                        whole,
+                        CovKind::Combination(s),
+                        info,
+                        Some(index),
+                    );
+                    first.get_or_insert(item);
+                }
+                Some(yavs_ir::CovComb {
+                    first: first?,
+                    states,
+                    inputs: leaves.iter().map(|l| db.exprs[l.expr].span).collect(),
+                    waivers: self.cx.cov_waivers(db, d.whole),
+                })
+            }
+            None => None,
+        };
         let cond = self.fb.program().cov_cond(CovCond {
-            first: first?,
+            first,
             inputs: leaves.len() as u8,
             consts,
             nodes,
+            comb,
         });
+        debug_assert_eq!(cond, index);
         // The first input is always evaluated and starts the state (`Inst::CoverIn`, shift 0).
         let state = self.reg(yavs_ir::RegTy::I64);
-        for (i, &(l, u)) in leaves.iter().enumerate() {
-            self.cov_inputs.insert(l, (state, 2 * i as u8, u));
+        for (i, l) in leaves.iter().enumerate() {
+            self.cov_inputs
+                .insert(l.expr, (state, 2 * i as u8, l.ulogic));
         }
         Some(Active {
             cond,
             state,
-            inputs: leaves.iter().map(|l| l.0).collect(),
+            inputs: leaves.iter().map(|l| l.expr).collect(),
         })
     }
 

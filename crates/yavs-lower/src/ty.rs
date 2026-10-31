@@ -72,7 +72,7 @@ fn lit_name(db: &Db, d: yavs_sem::DeclId) -> String {
 }
 
 /// BIT, BOOLEAN and STD_ULOGIC (and their arrays) are stored as yavs-logic codes and planes.
-fn logic_kind(db: &Db, t: TypeId) -> Option<LogicKind> {
+pub(crate) fn logic_kind(db: &Db, t: TypeId) -> Option<LogicKind> {
     let wk = &db.well_known;
     if Some(t) == wk.bit {
         return Some(LogicKind::Bit);

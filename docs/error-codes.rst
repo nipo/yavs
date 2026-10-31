@@ -130,6 +130,8 @@ Syntax, command line, waveforms, coverage, debugger, plugins (E0 and W0)
      - ``yavs lint`` cannot write a report file, named by ``--json``, ``--sarif``, ``--junit``, ``--quality-report`` or ``--sonarqube``.
    * - _`E0136`
      - The argument layout in ``--load=LIB:args=LAYOUT`` does not exist: ``length`` is the default, ``fat-pointer`` the other one (see the VHPI guide).
+   * - _`E0137`
+     - ``yavs cov merge`` or ``yavs cov report`` was given databases that disagree about an in-source coverage exclusion: a combination that a ``-- yavs coverage exclude`` directive waives in one run is a requirement in another (the other run was made from other sources, or with ``--coverage-directives=ignore``).
    * - _`E0199`
      - A command option or combination is not implemented yet.
    * - _`E0701`
@@ -476,6 +478,26 @@ Elaboration (E2 and W2)
      - Meaning
    * - _`E2001`
      - The lowering to IR does not handle this construct yet; the message names it.
+   * - _`E2020`
+     - A ``-- yavs coverage exclude`` directive is malformed: a missing ``)``, a name without ``=value``, text after the pattern that is not a reason (a reason follows ``:``), or an unknown word where ``condition`` or ``expression`` may stand.
+   * - _`W2020`
+     - A coverage exclusion repeats an earlier one of the same expression, or is already covered by a broader one.
+   * - _`E2021`
+     - A positional exclusion (``-- yavs cov exclude 01-``) has a symbol other than ``0`` (evaluated false), ``1`` (evaluated true) or ``-`` (anything, also not evaluated), or a different number of positions than the expression has inputs.
+   * - _`W2021`
+     - The exclusions of an expression together waive every combination of it, so nothing is left to cover.
+   * - _`E2022`
+     - A named exclusion (``(valid=false, ready=true)``) names something that is not exactly one input of the expression: an unknown name, a name that is several inputs, or an input given twice.
+   * - _`W2022`
+     - A coverage exclusion matches no combination the expression can show.
+   * - _`E2023`
+     - A value in a named exclusion is not ``true`` or ``false``.
+   * - _`W2023`
+     - With ``--cov-kind=combination``, a decision or logic expression with two or more inputs has no combinations to measure: an input is constant after elaboration, it has more than 8 inputs, or it has more combinations than the limit.
+   * - _`E2024`
+     - A coverage exclusion has nothing to attach to or cannot be used where it is: no ``if``, ``elsif``, ``while``, ``exit``, ``next`` or assignment follows it (comments and blank lines may stand between), the construct has several conditions or choices, ``exclude condition`` is on an assignment or ``exclude expression`` on a condition, or the expression has no combinations to exclude (fewer than two inputs, an input that is constant after elaboration, more than 8 inputs, or too many combinations).
+   * - _`E2025`
+     - A ``-- yavs coverage`` (or ``-- yavs cov``) comment has no command or an unknown one.
    * - _`E2101`
      - The top level named on the command line does not exist in the work library or cannot be elaborated.
    * - _`E2102`

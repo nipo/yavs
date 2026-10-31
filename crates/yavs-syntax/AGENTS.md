@@ -22,7 +22,7 @@ Read the root `AGENTS.md` first. This file is for an agent about to change `crat
 | `src/symbol.rs` | `Symbol`: global interner behind a lock plus a per-thread copy (hits and `as_str` take no lock; both are open-addressing `Index`es probed with one hash that they keep), leaked strings, `as_str() -> &'static str`, `index()`; `encode_table`/`DecodeTable`: the symbol text table of a cache image, each symbol interned on first read (an atomic per symbol) |
 | `src/source.rs` | `Src` (bytes plus Latin-1 flag) |
 | `src/token.rs` | `Tok`, `Kw` (keywords per standard), `Token` |
-| `src/lexer.rs` | `lex`: bytes to tokens, `-- psl` pragmas, `E0001`, `E0009`, `W0003` |
+| `src/lexer.rs` | `lex`: bytes to tokens, `-- psl` pragmas, `E0001`, `E0009`, `W0003`; `lex_with` also collects the plain `--` comments with the start of the token after each (`LineComment`, `line_comments` in `lib.rs`: what in-source pragmas such as `-- yavs coverage exclude` read, #883) |
 | `src/protect.rs` | Language-neutral detector of `` `protect begin_protected `` envelopes (`begins_envelope`, `envelope_info`); the lexer reports `E0012` and stops, `parse_file` skips the later stages (#775) |
 | `src/directive.rs` | `preprocess`: `` `if/elsif/else/end ``, `` `warning/error ``, unknown directives `W0002`; standard identifiers (`VHDL_VERSION`, `TOOL_*`) |
 | `src/parser/mod.rs` | `Parser`, `PResult`/`Recover`, resync, `MAX_DEPTH = 64`, fuel counter |

@@ -214,6 +214,50 @@ const EXPLAIN: &[(&str, &str)] = &[
         "An exclusion file given to `yavs cov report --exclude` cannot be read or has a malformed row or entry (a `.yaml` or `.yml` file is read as YAML, any other as text rows); the note names the line. Rows start with `statement`, `branch`, `toggle`, `instance`, `unit` or `file`; a YAML entry has the same word as its `kind`.",
     ),
     (
+        "E0137",
+        "`yavs cov merge` or `yavs cov report` was given databases that disagree about an in-source coverage exclusion: a combination that a `-- yavs coverage exclude` directive waives in one run is a requirement in another (the other run was made from other sources, or with `--coverage-directives=ignore`). Merging them would let the waiver hide a requirement, so nothing is merged. Run all the databases from the same sources and options.",
+    ),
+    (
+        "E2020",
+        "A `-- yavs coverage exclude` directive is malformed: a missing `)`, a name without `=value`, text after the pattern that is not a reason (a reason follows `:`), or an unknown word where `condition` or `expression` may stand. The directive is rejected as a whole, never repaired. Directives are checked at analysis, whether or not coverage is collected; `--coverage-directives=ignore` reads none.",
+    ),
+    (
+        "E2021",
+        "A positional exclusion (`-- yavs cov exclude 01-`) has a symbol other than `0` (evaluated false), `1` (evaluated true) or `-` (anything, also not evaluated), or a different number of positions than the expression has inputs. The inputs are the operands of the logic operators of the condition or assignment, left to right in the source; the message lists them. Write `-` for an input that is unrestricted: a pattern is never padded.",
+    ),
+    (
+        "E2022",
+        "A named exclusion (`(valid=false, ready=true)`) names something that is not exactly one input of the expression: an unknown name, a name that is several inputs, or an input given twice. Only operands that are plain names have a name; any other operand (a relation, a call) is addressed by its position in the positional form.",
+    ),
+    (
+        "E2023",
+        "A value in a named exclusion is not `true` or `false`.",
+    ),
+    (
+        "E2024",
+        "A coverage exclusion has nothing to attach to or cannot be used where it is: no `if`, `elsif`, `while`, `exit`, `next` or assignment follows it (comments and blank lines may stand between), the construct has several conditions or choices, `exclude condition` is on an assignment or `exclude expression` on a condition, or the expression has no combinations to exclude (fewer than two inputs, an input that is constant after elaboration, more than 8 inputs, or too many combinations).",
+    ),
+    (
+        "E2025",
+        "A `-- yavs coverage` (or `-- yavs cov`) comment has no command or an unknown one. The commands are `exclude`, `off`, `on` and `off-line`. Ordinary comments are never read as directives.",
+    ),
+    (
+        "W2020",
+        "A coverage exclusion repeats an earlier one of the same expression, or is already covered by a broader one. It does nothing more. Remove it, or silence the warning with `-Wno-W2020`.",
+    ),
+    (
+        "W2021",
+        "The exclusions of an expression together waive every combination of it, so nothing is left to cover. Check that the directives say what was meant.",
+    ),
+    (
+        "W2022",
+        "A coverage exclusion matches no combination the expression can show. The right operand of `and`, `or`, `nand` and `nor` on `boolean` and `bit` is not evaluated when the left one decides, so a pattern that gives it a value with the left operand deciding matches nothing; write `-` for it. `std_ulogic` operators evaluate both operands.",
+    ),
+    (
+        "W2023",
+        "With `--cov-kind=combination`, a decision or logic expression with two or more inputs has no combinations to measure: an input is constant after elaboration, it has more than 8 inputs, or it has more combinations than the limit. The note says which. Its other coverage is not affected.",
+    ),
+    (
         "W0110",
         "A row of the exclusion file names a line (`file:line`) that is not where the excluded statement is now. The exclusion still applies, matched by the statement's text; update the line to silence the warning.",
     ),

@@ -321,6 +321,7 @@ impl Toggles {
                         count: st.counts[n.bit as usize][usize::from(rise)],
                         text: String::new(),
                         tests: Vec::new(),
+                        waivers: Vec::new(),
                     },
                 ));
             }

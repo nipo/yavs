@@ -166,6 +166,17 @@ Arguments:
 
    May be repeated.
 
+.. option:: --coverage-directives=apply|ignore
+
+   What to do with the ``-- yavs coverage exclude`` directives in the sources: ``apply`` (check them) or ``ignore`` (read none of them; a note says how many were left out).
+
+   Default: ``apply``.
+
+   Values:
+
+   * ``apply``: Check the directives and waive what they name
+   * ``ignore``: Read none of them
+
 .. option:: --bootstrap
 
    Allow ``std`` and ``ieee`` as ``--work`` or ``--map``: for building the standard libraries from their sources.
@@ -242,6 +253,17 @@ Arguments:
 .. option:: --std-cache=DIR|off
 
    Directory of the std/ieee units shared by all libraries, or ``off`` (default: ``$YAVS_STD_CACHE``, else ``yavs/std`` in the user's cache directory).
+
+.. option:: --coverage-directives=apply|ignore
+
+   What to do with the ``-- yavs coverage exclude`` directives in the sources: ``apply`` (check them and waive the combinations they name) or ``ignore`` (read none of them; a note says how many were left out).
+
+   Default: ``apply``.
+
+   Values:
+
+   * ``apply``: Check the directives and waive what they name
+   * ``ignore``: Read none of them
 
 .. option:: --no-collapse-ports
 
@@ -320,6 +342,17 @@ Arguments:
 .. option:: --std-cache=DIR|off
 
    Directory of the std/ieee units shared by all libraries, or ``off`` (default: ``$YAVS_STD_CACHE``, else ``yavs/std`` in the user's cache directory).
+
+.. option:: --coverage-directives=apply|ignore
+
+   What to do with the ``-- yavs coverage exclude`` directives in the sources: ``apply`` (check them and waive the combinations they name) or ``ignore`` (read none of them; a note says how many were left out).
+
+   Default: ``apply``.
+
+   Values:
+
+   * ``apply``: Check the directives and waive what they name
+   * ``ignore``: Read none of them
 
 .. option:: --no-collapse-ports
 
@@ -432,6 +465,7 @@ Arguments:
    * ``toggle``: The 0 to 1 and 1 to 0 changes of every ``bit`` and ``std_ulogic`` scalar of signals and ports
    * ``condition``: Each input and value of conditions with two or more inputs
    * ``expression``: The same for the logic expression assigned to a signal or variable
+   * ``combination``: Each combination of the inputs of conditions and logic expressions that can occur (an input a short-circuit operator skips counts as not evaluated, not as false)
 
 .. option:: --cov-test=NAME
 
@@ -558,9 +592,9 @@ Arguments:
 
 .. option:: --kind=LIST
 
-   Report only these kinds of item (``statement``, ``branch``, ``toggle``, ``condition``, ``expression``, comma separated); ``--total`` and ``--fail-under`` then count only them.
+   Report only these kinds of item (``statement``, ``branch``, ``toggle``, ``condition``, ``expression``, ``combination``, comma separated); ``--total`` and ``--fail-under`` then count only them.
 
-   Accepted: ``statement``, ``branch``, ``toggle``, ``condition``, ``expression``.
+   Accepted: ``statement``, ``branch``, ``toggle``, ``condition``, ``expression``, ``combination``.
 
    A list, values separated by ``,``.
 
@@ -577,6 +611,12 @@ Arguments:
 .. option:: --exclude=FILE
 
    Leave out the items an exclusion file lists (rows pasted from ``--uncovered``; a ``.yaml`` or ``.yml`` file is read as YAML).
+
+.. option:: --exclusions, --exclusions=text|json
+
+   Print the exclusion report instead of the summary: every rule that takes requirements out of the totals (``-- yavs coverage exclude`` directives and the rows of ``--exclude``) with its origin, reason, what it matched, how often that ran, and the totals before and after (``--exclusions=json``: versioned JSON). The HTML report gets the same page.
+
+   Cannot be combined with ``--uncovered``, ``--tests``, ``--total``.
 
 .. option:: --uncovered, --uncovered=text|yaml
 

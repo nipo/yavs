@@ -38,6 +38,9 @@ pub enum Kind {
     Condition(u32),
     /// The same for a logic expression on the right side of an assignment.
     Expression(u32),
+    /// One combination of the inputs of a condition or logic expression: two bits per input of
+    /// `Key::sig` (0 not evaluated, 1 false, 2 true).
+    Combination(u32),
 }
 
 impl Kind {
@@ -49,6 +52,7 @@ impl Kind {
             Kind::Toggle(_) => "toggle",
             Kind::Condition(_) => "condition",
             Kind::Expression(_) => "expression",
+            Kind::Combination(_) => "combination",
         }
     }
 
@@ -95,9 +99,24 @@ pub struct Entry {
     pub text: String,
     /// The tests that hit it: indices into [`Database::tests`], sorted.
     pub tests: Vec<u32>,
+    /// The in-source `-- yavs coverage exclude` directives that waive it (combinations only).
+    /// The count stays the raw one.
+    pub waivers: Vec<Waiver>,
+}
+
+/// An in-source exclusion of a requirement.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Waiver {
+    /// The directive as written after `exclude`, without the reason.
+    pub rule: String,
+    pub reason: String,
+    /// Where the directive is.
+    pub file: String,
+    pub line: u32,
 }
 
 pub mod exclude;
+pub mod exclusions;
 pub mod html;
 pub mod toggle;
 
@@ -111,18 +130,37 @@ pub struct Database {
     pub items: BTreeMap<Key, Entry>,
     /// The names of the tests the runs were (`yavs run --cov-test`), in the order seen.
     pub tests: Vec<String>,
+    /// A database read from a file older than version 6 is in it: such files do not record
+    /// in-source exclusions, so there is nothing to say about them.
+    pub legacy: bool,
 }
 
-const MAGIC: &str = "yavs-coverage 5";
+const MAGIC: &str = "yavs-coverage 6";
 /// Older versions [`Database::parse`] still reads: 2 has no toggles, 2 and 3 no tests, 4 no
-/// conditions.
+/// conditions, 5 no combinations and no in-source exclusions.
 const OLD: &[&str] = &["yavs-coverage 2", "yavs-coverage 3"];
 const V4: &str = "yavs-coverage 4";
+const V5: &str = "yavs-coverage 5";
 
+/// `line` without its `--` comment (a `--` inside a string literal is text).
+fn uncommented(line: &str) -> &str {
+    let mut in_str = false;
+    let b = line.as_bytes();
+    for (i, &c) in b.iter().enumerate() {
+        match c {
+            b'"' => in_str = !in_str,
+            b'-' if !in_str && b.get(i + 1) == Some(&b'-') => return &line[..i],
+            _ => {}
+        }
+    }
+    line
+}
+
+/// FNV-1a of the words of `text`, comments left out: an edit of a comment keeps the identity.
 fn fnv1a(text: &str) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     let mut first = true;
-    for w in text.split_whitespace() {
+    for w in text.lines().flat_map(|l| uncommented(l).split_whitespace()) {
         for b in (!first).then_some(b' ').into_iter().chain(w.bytes()) {
             h ^= u64::from(b);
             h = h.wrapping_mul(0x0100_0000_01b3);
@@ -143,8 +181,48 @@ struct Item {
     text: String,
     /// Inside a `-- coverage off` region: counted but left out of the database.
     skip: bool,
-    /// A condition row: the text of its input.
+    /// A condition row: the text of its input; a combination: the texts of all its inputs.
     input: String,
+    waivers: Vec<Waiver>,
+}
+
+/// Between the texts of the inputs of a combination in `Key::sig`.
+pub const INPUT_SEP: &str = "\u{1f}";
+
+/// The inputs of a combination item, as written in the source.
+pub fn inputs(k: &Key) -> Vec<&str> {
+    k.sig.split(INPUT_SEP).collect()
+}
+
+/// A combination as a pattern, one symbol per input: `0` false, `1` true, `-` not evaluated.
+pub fn pattern(k: &Key) -> String {
+    let Kind::Combination(s) = k.kind else {
+        return String::new();
+    };
+    (0..inputs(k).len())
+        .map(|i| match s >> (2 * i) & 3 {
+            1 => '0',
+            2 => '1',
+            _ => '-',
+        })
+        .collect()
+}
+
+/// A combination in words: `valid is false, ready is not evaluated`.
+pub fn combination_words(k: &Key) -> String {
+    let Kind::Combination(s) = k.kind else {
+        return String::new();
+    };
+    inputs(k)
+        .iter()
+        .enumerate()
+        .map(|(i, x)| match s >> (2 * i) & 3 {
+            1 => format!("{x} is false"),
+            2 => format!("{x} is true"),
+            _ => format!("{x} is not evaluated"),
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// First line of a statement's text, for display.
@@ -316,13 +394,42 @@ pub fn collect(
                 .get(f.text_offset(s.start)..f.text_offset(s.end))
                 .unwrap_or("")
         };
+        // A combination: its decision's inputs, and the directives that waive its state.
+        let comb = c
+            .cond
+            .and_then(|i| prog.cov_conds.get(i as usize)?.comb.as_ref());
+        let state = match c.kind {
+            yavs_ir::CovKind::Combination(s) => s,
+            _ => 0,
+        };
+        let waivers = comb
+            .map(|k| {
+                k.waivers
+                    .iter()
+                    .filter(|w| state & w.care == w.want)
+                    .map(|w| Waiver {
+                        rule: w.rule.clone(),
+                        reason: w.reason.replace('\t', " "),
+                        file: db.sources.get(w.at.file).path.clone(),
+                        line: db.sources.get(w.at.file).line_col(w.at.start).0 as u32,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         items.push(Item {
-            input: c
-                .row
-                .as_ref()
-                .map(|r| display(at(r.input)))
-                .unwrap_or_default(),
+            waivers,
+            input: match (comb, &c.row) {
+                (Some(k), _) => k
+                    .inputs
+                    .iter()
+                    .map(|s| display(at(*s)))
+                    .collect::<Vec<_>>()
+                    .join(INPUT_SEP),
+                (None, Some(r)) => display(at(r.input)),
+                _ => String::new(),
+            },
             text: match (&c.row, c.arm, c.kind) {
+                (Some(_), ..) if comb.is_some() => display(text),
                 (Some(r), ..) => format!("{} {}", r.result, display(text)),
                 (None, Some(a), yavs_ir::CovKind::Branch(k)) => {
                     let in_if = prog
@@ -340,6 +447,7 @@ pub fn collect(
                 yavs_ir::CovKind::Branch(a) => Kind::Branch(a),
                 yavs_ir::CovKind::Condition(r) => Kind::Condition(r),
                 yavs_ir::CovKind::Expression(r) => Kind::Expression(r),
+                yavs_ir::CovKind::Combination(s) => Kind::Combination(s),
             },
             hash: fnv1a(text),
             start: span.start,
@@ -406,6 +514,7 @@ pub fn collect(
             count: 0,
             text: items[i].text.clone(),
             tests: Vec::new(),
+            waivers: items[i].waivers.clone(),
         });
         e.count = e.count.saturating_add(c);
     };
@@ -533,6 +642,29 @@ impl Database {
                     );
                     continue;
                 }
+                Kind::Combination(st) => {
+                    let w: Vec<String> = e
+                        .waivers
+                        .iter()
+                        .map(|w| {
+                            format!(
+                                "{}\u{1f}{}\u{1f}{}\u{1f}{}",
+                                w.rule, w.reason, w.file, w.line
+                            )
+                        })
+                        .collect();
+                    let w = if w.is_empty() {
+                        "-".to_string()
+                    } else {
+                        w.join("\u{1e}")
+                    };
+                    let _ = writeln!(
+                        s,
+                        "m{st}\t{}\t{:016x}\t{}\t{}\t{t}\t{}\t{}\t{}\t{}\t{w}",
+                        k.path, k.hash, k.occ, e.count, e.line, e.file, k.sig, e.text
+                    );
+                    continue;
+                }
                 Kind::Toggle(_) => continue,
             };
             let _ = writeln!(
@@ -550,10 +682,13 @@ impl Database {
         let mut lines = text.lines();
         let head = lines.next();
         let old = head.is_some_and(|h| OLD.contains(&h));
-        if head != Some(MAGIC) && head != Some(V4) && !old {
+        if head != Some(MAGIC) && head != Some(V5) && head != Some(V4) && !old {
             return Err(format!("not a yavs coverage database (no `{MAGIC}` line)"));
         }
-        let mut db = Database::default();
+        let mut db = Database {
+            legacy: head != Some(MAGIC),
+            ..Database::default()
+        };
         for (n, l) in lines.enumerate() {
             let bad = || format!("line {}: malformed item `{l}`", n + 2);
             if let Some(t) = l.strip_prefix("test\t") {
@@ -605,11 +740,31 @@ impl Database {
                     count: count.parse().map_err(|_| bad())?,
                     text: String::new(),
                     tests,
+                    waivers: Vec::new(),
                 };
                 (key, entry)
             } else {
                 let fec = l.starts_with('c') || l.starts_with('e');
-                let (sig, f) = match (fec, &f[..]) {
+                let comb = l.starts_with('m');
+                let mut waivers = Vec::new();
+                if comb {
+                    let Some(w) = f.pop() else {
+                        return Err(bad());
+                    };
+                    for x in w.split('\u{1e}').filter(|x| *x != "-") {
+                        let p: Vec<&str> = x.split('\u{1f}').collect();
+                        let [rule, reason, file, line] = p[..] else {
+                            return Err(bad());
+                        };
+                        waivers.push(Waiver {
+                            rule: rule.into(),
+                            reason: reason.into(),
+                            file: file.into(),
+                            line: line.parse().map_err(|_| bad())?,
+                        });
+                    }
+                }
+                let (sig, f) = match (fec || comb, &f[..]) {
                     (true, [a, b, c, d, e, g, h, i, sig, text]) => {
                         (*sig, vec![*a, *b, *c, *d, *e, *g, *h, *i, *text])
                     }
@@ -626,6 +781,7 @@ impl Database {
                 };
                 let kind = match kind {
                     "s" => Kind::Statement,
+                    _ if comb => Kind::Combination(row('m')?),
                     _ if fec && kind.starts_with('c') => Kind::Condition(row('c')?),
                     _ if fec => Kind::Expression(row('e')?),
                     _ => Kind::Branch(row('b')?),
@@ -643,6 +799,7 @@ impl Database {
                     count: count.parse().map_err(|_| bad())?,
                     text: text.to_string(),
                     tests,
+                    waivers,
                 };
                 (key, entry)
             };
@@ -654,8 +811,12 @@ impl Database {
     }
 
     /// Add the counts of `other` and the tests that hit each item (tests are matched by
-    /// name); its items not in `self` are added as they are.
-    pub fn merge(&mut self, other: Database) {
+    /// name); its items not in `self` are added as they are. Returns a line for each item that
+    /// one side waives with an in-source directive and the other does not: such a waiver would
+    /// hide a requirement the other run kept (the item is merged without the waiver).
+    pub fn merge(&mut self, other: Database) -> Vec<String> {
+        let mut conflicts = Vec::new();
+        self.legacy |= other.legacy;
         let id: Vec<u32> = other
             .tests
             .iter()
@@ -673,6 +834,31 @@ impl Database {
             }
             match self.items.get_mut(&k) {
                 Some(x) => {
+                    if x.waivers.is_empty() != e.waivers.is_empty() {
+                        let w = if x.waivers.is_empty() {
+                            &e.waivers
+                        } else {
+                            &x.waivers
+                        };
+                        conflicts.push(format!(
+                            "{} {} of {} ({}:{}) is excluded at {}:{} in one database and required in the other",
+                            k.kind.name(),
+                            pattern(&k),
+                            k.path,
+                            x.file,
+                            x.line,
+                            w[0].file,
+                            w[0].line
+                        ));
+                        x.waivers.clear();
+                    } else {
+                        for w in e.waivers {
+                            if !x.waivers.contains(&w) {
+                                x.waivers.push(w);
+                            }
+                        }
+                        x.waivers.sort();
+                    }
                     x.count = x.count.saturating_add(e.count);
                     x.tests.extend(e.tests);
                     x.tests.sort_unstable();
@@ -684,6 +870,7 @@ impl Database {
                 }
             }
         }
+        conflicts
     }
 
     /// Make this the database of one run of test `name`: every item that ran was hit by it.
@@ -759,7 +946,7 @@ impl Database {
         let pct = percent;
         let col = |h: usize, t: usize| format!("{h}/{t} {}", pct(h, t));
         // Per path: statements, branches, toggles, conditions, expressions (hit, total each).
-        let mut per: BTreeMap<&str, [usize; 10]> = BTreeMap::new();
+        let mut per: BTreeMap<&str, [usize; 12]> = BTreeMap::new();
         for (k, e) in &self.items {
             let c = per.entry(&k.path).or_default();
             let o = match k.kind {
@@ -768,18 +955,19 @@ impl Database {
                 Kind::Toggle(_) => 4,
                 Kind::Condition(_) => 6,
                 Kind::Expression(_) => 8,
+                Kind::Combination(_) => 10,
             };
             c[o + 1] += 1;
             c[o] += usize::from(e.count > 0);
         }
-        let mut t = [0; 10];
+        let mut t = [0; 12];
         for c in per.values() {
             for (a, b) in t.iter_mut().zip(c) {
                 *a += b;
             }
         }
         // Conditions and expressions show only when the database has them.
-        let (fc, fe) = (t[7] > 0, t[9] > 0);
+        let (fc, fe, fm) = (t[7] > 0, t[9] > 0, t[11] > 0);
         let mut s = format!(
             "statements {}\nbranches   {}\ntoggles    {}\n",
             col(t[0], t[1]),
@@ -792,10 +980,21 @@ impl Database {
         if fe {
             let _ = writeln!(s, "expressions {}", col(t[8], t[9]));
         }
+        if fm {
+            let _ = writeln!(s, "combinations {}", col(t[10], t[11]));
+            // The longest label sets the column.
+            s = s
+                .lines()
+                .map(|l| {
+                    let (label, rest) = l.split_once(' ').unwrap_or((l, ""));
+                    format!("{label:12} {}\n", rest.trim_start())
+                })
+                .collect();
+        }
         s.push('\n');
         let w = per.keys().map(|p| p.len()).max().unwrap_or(0).max(4);
         // The toggles column is padded only when a column follows.
-        let pad = if fc || fe { 20 } else { 0 };
+        let pad = if fc || fe || fm { 20 } else { 0 };
         let _ = write!(
             s,
             "{:w$}  {:<20}  {:<20}  {:<pad$}",
@@ -805,7 +1004,10 @@ impl Database {
             let _ = write!(s, "  {:<20}", "conditions");
         }
         if fe {
-            let _ = write!(s, "  expressions");
+            let _ = write!(s, "  {:<20}", "expressions");
+        }
+        if fm {
+            let _ = write!(s, "  combinations");
         }
         s = s.trim_end().to_string();
         s.push('\n');
@@ -821,7 +1023,10 @@ impl Database {
                 let _ = write!(s, "  {:<20}", col(c[6], c[7]));
             }
             if fe {
-                let _ = write!(s, "  {}", col(c[8], c[9]));
+                let _ = write!(s, "  {:<20}", col(c[8], c[9]));
+            }
+            if fm {
+                let _ = write!(s, "  {}", col(c[10], c[11]));
             }
             s = s.trim_end().to_string();
             s.push('\n');
@@ -838,6 +1043,7 @@ impl Database {
                 let item = match k.kind {
                     Kind::Toggle(r) => format!("{} {}", k.sig, arrow(r)),
                     Kind::Condition(_) | Kind::Expression(_) => fec_text(k, e),
+                    Kind::Combination(_) => comb_text(k, e),
                     _ => e.text.clone(),
                 };
                 [
@@ -877,6 +1083,7 @@ impl Database {
                 .map(|(k, e)| (k.clone(), e.clone()))
                 .collect(),
             tests: self.tests.clone(),
+            legacy: self.legacy,
         }
     }
 
@@ -902,7 +1109,7 @@ impl Database {
         for (k, e) in self
             .items
             .iter()
-            .filter(|(k, _)| !matches!(k.kind, Kind::Toggle(_)))
+            .filter(|(k, _)| !matches!(k.kind, Kind::Toggle(_) | Kind::Combination(_)))
         {
             let line = files.entry(&e.file).or_default().entry(e.line).or_default();
             match k.kind {
@@ -927,7 +1134,8 @@ impl Database {
                     let c = line.arms.entry((k.hash, k.occ, a)).or_default();
                     *c = c.saturating_add(e.count);
                 }
-                Kind::Toggle(_) => {}
+                // Combinations are not branches: Cobertura has no notion of them.
+                Kind::Toggle(_) | Kind::Combination(_) => {}
             }
         }
         for ((f, l, _, _), c) in stmts {
@@ -1017,6 +1225,11 @@ pub fn fec_text(k: &Key, e: &Entry) -> String {
     format!("{} is {v}{res} in {whole}", k.sig)
 }
 
+/// What a combination is about: `valid is false, ready is true in valid and ready`.
+pub fn comb_text(k: &Key, e: &Entry) -> String {
+    format!("{} in {}", combination_words(k), e.text)
+}
+
 /// `rise (0->1)` or `fall (1->0)`.
 pub fn arrow(rise: bool) -> &'static str {
     if rise { "rise (0->1)" } else { "fall (1->0)" }
@@ -1067,6 +1280,7 @@ mod tests {
                 count,
                 text: "x := 1;".into(),
                 tests: Vec::new(),
+                waivers: Vec::new(),
             },
         )
     }
@@ -1147,9 +1361,59 @@ mod tests {
         // Older versions still read: 2 (no toggles), 3 (no tests).
         assert!(Database::parse("yavs-coverage 2\n").is_ok());
         let v3 = Database::parse("yavs-coverage 3\nt1\t:top:u1\tr.d(7)\t3\t4\ta&b.vhd\n");
-        assert_eq!(v3.unwrap(), d);
+        let v3 = v3.unwrap();
+        assert!(v3.legacy);
+        assert_eq!(v3.items, d.items);
         assert!(d.cobertura().contains("lines-valid=\"0\""));
         assert!(d.summary().contains("toggles    1/1 100.0%"));
+    }
+
+    /// A combination with in-source waivers survives write and parse, and merging a database
+    /// that waives it with one that does not is a conflict.
+    #[test]
+    fn combinations_keep_their_waivers() {
+        let key = Key {
+            path: ":t".into(),
+            kind: Kind::Combination(0b1001),
+            hash: 7,
+            occ: 0,
+            sig: format!("valid{INPUT_SEP}ready"),
+        };
+        let entry = |count, waivers| Entry {
+            file: "a.vhd".into(),
+            line: 3,
+            count,
+            text: "valid and ready".into(),
+            tests: Vec::new(),
+            waivers,
+        };
+        let waiver = Waiver {
+            rule: "01".into(),
+            reason: "impossible handshake".into(),
+            file: "a.vhd".into(),
+            line: 2,
+        };
+        let mut d = Database::default();
+        d.items.insert(key.clone(), entry(2, vec![waiver.clone()]));
+        let text = d.write();
+        assert!(text.starts_with("yavs-coverage 6\n"));
+        let back = Database::parse(&text).unwrap();
+        assert_eq!(back, d);
+        assert_eq!(pattern(&key), "01");
+        assert_eq!(combination_words(&key), "valid is false, ready is true");
+        // The same waiver in both: kept once, counts added.
+        let mut m = back.clone();
+        assert!(m.merge(d.clone()).is_empty());
+        assert_eq!(m.items[&key].count, 4);
+        assert_eq!(m.items[&key].waivers, vec![waiver]);
+        // Waived in one database only: a conflict, and the requirement stays.
+        let mut other = Database::default();
+        other.items.insert(key.clone(), entry(0, Vec::new()));
+        let mut m = back;
+        let conflicts = m.merge(other);
+        assert_eq!(conflicts.len(), 1, "{conflicts:?}");
+        assert!(conflicts[0].contains("a.vhd:2"));
+        assert!(m.items[&key].waivers.is_empty());
     }
 
     #[test]

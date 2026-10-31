@@ -69,7 +69,7 @@ d.addEventListener('keydown',function(e){\
 if(e.key=='Escape'&&pin)set(pin);\
 else if((e.key=='Enter'||e.key==' ')&&e.target.matches('tr[tabindex]')){e.preventDefault();set(e.target)}})})();";
 
-fn esc(s: &str) -> String {
+pub(crate) fn esc(s: &str) -> String {
     let mut o = String::with_capacity(s.len());
     for c in s.chars() {
         match c {
@@ -107,7 +107,7 @@ fn cell(h: usize, t: usize) -> String {
 
 /// Hit and total of statements, branches and toggles.
 #[derive(Default, Clone, Copy)]
-struct Tally([usize; 10]);
+struct Tally([usize; 12]);
 
 impl Tally {
     fn add(&mut self, k: &Key, e: &Entry) {
@@ -117,27 +117,34 @@ impl Tally {
             Kind::Toggle(_) => 4,
             Kind::Condition(_) => 6,
             Kind::Expression(_) => 8,
+            Kind::Combination(_) => 10,
         };
         self.0[o + 1] += 1;
         self.0[o] += usize::from(e.count > 0);
     }
-    /// The cells of the kinds shown: conditions and expressions only when `fec` says so.
-    fn cells(&self, fec: [bool; 2]) -> String {
-        (0..3 + usize::from(fec[0]) + usize::from(fec[1]))
-            .map(|i| {
-                // Skip a column the report has no rows for.
-                let i = if i == 3 && !fec[0] { 4 } else { i };
-                cell(self.0[2 * i], self.0[2 * i + 1])
-            })
+    /// The cells of the kinds shown: conditions, expressions and combinations only when `fec`
+    /// says so.
+    fn cells(&self, fec: [bool; 3]) -> String {
+        columns(fec)
+            .into_iter()
+            .map(|i| cell(self.0[2 * i], self.0[2 * i + 1]))
             .collect()
     }
 }
 
-fn table_head(first: &str, fec: [bool; 2]) -> String {
+/// The tally columns shown: statements, branches, toggles, then the optional kinds.
+fn columns(fec: [bool; 3]) -> Vec<usize> {
+    let mut c = vec![0, 1, 2];
+    c.extend((0..3).filter(|&i| fec[i]).map(|i| 3 + i));
+    c
+}
+
+fn table_head(first: &str, fec: [bool; 3]) -> String {
     format!(
-        "<tr><th>{first}</th><th>statements</th><th>branches</th><th>toggles</th>{}{}</tr>\n",
+        "<tr><th>{first}</th><th>statements</th><th>branches</th><th>toggles</th>{}{}{}</tr>\n",
         if fec[0] { "<th>conditions</th>" } else { "" },
-        if fec[1] { "<th>expressions</th>" } else { "" }
+        if fec[1] { "<th>expressions</th>" } else { "" },
+        if fec[2] { "<th>combinations</th>" } else { "" }
     )
 }
 
@@ -153,6 +160,7 @@ pub fn pages(
     db: &Database,
     ex: &[(Key, Entry, String)],
     sources: &BTreeMap<String, String>,
+    exclusions: Option<&crate::exclusions::Report>,
 ) -> Vec<(String, String)> {
     let names: Vec<&str> = files(db, ex).into_iter().collect();
     let mut out = Vec::new();
@@ -164,7 +172,7 @@ pub fn pages(
         per_path.entry(&k.path).or_default().add(k, e);
         per_file.entry(&e.file).or_default().add(k, e);
     }
-    let fec = [total.0[7] > 0, total.0[9] > 0];
+    let fec = [total.0[7] > 0, total.0[9] > 0, total.0[11] > 0];
     let mut b = String::from("<h1>Coverage report</h1>\n");
     let _ = write!(
         b,
@@ -223,6 +231,13 @@ pub fn pages(
         );
     }
     b.push_str("</table>\n");
+    if let Some(r) = exclusions {
+        b.push_str("<p><a href=\"exclusions.html\">Coverage exclusions</a></p>\n");
+        out.push((
+            "exclusions.html".to_string(),
+            page("Coverage exclusions", &r.html_body()),
+        ));
+    }
     out.push(("index.html".to_string(), page("Coverage report", &b)));
     for (i, f) in names.iter().enumerate() {
         for missed in [false, true] {
@@ -250,6 +265,7 @@ fn what(k: &Key, e: &Entry) -> String {
         Kind::Branch(a) => format!("branch arm {a}: {}", e.text),
         Kind::Toggle(r) => format!("toggle {} {}", k.sig, arrow(r)),
         Kind::Condition(_) | Kind::Expression(_) => String::new(),
+        Kind::Combination(_) => format!("combinations of {}", e.text),
     }
 }
 
@@ -325,10 +341,15 @@ fn popup(db: &Database, n: usize, its: &[LineItem], summary: &str) -> String {
                 e.count
             );
         } else {
+            let at = if matches!(k.kind, Kind::Combination(_)) {
+                format!("{}: {}", k.path, crate::combination_words(k))
+            } else {
+                k.path.clone()
+            };
             let _ = write!(
                 b,
                 "<tr class=\"{class}\"><td>{}</td><td class=\"n\">{}</td><td class=\"dim\">{tests}{reason}</td></tr>",
-                esc(&k.path),
+                esc(&at),
                 e.count
             );
         }

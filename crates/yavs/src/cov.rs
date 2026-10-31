@@ -26,6 +26,15 @@ pub enum KindArg {
     Toggle,
     Condition,
     Expression,
+    Combination,
+}
+
+/// The form of `--exclusions`.
+#[cfg_attr(test, derive(Debug))]
+#[derive(Clone, Copy, clap::ValueEnum)]
+pub enum ExclusionsFormat {
+    Text,
+    Json,
 }
 
 impl KindArg {
@@ -36,6 +45,7 @@ impl KindArg {
             KindArg::Toggle => yavs_cov::Kind::Toggle(true),
             KindArg::Condition => yavs_cov::Kind::Condition(0),
             KindArg::Expression => yavs_cov::Kind::Expression(0),
+            KindArg::Combination => yavs_cov::Kind::Combination(0),
         };
         k.name().to_string()
     }
@@ -80,7 +90,7 @@ pub enum Command {
         #[arg(long, value_name = "DIR")]
         root: Option<PathBuf>,
         /// Report only these kinds of item (`statement`, `branch`, `toggle`, `condition`,
-        /// `expression`, comma separated); `--total` and `--fail-under` then count only them.
+        /// `expression`, `combination`, comma separated); `--total` and `--fail-under` then count only them.
         #[arg(long, value_name = "LIST", value_delimiter = ',')]
         kind: Vec<KindArg>,
         /// Print only the total coverage, as one percentage (`70.0%`, rounded down): items that
@@ -96,6 +106,19 @@ pub enum Command {
         /// `.yaml` or `.yml` file is read as YAML).
         #[arg(long, value_name = "FILE")]
         exclude: Option<PathBuf>,
+        /// Print the exclusion report instead of the summary: every rule that takes requirements
+        /// out of the totals (`-- yavs coverage exclude` directives and the rows of `--exclude`)
+        /// with its origin, reason, what it matched, how often that ran, and the totals before
+        /// and after (`--exclusions=json`: versioned JSON). The HTML report gets the same page.
+        #[arg(
+            long,
+            value_name = "FORMAT",
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = "text",
+            conflicts_with_all = ["uncovered", "tests", "total"]
+        )]
+        exclusions: Option<ExclusionsFormat>,
         /// Print only the items that never ran, as exclusion rows (`--uncovered=yaml`: as a
         /// YAML exclusion file).
         #[arg(
@@ -143,6 +166,8 @@ const SOURCE_ERROR: &str = "E0113";
 const BELOW_ERROR: &str = "E0114";
 /// `--total` or `--fail-under` over a database with no item of the selected kinds.
 const EMPTY_ERROR: &str = "E0115";
+/// Merged databases disagree about an in-source exclusion.
+const CONFLICT_ERROR: &str = "E0137";
 
 fn merged(inputs: &[PathBuf]) -> Result<Database, Box<Diagnostic>> {
     let mut db = Database::default();
@@ -151,7 +176,27 @@ fn merged(inputs: &[PathBuf]) -> Result<Database, Box<Diagnostic>> {
             .map_err(|e| e.to_string())
             .and_then(|t| Database::parse(&t));
         match d {
-            Ok(d) => db.merge(d),
+            Ok(d) => {
+                let conflicts = db.merge(d);
+                if !conflicts.is_empty() {
+                    let mut e = Diagnostic::error(
+                        CONFLICT_ERROR,
+                        format!(
+                            "`{}` disagrees with the databases before it about in-source exclusions",
+                            p.display()
+                        ),
+                    );
+                    for c in conflicts.iter().take(5) {
+                        e = e.with_note(c.clone());
+                    }
+                    if conflicts.len() > 5 {
+                        e = e.with_note(format!("... and {} more", conflicts.len() - 5));
+                    }
+                    return Err(Box::new(e.with_help(
+                        "a waiver from one run would hide a requirement the other run kept: run                          all databases from the same sources, or drop the directive",
+                    )));
+                }
+            }
             Err(m) => {
                 return Err(Box::new(
                     Diagnostic::error(
@@ -178,42 +223,47 @@ fn write(path: &PathBuf, text: String) -> Result<(), Box<Diagnostic>> {
 /// Excluded items with the reasons of their rows.
 type Excluded = Vec<(yavs_cov::Key, yavs_cov::Entry, String)>;
 
-/// `db` without the items the exclusion file lists, and those items.
+/// `db` without the items the exclusion file lists and the in-source directives waive, those
+/// items, and the report of every rule.
 fn excluded(
     out: &mut Out,
     db: Database,
     exclude: Option<PathBuf>,
-) -> Result<(Database, Excluded), Box<Diagnostic>> {
-    let Some(p) = &exclude else {
-        return Ok((db, Vec::new()));
+) -> Result<(Database, Excluded, yavs_cov::exclusions::Report), Box<Diagnostic>> {
+    let (rows, name) = match &exclude {
+        None => (Vec::new(), String::new()),
+        Some(p) => {
+            let fail = |m: String| {
+                Box::new(
+                    Diagnostic::error(
+                        EXCLUDE_ERROR,
+                        format!("cannot use exclusion file `{}`", p.display()),
+                    )
+                    .with_note(m),
+                )
+            };
+            let yaml = p
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("yaml") || e.eq_ignore_ascii_case("yml"));
+            let rows = std::fs::read_to_string(p)
+                .map_err(|e| e.to_string())
+                .and_then(|t| {
+                    if yaml {
+                        yavs_cov::exclude::parse_yaml(&t)
+                    } else {
+                        yavs_cov::exclude::parse(&t)
+                    }
+                })
+                .map_err(fail)?;
+            (rows, p.display().to_string())
+        }
     };
-    let fail = |m: String| {
-        Box::new(
-            Diagnostic::error(
-                EXCLUDE_ERROR,
-                format!("cannot use exclusion file `{}`", p.display()),
-            )
-            .with_note(m),
-        )
-    };
-    let yaml = p
-        .extension()
-        .is_some_and(|e| e.eq_ignore_ascii_case("yaml") || e.eq_ignore_ascii_case("yml"));
-    let rows = std::fs::read_to_string(p)
-        .map_err(|e| e.to_string())
-        .and_then(|t| {
-            if yaml {
-                yavs_cov::exclude::parse_yaml(&t)
-            } else {
-                yavs_cov::exclude::parse(&t)
-            }
-        })
-        .map_err(fail)?;
-    let a = yavs_cov::exclude::apply(&db, &rows, &p.display().to_string());
+    let a = yavs_cov::exclude::apply(&db, &rows, &name);
     for w in &a.warnings {
         out.emit(&SourceMap::default(), w);
     }
-    Ok((a.kept, a.excluded))
+    let report = yavs_cov::exclusions::build(&db, &a);
+    Ok((a.kept, a.excluded, report))
 }
 
 /// Split a path into (Windows style, components) with `.` and `..` collapsed lexically. A path
@@ -307,6 +357,7 @@ fn write_html(
     root: Option<PathBuf>,
     db: &Database,
     excluded: &Excluded,
+    exclusions: &yavs_cov::exclusions::Report,
 ) -> Result<(), Box<Diagnostic>> {
     let mut sources = std::collections::BTreeMap::new();
     for f in yavs_cov::html::files(db, excluded) {
@@ -334,7 +385,7 @@ fn write_html(
                 .with_note(e.to_string()),
         )
     })?;
-    for (name, text) in yavs_cov::html::pages(db, excluded, &sources) {
+    for (name, text) in yavs_cov::html::pages(db, excluded, &sources, Some(exclusions)) {
         write(&dir.join(name), text)?;
     }
     Ok(())
@@ -346,6 +397,7 @@ struct Report {
     html: Option<PathBuf>,
     root: Option<PathBuf>,
     exclude: Option<PathBuf>,
+    exclusions: Option<ExclusionsFormat>,
     kinds: Vec<String>,
     uncovered: Option<UncoveredFormat>,
     tests: bool,
@@ -354,7 +406,7 @@ struct Report {
 }
 
 fn report(out: &mut Out, db: Database, r: Report) -> Result<(), Box<Diagnostic>> {
-    let (db, mut excluded) = excluded(out, db, r.exclude)?;
+    let (db, mut excluded, mut exclusions) = excluded(out, db, r.exclude)?;
     let db = if r.kinds.is_empty() {
         db
     } else {
@@ -363,6 +415,7 @@ fn report(out: &mut Out, db: Database, r: Report) -> Result<(), Box<Diagnostic>>
     };
     let root = root_dir(r.root.clone())?;
     let (shown_db, shown_excluded) = shown(&db, &excluded, &root);
+    exclusions.map_files(&|f| relative(f, &root));
     let (hit, all) = db.totals();
     if (r.total || r.fail_under.is_some()) && all == 0 {
         return Err(Box::new(
@@ -375,7 +428,12 @@ fn report(out: &mut Out, db: Database, r: Report) -> Result<(), Box<Diagnostic>>
                 .with_help("run with `--cov-kind` naming the kinds to count"),
         ));
     }
-    if let Some(f) = r.uncovered {
+    if let Some(f) = r.exclusions {
+        match f {
+            ExclusionsFormat::Text => print!("{}", exclusions.text()),
+            ExclusionsFormat::Json => print!("{}", exclusions.json()),
+        }
+    } else if let Some(f) = r.uncovered {
         match f {
             UncoveredFormat::Text => print!("{}", shown_db.uncovered()),
             UncoveredFormat::Yaml => print!("{}", shown_db.uncovered_yaml()),
@@ -389,7 +447,7 @@ fn report(out: &mut Out, db: Database, r: Report) -> Result<(), Box<Diagnostic>>
         print!("{}", yavs_cov::exclude::excluded_text(&shown_excluded));
     }
     if let Some(d) = r.html {
-        write_html(&d, r.root, &db, &excluded)?;
+        write_html(&d, r.root, &db, &excluded, &exclusions)?;
     }
     if let Some(p) = r.cobertura {
         write(&p, db.cobertura())?;
@@ -422,6 +480,7 @@ pub fn run(c: Command, format: MessageFormat, color: bool) -> ExitCode {
             total,
             fail_under,
             exclude,
+            exclusions,
             uncovered,
             tests,
             warn,
@@ -435,6 +494,7 @@ pub fn run(c: Command, format: MessageFormat, color: bool) -> ExitCode {
                     html,
                     root,
                     exclude,
+                    exclusions,
                     kinds: kind.into_iter().map(KindArg::name).collect(),
                     uncovered,
                     tests,
@@ -451,7 +511,7 @@ pub fn run(c: Command, format: MessageFormat, color: bool) -> ExitCode {
             .set_warn(&warn)
             .and_then(|()| merged(&inputs))
             .and_then(|db| excluded(&mut out, db, exclude))
-            .map(|(db, _)| print!("{}", db.rank())),
+            .map(|(db, ..)| print!("{}", db.rank())),
     };
     match r {
         Ok(()) => out.finish(u8::from(out.errors > 0)),

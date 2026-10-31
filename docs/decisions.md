@@ -12906,3 +12906,41 @@ gets no suggestion, and a malformed one only when exactly one id is close. Not c
 purpose: environment variables (an unknown `YAVS_*` is ignored, not rejected), exclusion globs and
 instance paths (patterns, not names), the two-valued `rise`/`fall`, the manifest keys of a library
 index (machine written; a damaged index says to re-analyze).
+
+## Combination coverage and inline exclusions (yavs-syntax, yavs-lower, yavs-ir, yavs-cov, CLI, #883)
+
+- **Metric (opt in, `--cov-kind=combination`):** a requirement is a reachable state of a decision's
+  inputs, two bits each: not evaluated, false, true. Reachability follows the tree: `and`, `or`,
+  `nand`, `nor` on `bit`/`boolean` skip the right operand when the left decides (LRM 9.2.2), every
+  other operator, `std_ulogic` ones included, evaluates both. Skipped is distinct from false and is
+  never given a value. The state is the one `CoverIn` already builds for focused expression
+  coverage, so nothing is evaluated extra and short-circuit is untouched; `CoverCond` counts the
+  state's own counter (`CovComb`). An input with another value than `'0'/'L'/'1'/'H'` is no
+  combination. Evaluated leaves that read the same object agree. A decision with a constant
+  input, more than 8 inputs or more than 512 combinations has none (`W2023` when measured).
+  FEC rows are unchanged and independent. Cobertura gets no combinations.
+- **Inputs and order:** the leaves of the logic tree, left to right in the source, before
+  optimisation; values refer to the leaf, not to a `not` above it. Only a leaf that is a plain
+  name can be addressed by name; a repeated name is ambiguous and rejected; the rest by position.
+  One shared reading (`covcond.rs` `Decision`) serves the lowering and the directive checks.
+- **Directives:** read from the lexer's `--` comments (`yavs_syntax::line_comments`, so a `--` in a
+  string or block comment is no directive), only those starting `yavs cov`/`yavs coverage`; bound
+  to the construct whose first token follows the comment group (`if`, `elsif` by its keyword,
+  `while`, `exit`/`next ... when`, simple assignment); a conditional or selected assignment is
+  ambiguous and rejected. Resolved against the final HIR (`yavs_lower::covdir`), checked at
+  analysis by `analyze` (a file that mentions `yavs` is analysed whole, not lazily from the unit
+  cache, so its HIR exists), `elab` and `run`, and applied by the lowering (`LowerOptions::
+  cov_directives`, in every lowering cache key). Malformed is an error, never repaired or
+  partly applied; duplicates, all waived and nothing matched are warnings. No warn-and-apply mode.
+- **Persistence:** the database (version 6) keeps waived combinations with raw counts, reasons and
+  places, so reports never reread sources; merging a waived with a not waived copy is `E0137`.
+  Identity (hash of the decision text, now without `--` comments, and occurrence) is independent
+  of directives. Older databases are marked `legacy` and the exclusion report says they hold no
+  record.
+- **Report:** `cov report --exclusions[=json]` (and an HTML page) lists inline and file rules, with
+  status applied/redundant/matches nothing/metric not collected; a requirement is excluded
+  once however many rules match. A directive for a metric that was not collected is not in the
+  database and so not in the report.
+- **Not applicable / deferred:** the Python scripting API (#132) does not exist yet; the VS Code
+  extension has no coverage settings. (maintainer, 2026-10-30, #883 plan; defaults of the plan
+  comment taken.)

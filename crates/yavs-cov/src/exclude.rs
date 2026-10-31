@@ -7,6 +7,7 @@
 //! branch    <instance|glob> <12hex>.<occ>.<arm> [file:line]
 //! condition <instance|glob> <12hex>.<occ> <row> [file:line]   a row of a condition (2 * input + value)
 //! expression <instance|glob> <12hex>.<occ> <row> [file:line]  the same for a logic expression
+//! combination <instance|glob> <12hex>.<occ> <pattern> [file:line]  the combinations of a condition or expression a pattern of `0`, `1` and `-` (anything, also not evaluated) matches
 //! toggle    <instance|glob> <scalar|glob> [rise|fall]   a signal's scalar, both directions unless one is named
 //! instance  <glob>          that instance and everything below it
 //! unit      <lib.package>   a package's items
@@ -16,6 +17,8 @@
 //! Items match by instance, kind, hash prefix, occurrence and arm; `file:line` is display only
 //! and a changed line is a warning. Exclusions apply when reporting: the database keeps raw
 //! counts.
+
+use std::collections::BTreeMap;
 
 use crate::{Database, Entry, Key, Kind};
 use yavs_diag::Diagnostic;
@@ -37,6 +40,7 @@ enum ItemKind {
     Branch,
     Condition,
     Expression,
+    Combination,
 }
 
 impl ItemKind {
@@ -46,6 +50,7 @@ impl ItemKind {
             "branch" => ItemKind::Branch,
             "condition" => ItemKind::Condition,
             "expression" => ItemKind::Expression,
+            "combination" => ItemKind::Combination,
             _ => return None,
         })
     }
@@ -62,6 +67,14 @@ enum Rule {
         arm: u32,
         at: Option<(String, u32)>,
     },
+    /// The combinations of a decision a pattern matches (`0` false, `1` true, `-` anything).
+    Combination {
+        glob: String,
+        hex: String,
+        occ: u32,
+        pattern: String,
+        at: Option<(String, u32)>,
+    },
     /// Path glob, scalar glob, direction (`Some(true)` rise, `Some(false)` fall, `None` both).
     Toggle(String, String, Option<bool>),
     Instance(String),
@@ -73,9 +86,23 @@ enum Rule {
 #[derive(Debug)]
 pub struct Row {
     rule: Rule,
+    /// The row as an exclusion file writes it, without the reason.
+    pub text: String,
     reason: String,
     /// 1-based line in the exclusion file.
     line: usize,
+}
+
+/// One exclusion rule and what it matched: a row of an exclusion file, or a directive in the
+/// source.
+pub struct Use {
+    /// `file:line` of the row or the directive.
+    pub origin: String,
+    pub inline: bool,
+    pub rule: String,
+    pub reason: String,
+    /// The items it matches (an item another rule excludes too is in both).
+    pub items: Vec<Key>,
 }
 
 /// The result of [`apply`].
@@ -85,6 +112,8 @@ pub struct Applied {
     /// The excluded items with the reason of the row that took them out.
     pub excluded: Vec<(Key, Entry, String)>,
     pub warnings: Vec<Diagnostic>,
+    /// Every rule, those of the exclusion file in file order after the in-source ones.
+    pub uses: Vec<Use>,
 }
 
 fn glob_match(g: &[u8], s: &[u8]) -> bool {
@@ -142,6 +171,19 @@ fn item_rule(
             Some((f.to_string(), num(n)?))
         }
     };
+    if kind == ItemKind::Combination {
+        let pattern = row.ok_or_else(|| bad("missing pattern"))?;
+        if pattern.is_empty() || !pattern.bytes().all(|b| matches!(b, b'0' | b'1' | b'-')) {
+            return Err(bad("expected a pattern of `0`, `1` and `-`, one per input"));
+        }
+        return Ok(Rule::Combination {
+            glob: glob.to_string(),
+            hex: p[0].to_ascii_lowercase(),
+            occ: num(p[1])?,
+            pattern: pattern.to_string(),
+            at,
+        });
+    }
     let arm = match (kind, row) {
         (ItemKind::Branch, _) => num(p[2])?,
         (ItemKind::Condition | ItemKind::Expression, Some(r)) => num(r)?,
@@ -180,16 +222,20 @@ pub fn parse(text: &str) -> Result<Vec<Row>, String> {
                 at.first().copied(),
                 &bad,
             )?,
-            [t @ ("condition" | "expression"), glob, id, row, ref at @ ..] if at.len() <= 1 => {
-                item_rule(
-                    ItemKind::word(t).unwrap_or(ItemKind::Condition),
-                    glob,
-                    id,
-                    Some(row),
-                    at.first().copied(),
-                    &bad,
-                )?
-            }
+            [
+                t @ ("condition" | "expression" | "combination"),
+                glob,
+                id,
+                row,
+                ref at @ ..,
+            ] if at.len() <= 1 => item_rule(
+                ItemKind::word(t).unwrap_or(ItemKind::Condition),
+                glob,
+                id,
+                Some(row),
+                at.first().copied(),
+                &bad,
+            )?,
             ["toggle", g, sig] => Rule::Toggle(g.to_string(), sig.to_string(), None),
             ["toggle", g, sig, d] => {
                 Rule::Toggle(g.to_string(), sig.to_string(), Some(direction(d, &bad)?))
@@ -198,8 +244,8 @@ pub fn parse(text: &str) -> Result<Vec<Row>, String> {
             ["unit", u] => Rule::Unit(u.to_string()),
             ["file", g] => Rule::File(g.to_string()),
             [
-                "statement" | "branch" | "condition" | "expression" | "toggle" | "instance"
-                | "unit" | "file",
+                "statement" | "branch" | "condition" | "expression" | "combination" | "toggle"
+                | "instance" | "unit" | "file",
                 ..,
             ] => {
                 return Err(bad("wrong number of fields"));
@@ -215,12 +261,26 @@ pub fn parse(text: &str) -> Result<Vec<Row>, String> {
             [] => unreachable!(),
         };
         rows.push(Row {
+            text: body.split_whitespace().collect::<Vec<_>>().join(" "),
             rule,
             reason: reason.to_string(),
             line: i + 1,
         });
     }
     Ok(rows)
+}
+
+/// Whether combination `k` is one `pattern` matches: `-` takes any state, also not evaluated.
+fn pattern_matches(pattern: &str, k: &Key) -> bool {
+    let Kind::Combination(s) = k.kind else {
+        return false;
+    };
+    pattern.len() == crate::inputs(k).len()
+        && pattern.bytes().enumerate().all(|(i, c)| match c {
+            b'0' => s >> (2 * i) & 3 == 1,
+            b'1' => s >> (2 * i) & 3 == 2,
+            _ => true,
+        })
 }
 
 fn matches(r: &Rule, k: &Key, e: &Entry) -> bool {
@@ -238,12 +298,25 @@ fn matches(r: &Rule, k: &Key, e: &Entry) -> bool {
                 Kind::Branch(a) => *kind == ItemKind::Branch && a == *arm,
                 Kind::Condition(r) => *kind == ItemKind::Condition && r == *arm,
                 Kind::Expression(r) => *kind == ItemKind::Expression && r == *arm,
-                Kind::Toggle(_) => false,
+                Kind::Toggle(_) | Kind::Combination(_) => false,
             };
             kind_ok
                 && k.occ == *occ
                 && format!("{:016x}", k.hash).starts_with(hex)
                 && glob(g, &k.path)
+        }
+        Rule::Combination {
+            glob: g,
+            hex,
+            occ,
+            pattern,
+            ..
+        } => {
+            matches!(k.kind, Kind::Combination(_))
+                && k.occ == *occ
+                && format!("{:016x}", k.hash).starts_with(hex)
+                && glob(g, &k.path)
+                && pattern_matches(pattern, k)
         }
         Rule::Toggle(g, sig, d) => {
             matches!(k.kind, Kind::Toggle(r) if d.is_none_or(|d| d == r))
@@ -267,25 +340,39 @@ fn matches(r: &Rule, k: &Key, e: &Entry) -> bool {
     }
 }
 
-/// Take the items the rows match out of `db`, with warnings for rows that match nothing,
-/// moved lines and excluded items that ran.
+/// Take the items the rows match, and those an in-source directive waives, out of `db`, with
+/// warnings for rows that match nothing, moved lines and excluded items that ran. An item more
+/// than one rule matches is excluded once; every rule is kept in [`Applied::uses`].
 pub fn apply(db: &Database, rows: &[Row], exfile: &str) -> Applied {
     let mut out = Applied {
         kept: Database {
             tests: db.tests.clone(),
+            legacy: db.legacy,
             ..Default::default()
         },
         excluded: Vec::new(),
         warnings: Vec::new(),
+        uses: Vec::new(),
     };
-    let mut seen = vec![0usize; rows.len()];
+    let mut seen: Vec<Vec<Key>> = vec![Vec::new(); rows.len()];
+    let mut inline: BTreeMap<(String, u32, String, String), Vec<Key>> = BTreeMap::new();
     for (k, e) in &db.items {
         let mut hit = None;
+        for w in &e.waivers {
+            inline
+                .entry((w.file.clone(), w.line, w.rule.clone(), w.reason.clone()))
+                .or_default()
+                .push(k.clone());
+            hit.get_or_insert(w.reason.clone());
+        }
         for (i, r) in rows.iter().enumerate() {
             if matches(&r.rule, k, e) {
-                seen[i] += 1;
-                hit.get_or_insert(i);
+                seen[i].push(k.clone());
+                hit.get_or_insert(r.reason.clone());
                 if let Rule::Item {
+                    at: Some((_, l)), ..
+                }
+                | Rule::Combination {
                     at: Some((_, l)), ..
                 } = &r.rule
                     && *l != e.line
@@ -311,16 +398,23 @@ pub fn apply(db: &Database, rows: &[Row], exfile: &str) -> Applied {
             }
         }
         match hit {
-            Some(i) => out
-                .excluded
-                .push((k.clone(), e.clone(), rows[i].reason.clone())),
+            Some(why) => out.excluded.push((k.clone(), e.clone(), why)),
             None => {
                 out.kept.items.insert(k.clone(), e.clone());
             }
         }
     }
-    for (r, n) in rows.iter().zip(seen) {
-        if n == 0 {
+    for ((file, line, rule, reason), items) in inline {
+        out.uses.push(Use {
+            origin: format!("{file}:{line}"),
+            inline: true,
+            rule,
+            reason,
+            items,
+        });
+    }
+    for (r, items) in rows.iter().zip(seen) {
+        if items.is_empty() {
             out.warnings.push(Diagnostic::warning(
                 STALE,
                 format!(
@@ -329,6 +423,13 @@ pub fn apply(db: &Database, rows: &[Row], exfile: &str) -> Applied {
                 ),
             ));
         }
+        out.uses.push(Use {
+            origin: format!("{exfile}:{}", r.line),
+            inline: false,
+            rule: r.text.clone(),
+            reason: r.reason.clone(),
+            items,
+        });
     }
     out
 }
@@ -351,6 +452,13 @@ pub fn head(k: &Key, e: &Entry) -> String {
         Kind::Toggle(r) => format!("toggle {} {} {}", k.path, k.sig, dir_word(r)),
         Kind::Condition(r) => format!("condition {} {id} {r} {}:{}", k.path, e.file, e.line),
         Kind::Expression(r) => format!("expression {} {id} {r} {}:{}", k.path, e.file, e.line),
+        Kind::Combination(_) => format!(
+            "combination {} {id} {} {}:{}",
+            k.path,
+            crate::pattern(k),
+            e.file,
+            e.line
+        ),
     }
 }
 
@@ -366,6 +474,7 @@ pub fn comment(k: &Key, e: &Entry) -> String {
         Kind::Branch(a) => format!("arm {a}: {}", e.text),
         Kind::Toggle(r) => format!("{} ({}:{})", crate::arrow(r), e.file, e.line),
         Kind::Condition(_) | Kind::Expression(_) => crate::fec_text(k, e),
+        Kind::Combination(_) => crate::comb_text(k, e),
     }
 }
 
@@ -425,6 +534,12 @@ pub fn miss_yaml(db: &Database, k: &Key, e: &Entry) -> Option<String> {
             },
             q(&k.path),
             q(&id)
+        ),
+        Kind::Combination(_) => format!(
+            "  - kind: combination   # {c}\n    instance: {}\n    hash: {}\n    pattern: {}\n    line: {at}\n",
+            q(&k.path),
+            q(&id),
+            q(&crate::pattern(k))
         ),
         Kind::Toggle(r) => format!(
             "  - kind: toggle   # {c}\n    instance: {}\n    signal: {}\n{}",
@@ -547,6 +662,7 @@ mod tests {
                     count,
                     text: "x;".into(),
                     tests: Vec::new(),
+                    waivers: Vec::new(),
                 },
             );
         }
@@ -767,6 +883,7 @@ mod tests {
                         count: n,
                         text: String::new(),
                         tests: Vec::new(),
+                        waivers: Vec::new(),
                     },
                 );
             }

@@ -91,6 +91,11 @@ impl ProgramBuilder {
         self.prog.cov_conds.len() as u32 - 1
     }
 
+    /// The number of condition trees so far (the index the next one gets).
+    pub fn cov_conds_len(&self) -> u32 {
+        self.prog.cov_conds.len() as u32
+    }
+
     pub fn reflect(&mut self, r: Refl) -> ReflId {
         self.prog.reflect.push(r)
     }

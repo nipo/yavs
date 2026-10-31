@@ -7842,10 +7842,20 @@ impl Machine {
             },
             None => c.hits(st),
         };
-        while hits != 0 {
-            let row = hits.trailing_zeros();
-            hits &= hits - 1;
-            let i = self.inst.cov_base as usize + c.first.0 as usize + row as usize;
+        if let Some(first) = c.first {
+            while hits != 0 {
+                let row = hits.trailing_zeros();
+                hits &= hits - 1;
+                let i = self.inst.cov_base as usize + first.0 as usize + row as usize;
+                self.rt
+                    .cov
+                    .get(i)
+                    .ok_or_else(|| ice_f!("no coverage counter {i}"))?
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        if let (Some(k), Some(comb)) = (c.comb_index(st), &c.comb) {
+            let i = self.inst.cov_base as usize + comb.first.0 as usize + k;
             self.rt
                 .cov
                 .get(i)

@@ -228,6 +228,34 @@ class TestRealYavs(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stdout)
         self.assertNotIn("lint_770", proc.stdout)
 
+    def test_coverage_directives_are_checked_when_compiling(self):
+        design = self.tempdir / "dir.vhd"
+        design.write_text(
+            "entity dir is end;\narchitecture a of dir is\n  signal a, b, c : boolean := false;\n  signal n : integer;\n"
+            "begin\n  process begin\n    -- yavs cov exclude 01\n    if a and b and c then n <= 1; end if;\n"
+            "    wait;\n  end process;\nend;\n"
+        )
+        env = dict(self._env(), EXTRA_VHDL=str(design))
+
+        def compile_project(*args):
+            return subprocess.run(
+                self._command("--compile", *args),
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                encoding="utf-8",
+                errors="replace",
+                timeout=TIMEOUT,
+                check=False,
+            )
+
+        proc = compile_project()
+        self.assertNotEqual(proc.returncode, 0, proc.stdout)
+        self.assertIn("E2021", proc.stdout)
+        self.assertIn("exclusion has 2 positions, but the expression has 3 inputs", proc.stdout)
+        proc = compile_project("--yavs-cov-directives=ignore")
+        self.assertEqual(proc.returncode, 0, proc.stdout)
+
     def _coverage_run(self, *args, **env):
         return subprocess.run(
             self._command("--yavs-cov", PASS, COMMA, *args),

@@ -36,7 +36,7 @@ as ``--name=value``.
        ``elab``. A ``--threads`` in ``yavs.sim_flags`` comes after it and wins.
    * - ``yavs.cov_kind``
      - ``yavs run --cov-kind=LIST``: the kinds of coverage to count (``statement``, ``branch``,
-       ``toggle``, ``condition``, ``expression``). Used with VUnit's own ``enable_coverage``
+       ``toggle``, ``condition``, ``expression``, ``combination``). Used with VUnit's own ``enable_coverage``
        sim option, which makes every run write a coverage database (:ref:`vunit-coverage`).
    * - ``yavs.init_files.after_load``
      - Files of console commands sourced after each ``vunit_load`` (:doc:`interactive`).
@@ -79,6 +79,10 @@ Flags of the run script (``python run.py ...``), next to VUnit's own:
    * - ``--yavs-cov``
      - Collects coverage in every simulation, as ``enable_coverage`` does for the tests it is set
        for. Not with ``--yavs-debug``.
+   * - ``--yavs-cov-directives MODE``
+     - ``apply`` or ``ignore``: what ``yavs analyze``, ``elab`` and ``run`` do with the
+       ``-- yavs coverage exclude`` comments in the sources (``--coverage-directives``, :doc:`coverage`).
+       Without it they are checked when compiling, as yavs does by default.
    * - ``--yavs-cov-html DIR``
      - ``results.merge_coverage()`` also writes the HTML coverage report into DIR.
    * - ``--yavs-cov-fail-under PCT``
