@@ -283,10 +283,14 @@ pub fn run(a: Args, format: MessageFormat, color: bool, encoding: Encoding) -> E
                 ExitCode::SUCCESS
             }
             None => {
+                let mut d = Diagnostic::error("E0133", format!("no such rule `{id}`"));
+                if let Some(h) = crate::explain::suggest_code(id, crate::explain::Codes::None, true)
+                {
+                    d = d.with_help(h);
+                }
                 out.emit(
                     &none,
-                    &Diagnostic::error("E0133", format!("no such rule `{id}`"))
-                        .with_help("`yavs lint --list-rules` lists the rules"),
+                    &d.with_help("`yavs lint --list-rules` lists the rules"),
                 );
                 out.finish(2)
             }
@@ -307,7 +311,7 @@ pub fn run(a: Args, format: MessageFormat, color: bool, encoding: Encoding) -> E
         return ExitCode::SUCCESS;
     }
     let lint_code = |c: &str| yavs_lint::rule(c).is_some();
-    if let Err(d) = out.set_warn_with(&a.warn, &lint_code) {
+    if let Err(d) = out.set_warn_with(&a.warn, &lint_code, true) {
         out.emit(&none, &d);
         return out.finish(2);
     }

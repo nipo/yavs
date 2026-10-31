@@ -2116,6 +2116,22 @@ pub fn encode(elem: Elem, bit01: bool, xs: &[&Val]) -> Value {
 // `-g NAME=VALUE` (plan rule 4, sim2 #1117): the text is a value of the generic's type,
 // parsed with the `'value` parser of yavs-std.
 
+/// `e` as a message; for a unit or literal the type does not have, with the closest `names`.
+fn conv_message(e: yavs_std::error::ConvError, names: impl Iterator<Item = String>) -> String {
+    let (noun, near) = match e.kind {
+        yavs_std::error::ErrorKind::UnknownUnit => ("unit", true),
+        yavs_std::error::ErrorKind::UnknownLiteral => ("literal", true),
+        _ => ("", false),
+    };
+    let names: Vec<_> = names.collect();
+    let tail = if near {
+        yavs_diag::suggest::tail(&e.offending(), noun, names.iter().map(String::as_str))
+    } else {
+        String::new()
+    };
+    e.to_string() + &tail
+}
+
 pub fn parse_override(
     m: &mut Model,
     db: &Db,
@@ -2159,11 +2175,14 @@ pub fn parse_override(
             let (lo, hi) = bounds(m)?.low_high();
             v::physical_value(&bytes, &pt, st::Bounds { low: lo, high: hi })
                 .map(Val::Phys)
-                .map_err(|e| e.to_string())
+                .map_err(|e| {
+                    conv_message(e, units.iter().map(|u| db.decls[u.decl].name.to_string()))
+                })
         }
         TypeKind::Enum { lits } => {
             let et = enum_type(db, lits);
-            let p = v::enum_value(&bytes, &et).map_err(|e| e.to_string())?;
+            let p = v::enum_value(&bytes, &et)
+                .map_err(|e| conv_message(e, lits.iter().map(|&l| db.decls[l].name.to_string())))?;
             let b = bounds(m)?;
             if b.pos(p as i64).is_none() {
                 return Err(format!("`{text}` is outside the subtype of the generic"));

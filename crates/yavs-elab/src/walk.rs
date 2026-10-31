@@ -839,16 +839,29 @@ impl Elab<'_> {
                     .iter()
                     .any(|&g| self.db.decls[g].name.key().as_str() == key)
                 {
-                    self.warnings.push(
-                        Diagnostic::warning(
-                            codes::UNKNOWN_OVERRIDE,
-                            format!(
-                                "`-g{name}`: top level `{}` has no generic `{name}`",
-                                label.text
-                            ),
-                        )
-                        .with_primary(label.span, "top-level entity"),
-                    );
+                    let names: Vec<(String, String)> = generics
+                        .iter()
+                        .map(|&g| {
+                            let n = &self.db.decls[g].name;
+                            (n.key().as_str().to_string(), n.to_string())
+                        })
+                        .collect();
+                    let mut w = Diagnostic::warning(
+                        codes::UNKNOWN_OVERRIDE,
+                        format!(
+                            "`-g{name}`: top level `{}` has no generic `{name}`",
+                            label.text
+                        ),
+                    )
+                    .with_primary(label.span, "top-level entity");
+                    if let Some(h) = yavs_diag::suggest::suggest(
+                        &key,
+                        "generic",
+                        names.iter().map(|(k, n)| (k.as_str(), n.as_str())),
+                    ) {
+                        w = w.with_help(h);
+                    }
+                    self.warnings.push(w);
                 }
             }
         }

@@ -465,6 +465,46 @@ pub fn explain(code: &str) -> Option<&'static str> {
         .or_else(|| yavs_sem::diag::explain(code))
 }
 
+/// Which diagnostic codes a name may be (`suggest_code`).
+#[derive(Clone, Copy, PartialEq)]
+pub enum Codes {
+    None,
+    Warnings,
+    All,
+}
+
+/// The help line for `input`, which names no diagnostic code: the code close to it or, when
+/// `input` starts like a lint rule id (always so with `Codes::None`), the lint rule. `None`
+/// when nothing is close.
+pub fn suggest_code(input: &str, codes: Codes, lint: bool) -> Option<String> {
+    let key = input.to_ascii_lowercase();
+    if lint && (codes == Codes::None || key.starts_with("lint")) {
+        let id = yavs_lint::similar_rule(&key)?;
+        return Some(yavs_diag::suggest::help(&[(id.into(), "lint rule")]));
+    }
+    // Codes are numbered densely: a well-formed one that does not exist (`E0999`) is no typo of
+    // its neighbours, and a malformed one that fits several (`E010`) names none of them.
+    if matches!(key.as_bytes(), [b'e' | b'w' | b'l', d @ ..] if d.len() == 4 && d.iter().all(u8::is_ascii_digit))
+    {
+        return None;
+    }
+    let names = EXPLAIN
+        .iter()
+        .chain(yavs_sem::diag::EXPLAIN)
+        .map(|(c, _)| *c)
+        .filter(|c| codes == Codes::All || (codes == Codes::Warnings && c.starts_with('W')))
+        .map(|c| (c, "diagnostic code"))
+        .chain((codes == Codes::Warnings).then_some(("error", "warning option")));
+    let cands: Vec<_> = names
+        .map(|(c, noun)| (c.to_ascii_lowercase(), (c, noun)))
+        .collect();
+    let found = yavs_diag::suggest::similar(&key, cands.iter().map(|(k, p)| (k.as_str(), p)));
+    let [(code, noun)] = found[..] else {
+        return None;
+    };
+    Some(yavs_diag::suggest::help(&[((*code).into(), noun)]))
+}
+
 /// Every code with its explanation, for the index page of the user guide.
 #[cfg(test)]
 pub(crate) fn all() -> Vec<(&'static str, &'static str)> {

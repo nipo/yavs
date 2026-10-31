@@ -128,7 +128,7 @@ impl Out {
 
     /// Apply the `-W` options in order: `error`, `error=CODE`, `no-CODE`, `CODE`.
     pub(crate) fn set_warn(&mut self, opts: &[String]) -> Result<(), Box<Diagnostic>> {
-        self.set_warn_with(opts, &|_| false)
+        self.set_warn_with(opts, &|_| false, false)
     }
 
     /// [`Out::set_warn`] with more codes it may name (`yavs lint`: the rule ids).
@@ -136,6 +136,7 @@ impl Out {
         &mut self,
         opts: &[String],
         also: &dyn Fn(&str) -> bool,
+        lint: bool,
     ) -> Result<(), Box<Diagnostic>> {
         for o in opts {
             let (action, code) = match o.as_str() {
@@ -150,13 +151,17 @@ impl Out {
                 },
             };
             if !also(code) && (!code.starts_with('W') || crate::explain::explain(code).is_none()) {
-                return Err(Box::new(
-                    Diagnostic::error("E0103", format!("unsupported warning option `-W{o}`"))
-                        .with_help(
-                            "use `-Werror`, `-Werror=CODE`, `-Wno-CODE` or `-WCODE` with a warning code; \
-                             `yavs --explain CODE` describes a code",
-                        ),
-                ));
+                let mut d =
+                    Diagnostic::error("E0103", format!("unsupported warning option `-W{o}`"));
+                if let Some(h) =
+                    crate::explain::suggest_code(code, crate::explain::Codes::Warnings, lint)
+                {
+                    d = d.with_help(h);
+                }
+                return Err(Box::new(d.with_help(
+                    "use `-Werror`, `-Werror=CODE`, `-Wno-CODE` or `-WCODE` with a warning code; \
+                     `yavs --explain CODE` describes a code",
+                )));
             }
             self.codes.insert(code.to_string(), action);
         }

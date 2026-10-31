@@ -117,7 +117,7 @@ pub fn check_time_resolution(db: &Db, limit: yavs_kernel::Unit) -> Option<Diagno
             "{} TIME literal{} with a unit below the resolution limit of {} in the design",
             uses.len(),
             if uses.len() == 1 { "" } else { "s" },
-            format!("{limit:?}").to_lowercase(),
+            limit.name(),
         ),
     )
     .with_primary(

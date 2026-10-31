@@ -279,7 +279,15 @@ impl Db {
             let span = self.exprs[id].span;
             let x = match x {
                 crate::stat::ConstValue::Int(i) | crate::stat::ConstValue::Phys(i) => i.to_string(),
-                other => format!("{other:?}"),
+                crate::stat::ConstValue::Real(r) => r.to_string(),
+                // An enumeration position: the literal's name.
+                crate::stat::ConstValue::Enum(p) => match &self.types[self.base(est)].kind {
+                    TypeKind::Enum { lits } => lits
+                        .get(p as usize)
+                        .map_or_else(|| p.to_string(), |&l| self.decls[l].name.to_string()),
+                    _ => p.to_string(),
+                },
+                _ => "of the aggregate".to_string(),
             };
             self.report(
                 Diagnostic::error(

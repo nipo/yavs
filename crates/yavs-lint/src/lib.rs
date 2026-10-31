@@ -58,6 +58,23 @@ pub fn rule(id: &str) -> Option<&'static Rule> {
     RULES.iter().find(|r| r.id == id)
 }
 
+/// The rule whose id `id` is a typo of, when exactly one is close. Rule ids are numbered
+/// densely: a well-formed one that does not exist (`lint_999`) is no typo of its neighbours.
+pub fn similar_rule(id: &str) -> Option<&'static str> {
+    let key = id.to_ascii_lowercase();
+    if key
+        .strip_prefix("lint_")
+        .is_some_and(|d| d.len() == 3 && d.bytes().all(|c| c.is_ascii_digit()))
+    {
+        return None;
+    }
+    let found = yavs_diag::suggest::similar(&key, RULES.iter().map(|r| (r.id, r.id)));
+    match found[..] {
+        [id] => Some(id),
+        _ => None,
+    }
+}
+
 /// What one rule found.
 #[derive(Debug)]
 pub struct Finding {

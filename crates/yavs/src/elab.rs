@@ -760,6 +760,23 @@ fn bind_foreign(
     Ok(())
 }
 
+/// What an object of the hierarchy is, for `--print-hierarchy`: `signal`, `port in`, ...
+fn object_kind(k: yavs_elab::ObjKind) -> String {
+    use yavs_elab::ObjKind::*;
+    let mode = |m: yavs_kernel::PortMode| match m {
+        yavs_kernel::PortMode::In => "in",
+        yavs_kernel::PortMode::Out => "out",
+        yavs_kernel::PortMode::Inout => "inout",
+        yavs_kernel::PortMode::Buffer => "buffer",
+    };
+    match k {
+        Signal => "signal".into(),
+        Port(m) => format!("port {}", mode(m)),
+        ComponentPort(m) => format!("component port {}", mode(m)),
+        Implicit => "implicit signal".into(),
+    }
+}
+
 fn print_hierarchy(db: &Db, e: &yavs_elab::Elaborated) {
     use yavs_elab::Case;
     let mut s = String::new();
@@ -773,10 +790,10 @@ fn print_hierarchy(db: &Db, e: &yavs_elab::Elaborated) {
         for &o in &sc.objs {
             let l = e.nets.obj(o);
             s.push_str(&format!(
-                "{}{} ({:?})\n",
+                "{}{} ({})\n",
                 e.hier.path_name(id, Case::Original),
                 l.name.text,
-                l.kind
+                object_kind(l.kind)
             ));
         }
     }
@@ -924,7 +941,7 @@ fn use_clift(
         if a.verbose {
             for (f, why) in &tier.notes {
                 let name = rt.prog.func(*f).map_or("?", |f| f.name.as_str());
-                eprintln!("note: `{name}` ({f}) stays interpreted under --tier=clift: {why}");
+                eprintln!("note: `{name}` stays interpreted under --tier=clift: {why}");
             }
             let n: usize = tier.interpreted.iter().map(|k| k.1).sum();
             let kinds: Vec<String> = tier
@@ -988,10 +1005,10 @@ fn use_clift(
         let n = prog.func(f).map_or(0, |f| f.code.len());
         match why {
             Ok(t) => eprintln!(
-                "note: `{name}` ({f}, {n} IR instructions) is hot: compiled by --tier=clift-auto in {} us",
+                "note: `{name}` ({n} IR instructions) is hot: compiled by --tier=clift-auto in {} us",
                 t.as_micros()
             ),
-            Err(why) => eprintln!("note: `{name}` ({f}) is hot but stays interpreted: {why}"),
+            Err(why) => eprintln!("note: `{name}` is hot but stays interpreted: {why}"),
         }
     });
     let first = yavs_clift::First::new().map_err(bug)?;
@@ -1055,10 +1072,10 @@ fn use_auto3(
         };
         match why {
             Ok(t) => eprintln!(
-                "note: `{name}` ({f}, {n} IR instructions) is hot: compiled by --tier=auto3 with {by} in {} us",
+                "note: `{name}` ({n} IR instructions) is hot: compiled by --tier=auto3 with {by} in {} us",
                 t.as_micros()
             ),
-            Err(why) => eprintln!("note: `{name}` ({f}) is hot but stays interpreted: {why}"),
+            Err(why) => eprintln!("note: `{name}` is hot but stays interpreted: {why}"),
         }
     });
     let first = yavs_clift::First::new().map_err(bug)?;
@@ -1237,11 +1254,11 @@ fn use_llvm_tier(
                 let n = prog.func(f).map_or(0, |f| f.code.len());
                 match why {
                     Ok(t) => eprintln!(
-                        "note: `{name}` ({f}, {n} IR instructions) is hot: compiled by --tier=auto at {level:?} in {} ms",
+                        "note: `{name}` ({n} IR instructions) is hot: compiled by --tier=auto at {level:?} in {} ms",
                         t.as_millis()
                     ),
                     Err(why) => {
-                        eprintln!("note: `{name}` ({f}) is hot but stays interpreted: {why}")
+                        eprintln!("note: `{name}` is hot but stays interpreted: {why}")
                     }
                 }
             });
@@ -1275,7 +1292,7 @@ fn use_llvm(rt: &yavs_interp::Runtime, tier: yavs_llvm::LlvmTier, verbose: bool)
     if verbose {
         for (f, why) in &tier.notes {
             let name = rt.prog.func(*f).map_or("?", |f| f.name.as_str());
-            eprintln!("note: `{name}` ({f}) stays interpreted under --tier=llvm: {why}");
+            eprintln!("note: `{name}` stays interpreted under --tier=llvm: {why}");
         }
         let n: usize = tier.interpreted.iter().map(|k| k.1).sum();
         let kinds: Vec<String> = tier
@@ -1505,7 +1522,11 @@ fn prepare(
                         d.with_note("a time needs a unit")
                             .with_help("write the unit after the number, for example `--stop-time=10ns` (fs, ps, ns, us, ms, sec, min, hr)")
                     } else {
-                        d.with_note(m)
+                        let d = d.with_note(m);
+                        match time_unit_help(t) {
+                            Some(h) => d.with_help(h),
+                            None => d,
+                        }
                     },
                 );
                 return Err((out, 2));
@@ -2486,6 +2507,15 @@ fn default_test_names() {
 }
 
 /// `10ms`, `1.5 ns`: a TIME literal.
+/// The help line for the unit of a time `t` that names none: `10nss` has a unit like `ns`.
+fn time_unit_help(t: &str) -> Option<String> {
+    let t = t.trim_end();
+    let unit = t.trim_start_matches(|c: char| !c.is_ascii_alphabetic());
+    let units = ["fs", "ps", "ns", "us", "ms", "sec", "min", "hr"];
+    let cands = units.into_iter().map(|u| (u, u));
+    yavs_diag::suggest::suggest(&unit.to_ascii_lowercase(), "time unit", cands)
+}
+
 fn parse_time(t: &str) -> Result<yavs_kernel::Time, String> {
     let fs = yavs_std::value::time_literal(t).map_err(|e| e.to_string())?;
     yavs_kernel::Time::from_vhdl(fs).map_err(|e| e.to_string())

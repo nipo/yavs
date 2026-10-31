@@ -620,7 +620,7 @@ impl State {
             let v = match read(r) {
                 Ok(v) => v,
                 Err(e) => {
-                    self.error = Some(Error::Value(format!("reading a signal: {e:?}")));
+                    self.error = Some(Error::Value(format!("reading a signal: {e}")));
                     continue;
                 }
             };

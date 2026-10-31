@@ -204,7 +204,14 @@ pub fn parse(text: &str) -> Result<Vec<Row>, String> {
             ] => {
                 return Err(bad("wrong number of fields"));
             }
-            [t, ..] => return Err(bad(&format!("unknown exclusion type `{t}`"))),
+            [t, ..] => {
+                let tail = yavs_diag::suggest::tail(t, "type", yaml::KINDS.into_iter());
+                return Err(format!(
+                    "line {}: unknown exclusion type `{t}`: `{}`{tail}",
+                    i + 1,
+                    body.trim()
+                ));
+            }
             [] => unreachable!(),
         };
         rows.push(Row {
@@ -675,6 +682,27 @@ mod tests {
         assert!(n.is_ok(), "{n:?}");
         let n = parse_yaml("exclude:\n  - {kind: statement, instance: x, hash: 1e5000000000.0}\n");
         assert!(n.is_ok(), "{n:?}");
+    }
+
+    #[test]
+    fn unknown_names_suggest_a_near_one() {
+        let err = |t: &str| parse_yaml(t).unwrap_err();
+        assert!(
+            err("exclude:\n  - kind: statment\n")
+                .contains("a kind with a similar name exists: `statement`")
+        );
+        assert!(
+            err("exclude:\n  - kind: instance\n    instanse: x\n")
+                .contains("a key with a similar name exists: `instance`")
+        );
+        assert!(err("exclud:\n").contains("a key with a similar name exists: `exclude`"));
+        let e = parse("statment g 0123456789ab.0\n").unwrap_err();
+        assert!(
+            e.contains("a type with a similar name exists: `statement`"),
+            "{e}"
+        );
+        // Nothing close: no suggestion.
+        assert!(!err("exclude:\n  - kind: frob\n").contains("similar"));
     }
 
     #[test]

@@ -10562,3 +10562,7 @@ contain CoreMark's validation line, or the cell gets no time. One command: `run.
 (`tools/realbench/AGENTS.md` section 7). Microwatt's simulation C helpers use the other foreign-string convention and cannot run
 unchanged (#928); the harness replaces the console and JTAG-socket helpers with VHDL. No reference numbers are recorded here: the full
 measurement is for the speed wave.
+
+### Names suggest a near one everywhere (#949)
+
+`yavs_diag::suggest` (moved from `yavs-sem`) is used by: unknown libraries and units in the library layer (`L0030`, `L0031`), options, subcommands and option values of the command line (usage errors), `--explain` codes and lint rule ids, `-W` options, generic overrides (`W2105`, literal and unit of an `-g` value), the unit of `--stop-time`, `yavs lint` configuration and waiver files, coverage exclusion files (type and kind, keys). Raw Rust Debug text removed from: `--print-hierarchy` (`signal`, `port in`), `--verbose` tier notes (internal function ids), the time resolution limit, file open modes, array index directions, enumeration values in static element checks, kernel faults. Tests: `crates/yavs/tests/names.rs` and the unit tests next to each site.

@@ -30,7 +30,7 @@ impl Unit {
         }
     }
 
-    const fn name(self) -> &'static str {
+    pub const fn name(self) -> &'static str {
         match self {
             Unit::Fs => "fs",
             Unit::Ps => "ps",

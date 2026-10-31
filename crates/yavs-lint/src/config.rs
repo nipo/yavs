@@ -5,6 +5,7 @@ use crate::{Certainty, Rule};
 use saphyr_parser::{Event, Parser};
 use std::path::{Path, PathBuf};
 use yavs_diag::Severity;
+use yavs_diag::suggest::tail as near;
 
 enum Node {
     Scalar(String),
@@ -125,12 +126,17 @@ fn layer(line: usize, name: &str, n: &Node) -> Result<Layer, String> {
                 out.severity = Some(match text.to_ascii_lowercase().as_str() {
                     "error" => Severity::Error,
                     "warning" => Severity::Warning,
-                    _ => return Err(bad()),
+                    other => {
+                        let tail = near(other, "severity", ["error", "warning"].into_iter());
+                        return Err(bad() + &tail);
+                    }
                 })
             }
             _ => {
+                let keys = ["disable", "severity", "suffixes", "prefixes"];
                 return Err(format!(
-                    "line {l}: unknown key `{key}` in the settings of `{name}` (expected `disable` or `severity`, and on lint_602 `suffixes`, on lint_603 `prefixes`)"
+                    "line {l}: unknown key `{key}` in the settings of `{name}` (expected `disable` or `severity`, and on lint_602 `suffixes`, on lint_603 `prefixes`){}",
+                    near(key, "setting", keys.into_iter())
                 ));
             }
         }
@@ -173,7 +179,8 @@ impl Config {
             }
             if key != "rule" {
                 return Err(format!(
-                    "line {l}: unknown key `{key}` (expected `rule` or `exclude`)"
+                    "line {l}: unknown key `{key}` (expected `rule` or `exclude`){}",
+                    near(&key, "key", ["rule", "exclude"].into_iter())
                 ));
             }
             let Node::Map(rules) = &v else {
@@ -196,8 +203,10 @@ impl Config {
                             .into_iter()
                             .find(|c| c.name() == name)
                             .ok_or_else(|| {
+                                let groups = ["definite", "advisory", "experimental", "policy"];
                                 format!(
-                                    "line {l}: unknown rule group `{name}` (expected definite, advisory, experimental or policy)"
+                                    "line {l}: unknown rule group `{name}` (expected definite, advisory, experimental or policy){}",
+                                    near(name, "rule group", groups.into_iter())
                                 )
                             })?;
                             cfg.groups.push((class, layer(*l, name, v)?));
@@ -206,7 +215,8 @@ impl Config {
                     _ => {
                         let rule = crate::rule(id).ok_or_else(|| {
                             format!(
-                                "line {l}: unknown rule `{id}` (`yavs lint --list-rules` lists the rules)"
+                                "line {l}: unknown rule `{id}` (`yavs lint --list-rules` lists the rules){}",
+                                near_rule(id)
                             )
                         })?;
                         cfg.rules.push((rule.id, layer(*l, id, v)?));
@@ -307,6 +317,13 @@ struct Waiver {
 #[derive(Default)]
 pub struct Waivers(Vec<Waiver>);
 
+/// The tail of an error about the unknown rule `id`.
+fn near_rule(id: &str) -> String {
+    crate::similar_rule(id).map_or_else(String::new, |r| {
+        format!("; {}", yavs_diag::suggest::help(&[(r.into(), "rule")]))
+    })
+}
+
 fn normalize(name: &str) -> String {
     name.replace('\\', "/").trim_start_matches("./").to_owned()
 }
@@ -334,7 +351,8 @@ impl Waivers {
         for (l, key, v) in top(text)? {
             if key != "waivers" {
                 return Err(format!(
-                    "line {l}: unknown key `{key}` (expected `waivers`)"
+                    "line {l}: unknown key `{key}` (expected `waivers`){}",
+                    near(&key, "key", ["waivers"].into_iter())
                 ));
             }
             let items = match v {
@@ -356,7 +374,10 @@ impl Waivers {
                     match (key.as_str(), v) {
                         ("rule", Node::Scalar(s)) => {
                             if s != "*" && crate::rule(&s).is_none() {
-                                return Err(format!("line {l}: unknown rule `{s}` in a waiver"));
+                                return Err(format!(
+                                    "line {l}: unknown rule `{s}` in a waiver{}",
+                                    near_rule(&s)
+                                ));
                             }
                             w.rule = s;
                         }
@@ -380,8 +401,10 @@ impl Waivers {
                             return Err(format!("line {l}: `{key}` has the wrong form"));
                         }
                         _ => {
+                            let keys = ["rule", "files", "lines", "reason"];
                             return Err(format!(
-                                "line {l}: unknown key `{key}` in a waiver (expected rule, files, lines or reason)"
+                                "line {l}: unknown key `{key}` in a waiver (expected rule, files, lines or reason){}",
+                                near(&key, "key", keys.into_iter())
                             ));
                         }
                     }
@@ -495,6 +518,37 @@ mod tests {
                 Ok(_) => panic!("accepted: {text}"),
             }
         }
+    }
+
+    #[test]
+    fn unknown_names_suggest_a_near_one() {
+        let cfg = |t: &str| Config::parse(t).err().expect("rejected");
+        assert!(cfg("rul:\n  global: {}\n").contains("a key with a similar name exists: `rule`"));
+        assert!(
+            cfg("rule:\n  lint_770:\n    disabel: true\n")
+                .contains("a setting with a similar name exists: `disable`")
+        );
+        assert!(
+            cfg("rule:\n  lint_770:\n    severity: eror\n")
+                .contains("a severity with a similar name exists: `error`")
+        );
+        assert!(
+            cfg("rule:\n  group:\n    definit:\n      disable: true\n")
+                .contains("a rule group with a similar name exists: `definite`")
+        );
+        assert!(
+            cfg("rule:\n  lint_0770:\n    disable: true\n")
+                .contains("a rule with a similar name exists: `lint_770`")
+        );
+        // A well-formed id that does not exist is no typo of its neighbours.
+        assert!(!cfg("rule:\n  lint_100:\n    disable: true\n").contains("similar"));
+        let w = |t: &str| Waivers::parse(t).err().expect("rejected");
+        assert!(w("waivers:\n  - rule: lint_0770\n").contains("a rule with a similar name exists"));
+        assert!(
+            w("waivers:\n  - rule: lint_770\n    reson: x\n")
+                .contains("a key with a similar name exists: `reason`")
+        );
+        assert!(w("waiver:\n").contains("a key with a similar name exists: `waivers`"));
     }
 
     #[test]

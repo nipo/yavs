@@ -8,6 +8,7 @@ publish.workspace = true
 
 [dependencies]
 serde.workspace = true
+strsim.workspace = true
 annotate-snippets.workspace = true
 twox-hash = { version = "2.1", default-features = false, features = ["xxhash3_64", "std"] }
 

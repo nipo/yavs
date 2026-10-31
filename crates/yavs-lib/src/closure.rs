@@ -74,18 +74,25 @@ impl Ctx<'_> {
         if !self.manifests.contains_key(lib) {
             let Some(l) = self.libs.get(lib) else {
                 let known: Vec<_> = self.libs.libs.iter().map(|l| l.name.as_str()).collect();
-                return Err(Box::new(
-                    err("L0030", format!("unknown library `{lib}`"))
-                        .with_note(format!(
-                            "mapped libraries: {}",
-                            if known.is_empty() {
-                                "none".into()
-                            } else {
-                                known.join(", ")
-                            }
-                        ))
-                        .with_help(format!("map it with `{lib}:PATH`")),
+                let mut d = err("L0030", format!("unknown library `{lib}`")).with_note(format!(
+                    "mapped libraries: {}",
+                    if known.is_empty() {
+                        "none".into()
+                    } else {
+                        known.join(", ")
+                    }
                 ));
+                let key = fold(lib);
+                let names = self
+                    .libs
+                    .libs
+                    .iter()
+                    .map(|l| (l.name.as_str(), l.name.as_str()));
+                d = match yavs_diag::suggest::suggest(&key, "library", names) {
+                    Some(h) => d.with_help(h),
+                    None => d.with_help(format!("map it with `{lib}:PATH`")),
+                };
+                return Err(Box::new(d));
             };
             // A directory without an index is an empty library (cli-contract section 3).
             let (m, guard) = if l.has_manifest() {
@@ -147,26 +154,26 @@ impl Ctx<'_> {
         if let Some(by) = needed_by {
             d = d.with_note(format!("needed by {by}"));
         }
-        let best = m
-            .units()
-            .map(|u| (edit_distance(u.key, &r.key), u))
-            .filter(|(dist, _)| *dist <= (r.key.len() / 3).max(2))
-            .min_by_key(|(dist, u)| (*dist, u.kind != r.kind));
-        d = match best {
-            Some((_, loc)) => {
-                let u = self.record(&r.library, &m, loc)?;
-                let kind = u.kind.describe();
-                let a = if kind.starts_with(['a', 'e', 'i', 'o', 'u']) {
-                    "an"
-                } else {
-                    "a"
-                };
-                d.with_help(format!(
-                    "{a} {kind} with a similar name exists: `{}`",
-                    u.name
-                ))
-            }
-            None if m.units().next().is_none() => {
+        // Same kind first (`counter_pck` for a package), any other kind when none is close.
+        let near = |same: bool| {
+            yavs_diag::suggest::similar(
+                &r.key,
+                m.units()
+                    .filter(|u| (u.kind == r.kind) == same)
+                    .map(|u| (u.key, u)),
+            )
+        };
+        let mut best = near(true);
+        if best.is_empty() {
+            best = near(false);
+        }
+        let mut shown = Vec::new();
+        for loc in &best {
+            let u = self.record(&r.library, &m, *loc)?;
+            shown.push((u.name.to_string(), u.kind.describe()));
+        }
+        d = match shown.as_slice() {
+            [] if m.units().next().is_none() => {
                 let dir = self
                     .libs
                     .get(&r.library)
@@ -183,10 +190,11 @@ impl Ctx<'_> {
                     }
                 ))
             }
-            None => d.with_help(format!(
+            [] => d.with_help(format!(
                 "library `{}` has no {want}; analyze the file that defines it",
                 r.library
             )),
+            found => d.with_help(yavs_diag::suggest::help(found)),
         };
         Err(Box::new(d))
     }
@@ -204,11 +212,6 @@ impl Ctx<'_> {
     fn node(lib: &str, u: &UnitRecord) -> Node {
         (lib.to_string(), u.kind, u.key.clone())
     }
-}
-
-/// Levenshtein distance.
-fn edit_distance(a: &str, b: &str) -> usize {
-    strsim::levenshtein(a, b)
 }
 
 /// Ordered list of files (dependencies first, across libraries) needed to elaborate `top`.
@@ -469,14 +472,4 @@ fn check_hash(lib: &str, dir: Option<&Path>, std: &str, path: &Path, recorded: &
         ));
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn edit_distance_counts_edits_without_transpositions() {
-        assert_eq!(super::edit_distance("ab", "ba"), 2);
-        assert_eq!(super::edit_distance("café", "cafe"), 1);
-        assert_eq!(super::edit_distance("", "é"), 1);
-    }
 }

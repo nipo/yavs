@@ -2378,7 +2378,7 @@ pub(crate) fn fault_text(e: exec::Fault) -> String {
     match e {
         exec::Fault::Runtime(m) | exec::Fault::Internal(m) => m,
         exec::Fault::Unbound(b) => b.0,
-        exec::Fault::Kernel(e) => format!("{e:?}"),
+        exec::Fault::Kernel(e) => e.to_string(),
         exec::Fault::Restart => RESTART.into(),
     }
 }

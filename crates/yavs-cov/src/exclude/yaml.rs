@@ -17,6 +17,19 @@
 
 use super::{ItemKind, Row, Rule, direction, item_rule};
 use saphyr_parser::{Event, Parser};
+use yavs_diag::suggest::tail;
+
+/// The kinds of exclusion an entry may have.
+pub(super) const KINDS: [&str; 8] = [
+    "statement",
+    "branch",
+    "condition",
+    "expression",
+    "toggle",
+    "instance",
+    "unit",
+    "file",
+];
 
 enum Node {
     Scalar(String),
@@ -97,7 +110,10 @@ pub fn parse(text: &str) -> Result<Vec<Row>, String> {
         if key != "exclude" {
             return Err(err(
                 kl,
-                &format!("unknown key `{key}` (expected `exclude`)"),
+                &format!(
+                    "unknown key `{key}` (expected `exclude`){}",
+                    tail(&key, "key", ["exclude"].into_iter())
+                ),
             ));
         }
         match v {
@@ -148,12 +164,23 @@ fn entry(line: usize, n: Node) -> Result<Row, String> {
         "file" => (&["kind", "file", "reason"], &["file"]),
         _ => {
             let l = get.iter().find(|f| f.1 == "kind").map_or(line, |f| f.0);
-            return Err(err(l, &format!("unknown exclusion kind `{kind}`")));
+            let kinds = KINDS.into_iter();
+            return Err(err(
+                l,
+                &format!(
+                    "unknown exclusion kind `{kind}`{}",
+                    tail(kind, "kind", kinds)
+                ),
+            ));
         }
     };
     for (l, k, _) in &get {
         if !allowed.contains(k) {
-            return Err(err(*l, &format!("unknown key `{k}` for kind `{kind}`")));
+            let tail = tail(k, "key", allowed.iter().copied());
+            return Err(err(
+                *l,
+                &format!("unknown key `{k}` for kind `{kind}`{tail}"),
+            ));
         }
     }
     for k in need {

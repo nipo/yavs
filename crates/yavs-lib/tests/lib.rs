@@ -149,6 +149,10 @@ fn errors() {
         "error[L0030]: unknown library `nope`\n  |\n  = note: mapped libraries: work, util\n  = help: map it with `nope:PATH`\n"
     );
     assert_eq!(
+        e(UnitRef::new("wrk", UnitKind::Entity, "x")),
+        "error[L0030]: unknown library `wrk`\n  |\n  = note: mapped libraries: work, util\n  = help: a library with a similar name exists: `work`\n"
+    );
+    assert_eq!(
         e(UnitRef::new("work", UnitKind::Package, "counter_pck")),
         "error[L0031]: unknown package `counter_pck` in library `work`\n  |\n  = help: a package with a similar name exists: `Counter_Pkg`\n"
     );

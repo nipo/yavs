@@ -211,10 +211,81 @@ pub(crate) fn parse_define(s: &str) -> Result<(String, String), String> {
     }
 }
 
+/// `e` with clap's own "did you mean" replaced by the shared helper, as for every other name:
+/// the options and subcommands of the command that `args` reach, and the values of an option.
+fn suggest_in(mut e: clap::Error, args: &[String]) -> clap::Error {
+    use clap::CommandFactory;
+    use clap::error::{ContextKind as K, ContextValue as V, ErrorKind as E};
+    for k in [K::SuggestedSubcommand, K::SuggestedArg, K::SuggestedValue] {
+        e.remove(k);
+    }
+    let text = |e: &clap::Error, k| match e.get(k) {
+        Some(V::String(s)) => Some(s.clone()),
+        _ => None,
+    };
+    let (noun, bad, cands): (&'static str, String, Vec<String>) = match e.kind() {
+        E::InvalidValue => {
+            let Some(V::Strings(good)) = e.get(K::ValidValue) else {
+                return e;
+            };
+            let bad = text(&e, K::InvalidValue).unwrap_or_default();
+            ("value", bad, good.clone())
+        }
+        E::UnknownArgument | E::InvalidSubcommand => {
+            let sub = e.kind() == E::InvalidSubcommand;
+            let Some(bad) = text(
+                &e,
+                if sub {
+                    K::InvalidSubcommand
+                } else {
+                    K::InvalidArg
+                },
+            ) else {
+                return e;
+            };
+            // The command the bad token belongs to: follow the subcommands named before it.
+            let mut cmd = Cli::command();
+            cmd.build();
+            let mut cmd = &cmd;
+            for a in &args[1..] {
+                if *a == bad || a.starts_with(&format!("{bad}=")) {
+                    break;
+                }
+                if let Some(c) = cmd.find_subcommand(a) {
+                    cmd = c;
+                }
+            }
+            if sub {
+                let names = cmd.get_subcommands().filter(|c| !c.is_hide_set());
+                (
+                    "subcommand",
+                    bad,
+                    names.map(|c| c.get_name().into()).collect(),
+                )
+            } else {
+                let longs = cmd.get_arguments().filter(|a| !a.is_hide_set());
+                let longs = longs.filter_map(|a| a.get_long().map(|l| format!("--{l}")));
+                ("option", bad, longs.collect())
+            }
+        }
+        _ => return e,
+    };
+    let cands = cands.iter().map(|c| (c.as_str(), c.as_str()));
+    if let Some(h) = yavs_diag::suggest::suggest(&bad, noun, cands) {
+        let mut tips = match e.get(K::Suggested) {
+            Some(V::StyledStrs(t)) => t.clone(),
+            _ => Vec::new(),
+        };
+        tips.push(h.into());
+        e.insert(K::Suggested, V::StyledStrs(tips));
+    }
+    e
+}
+
 /// The run arguments of a `yavs run` command line (a console session's `reload`).
 pub(crate) fn run_args(args: &[String]) -> Result<elab::RunArgs, String> {
     match Cli::try_parse_from(args)
-        .map_err(|e| e.to_string())?
+        .map_err(|e| suggest_in(e, args).to_string())?
         .command
     {
         Some(Command::Run(a)) => Ok(a),
@@ -263,7 +334,9 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    let cli = parse_hot(&args).unwrap_or_else(|| Cli::parse_from(&args));
+    let cli = parse_hot(&args).unwrap_or_else(|| {
+        Cli::try_parse_from(&args).unwrap_or_else(|e| suggest_in(e, &args).exit())
+    });
     if let Some(text) = cli.top.explain.as_ref().and_then(|c| lint::explain_text(c)) {
         println!("{text}");
         return ExitCode::SUCCESS;
@@ -280,6 +353,9 @@ fn main() -> ExitCode {
             }
             None => {
                 eprintln!("error: no such diagnostic code `{code}`");
+                if let Some(h) = explain::suggest_code(code, explain::Codes::All, true) {
+                    eprintln!("  = help: {h}");
+                }
                 ExitCode::from(2)
             }
         };

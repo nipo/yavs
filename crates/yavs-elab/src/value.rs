@@ -864,7 +864,15 @@ impl Model {
                         fails(
                             db,
                             i,
-                            format!("index {x} is outside {} {:?} {}", b.left, b.dir, b.right),
+                            format!(
+                                "index {x} is outside {} {} {}",
+                                b.left,
+                                match b.dir {
+                                    yavs_sem::hir::Direction::To => "to",
+                                    yavs_sem::hir::Direction::Downto => "downto",
+                                },
+                                b.right
+                            ),
                         )
                     })?;
                     k = k * b.len() + p;

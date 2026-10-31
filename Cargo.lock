@@ -2147,6 +2147,7 @@ dependencies = [
  "annotate-snippets",
  "postcard",
  "serde",
+ "strsim",
  "tempfile",
  "twox-hash",
 ]
@@ -2221,7 +2222,6 @@ version = "0.11.0"
 dependencies = [
  "serde",
  "sha2 0.11.1",
- "strsim",
  "tempfile",
  "toml",
  "yavs-diag",
@@ -2291,7 +2291,6 @@ dependencies = [
  "serde",
  "sha2 0.11.1",
  "smallvec",
- "strsim",
  "tempfile",
  "twox-hash",
  "yavs-diag",

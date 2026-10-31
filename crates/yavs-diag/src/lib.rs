@@ -31,6 +31,7 @@
 //! that gives the seed of a shuffled run.
 
 mod shared;
+pub mod suggest;
 
 pub use shared::{Buffer, Slice, sharing};
 

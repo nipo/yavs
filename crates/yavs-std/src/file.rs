@@ -21,6 +21,16 @@ pub enum FileOpenKind {
 }
 
 impl FileOpenKind {
+    /// The mode as the user wrote it, `read` or `append`.
+    pub fn name(self) -> &'static str {
+        match self {
+            FileOpenKind::Read => "read",
+            FileOpenKind::Write => "write",
+            FileOpenKind::Append => "append",
+            FileOpenKind::ReadWrite => "read-write",
+        }
+    }
+
     /// The kind at position `pos` of FILE_OPEN_KIND: READ, WRITE, APPEND in 2008; READ,
     /// READ_WRITE, WRITE, APPEND in 2019 (LRM 2019 5.5.2).
     pub fn from_pos(pos: u64, rev: Revision) -> Option<Self> {
@@ -95,7 +105,11 @@ impl fmt::Display for FileError {
         match self {
             FileError::NotOpen => write!(f, "file is not open"),
             FileError::WrongMode { op, kind } => {
-                write!(f, "{op} is not allowed on a file opened with {kind:?} mode")
+                write!(
+                    f,
+                    "{op} is not allowed on a file opened with {} mode",
+                    kind.name()
+                )
             }
             FileError::EndOfFile => write!(f, "read past the end of the file"),
             FileError::NotSeekable { op } => write!(f, "{op} needs a seekable file"),
@@ -470,6 +484,18 @@ pub fn path_of(name: &[u8]) -> std::path::PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wrong_mode_names_the_mode_in_words() {
+        let e = FileError::WrongMode {
+            op: "readline",
+            kind: FileOpenKind::Write,
+        };
+        assert_eq!(
+            e.to_string(),
+            "readline is not allowed on a file opened with write mode"
+        );
+    }
 
     #[test]
     fn open_kind_positions_follow_the_revision() {

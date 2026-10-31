@@ -12877,3 +12877,18 @@ duplicate implementations without changing diagnostics (issue #894; implemented 
 - **`--activity` is a wrapper and an observer, like `--profile`.** Without the option nothing is wrapped or subscribed, and
   `SimControl` has no new field (one moved the hot layout before). It counts runs of a process and, per signal, cycles
   with an event. Activations the kernel skips (pure clocked processes, gates) do not run, so they do not count.
+
+## One "did you mean" helper for every name (#949, 2026-10-31)
+
+User rule 35: every place that takes a name suggests a near one through the one helper. It
+moved from `yavs-sem` to `yavs-diag` (`yavs_diag::suggest`; `yavs_sem::suggest` re-exports it) so
+the library layer, lint, coverage and the binary reach it without a dependency cycle. This
+supersedes "library suggestions retain plain Levenshtein" (#894): units and libraries now use
+the same measure as the semantic ones (adjacent transposition counts as one edit, abbreviations
+match). Clap's own matcher is replaced too: `main::suggest_in` removes its suggestions from a
+usage error and adds the helper's, for options, subcommands and option values. Diagnostic codes and
+lint rule ids are numbered densely, so a well-formed id that does not exist (`E0999`, `lint_999`)
+gets no suggestion, and a malformed one only when exactly one id is close. Not covered, on
+purpose: environment variables (an unknown `YAVS_*` is ignored, not rejected), exclusion globs and
+instance paths (patterns, not names), the two-valued `rise`/`fall`, the manifest keys of a library
+index (machine written; a damaged index says to re-analyze).
