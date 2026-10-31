@@ -82,7 +82,7 @@ pub(crate) fn shape(db: &Db, cx: &mut Cx, p: &Param, span: Span) -> R<Shape> {
         return Ok(Shape::Arr);
     }
     if !db.types[db.base(p.subtype)].kind_is_scalar() {
-        return Err(cx.unsupported(span, "record, access and protected parameters (M3)"));
+        return Err(cx.unsupported(span, "record, access and protected parameters"));
     }
     match p.mode {
         HMode::In => Ok(Shape::Val),
@@ -642,9 +642,7 @@ impl<'a, 'b> Fx<'a, 'b> {
             }
             let r = match o.class {
                 ObjClass::Variable | ObjClass::Constant => self.local(d),
-                ObjClass::SharedVariable => {
-                    Err(self.cx.unsupported(decl.span, "shared variables (M3)"))
-                }
+                ObjClass::SharedVariable => Err(self.cx.unsupported(decl.span, "shared variables")),
                 ObjClass::File => {
                     self.stmt_start(StmtKind::Decl, decl.span);
                     self.local_file(d)
@@ -1999,14 +1997,12 @@ fn inst_object(db: &Db, pb: &mut ProgramBuilder, cx: &mut Cx, ir: &mut UnitIr, d
             Ok(())
         }
         ObjClass::SharedVariable => crate::protected::shared_var(db, pb, cx, ir, d),
-        // A file of an architecture: a cell in the shared heap (instance data is read-only
-        // while processes run), made and opened by a thunk at elaboration; its instance cell
-        // holds the address (`Space::Region`, serial processes). One per instance only: a
-        // block or generate would need one per declaring region (#249). A local package
-        // instance counts as its region (#925).
-        ObjClass::File
-            if elab_region(db, decl.scope).is_some_and(|r| cx.arch_scopes.contains(&r)) =>
-        {
+        // A file of an architecture, block or generate: a cell in the shared heap (instance data
+        // is read-only while processes run), made and opened by a thunk at elaboration, once per
+        // declaring region (yavs-elab, #249, #966); its instance cell holds the address
+        // (`Space::Region`, serial processes). A local package instance counts as its region
+        // (#925).
+        ObjClass::File => {
             let off = cx.inst_alloc(8);
             cx.objs.insert(
                 d,
@@ -2025,7 +2021,8 @@ fn inst_object(db: &Db, pb: &mut ProgramBuilder, cx: &mut Cx, ir: &mut UnitIr, d
                 comp: None,
                 init,
                 scope: elab_region(db, decl.scope),
-                instance_level: true,
+                instance_level: elab_region(db, decl.scope)
+                    .is_some_and(|r| cx.arch_scopes.contains(&r)),
             });
             Ok(())
         }
@@ -2044,10 +2041,7 @@ fn inst_object(db: &Db, pb: &mut ProgramBuilder, cx: &mut Cx, ir: &mut UnitIr, d
             ir.var_ports.push((d, off));
             Ok(())
         }
-        _ => Err(cx.unsupported(
-            decl.span,
-            "shared variables and files in an architecture (M3)",
-        )),
+        _ => Err(cx.ice(decl.span, "a variable in an architecture")),
     }
 }
 
@@ -2092,10 +2086,7 @@ fn process(
             postponed, info, ..
         } => (*postponed, info, None, true),
         _ => {
-            return Err(cx.unsupported(
-                st.span,
-                "blocks, instances and generate statements (M2 slice 3)",
-            ));
+            return Err(cx.unsupported(st.span, "blocks, instances and generate statements"));
         }
     };
     let label = st.label.map(|l| l.text.to_string());

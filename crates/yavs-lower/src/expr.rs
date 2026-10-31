@@ -3241,7 +3241,7 @@ impl<'a> Fx<'a, '_> {
             Body::Foreign(attr) => self.foreign_call(callee, sp, *attr, args, span),
             _ => Err(self
                 .cx
-                .unsupported(span, "generic and instantiated subprograms (M3)")),
+                .unsupported(span, "generic and instantiated subprograms")),
         }
     }
 

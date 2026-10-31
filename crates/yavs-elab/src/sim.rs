@@ -35,8 +35,8 @@ pub struct Ir {
     /// Leaves resolved by a function declared in an elaborated region: the instance, block
     /// or generate iteration whose data the function reads (#164, #817).
     pub res_regions: std::collections::BTreeMap<crate::LeafId, ScopeId>,
-    /// Instances without processes whose declarative part runs at the start (constants that
-    /// can fail).
+    /// Regions whose declarative part runs at the start: instances without processes (constants
+    /// that can fail) and regions declaring files (which their declarations open).
     pub init_regions: Vec<ScopeId>,
     /// `'path_name`/`'instance_name` strings per (region, named entity, instance?).
     pub names: HashMap<(ScopeId, yavs_sem::DeclId, bool), String>,
@@ -288,6 +288,28 @@ impl Elaborated {
                     archs.push(arch);
                 }
                 init_regions.push(ScopeId(k as u32));
+            }
+        }
+        // A file's declaration opens it at elaboration, also in a region no process uses (#966).
+        let mut file_regions: Vec<ScopeId> = self
+            .shared_vars
+            .iter()
+            .filter(|&&(_, d)| {
+                matches!(&db.decls[d].kind, yavs_sem::decl::DeclKind::Object(o)
+                    if o.class == yavs_sem::decl::ObjClass::File)
+            })
+            .map(|&(r, _)| r)
+            .collect();
+        file_regions.sort();
+        file_regions.dedup();
+        for r in file_regions {
+            if let ScopeKind::Instance { arch, .. } = self.hier.scope(self.instance_of(r)).kind
+                && !archs.contains(&arch)
+            {
+                archs.push(arch);
+            }
+            if !init_regions.contains(&r) {
+                init_regions.push(r);
             }
         }
         // A resolution function reads its declaring region's data, so the containing
@@ -1801,8 +1823,8 @@ impl Elaborated {
             }
         }
         for c in u.consts.iter().filter(|c| !known.contains(&c.decl)) {
-            // An instance-level constant or shared variable is one object for all regions of
-            // the instance (#190); a shared variable of a block or generate one per elaboration
+            // An instance-level constant, shared variable or file is one object for all regions of
+            // the instance (#190); a shared variable or file of a block or generate one per elaboration
             // of its declarative part, shared by the nested regions (#249): its thunk runs once
             // per declaring region.
             let key = if c.instance_level {

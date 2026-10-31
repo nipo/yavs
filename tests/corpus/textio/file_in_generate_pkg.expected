@@ -1,0 +1,4 @@
+exit	0
+diag	note	0	0	:file_in_generate_pkg:b:_p0	block package
+diag	note	1000000	0	:file_in_generate_pkg:p(1):_p0	package 1
+diag	note	2000000	0	:file_in_generate_pkg:p(2):_p0	package 2

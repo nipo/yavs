@@ -1,0 +1,15 @@
+exit	0
+diag	note	0	0	:file_in_generate:g_if:_p0	if read back in if
+diag	note	11000000	0	:file_in_generate:g_for(1):_p0	for 1 read first 1
+diag	note	11000000	0	:file_in_generate:g_for(1):_p0	for 1 read nested 1
+diag	note	12000000	0	:file_in_generate:g_for(2):_p0	for 2 read first 2
+diag	note	12000000	0	:file_in_generate:g_for(2):_p0	for 2 read nested 2
+diag	note	13000000	0	:file_in_generate:g_for(3):_p0	for 3 read first 3
+diag	note	13000000	0	:file_in_generate:g_for(3):_p0	for 3 read nested 3
+diag	note	20000000	0	:file_in_generate:g_case:_p0	case open missing name_error
+diag	note	20000000	0	:file_in_generate:g_case:_p0	case open open_ok
+diag	note	20000000	0	:file_in_generate:g_case:_p0	case read back in case
+diag	note	25000000	0	:file_in_generate:b:_p0	block read back in block
+diag	note	30000000	0	:file_in_generate:_p0	quiet 1 open_ok
+diag	note	30000000	0	:file_in_generate:_p0	quiet 2 open_ok
+diag	note	30000000	0	:file_in_generate:_p0	quiet 3 open_ok

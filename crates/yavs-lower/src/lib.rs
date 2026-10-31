@@ -583,7 +583,7 @@ impl Cx {
         self.error(
             NOT_IMPLEMENTED,
             span,
-            format!("{what} is not lowered to IR yet (M2)"),
+            format!("{what} is not lowered to IR yet"),
         )
     }
 

@@ -448,7 +448,7 @@ pub struct Elaborated {
     /// enclosing region; `None`: a package's) and declaration. The waveform recorder declares
     /// variables with it, as signals with theirs (#321).
     pub var_shapes: std::collections::HashMap<(Option<ScopeId>, yavs_sem::DeclId), Shape>,
-    /// Shared variables by (declaring region, declaration): one object each (#249).
+    /// Shared variables and files by (declaring region, declaration): one object each (#249, #966).
     pub shared_vars: std::collections::HashSet<(ScopeId, yavs_sem::DeclId)>,
     /// The ranges of types and subtypes elaboration evaluated at their declarations, by
     /// declaring scope and left bound (`UnitIr::ranges`, #612).

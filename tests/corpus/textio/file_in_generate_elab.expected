@@ -1,0 +1,13 @@
+exit	0
+diag	note	1000000	0	:file_in_generate_elab:g(1):_p0	constant 42
+diag	note	2000000	0	:file_in_generate_elab:g(2):_p0	constant 43
+diag	note	101000000	0	:file_in_generate_elab:o(1):_p0	outer 1 from 1
+diag	note	101000000	0	:file_in_generate_elab:o(1):_p0	outer 1 from 2
+diag	note	102000000	0	:file_in_generate_elab:o(2):_p0	outer 2 from 1
+diag	note	102000000	0	:file_in_generate_elab:o(2):_p0	outer 2 from 2
+diag	note	201000000	0	:file_in_generate_elab:t(1):_p0	protected 1 nested
+diag	note	202000000	0	:file_in_generate_elab:t(2):_p0	protected 2 nested
+diag	note	300000000	0	:file_in_generate_elab:_p0	quiet 71 open_ok
+diag	note	300000000	0	:file_in_generate_elab:_p0	quiet 72 open_ok
+diag	note	300000000	0	:file_in_generate_elab:_p0	quiet 81 open_ok
+diag	note	300000000	0	:file_in_generate_elab:_p0	quiet 82 open_ok

@@ -52,7 +52,7 @@ impl Fx<'_, '_> {
         self.open_file(d, Space::Frame(self.depth), off)
     }
 
-    /// The cell of file object `d` of an architecture: a closed cell in the shared heap,
+    /// The cell of file object `d` of an architecture, block or generate: a closed cell in the shared heap,
     /// opened as its declaration says; returns its address.
     pub fn file_region(&mut self, d: DeclId) -> R<Reg> {
         let db = self.db;
@@ -134,9 +134,7 @@ impl Fx<'_, '_> {
             "input" if in_textio(decl.scope) => FILE_INPUT,
             "output" if in_textio(decl.scope) => FILE_OUTPUT,
             _ => {
-                return Err(self
-                    .cx
-                    .unsupported(span, "file objects declared in packages (M3)"));
+                return Err(self.cx.ice(span, "a file object that was not lowered"));
             }
         };
         let c = self

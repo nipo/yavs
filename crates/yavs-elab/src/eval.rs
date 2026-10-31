@@ -86,7 +86,7 @@ pub struct Model {
     pub(crate) sigs: HashMap<(ScopeId, DeclId), ObjId>,
     /// Package constants.
     pub(crate) pkg: HashMap<DeclId, Val>,
-    /// Shared variables by (region, declaration), and the object of each variable port
+    /// Shared variables and files by (region, declaration), and the object of each variable port
     /// (`Elaborated::var_ports`).
     pub(crate) shared_vars: std::collections::HashSet<(ScopeId, DeclId)>,
     pub(crate) var_ports: std::collections::BTreeMap<(ScopeId, DeclId), crate::VarObj>,

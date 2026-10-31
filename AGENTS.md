@@ -70,7 +70,7 @@ to, and those documents win over your memory.
    fallbacks: never `unwrap_or(default)` on anything that comes from the design, the user or the
    environment. A broken invariant is an internal-compiler-error diagnostic ("this is a bug in
    yavs"), never a bare panic. Not-yet-implemented features report an explicit "not implemented"
-   diagnostic naming the milestone or slice, never a guess.
+   diagnostic naming the construct, never a guess and no milestone (maintainer, 2026-10-31, #966).
 2. **LRM policy.** Where the LRM is clear, follow it and fail early. Where it is unclear or silent,
    be permissive: accept what the other major simulators accept, pick the
    semantics that lets the most designs elaborate, and warn only when simulators give different

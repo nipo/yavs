@@ -1332,6 +1332,13 @@ impl Elab<'_> {
                     self.m.shared_vars.insert((s, d));
                     self.var_shape(Some(s), d)?;
                 }
+                // One file object per elaboration of the declaration, like a shared variable. A
+                // process's own file is its lowered code's.
+                (ObjClass::File, _)
+                    if db.scopes[region].kind != yavs_sem::scope::ScopeKind::Process =>
+                {
+                    self.m.shared_vars.insert((s, d));
+                }
                 (ObjClass::Variable, ObjRole::Plain)
                     if db.scopes[region].kind == yavs_sem::scope::ScopeKind::Process =>
                 {
