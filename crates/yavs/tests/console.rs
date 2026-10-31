@@ -836,6 +836,12 @@ fn hook_commands_run_in_the_runner() {
     assert!(out.contains("greet: say hello\n"), "{out}");
     assert!(!out.contains("hidden:"), "{out}");
     assert!(out.contains("hello you there\nfalse\n"), "{out}");
+    // In the order of the commands, whatever the timing (#947).
+    assert!(
+        out.find("greet: say hello").unwrap_or(usize::MAX)
+            < out.find("hello you there").unwrap_or(0),
+        "{out}"
+    );
     assert!(out.contains("** Note: 30000000fs+0: done"), "{out}");
     assert!(out.contains("\ntrue\n"), "{out}");
     assert!(!out.ends_with("between cycles\nbetween cycles\n"), "{out}");

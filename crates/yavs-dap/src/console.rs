@@ -175,7 +175,8 @@ enum Exec {
     Text(String),
     Next(Next),
     Script(Vec<String>),
-    Call(i64),
+    /// A runner's command and its arguments.
+    Call(String, String),
 }
 
 /// The commands of a line (`;` separates, `#` at the start of a command and `--` end the line,
@@ -359,9 +360,22 @@ pub(crate) fn work(sh: &Shared, at: &At<'_, '_>) -> Option<Next> {
                 lines.extend(std::mem::take(&mut b.lines));
                 b.lines = lines.into();
             }
-            Ok(Exec::Call(id)) => {
+            Ok(Exec::Call(name, args)) => {
+                // What the commands before it said goes first: a runner's `print` comes straight
+                // from its connection and would overtake it (#947).
                 b.flush(link);
-                b.awaiting = Some(id);
+                match link.hook.get().map(|h| h.call(&name, &args)) {
+                    Some(Ok(id)) => b.awaiting = Some(id),
+                    Some(Err(m)) => {
+                        b.error = Some(m);
+                        b.lines.clear();
+                    }
+                    None => {
+                        b.error =
+                            Some("this is a bug in yavs: a runner's command with no runner".into());
+                        b.lines.clear();
+                    }
+                }
             }
             Ok(Exec::Next(n)) => {
                 b.flush(link);
@@ -1006,7 +1020,7 @@ fn exec(sh: &Shared, at: &At<'_, '_>, line: &str) -> Result<Exec, String> {
             if let Some(h) = sh.link.hook.get()
                 && h.commands.iter().any(|(n, _)| n == cmd)
             {
-                return h.call(cmd, rest).map(Exec::Call);
+                return Ok(Exec::Call(cmd.to_string(), rest.to_string()));
             }
             examine(sh, at, line).map(Exec::Text).map_err(|_| {
                 let help = did_you_mean(sh, cmd).unwrap_or_else(|| "see `help`".to_string());
