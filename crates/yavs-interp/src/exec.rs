@@ -4308,7 +4308,7 @@ impl Machine {
 
     /// `Inst::Deref`: the address of the object the access value `h` designates.
     #[inline(always)]
-    fn deref(&mut self, h: u64, what: yavs_ir::CheckMsgId) -> R<u64> {
+    pub(crate) fn deref(&mut self, h: u64, what: yavs_ir::CheckMsgId) -> R<u64> {
         if h == 0 {
             // sim1's wording; the statement span names the place.
             return rt_err_s!("null access dereference");

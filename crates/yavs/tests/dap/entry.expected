@@ -1,5 +1,5 @@
 > initialize {"adapterID":"yavs"}
-< {"body":{"supportsConditionalBreakpoints":true,"supportsConfigurationDoneRequest":true,"supportsDataBreakpoints":true,"supportsEvaluateForHovers":true,"supportsHitConditionalBreakpoints":true,"supportsSetVariable":true,"supportsTerminateRequest":true},"command":"initialize","request_seq":1,"success":true,"type":"response"}
+< {"body":{"supportsCompletionsRequest":true,"supportsConditionalBreakpoints":true,"supportsConfigurationDoneRequest":true,"supportsDataBreakpoints":true,"supportsEvaluateForHovers":true,"supportsHitConditionalBreakpoints":true,"supportsSetVariable":true,"supportsTerminateRequest":true},"command":"initialize","request_seq":1,"success":true,"type":"response"}
 > launch {"stopOnEntry":true}
 < {"body":{},"event":"initialized","type":"event"}
 < {"body":{},"command":"launch","request_seq":2,"success":true,"type":"response"}
@@ -28,6 +28,7 @@
 > evaluate {"expression":"nosuch","frameId":65537}
 < {"command":"evaluate","message":"no variable or signal `nosuch` here","request_seq":12,"success":false,"type":"response"}
 > disconnect {}
+< {"body":{"category":"console","output":"the session ended with exit status 1\n"},"event":"output","type":"event"}
 < {"body":{"exitCode":1},"event":"exited","type":"event"}
 < {"body":{},"event":"terminated","type":"event"}
 < {"body":{},"command":"disconnect","request_seq":13,"success":true,"type":"response"}

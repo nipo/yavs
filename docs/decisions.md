@@ -2342,6 +2342,8 @@ scalars; the on-disk format is implementation-defined, so it is fixed here (yavs
   or slice acts on its kernel elements only (#364), so a force of `d(7 downto 4)` leaves the
   other elements to their drivers. Why: the plan
   lets nothing else drive the kernel, and a stop inside a process is mid-cycle.
+- **A debugger's expressions have one evaluator; numbers on `unsigned` and `signed` by the type's name** (agent, #930, #935, 2026-10-31): `examine`, Watch, hover and conditions go through `cond.rs`. `cnt = 3` and `to_integer(cnt)` work without lowering because the signal's type name is known; a local's is not in the IR, so where signed and unsigned read differently the error asks for a bit string instead of guessing.
+- **The console's `--` starts a comment except after a space and before a letter inside a command** (agent, #933, 2026-10-31): the flags of a test runner's commands were cut off as comments.
 - **Breakpoint conditions are evaluated by the DAP server, not lowered to IR** (#326): the
   condition is parsed as a VHDL expression and evaluated over the locals and signals the
   debugger shows, with the predefined operators (relations, logic on boolean and bit, integer,

@@ -109,8 +109,37 @@ async function run() {
   await ended;
   assert.equal(stops.length, 4);
 
+  await launchThatCannotStart(folder);
   await attachWithNoConfiguration(folder, tb, () => waitFor('stopped when attached', 60000, (r) => (onStop = r)));
   await surferGoesToTheDeclaration(folder, tb, () => waitFor('stopped under Surfer', 60000, (r) => (onStop = r)));
+}
+
+/** A wrong `top`: the session does not start, and the adapter's answer holds the diagnostic that VS
+ * Code shows (#934). */
+async function launchThatCannotStart(folder) {
+  const seen = [];
+  const reg = vscode.debug.registerDebugAdapterTrackerFactory('yavs', {
+    createDebugAdapterTracker: () => ({
+      onDidSendMessage: (m) => {
+        if (m.type === 'response' && m.command === 'launch') seen.push(m);
+      },
+    }),
+  });
+  // VS Code puts the failure in a dialog, which it refuses to open in a test run.
+  const started = await vscode.debug
+    .startDebugging(folder, {
+      type: 'yavs',
+      request: 'launch',
+      name: 'Bad top',
+      top: 'nosuch',
+      work: 'work:' + folder.uri.fsPath + '/.yavs/work',
+    })
+    .catch(() => false);
+  reg.dispose();
+  assert.equal(started, false);
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].success, false);
+  assert.match(seen[0].message, /error\[E0104\]/);
 }
 
 /** `surfer` in a launch configuration: a fake WCP endpoint asks for a declaration, and the file

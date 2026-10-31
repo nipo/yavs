@@ -1590,7 +1590,14 @@ pub fn run(
         stop,
     } = match prepare(&a, format, color, encoding, tokens.is_some()) {
         Ok(p) => p,
-        Err((out, code)) => return out.finish(code),
+        Err((out, code)) => {
+            let status = out.finish(code);
+            // Nobody but the client that started this process sees it (#934).
+            if a.dap == Some(yavs_dap::Transport::Stdio) {
+                yavs_dap::refuse(&out.error_text, code);
+            }
+            return status;
+        }
     };
     let none = SourceMap::default();
     if let Some(why) = token_warning {

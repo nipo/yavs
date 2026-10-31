@@ -1,18 +1,19 @@
-//! Breakpoint conditions (#326): a VHDL boolean expression over the locals and signals a stop
-//! sees, parsed by `yavs-syntax` and evaluated over the values the debugger shows (`Lit`).
+//! Expressions of the debugger (#326, #930, #935): breakpoint conditions, `examine` and the Watch
+//! of a part or a computed value. A VHDL expression over the locals and signals a stop sees, parsed
+//! by `yavs-syntax` and evaluated over the values the debugger shows (`Lit`).
 //!
-//! ponytail: predefined operators on scalars (and `=`, `/=` and ordering on arrays) only, no
-//! function calls, attributes or overloaded operators (`numeric_std."+"`); lowering the
-//! condition to an IR function nested in the statement's (ir.md 3.4) would allow them, once
-//! a running program can take new functions.
+//! ponytail: predefined operators on scalars (and `=`, `/=` and ordering on arrays), comparing an
+//! `unsigned` or `signed` with a number or with another, and `to_integer`; no other function calls,
+//! attributes or overloaded operators (`numeric_std."+"`). Lowering the expression to an IR
+//! function nested in the statement's (ir.md 3.4) would allow them, once a running program can
+//! take new functions.
 
 use std::cmp::Ordering;
 
 use yavs_std::types::{Bounds, EnumLit, EnumType, boolean_type};
 use yavs_std::value::{Lit, LitType, literal};
 use yavs_syntax::ast::{
-    Actual, BinaryOp, Decl, Expr, ExprKind, LibraryUnit, LiteralKind, Name, NameKind, Suffix,
-    UnaryOp,
+    Actual, BinaryOp, Decl, Expr, ExprKind, LibraryUnit, Name, NameKind, Suffix, UnaryOp,
 };
 
 /// A parsed condition.
@@ -25,6 +26,27 @@ pub(crate) struct Cond {
 /// What a condition reads: a local or signal by name or path, with its type.
 pub(crate) trait Env {
     fn get(&self, name: &str) -> Option<(LitType, Lit)>;
+    /// What an access value or a protected object designates.
+    fn deref(&self, _t: &LitType, _v: &Lit) -> Option<(LitType, Lit)> {
+        None
+    }
+    /// The name of the type of signal `name`; `None` for a local: the IR does not keep it.
+    fn type_name(&self, _name: &str) -> Option<String> {
+        None
+    }
+}
+
+/// A value of type `t` to check types with.
+pub(crate) fn zero(t: &LitType) -> Lit {
+    match t {
+        LitType::Enum(_) => Lit::Enum(0),
+        LitType::Int(_) => Lit::Int(0),
+        LitType::Real(_) => Lit::Real(0.0),
+        LitType::Phys(..) => Lit::Phys(0),
+        LitType::Array { len, elem, .. } => Lit::Array(vec![zero(elem); *len as usize]),
+        LitType::Record(fs) => Lit::Record(fs.iter().map(|(_, t)| zero(t)).collect()),
+        LitType::Handle { .. } => Lit::Handle(0),
+    }
 }
 
 const PREFIX: &str = "package p is constant c : boolean := ";
@@ -99,7 +121,153 @@ fn op_text(op: BinaryOp) -> &'static str {
 /// type of the other operand.
 enum V {
     Typed(LitType, Lit),
+    /// An array of a bit-like type, with the name of its type if it is known.
+    Bits(LitType, Lit, Option<String>),
     Text(String),
+}
+
+impl V {
+    /// As any other typed value.
+    fn plain(self) -> V {
+        match self {
+            V::Bits(t, v, _) => V::Typed(t, v),
+            v => v,
+        }
+    }
+}
+
+fn is_bits(t: &LitType) -> bool {
+    matches!(t, LitType::Array { elem, .. }
+        if matches!(&**elem, LitType::Enum(e) if char_pos(e, b'0').is_some() && char_pos(e, b'1').is_some()))
+}
+
+/// How a bit-like array reads as a number: `Some(signed)`; `None` when the type has no numbers
+/// (`std_logic_vector`). A local's type is not known here, so an unknown name reads as unsigned
+/// where both readings agree (`number`).
+fn numeric(ty: &Option<String>) -> Option<Option<bool>> {
+    let Some(ty) = ty else {
+        return Some(None);
+    };
+    match ty.to_ascii_lowercase().as_str() {
+        "unsigned" | "unresolved_unsigned" | "u_unsigned" => Some(Some(false)),
+        "signed" | "unresolved_signed" | "u_signed" => Some(Some(true)),
+        _ => None,
+    }
+}
+
+/// The number a bit-like array holds, leftmost bit first; `None` with a metavalue in it. `signed` is
+/// what `numeric` found.
+fn number(t: &LitType, v: &Lit, signed: Option<bool>) -> Result<Option<i128>, String> {
+    let (LitType::Array { elem, .. }, Lit::Array(xs)) = (t, v) else {
+        return Err("this is a bug in yavs: not an array of bits".into());
+    };
+    let LitType::Enum(e) = &**elem else {
+        return Err("this is a bug in yavs: not an array of bits".into());
+    };
+    let mut bits = Vec::with_capacity(xs.len());
+    for x in xs {
+        let Lit::Enum(p) = x else {
+            return Ok(None);
+        };
+        let bit = match e.lits.get(*p) {
+            Some(EnumLit::Char(b'0' | b'L')) => 0,
+            Some(EnumLit::Char(b'1' | b'H')) => 1,
+            _ => return Ok(None),
+        };
+        bits.push(bit);
+    }
+    let negative = bits.first() == Some(&1);
+    if negative && signed.is_none() {
+        return Err(
+            "the type of this local is not known here, and its leftmost bit is 1, so it reads \
+             differently as `signed` and as `unsigned`: compare it with a bit string"
+                .into(),
+        );
+    }
+    let negative = negative && signed == Some(true);
+    let sign = i128::from(negative);
+    let start = bits.iter().take_while(|&&b| b == sign).count();
+    if bits.len() - start > 120 {
+        return Err(
+            "this array is too wide to read as a number here: compare it with a bit string".into(),
+        );
+    }
+    let mut n = if negative { -1 } else { 0 };
+    for &b in &bits[start..] {
+        n = n * 2 + b;
+    }
+    Ok(Some(n))
+}
+
+fn compare(op: BinaryOp, o: Ordering) -> bool {
+    use BinaryOp as B;
+    match op {
+        B::Eq => o == Ordering::Equal,
+        B::Ne => o != Ordering::Equal,
+        B::Lt => o == Ordering::Less,
+        B::Le => o != Ordering::Greater,
+        B::Gt => o == Ordering::Greater,
+        _ => o != Ordering::Less,
+    }
+}
+
+fn is_compare(op: BinaryOp) -> bool {
+    use BinaryOp as B;
+    matches!(op, B::Eq | B::Ne | B::Lt | B::Le | B::Gt | B::Ge)
+}
+
+/// `cnt = 3`, `cnt > n`, `a < b` on `unsigned` and `signed`, as `numeric_std` has them: a metavalue
+/// makes only `/=` true. `None` when `l` and `r` are nothing of the kind.
+fn numeric_op(op: BinaryOp, l: &V, r: &V) -> Option<Result<V, String>> {
+    let int = |v: &V| match v {
+        V::Text(s) => match literal(s.as_bytes(), &LitType::Int(Bounds::I64)) {
+            Ok(Lit::Int(i)) => Some(i),
+            _ => None,
+        },
+        V::Typed(_, Lit::Int(i)) => Some(*i),
+        _ => None,
+    };
+    let (a, b): (Result<Option<i128>, String>, Result<Option<i128>, String>) = match (l, r) {
+        (V::Bits(t1, v1, n1), V::Bits(t2, v2, n2)) => {
+            let (Some(Some(s1)), Some(Some(s2))) = (numeric(n1), numeric(n2)) else {
+                return None;
+            };
+            if s1 != s2 {
+                return None;
+            }
+            (number(t1, v1, Some(s1)), number(t2, v2, Some(s2)))
+        }
+        (V::Bits(t, v, n), other) | (other, V::Bits(t, v, n)) => {
+            let i = int(other)?;
+            let Some(sign) = numeric(n) else {
+                let name = n.as_deref().unwrap_or("this array").to_ascii_lowercase();
+                return Some(Err(format!(
+                    "{i} is not a value of `{name}`, which has no numbers: compare it with a bit \
+                     string such as \"0101\""
+                )));
+            };
+            let x = number(t, v, sign);
+            if matches!(l, V::Bits(..)) {
+                (x, Ok(Some(i128::from(i))))
+            } else {
+                (Ok(Some(i128::from(i))), x)
+            }
+        }
+        _ => return None,
+    };
+    if !is_compare(op) {
+        return Some(Err(format!(
+            "`{}` on `unsigned` or `signed` is not supported in conditions: write \
+             to_integer(name) {} ...",
+            op_text(op),
+            op_text(op)
+        )));
+    }
+    Some(match (a, b) {
+        (Err(e), _) | (_, Err(e)) => Err(e),
+        (Ok(Some(a)), Ok(Some(b))) => Ok(boolean(compare(op, a.cmp(&b)))),
+        _ => Ok(boolean(op == BinaryOp::Ne)),
+    })
 }
 
 fn boolean(b: bool) -> V {
@@ -154,7 +322,6 @@ impl Cond {
         let no = |what: &str| Err(format!("{what} is not supported in conditions"));
         match &e.kind {
             ExprKind::Name(n) => self.check_name(n),
-            ExprKind::Literal(l) if matches!(l.kind, LiteralKind::Null) => no("`null`"),
             ExprKind::Literal(_) => Ok(()),
             ExprKind::Paren(x) => self.check(x),
             ExprKind::Unary { op, operand } => match op {
@@ -193,12 +360,17 @@ impl Cond {
                 prefix,
                 suffix: Suffix::Ident(_),
             } => self.check_name(prefix),
+            NameKind::Selected {
+                prefix,
+                suffix: Suffix::All(_),
+            } => self.check_name(prefix),
             NameKind::Apply { prefix, args } if args.len() == 1 => match &args[0].actual {
                 Actual::Expr(x) if args[0].formal.is_none() => {
                     self.check_name(prefix)?;
                     self.check(x)
                 }
-                _ => Err("slices and named arguments are not supported in conditions".into()),
+                Actual::Range(_) if args[0].formal.is_none() => self.check_name(prefix),
+                _ => Err("named arguments are not supported in conditions".into()),
             },
             _ => Err(format!(
                 "`{}` is not supported in conditions (a local, a signal, a field or an element)",
@@ -209,9 +381,62 @@ impl Cond {
         }
     }
 
+    /// Evaluate to a value. The error is `None` when the expression only names what is not here.
+    pub(crate) fn evaluate(&self, env: &dyn Env) -> Result<(LitType, Lit), Option<String>> {
+        match self.value(&self.expr, env).map_err(Some)?.plain() {
+            V::Typed(t, v) => Ok((t, v)),
+            V::Text(s) => {
+                let int = LitType::Int(Bounds::I64);
+                let real = LitType::Real(yavs_std::types::RealBounds::REAL);
+                [int, real]
+                    .into_iter()
+                    .find_map(|t| literal(s.as_bytes(), &t).ok().map(|v| (t, v)))
+                    .ok_or(None)
+            }
+            V::Bits(..) => Err(Some("this is a bug in yavs: bits after `plain`".into())),
+        }
+    }
+
+    /// What can be known before the run: a literal compared with a signal reads in its type.
+    /// Everything else waits for the stop, where the locals are known.
+    pub(crate) fn check_types(&self, env: &dyn Env) -> Result<(), String> {
+        self.lint(&self.expr, env)
+            .map_err(|e| format!("condition: {e}"))
+    }
+
+    fn lint(&self, e: &Expr, env: &dyn Env) -> Result<(), String> {
+        match &e.kind {
+            ExprKind::Paren(x) | ExprKind::Unary { operand: x, .. } => self.lint(x, env),
+            ExprKind::Binary { op, left, right } => {
+                self.lint(left, env)?;
+                self.lint(right, env)?;
+                let named = |x: &Expr, env: &dyn Env| match &x.kind {
+                    ExprKind::Name(n) => match self.name(n, env) {
+                        Ok(v @ (V::Typed(..) | V::Bits(..))) => Some(v),
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                let literal = |x: &Expr| matches!(x.kind, ExprKind::Literal(_));
+                let operands = if literal(right) {
+                    named(left, env).map(|v| (v, V::Text(self.text(right))))
+                } else if literal(left) {
+                    named(right, env).map(|v| (V::Text(self.text(left)), v))
+                } else {
+                    None
+                };
+                match operands {
+                    Some((l, r)) if is_compare(*op) => binary(*op, l, r).map(|_| ()),
+                    _ => Ok(()),
+                }
+            }
+            _ => Ok(()),
+        }
+    }
+
     /// Evaluate to a boolean; `bit` and `std_ulogic` results convert as `??` does.
     pub(crate) fn eval(&self, env: &dyn Env) -> Result<bool, String> {
-        match self.value(&self.expr, env)? {
+        match self.value(&self.expr, env)?.plain() {
             V::Typed(t, Lit::Enum(p)) if is_boolean(&t) => Ok(p == 1),
             V::Typed(LitType::Enum(t), Lit::Enum(p))
                 if char_pos(&t, b'1').is_some() && char_pos(&t, b'0').is_some() =>
@@ -230,7 +455,7 @@ impl Cond {
             ExprKind::Name(n) => self.name(n, env),
             ExprKind::Unary { op, operand } => {
                 let v = self.value(operand, env)?;
-                unary(*op, v)
+                unary(*op, v.plain())
             }
             ExprKind::Binary { op, left, right } => {
                 let (l, r) = (self.value(left, env)?, self.value(right, env)?);
@@ -249,35 +474,92 @@ impl Cond {
             .unwrap_or_default()
             .to_string();
         if let Some((t, v)) = env.get(&text) {
-            return Ok(V::Typed(t, v));
+            return Ok(if is_bits(&t) {
+                V::Bits(t, v, env.type_name(&text))
+            } else {
+                V::Typed(t, v)
+            });
         }
+        // Through an access value, as VHDL's `p.x` and `p(1)` go.
+        let through = |v: V| match v.plain() {
+            V::Typed(t @ LitType::Handle { .. }, x) => env
+                .deref(&t, &x)
+                .map(|(t, x)| V::Typed(t, x))
+                .ok_or_else(|| format!("`{text}`: the access value is null")),
+            v => Ok(v),
+        };
         match &n.kind {
             NameKind::Selected {
                 prefix,
+                suffix: Suffix::All(_),
+            } => match self.name(prefix, env)?.plain() {
+                V::Text(_) => Ok(V::Text(text)),
+                v @ V::Typed(LitType::Handle { .. }, _) => through(v),
+                _ => Err(format!("`{text}`: not an access value")),
+            },
+            NameKind::Selected {
+                prefix,
                 suffix: Suffix::Ident(f),
-            } => match self.name(prefix, env)? {
+            } => match through(self.name(prefix, env)?)? {
                 V::Typed(LitType::Record(fs), Lit::Record(xs)) => {
                     let k = fs
                         .iter()
                         .position(|(n, _)| n.eq_ignore_ascii_case(&f.text.to_string()))
                         .ok_or_else(|| format!("no field `{}` in `{text}`", f.text))?;
-                    Ok(V::Typed(fs[k].1.clone(), xs[k].clone()))
+                    let (t, x) = (fs[k].1.clone(), xs[k].clone());
+                    Ok(if is_bits(&t) {
+                        V::Bits(t, x, None)
+                    } else {
+                        V::Typed(t, x)
+                    })
                 }
                 // A path such as `tb.u1.s` the environment did not know.
                 V::Text(_) => Ok(V::Text(text)),
                 _ => Err(format!("`{text}`: not a record")),
             },
             NameKind::Apply { prefix, args } => {
+                if matches!(&args[0].actual, Actual::Range(_)) {
+                    let V::Typed(t, x) = through(self.name(prefix, env)?)? else {
+                        return Err(format!("`{text}`: not an array, local or signal here"));
+                    };
+                    let p = self
+                        .src
+                        .get(prefix.span.start as usize..prefix.span.end as usize);
+                    let suffix = text[p.unwrap_or_default().len()..].to_string();
+                    let (t, x) = crate::part_of(&t, &x, &suffix)?;
+                    return Ok(V::Typed(t, x));
+                }
                 let Actual::Expr(x) = &args[0].actual else {
                     return Err(format!("`{text}` is not supported in conditions"));
                 };
-                let V::Typed(t, Lit::Array(xs)) = self.name(prefix, env)? else {
+                let prefix_value = self.name(prefix, env)?;
+                if let V::Text(f) = &prefix_value
+                    && f.eq_ignore_ascii_case("to_integer")
+                {
+                    return match self.value(x, env)? {
+                        V::Bits(t, v, ty) => {
+                            let sign = numeric(&ty).ok_or_else(|| {
+                                format!(
+                                    "`{text}`: `{}` has no numbers",
+                                    ty.as_deref().unwrap_or("")
+                                )
+                            })?;
+                            // A metavalue reads as 0, with the warning `numeric_std` has at run time.
+                            let i = number(&t, &v, sign)?.unwrap_or(0);
+                            let i =
+                                i64::try_from(i).map_err(|_| format!("`{text}` is too large"))?;
+                            Ok(V::Typed(LitType::Int(Bounds::I64), Lit::Int(i)))
+                        }
+                        _ => Err(format!("`{text}`: not an `unsigned` or `signed`")),
+                    };
+                }
+                let V::Typed(t, Lit::Array(xs)) = through(prefix_value)? else {
                     return Err(format!("`{text}`: not an array, local or signal here"));
                 };
                 let LitType::Array { len, elem, .. } = &t else {
                     return Err(format!("`{text}`: not an array"));
                 };
-                let i = match self.value(x, env)? {
+                let i = match self.value(x, env)?.plain() {
                     V::Typed(_, Lit::Int(i)) => i,
                     V::Text(s) => match literal(s.as_bytes(), &LitType::Int(Bounds::I64)) {
                         Ok(Lit::Int(i)) => i,
@@ -288,7 +570,12 @@ impl Cond {
                 let k = (0..*len)
                     .find(|&k| t.index(k) == Some(i))
                     .ok_or_else(|| format!("`{text}`: index {i} is outside the array"))?;
-                Ok(V::Typed((**elem).clone(), xs[k as usize].clone()))
+                let (et, ex) = ((**elem).clone(), xs[k as usize].clone());
+                Ok(if is_bits(&et) {
+                    V::Bits(et, ex, None)
+                } else {
+                    V::Typed(et, ex)
+                })
             }
             _ => Ok(V::Text(text)),
         }
@@ -298,7 +585,7 @@ impl Cond {
 /// Both operands in one type: a literal is read in the type of the other.
 fn unify(l: V, r: V) -> Result<(LitType, Lit, Lit), String> {
     let read = |t: &LitType, s: &str| literal(s.as_bytes(), t).map_err(|e| e.to_string());
-    match (l, r) {
+    match (l.plain(), r.plain()) {
         (V::Typed(t, a), V::Typed(_, b)) => {
             if std::mem::discriminant(&a) != std::mem::discriminant(&b) {
                 return Err("operands of different types".into());
@@ -327,6 +614,7 @@ fn unify(l: V, r: V) -> Result<(LitType, Lit, Lit), String> {
             let name = if num(&a) { b } else { a };
             Err(format!("no local or signal `{name}` here"))
         }
+        _ => Err("this is a bug in yavs: bits after `plain`".into()),
     }
 }
 
@@ -377,6 +665,10 @@ fn logic(op: BinaryOp, t: &LitType, a: &Lit, b: &Lit) -> Result<V, String> {
 
 fn binary(op: BinaryOp, l: V, r: V) -> Result<V, String> {
     use BinaryOp as B;
+    if let Some(v) = numeric_op(op, &l, &r) {
+        return v;
+    }
+    let (l, r) = (l.plain(), r.plain());
     // Physical times integer, physical divided by physical: the operands differ in type.
     if matches!(op, B::Mul | B::Div)
         && let (V::Typed(LitType::Phys(..), _), _) | (_, V::Typed(LitType::Phys(..), _)) = (&l, &r)

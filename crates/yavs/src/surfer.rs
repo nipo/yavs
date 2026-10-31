@@ -26,8 +26,9 @@ const MAX_SHOWN: usize = 200;
 pub enum Msg {
     /// A debugger stop: the file was just synced.
     Stop(yavs_dap::ViewStop),
-    /// A console's `wave add`: the items, and where the answer goes.
-    Add(Vec<String>, Sender<Result<usize, String>>),
+    /// A console's `wave add`: the items, whether each is a scope in the file, and where the
+    /// answer goes.
+    Add(Vec<(String, bool)>, Sender<Result<usize, String>>),
     /// A console's `wave cursor`, in fs.
     Cursor(u64),
     /// The run starts over and the file with it: its size with no values yet.
@@ -152,7 +153,7 @@ impl yavs_dap::Viewer for Surfer {
         self.send(Msg::Stop(s));
     }
 
-    fn add(&self, items: Vec<String>) -> Result<usize, String> {
+    fn add(&self, items: Vec<(String, bool)>) -> Result<usize, String> {
         let (tx, rx) = channel();
         self.send(Msg::Add(items, tx));
         rx.recv_timeout(WAIT + WAIT)
@@ -194,6 +195,12 @@ pub fn names(h: &Hierarchy, all: bool) -> (Vec<String>, usize) {
                 // Vector bounds in the name (`data[7:0]`) are not part of the viewer's name.
                 let name = match name.rfind('[') {
                     Some(i) if name.ends_with(']') => &name[..i],
+                    _ => name,
+                };
+                // The viewer's file reader takes an array's name off its elements: `m(0)` in
+                // scope `m` is `tb.m.(0)` there.
+                let name = match (composite.last(), path.last()) {
+                    (Some(true), Some(p)) => name.strip_prefix(p).unwrap_or(name),
                     _ => name,
                 };
                 out.push(format!("{}.{name}", path.join(".")));
@@ -350,19 +357,26 @@ impl Wcp {
         }
     }
 
-    /// Add items to the view, remembering their ids; how many were added.
-    fn add(&mut self, items: &[String]) -> io::Result<usize> {
-        if items.is_empty() {
-            return Ok(0);
+    /// Add items to the view, remembering their ids; how many were added. A scope in `add_items`
+    /// is also looked for as a variable, and Surfer opens its log window on that failure.
+    fn add(&mut self, items: &[(String, bool)]) -> io::Result<usize> {
+        let (scopes, vars): (Vec<_>, Vec<_>) = items.iter().partition(|(_, scope)| *scope);
+        let vars: Vec<&String> = vars.iter().map(|(n, _)| n).collect();
+        let mut n = 0;
+        if !vars.is_empty() {
+            let r = self.command("add_items", json!({"items": vars}))?;
+            let ids = r["ids"].as_array().cloned().unwrap_or_default();
+            n += ids.len();
+            if ids.len() == vars.len() {
+                let names = vars.iter().map(|n| n.to_ascii_lowercase());
+                self.shown.extend(names.zip(ids));
+            }
         }
-        let r = self.command("add_items", json!({"items": items}))?;
-        let ids = r["ids"].as_array().cloned().unwrap_or_default();
-        // A scope adds several ids for one item: only one-to-one names are known by name.
-        if ids.len() == items.len() {
-            let names = items.iter().map(|n| n.to_ascii_lowercase());
-            self.shown.extend(names.zip(ids.iter().cloned()));
+        for (name, _) in scopes {
+            let r = self.command("add_scope", json!({"scope": name, "recursive": false}))?;
+            n += r["ids"].as_array().map_or(0, Vec::len);
         }
-        Ok(ids.len())
+        Ok(n)
     }
 
     /// The stopped process's signals in colour, the last stop's back.
@@ -370,11 +384,21 @@ impl Wcp {
         for id in std::mem::take(&mut self.coloured) {
             self.command("set_item_color", json!({"id": id, "color": PLAIN_COLOUR}))?;
         }
-        for name in signals {
-            if let Some(id) = self.shown.get(name).cloned() {
-                self.command("set_item_color", json!({"id": id, "color": STOPPED_COLOUR}))?;
-                self.coloured.push(id);
-            }
+        // A composite is shown as its elements.
+        let ids: Vec<Json> = self
+            .shown
+            .iter()
+            .filter(|(k, _)| {
+                signals.iter().any(|n| {
+                    k.strip_prefix(n.as_str())
+                        .is_some_and(|r| r.is_empty() || r.starts_with('.'))
+                })
+            })
+            .map(|(_, id)| id.clone())
+            .collect();
+        for id in ids {
+            self.command("set_item_color", json!({"id": id, "color": STOPPED_COLOUR}))?;
+            self.coloured.push(id);
         }
         Ok(())
     }
@@ -425,7 +449,9 @@ struct View<'a> {
     /// `reload`s and the `load`, for `Wcp::wait_loaded`.
     asked: u64,
     /// What to add once the file has values.
-    waiting: Vec<String>,
+    waiting: Vec<(String, bool)>,
+    /// The markers of breakpoints.
+    markers: Vec<Json>,
 }
 
 impl View<'_> {
@@ -472,7 +498,8 @@ fn drive(
         empty,
         seen: empty,
         asked: 1,
-        waiting: names,
+        waiting: names.into_iter().map(|n| (n, false)).collect(),
+        markers: Vec::new(),
     };
     let mut marks = 0;
     let mut next = None;
@@ -513,7 +540,9 @@ fn drive(
                         marks += 1;
                         let name = format!("bp{marks}");
                         let marker = json!({"time": t, "name": name, "move_focus": false});
-                        w.command("add_markers", json!({"markers": [marker]}))?;
+                        let r = w.command("add_markers", json!({"markers": [marker]}))?;
+                        v.markers
+                            .extend(r["ids"].as_array().into_iter().flatten().cloned());
                     }
                     w.colour(&last.signals)?;
                 }
@@ -539,9 +568,14 @@ fn drive(
                 w.command("set_viewport_to", json!({"timestamp": t}))?;
             }
             Ok(Msg::Restart(empty)) => {
-                // The new file is empty: what is shown stays, and reloads when it has values.
+                // The new file is empty: what is shown stays, and reloads when it has values. The
+                // breakpoints' markers were of the old run.
                 v.empty = empty;
                 v.seen = empty;
+                let ids = std::mem::take(&mut v.markers);
+                if !ids.is_empty() {
+                    w.command("remove_items", json!({"ids": ids}))?;
+                }
             }
             Err(RecvTimeoutError::Disconnected) => {
                 if v.has_values() {

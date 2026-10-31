@@ -77,12 +77,16 @@ What you can do:
   for or until a time ("yavs: Run for...", "yavs: Run until..."); pause a running simulation.
 * **Inspect**: each process is a thread with its call stack; the Variables view shows locals,
   signals, ports and generics, and a Hierarchy scope lists the design's instances. Hover a signal
-  to see its value.
+  to see its value. An access value shows what it designates and expands as that does; in a method of a protected type,
+  Locals lists the object's variables. A Watch takes a field, an element, a slice (``rec.x``, ``arr(i)``, ``p.all``,
+  ``slv(3 downto 0)``) or an expression (``cnt = 3``).
 * **Change values**: "Set Value" deposits a signal or writes a variable; "Force a signal...",
   "Deposit a signal value..." and "Release a forced signal..." in the context menu. Values are
   VHDL literals: ``'1'``, ``16#FF#``, ``x"A5"``, ``10 ns``, ``(others => '0')``.
 
-Reports go to the Debug Console, and the session ends with the exit status of the run.
+Reports go to the Debug Console, and the session ends with a line giving the exit status of the run. A launch that cannot
+start (no such top level, an elaboration error, no Surfer) prints its diagnostic there; a command line yavs refuses or a
+crash shows a notification with the command to try in a terminal.
 
 Attach to a run started elsewhere
 ---------------------------------
@@ -118,8 +122,13 @@ Limits
 * A debugger session runs the interpreter on one thread, so every session behaves the same;
   ``--threads`` and ``--tier`` have no effect there.
 * ``--cov`` and ``--profile`` cannot be combined with ``--dap``.
-* Breakpoint conditions cannot call functions or use attributes. That includes the ``numeric_std`` operators: compare
-  an ``unsigned`` with a literal of its own type (``cnt = "00000011"``), not with an integer (``cnt = 3``).
+* Breakpoint conditions, and expressions in a Watch or ``examine``, cannot call functions other than ``to_integer`` or use
+  attributes. An ``unsigned`` or ``signed`` compares with a number (``cnt = 3``, ``cnt > n``) or with another as
+  ``numeric_std`` does, but its other operators are out of reach: write ``to_integer(cnt) + 1 = 4``. A variable of those
+  types whose leftmost bit is 1 needs a bit string, as its type is not known at a stop. A literal that cannot be a value of
+  a signal is refused when the breakpoint is set.
+* A value behind an access value and a variable of a protected object are shown, not written, from the Variables view. A
+  shared variable of a protected type is seen in the frames of its methods, not from outside.
 
 See also
 --------

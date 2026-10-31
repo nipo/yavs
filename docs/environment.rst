@@ -595,6 +595,11 @@ Tests and builds
      - Values
      - Default
      - Read by
+   * - ``YAVS_TEST_SURFER``
+     - The test of the real Surfer runs: it opens a window, so it needs a display and ``surfer`` on ``PATH``.
+     - any value
+     - unset
+     - tests
    * - ``YAVS_BLESS``
      - Tests rewrite their expected files and the generated pages instead of comparing.
      - any value

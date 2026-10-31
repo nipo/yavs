@@ -349,6 +349,16 @@ impl<'a> FrameView<'a> {
         crate::write_slot(&mut self.m.borrow_mut(), ty, a, v).map_err(crate::fault_text)
     }
 
+    /// The object access value or protected object `h` designates, of IR type `target`: the
+    /// descriptor comes first in a heap object, then the data.
+    pub fn deref(&self, target: TyId, h: u64) -> Result<CallVal, String> {
+        let mut m = self.m.borrow_mut();
+        let p = m
+            .deref(h, yavs_ir::CheckMsgId(0))
+            .map_err(crate::fault_text)?;
+        crate::read_object(&m, target, p).map_err(crate::fault_text)
+    }
+
     /// A scalar local formatted the way VHDL `'image` shows it.
     pub fn format(&self, ty: TyId, bytes: &[u8]) -> Option<String> {
         format_scalar(self.prog, ty, bytes)

@@ -537,9 +537,20 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   ranges and `others`; a value that does not parse is a failed response naming the problem.
   `condition` on line and data breakpoints (`supportsConditionalBreakpoints`) is a VHDL boolean
   expression over the stopped frame's locals and the signals visible from the process (or the
-  watched signal's region) or by path, with predefined operators; one that does not parse or
-  uses something unsupported is `verified: false` with a `message`, an error while evaluating a
-  stop with reason `exception`. `hitCondition` counts the hits where the condition held.
+  watched signal's region) or by path, with predefined operators, numeric comparisons of `unsigned`
+  and `signed` and `to_integer`; one that does not parse, uses something unsupported or compares a
+  signal with a literal that is no value of its type is `verified: false` with a `message`, an error
+  while evaluating a stop with reason `exception`. `hitCondition` counts the hits where the condition
+  held. `evaluate` takes a local or signal, a part of one (field, element, slice, `.all`) or any such
+  expression. `completions` (`supportsCompletionsRequest`, at a stop) answers targets with `label` and
+  `length`, the characters before the cursor it replaces. Access values and protected objects expand
+  through `variablesReference`; what is behind them is not written by `setVariable`.
+  A failure before a session starts under `--dap=stdio`, and over TCP once a client connected: `initialize`
+  succeeds, `launch` or `attach` get an `output` event of category `stderr` and a failed response with
+  the rendered diagnostic as `message`, other requests fail with it; the process exits with its status at
+  `disconnect`, at the end of input, or after 30 s. The diagnostic also goes to standard error. Standard
+  input being a terminal skips all of this. Before `exited`, a session that is no console sends an `output`
+  event giving the exit status.
   Composite variables have a `variablesReference` (records with `namedVariables`, arrays with
   `indexedVariables`, children named by field or index, paged by `start` and `count`).
   The scope `Hierarchy` and the custom request `yavs/hierarchy` (answered at any time;
@@ -780,7 +791,7 @@ commands first, and without `--interactive` the process then exits. Both conflic
 session like `--dap`: interpreter, one thread (`W0109`), no `--cov` (`E0199`) or `--profile` (`E0125`).
 The session stops at time 0 before any process has run, and stays after the end of the run until `quit`.
 
-- Commands: `run [TIME | until COND]`, `step [delta | timestep]`, `next`, `stop`, `examine`/`print`, `force`, `deposit`, `release`, `where`, `break`, `restart`/`reset`, `source`, `help`, `quit [STATUS]`. `;` separates; `#` at the start of a command and `--` start a comment.
+- Commands: `run [TIME | until COND]`, `step [delta | timestep]`, `next`, `stop`, `examine`/`print`, `force`, `deposit`, `release`, `where`, `break`, `restart`/`reset`, `source`, `help`, `quit [STATUS]`. `;` separates; `#` at the start of a command and `--` start a comment (not a `--` after a space and before a letter inside a command: a flag of a runner's command). Tab at a terminal prompt is the DAP `completions` request.
 - Standard output: reports, textio output, results of commands (a `--do="run; quit"` session prints what a plain run prints, with the same exit status). Standard error: notices of stops and of the end, errors of commands, diagnostics.
 - Exit status: the `quit` argument; else the run's (section 5) when it has ended, else 0. A `--do` command that fails without `--interactive` ends the session with 1. End of input is `quit`.
 - A failed command does not end a session with `--interactive`. No prompt is printed when standard input is not a terminal.

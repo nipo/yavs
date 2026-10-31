@@ -559,6 +559,25 @@ impl Design {
         self.procs.get(name)
     }
 
+    /// The source files with statements, as a user would name them on a console.
+    pub fn files(&self) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .lines
+            .keys()
+            .map(|k| self.shown_file(k))
+            .filter_map(|p| {
+                let p = std::path::Path::new(&p)
+                    .file_name()?
+                    .to_string_lossy()
+                    .into_owned();
+                Some(p)
+            })
+            .collect();
+        names.sort();
+        names.dedup();
+        names
+    }
+
     /// A signal by simple name seen from process `p`, or by path (`:top:u1:s`, `top.u1.s`): its
     /// index into `sigs`.
     pub fn find(&self, p: Option<&Proc>, name: &str) -> Option<usize> {
@@ -713,7 +732,7 @@ fn const_text(db: &Db, t: yavs_sem::TypeId, v: &ConstValue) -> String {
 }
 
 /// A variable's value of IR type `ty` as the debugger reads and writes it; `None` for types
-/// it does not show (access, file, protected).
+/// it does not show (file). Handles come as `ConstValue::Int` (`ir_decode_shown`).
 pub(crate) fn ir_lit(prog: &Program, ty: TyId, v: &ConstValue) -> Option<(LitType, Lit)> {
     Some(match (prog.types.get(ty)?, v) {
         (Ty::Int { lo, hi }, ConstValue::Int(x)) => (
@@ -754,6 +773,20 @@ pub(crate) fn ir_lit(prog: &Program, ty: TyId, v: &ConstValue) -> Option<(LitTyp
             Lit::Enum(*p as usize),
         ),
         (Ty::Real, ConstValue::Real(x)) => (LitType::Real(RealBounds::REAL), Lit::Real(*x)),
+        (Ty::Access { target }, ConstValue::Int(h)) => (
+            LitType::Handle {
+                target: target.0,
+                protected: false,
+            },
+            Lit::Handle(*h as u64),
+        ),
+        (Ty::Protected { state }, ConstValue::Int(h)) => (
+            LitType::Handle {
+                target: state.0,
+                protected: true,
+            },
+            Lit::Handle(*h as u64),
+        ),
         (Ty::Array { elem, .. }, ConstValue::Array(a)) => {
             let n: u64 = a.bounds.iter().map(|b| span(*b)).product();
             let mut xs = Vec::with_capacity(n as usize);
@@ -824,6 +857,7 @@ fn elem_at(a: &yavs_sem::stat::ArrayConst, mut k: u64) -> Option<ConstValue> {
 pub(crate) fn to_const(v: &Lit, like: &ConstValue) -> Option<ConstValue> {
     Some(match (v, like) {
         (Lit::Int(x), ConstValue::Int(_)) => ConstValue::Int(*x),
+        (Lit::Handle(x), ConstValue::Int(_)) => ConstValue::Int(*x as i64),
         (Lit::Phys(x), ConstValue::Phys(_)) => ConstValue::Phys(*x),
         (Lit::Real(x), ConstValue::Real(_)) => ConstValue::Real(*x),
         (Lit::Enum(p), ConstValue::Enum(_)) => ConstValue::Enum(u32::try_from(*p).ok()?),

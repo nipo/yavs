@@ -2260,6 +2260,23 @@ pub(crate) fn read_slot(m: &Machine, ty: yavs_ir::TyId, a: u64) -> exec::R<CallV
     })
 }
 
+/// The heap object of IR type `ty` at `p`: a scalar as a cell, a composite as its descriptor and data.
+pub(crate) fn read_object(m: &Machine, ty: yavs_ir::TyId, p: u64) -> exec::R<CallVal> {
+    let prog = &m.rt.prog;
+    if let Some(n) = prog.types.get(ty).and_then(yavs_ir::Ty::scalar_size) {
+        return Ok(CallVal::Cell(m.load(p, width(n))?));
+    }
+    let n = yavs_ir::Ty::desc_size(&prog.types, ty)
+        .ok_or_else(|| exec::Fault::Internal("variable of a cyclic type".into()))?;
+    let desc = m.rd(p, n)?.to_vec();
+    let (l, _) = yavs_ir::Ty::layout(&prog.types, &prog.consts, ty, &desc)
+        .map_err(|e| exec::Fault::Internal(format!("variable layout: {e:?}")))?;
+    Ok(CallVal::Composite {
+        data: m.rd(exec::add_addr(p, n)?, l.size)?.to_vec(),
+        desc,
+    })
+}
+
 /// Whether [`read_slot`] would return `v`, without building it.
 fn slot_is(
     m: &Machine,

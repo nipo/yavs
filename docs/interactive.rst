@@ -21,7 +21,10 @@ elaborates the design, stops at time 0 before any process has run, and waits at 
     yavs> quit
 
 The prompt has line editing and history. Ctrl-C pauses a running simulation and returns to the
-prompt; at the prompt it drops the line. Ctrl-D or the end of piped input is ``quit``.
+prompt; at the prompt it drops the line. Ctrl-D or the end of piped input is ``quit``. Tab completes:
+command names and their subcommands (``wave add``, ``break delete``), the signals and variables in
+scope, their fields (``rec.`` then Tab), source files after ``break``, and a test runner's commands.
+A second Tab lists what is left. The Debug Console of an editor asks the same question.
 
 .. contents:: On this page
    :local:
@@ -39,8 +42,11 @@ Commands
     Pauses a running simulation, from a client that can send it then (the terminal has Ctrl-C).
 ``examine NAME``, ``print NAME``
     The value of a local or a signal, or of a field, element or slice of one
-    (``examine v(3 downto 0)``). Between cycles, simple names are looked up at the top level;
-    inside a process, where that process sees them. A bare name also works.
+    (``examine v(3 downto 0)``, ``examine rec.x``), through an access value too (``examine p.all``,
+    ``examine p.next.value``), or of an expression as breakpoint conditions take it
+    (``examine cnt = 3``, ``examine to_integer(cnt) + 1``). Inside a method of a protected type the
+    variables of the object are in scope. Between cycles, simple names are looked up at the top
+    level; inside a process, where that process sees them. A bare name also works.
 ``force NAME VALUE``, ``deposit NAME VALUE``, ``release NAME``
     Change a signal or a part of one, from the next cycle. Values are VHDL literals. ``-out`` at
     the end of ``force`` or ``release`` acts on the driving value instead of the effective one.
@@ -61,8 +67,9 @@ Commands
 ``help``, ``quit [STATUS]``
     The exit status is ``STATUS``; without one, that of the run if it has ended, else 0.
 
-Several commands go on a line with ``;``. ``#`` at the start of a command and ``--`` anywhere
-start a comment.
+Several commands go on a line with ``;``. ``#`` at the start of a command and ``--`` start a
+comment, except a ``--`` after a space and right before a letter inside a command, which is a flag
+(``vunit_load --stop-time=30ns``).
 
 Reports and text output go to standard output as in a batch run, and so do the results of
 commands. Notices of stops and errors go to standard error.
@@ -88,8 +95,7 @@ The same commands work in the Debug Console of a ``yavs`` session (:doc:`debuggi
 ``run 10 ns``, ``break list`` or ``restart``. A plain name still shows its value. ``restart`` stops
 at time 0 and keeps the breakpoints of the editor. Unlike at the prompt, the session ends with the
 run. Breakpoints made with ``break`` belong to the session only: the editor's Breakpoints list does not
-show them, or their deletion. Watch expressions and hovers take plain names; only ``examine`` takes a part of
-a signal (``slv(3 downto 0)``, ``rec.field``).
+show them, or their deletion. Watch expressions and hovers take what ``examine`` takes.
 
 With a test runner
 ------------------

@@ -17,11 +17,12 @@ use std::time::Duration;
 use serde_json::{Value as Json, json};
 use yavs_interp::Resume;
 use yavs_kernel::Time;
-use yavs_std::value::{Lit, LitType, literal_image};
+use yavs_std::types::EnumLit;
+use yavs_std::value::LitType;
 
 use crate::{
     At, CONSOLE_BREAKS, Link, Msg, Next, RUN_UNTIL, Run, Shared, SigBp, apply_lines, apply_signals,
-    cond, eval_var, rewatch, select, signal_change, split_part, thread_proc,
+    cond, eval_var, rewatch, signal_change, split_part, state_vars, stop_of, thread_proc,
 };
 
 /// The environment variable naming a test runner's hook: `<port>:<secret>`.
@@ -178,8 +179,9 @@ enum Exec {
     Call(i64),
 }
 
-/// The commands of a line (`;` separates, `#` at the start of a command and `--` end the line;
-/// not inside strings and character literals).
+/// The commands of a line (`;` separates, `#` at the start of a command and `--` end the line,
+/// except a `--` after a space and before a letter in a command, which is a flag; not inside
+/// strings and character literals).
 fn split(line: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut cur = String::new();
@@ -201,7 +203,15 @@ fn split(line: &str) -> Vec<String> {
                 continue;
             }
             b'#' if !quoted && cur.trim().is_empty() => break,
-            b'-' if !quoted && b.get(i + 1) == Some(&b'-') => break,
+            // Not in a flag of a runner's command (`vunit_load --stop-time=30ns`, #933).
+            b'-' if !quoted
+                && b.get(i + 1) == Some(&b'-')
+                && (cur.trim().is_empty()
+                    || !b.get(i + 2).is_some_and(u8::is_ascii_alphabetic)
+                    || !cur.ends_with(char::is_whitespace)) =>
+            {
+                break;
+            }
             _ => {}
         }
         // Whole characters: everything the matches above look at is ASCII.
@@ -452,42 +462,147 @@ fn examine(sh: &Shared, at: &At<'_, '_>, name: &str) -> Result<String, String> {
     if name.is_empty() {
         return Err("`examine` needs a name".into());
     }
-    let name = qualify(sh, at, name);
-    let tid = thread_of(at);
     let frame = match at {
         At::Process(s) => s.frames.depth().saturating_sub(1),
         At::Kernel(_) => 0,
     };
-    let whole = eval_var(sh, at, tid, frame, &name);
-    if let Ok(j) = &whole {
-        return Ok(j["result"].as_str().unwrap_or("?").to_string());
-    }
-    let Some((k, suffix)) = split_part(sh, thread_proc(sh, tid), &name) else {
-        return whole.map(|_| String::new());
-    };
-    let s = &sh.design.sigs[k];
-    let (paths, ty) = select(&s.lit, suffix)?;
-    let v = s
-        .value(&|r| at.read(r))
-        .ok_or("the signal is not readable here")?;
-    let at_path = |p: &[usize]| {
-        let mut cur = &v;
-        for &i in p {
-            cur = match cur {
-                Lit::Record(xs) | Lit::Array(xs) => &xs[i],
-                _ => return None,
-            };
+    let j = eval_var(sh, at, thread_of(at), frame, name)?;
+    Ok(j["result"].as_str().unwrap_or("?").to_string())
+}
+
+/// "A ... with a similar name exists" for a word that means nothing here: the commands first.
+pub(crate) fn did_you_mean(sh: &Shared, word: &str) -> Option<String> {
+    let commands = COMMANDS.iter().map(|(n, _)| *n);
+    let hook = sh.link.hook.get().into_iter().flat_map(|h| &h.commands);
+    let hook: Vec<&str> = hook.map(|(n, _)| n.as_str()).collect();
+    let all: Vec<&str> = commands.chain(hook).collect();
+    let key = word.to_ascii_lowercase();
+    yavs_sem::suggest::suggest(&key, "command", all.iter().map(|&n| (n, n)))
+}
+
+/// The names `examine` and the like see at this stop: the frame's locals, the variables of its
+/// protected object, the process frame's locals and the signals in scope.
+fn names_here(sh: &Shared, at: &At<'_, '_>, tid: i64, frame: usize) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Some(s) = stop_of(at, tid) {
+        for i in [frame, 0] {
+            out.extend(s.frames.locals(i).iter().map(|l| l.name.to_string()));
+            out.extend(state_vars(sh, s, at, i).into_iter().map(|(n, ..)| n));
         }
-        Some(cur.clone())
+    }
+    match thread_proc(sh, tid) {
+        Some(p) => out.extend(p.signals.iter().map(|&k| sh.design.sigs[k].name.clone())),
+        None => {
+            let top = sh.design.roots.first();
+            let sigs = top.into_iter().flat_map(|&r| &sh.design.regions[r].sigs);
+            out.extend(sigs.map(|&k| sh.design.sigs[k].name.clone()));
+        }
+    }
+    out.retain(|n| n != "self");
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// The DAP `completions` request (also the terminal's Tab): what can follow in the last command of
+/// `text` up to `column`. A target's `length` is how much of the text it replaces.
+pub(crate) fn completions(sh: &Shared, at: &At<'_, '_>, req: &Json) {
+    let a = &req["arguments"];
+    let text = a["text"].as_str().unwrap_or_default();
+    let column = a["column"].as_u64().unwrap_or(1).saturating_sub(1) as usize;
+    let before = text.get(..column).unwrap_or(text);
+    let (tid, frame) = match a["frameId"].as_i64() {
+        Some(f) => (f >> 16, (f & 0xffff) as usize),
+        None => (
+            thread_of(at),
+            match at {
+                At::Process(s) => s.frames.depth().saturating_sub(1),
+                At::Kernel(_) => 0,
+            },
+        ),
     };
-    let part = if let LitType::Array { .. } = &ty
-        && paths.len() != 1
-    {
-        Lit::Array(paths.iter().filter_map(|p| at_path(p)).collect())
-    } else {
-        at_path(&paths[0]).ok_or("the part is not readable here")?
+    let line = before.rsplit(';').next().unwrap_or_default().trim_start();
+    let word_start = line.rfind(char::is_whitespace).map_or(0, |i| i + 1);
+    let (head, word) = line.split_at(word_start);
+    let words: Vec<&str> = head.split_whitespace().collect();
+    let names = || names_here(sh, at, tid, frame);
+    let mut cands: Vec<String> = match words[..] {
+        [] => {
+            let hook = sh.link.hook.get().into_iter().flat_map(|h| &h.commands);
+            COMMANDS
+                .iter()
+                .map(|(n, _)| n.to_string())
+                .chain(hook.map(|(n, _)| n.clone()))
+                .chain(names())
+                .collect()
+        }
+        ["examine" | "print"] | ["force" | "deposit" | "release"] | ["run", "until"] => names(),
+        ["wave", "add", ..] => names(),
+        ["wave"] => vec!["add".into(), "cursor".into()],
+        ["step"] => vec!["delta".into(), "timestep".into()],
+        ["run"] => vec!["until".into()],
+        ["break"] => {
+            let files = sh.design.files().into_iter().map(|f| format!("{f}:"));
+            let subs = ["list", "delete"].into_iter().map(String::from);
+            subs.chain(files).chain(names()).collect()
+        }
+        ["break", "delete"] => vec!["all".into()],
+        ["break", ..] if words.contains(&"if") => names(),
+        ["break", _] => vec!["if".into()],
+        _ => Vec::new(),
     };
-    Ok(literal_image(&part, &ty))
+    // Inside a name: a field of a record, or through an access value.
+    if let Some((prefix, _)) = word.rsplit_once('.') {
+        let typed = cond::parse(prefix).ok().and_then(|c| {
+            let top = (tid == 0).then(|| sh.design.roots.first()).flatten();
+            let names = crate::Names {
+                sh,
+                at,
+                tid,
+                frame: Some(frame),
+                region: top.map(|&r| sh.design.regions[r].path.as_str()),
+            };
+            c.evaluate(&names).ok()
+        });
+        cands = match typed {
+            Some((LitType::Record(fs), _)) => fs
+                .into_iter()
+                .map(|(n, _)| format!("{prefix}.{n}"))
+                .collect(),
+            Some((t @ LitType::Handle { .. }, x)) => match crate::deref(sh, at, &t, &x) {
+                Some((LitType::Record(fs), _)) => fs
+                    .into_iter()
+                    .map(|(n, _)| format!("{prefix}.{n}"))
+                    .collect(),
+                _ => vec![format!("{prefix}.all")],
+            },
+            _ => Vec::new(),
+        };
+        // Or a path through the hierarchy.
+        if cands.is_empty() {
+            let lower = word.to_ascii_lowercase();
+            cands.extend(
+                sh.design
+                    .sigs
+                    .iter()
+                    .map(|s| dotted(&s.path))
+                    .filter(|p| p.starts_with(&lower)),
+            );
+        }
+    }
+    let lower = word.to_ascii_lowercase();
+    let mut labels: Vec<String> = cands
+        .into_iter()
+        .filter(|c| c.to_ascii_lowercase().starts_with(&lower) && !c.is_empty())
+        .collect();
+    labels.sort();
+    labels.dedup();
+    let length = word.len();
+    let targets: Vec<Json> = labels
+        .iter()
+        .map(|l| json!({"label": l, "length": length}))
+        .collect();
+    sh.respond(req, json!({"targets": targets}));
 }
 
 fn change(sh: &Shared, at: &At<'_, '_>, cmd: &str, rest: &str) -> Result<String, String> {
@@ -812,9 +927,10 @@ fn exec(sh: &Shared, at: &At<'_, '_>, line: &str) -> Result<Exec, String> {
             {
                 return h.call(cmd, rest).map(Exec::Call);
             }
-            examine(sh, at, line)
-                .map(Exec::Text)
-                .map_err(|_| format!("unknown command or signal `{cmd}`: see `help`"))
+            examine(sh, at, line).map(Exec::Text).map_err(|_| {
+                let help = did_you_mean(sh, cmd).unwrap_or_else(|| "see `help`".to_string());
+                format!("unknown command or signal `{cmd}`: {help}")
+            })
         }
     }
 }
@@ -854,12 +970,21 @@ fn wave(sh: &Shared, at: &At<'_, '_>, rest: &str) -> Result<String, String> {
     }
 }
 
-/// A signal or scope name of the console as the viewer writes it: `top.u1.s`.
-fn viewer_name(sh: &Shared, at: &At<'_, '_>, name: &str) -> Result<String, String> {
+/// A signal or scope name of the console as the viewer writes it (`top.u1.s`), and whether it is a
+/// scope in the file: a region, a record, an array other than a vector of a bit-like type.
+fn viewer_name(sh: &Shared, at: &At<'_, '_>, name: &str) -> Result<(String, bool), String> {
     let bad = || format!("no signal or scope `{name}` here");
     let proc = thread_proc(sh, thread_of(at));
     if let Some(k) = sh.design.find(proc, &qualify(sh, at, name)) {
-        return Ok(dotted(&sh.design.sigs[k].path));
+        let s = &sh.design.sigs[k];
+        let scope = match &s.lit {
+            LitType::Record(_) => true,
+            LitType::Array { elem, .. } => {
+                !matches!(&**elem, LitType::Enum(e) if e.lits.contains(&EnumLit::Char(b'1')))
+            }
+            _ => false,
+        };
+        return Ok((dotted(&s.path), scope));
     }
     let lower = name.to_ascii_lowercase().replace('.', ":");
     let wanted = lower.trim_matches(':').to_string();
@@ -873,7 +998,7 @@ fn viewer_name(sh: &Shared, at: &At<'_, '_>, name: &str) -> Result<String, Strin
                     p == format!("{}:{wanted}", sh.design.regions[t].path.trim_matches(':'))
                 })
         })
-        .map(|r| dotted(&r.path))
+        .map(|r| (dotted(&r.path), true))
         .ok_or_else(bad)
 }
 
@@ -920,9 +1045,9 @@ pub(crate) fn set_viewer(link: &std::sync::Arc<Link>, v: std::sync::Arc<dyn crat
         let Some(sh) = sh else {
             return;
         };
-        let decl = sh
-            .design
-            .find(None, name)
+        // A field or an element in the viewer is declared with its signal.
+        let decl = std::iter::successors(Some(name), |n| n.rsplit_once('.').map(|(p, _)| p))
+            .find_map(|n| sh.design.find(None, n))
             .and_then(|k| sh.design.sigs[k].decl.clone());
         if let Some((path, line)) = decl {
             link.output("console", &format!("{name}: {path}:{line}\n"));
@@ -1130,5 +1255,24 @@ pub(crate) fn hook_gone(sh: &Shared) {
             b.error = Some("the test runner closed its connection".into());
             b.lines.clear();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::split;
+
+    #[test]
+    fn split_keeps_flags_and_ends_at_comments() {
+        assert_eq!(split("run 10 ns; where"), ["run 10 ns", "where"]);
+        assert_eq!(split("run -- to the end"), ["run"]);
+        assert_eq!(split("-- only a comment"), Vec::<String>::new());
+        assert_eq!(split("--comment"), Vec::<String>::new());
+        assert_eq!(split("run; --comment"), ["run"]);
+        assert_eq!(
+            split("vunit_load --stop-time=30ns --no-such-flag"),
+            ["vunit_load --stop-time=30ns --no-such-flag"]
+        );
+        assert_eq!(split("examine a--1"), ["examine a"]);
     }
 }

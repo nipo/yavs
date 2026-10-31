@@ -39,6 +39,8 @@ architecture a of tb is
   signal cnt : integer := 0;
   signal v : std_logic_vector(3 downto 0) := "0101";
   signal r : rec_t := (0, '0');
+  type mem_t is array (0 to 1) of std_logic_vector(1 downto 0);
+  signal m : mem_t := (others => "00");
 begin
   p : process
   begin
@@ -140,7 +142,7 @@ impl Fake {
                 continue;
             }
             match cmd {
-                "add_items" | "add_markers" => {
+                "add_items" | "add_markers" | "add_scope" => {
                     let k = m["items"]
                         .as_array()
                         .or(m["markers"].as_array())
@@ -240,6 +242,8 @@ fn connect_mode_loads_shows_and_fits() {
     assert!(names.contains(&"tb.cnt"), "{names:?}");
     assert!(names.contains(&"tb.v"), "{names:?}");
     assert!(names.contains(&"tb.r.x"), "{names:?}");
+    // As the viewer's file reader names an element of an array.
+    assert!(names.contains(&"tb.m.(1)"), "{names:?}");
     // The end: a last reload, then the whole run.
     let c = fake.commands();
     assert_eq!(c[0], "load", "{c:?}");
@@ -434,9 +438,17 @@ fn console_stops_drive_the_viewer() {
         "{:?}",
         fake.commands()
     );
+    // A scope in the file (the record) has its own command.
+    assert_eq!(fake.first("add_scope")["scope"], "tb.r");
     let adds = fake.all("add_items");
     let added = |n: &str| adds.iter().any(|a| a["items"] == json!([n]));
-    assert!(added("tb.r") && added("tb.cnt"), "{adds:?}");
+    assert!(added("tb.cnt"), "{adds:?}");
+    // The markers of a run that starts over go with it.
+    assert!(
+        !fake.all("remove_items").is_empty(),
+        "{:?}",
+        fake.commands()
+    );
     assert!(stdout(&o).contains("1 added"), "{}", stdout(&o));
 }
 
@@ -691,4 +703,90 @@ fn no_clock_flush_without_the_flag() {
         b
     };
     assert_eq!(read("a.fst"), read("b.fst"));
+}
+
+/// The real program (opt-in: `YAVS_TEST_SURFER=1`, a display and `surfer` on PATH; it opens a window).
+/// Between yavs and Surfer a relay reads Surfer's answers, as the file reader's names are what it
+/// finds or not: every item yavs adds must be found.
+#[test]
+fn real_surfer_finds_what_is_added() {
+    let found = std::env::var_os("PATH").is_some_and(|p| {
+        std::env::split_paths(&p)
+            .any(|d| d.join("surfer").is_file() || d.join("surfer.exe").is_file())
+    });
+    if std::env::var_os("YAVS_TEST_SURFER").is_none() || !found {
+        return;
+    }
+    let d = setup("real");
+    // Surfer connects to one side, yavs to the other.
+    let to_surfer = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let to_yavs = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let mut surfer = Command::new("surfer")
+        .args([
+            "--wcp-initiate",
+            &to_surfer.local_addr().expect("addr").port().to_string(),
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("surfer");
+    let (s, _) = to_surfer.accept().expect("surfer connects");
+    let addr = to_yavs.local_addr().expect("addr");
+    let (log_tx, log_rx) = std::sync::mpsc::channel::<Value>();
+    let relay = std::thread::spawn(move || {
+        let (y, _) = to_yavs.accept().expect("yavs connects");
+        let copy =
+            |from: TcpStream, mut to: TcpStream, log: Option<std::sync::mpsc::Sender<Value>>| {
+                std::thread::spawn(move || {
+                    let mut r = BufReader::new(from);
+                    let mut b = Vec::new();
+                    while r.read_until(0, &mut b).is_ok_and(|n| n > 0) {
+                        if let Some(l) = &log
+                            && let Ok(m) = serde_json::from_slice::<Value>(&b[..b.len() - 1])
+                        {
+                            let _ = l.send(m);
+                        }
+                        if to.write_all(&b).is_err() {
+                            break;
+                        }
+                        b.clear();
+                    }
+                    let _ = to.shutdown(std::net::Shutdown::Write);
+                })
+            };
+        let a = copy(
+            y.try_clone().expect("clone"),
+            s.try_clone().expect("clone"),
+            Some(log_tx.clone()),
+        );
+        let b = copy(s, y, Some(log_tx));
+        let _ = (a.join(), b.join());
+    });
+    let o = run(
+        &d,
+        &[
+            &format!("--surfer={addr}"),
+            "--do=break tb.vhd:23; run; wave add tb.r; wave add cnt; wave cursor 5 ns; restart; run 10 ns; quit",
+        ],
+    );
+    let _ = surfer.kill();
+    let _ = surfer.wait();
+    let _ = relay.join();
+    assert_eq!(o.status.code(), Some(0), "{}", stderr(&o));
+    assert!(!stderr(&o).contains("W0131"), "{}", stderr(&o));
+    let log: Vec<Value> = log_rx.try_iter().collect();
+    let errors: Vec<&Value> = log.iter().filter(|m| m["type"] == "error").collect();
+    assert!(errors.is_empty(), "{errors:?}");
+    // Commands and their answers alternate on the connection.
+    let mut asked = 0;
+    for m in &log {
+        if m["command"] == "add_items" && m["type"] == "command" {
+            asked = m["items"].as_array().map_or(0, Vec::len);
+        }
+        if m["command"] == "add_items" && m["type"] == "response" {
+            assert_eq!(m["ids"].as_array().map_or(0, Vec::len), asked, "{log:?}");
+        }
+    }
+    assert!(asked > 0, "{log:?}");
 }

@@ -17,7 +17,7 @@ mod waves;
 mod wire;
 
 use std::collections::HashMap;
-use std::io::{BufReader, Read, Write};
+use std::io::{BufReader, IsTerminal, Read, Write};
 use std::net::TcpListener;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -206,7 +206,7 @@ pub type GotoFn = Box<dyn Fn(&str) + Send + std::marker::Sync>;
 pub trait Viewer: Send + std::marker::Sync {
     fn stop(&self, s: ViewStop);
     /// Add signals or scopes (`top.u1.s`) to the view; how many were added.
-    fn add(&self, items: Vec<String>) -> Result<usize, String>;
+    fn add(&self, items: Vec<(String, bool)>) -> Result<usize, String>;
     fn cursor(&self, fs: u64);
     fn on_goto(&self, f: GotoFn);
 }
@@ -256,10 +256,22 @@ enum Node {
     },
     /// Index into `Design::regions`.
     Region(usize),
+    /// A value read at this stop: what an access value designates, a variable of a protected
+    /// object, the result of an expression. Not written from the Variables view.
+    Value(LitType, Lit),
 }
 
 impl Node {
-    fn child(&self, k: usize) -> Node {
+    /// Child `k`, which holds `x` of type `t`.
+    fn child(&self, k: usize, t: &LitType, x: &Lit) -> Node {
+        if let Node::Value(..) = self {
+            return Node::Value(t.clone(), x.clone());
+        }
+        self.below(k)
+    }
+
+    /// The node `k` further along the path of a local or a signal.
+    fn below(&self, k: usize) -> Node {
         let mut n = self.clone();
         if let Node::Local { path, .. } | Node::Signal { path, .. } = &mut n {
             path.push(k);
@@ -598,6 +610,10 @@ fn serve_stop(sh: &Shared, at: &At<'_, '_>, stopped: Json) -> Option<Next> {
                 variables(sh, at, &req);
                 None
             }
+            "completions" => {
+                console::completions(sh, at, &req);
+                None
+            }
             "evaluate" => {
                 if console::is_command(sh, &req) {
                     console::start(sh, req.clone());
@@ -782,9 +798,47 @@ fn local(
     name: &str,
 ) -> Option<(LitType, Lit, yavs_sem::stat::ConstValue)> {
     let (ty, v) = s.frames.value(i, name).ok()?;
-    let c = yavs_elab::ir_decode(&sh.prog, ty, &v)?;
+    let c = yavs_elab::ir_decode_shown(&sh.prog, ty, &v)?;
     let (t, v) = design::ir_lit(&sh.prog, ty, &c)?;
     Some((t, v, c))
+}
+
+/// What an access value or a protected object designates; `None` for `null`, or where nothing
+/// can read it (only the stopped process's heap can be read).
+fn deref(sh: &Shared, at: &At<'_, '_>, t: &LitType, v: &Lit) -> Option<(LitType, Lit)> {
+    let (LitType::Handle { target, .. }, Lit::Handle(h), At::Process(s)) = (t, v, at) else {
+        return None;
+    };
+    if *h == 0 {
+        return None;
+    }
+    let ty = yavs_ir::TyId(*target);
+    let c = yavs_elab::ir_decode_shown(&sh.prog, ty, &s.frames.deref(ty, *h).ok()?)?;
+    design::ir_lit(&sh.prog, ty, &c)
+}
+
+/// The variables of the protected object whose method frame `i` is: the fields of its state.
+fn state_vars(sh: &Shared, s: &Stop<'_>, at: &At<'_, '_>, i: usize) -> Vec<(String, LitType, Lit)> {
+    let Some((t, v, _)) = local(sh, s, i, "self") else {
+        return Vec::new();
+    };
+    match (
+        matches!(
+            t,
+            LitType::Handle {
+                protected: true,
+                ..
+            }
+        ),
+        deref(sh, at, &t, &v),
+    ) {
+        (true, Some((LitType::Record(fs), Lit::Record(xs)))) => fs
+            .into_iter()
+            .zip(xs)
+            .map(|((n, t), x)| (n, t, x))
+            .collect(),
+        _ => Vec::new(),
+    }
 }
 
 /// Write `v` (of the type `local` gives) into local `name` of frame `i`.
@@ -835,19 +889,43 @@ fn node_root(sh: &Shared, at: &At<'_, '_>, n: &Node) -> Option<(LitType, Lit)> {
             Some((s.lit.clone(), s.value(&|r| at.read(r))?))
         }
         Node::Region(_) => None,
+        Node::Value(t, v) => Some((t.clone(), v.clone())),
     }
 }
 
 fn node_path(n: &Node) -> &[usize] {
     match n {
         Node::Local { path, .. } | Node::Signal { path, .. } => path,
-        Node::Region(_) => &[],
+        Node::Region(_) | Node::Value(..) => &[],
     }
 }
 
 /// A variable showing value `v` of type `t`; a composite gets a reference to `node`, its
-/// children (an array's paged through `indexedVariables`).
-fn value_var(sh: &Shared, name: &str, t: &LitType, v: &Lit, node: impl FnOnce() -> Node) -> Json {
+/// children (an array's paged through `indexedVariables`). An access value shows what it
+/// designates, and expands as that does.
+fn value_var(
+    sh: &Shared,
+    at: &At<'_, '_>,
+    name: &str,
+    t: &LitType,
+    v: &Lit,
+    node: &dyn Fn() -> Node,
+) -> Json {
+    if let Some((dt, dv)) = deref(sh, at, t, v) {
+        let mut j = value_var(sh, at, name, &dt, &dv, &|| {
+            Node::Value(dt.clone(), dv.clone())
+        });
+        if matches!(
+            t,
+            LitType::Handle {
+                protected: true,
+                ..
+            }
+        ) {
+            j["value"] = json!("protected");
+        }
+        return j;
+    }
     let mut j = json!({"name": name, "value": literal_image(v, t), "variablesReference": 0});
     match (t, v) {
         (LitType::Array { .. }, Lit::Array(xs)) => {
@@ -867,7 +945,7 @@ fn value_var(sh: &Shared, name: &str, t: &LitType, v: &Lit, node: impl FnOnce() 
 fn signal_var(sh: &Shared, at: &At<'_, '_>, k: usize) -> Json {
     let s = &sh.design.sigs[k];
     let mut j = match s.value(&|r| at.read(r)) {
-        Some(v) => value_var(sh, &s.name, &s.lit, &v, || Node::Signal {
+        Some(v) => value_var(sh, at, &s.name, &s.lit, &v, &|| Node::Signal {
             sig: k,
             path: Vec::new(),
         }),
@@ -884,17 +962,19 @@ fn local_vars(sh: &Shared, at: &At<'_, '_>, tid: i64, i: usize) -> Vec<Json> {
     let Some(s) = stop_of(at, tid) else {
         return Vec::new();
     };
-    s.frames
-        .locals(i)
+    let locals = s.frames.locals(i);
+    let mut vars: Vec<Json> = locals
         .iter()
+        // The object of a protected method: its variables come below.
+        .filter(|l| l.name != "self" || state_vars(sh, s, at, i).is_empty())
         .map(|l| match local(sh, s, i, l.name) {
-            Some((t, v, _)) => value_var(sh, l.name, &t, &v, || Node::Local {
+            Some((t, v, _)) => value_var(sh, at, l.name, &t, &v, &|| Node::Local {
                 tid,
                 frame: i,
                 name: l.name.to_string(),
                 path: Vec::new(),
             }),
-            // Access values.
+            // Files.
             None => {
                 let v = s
                     .frames
@@ -903,7 +983,13 @@ fn local_vars(sh: &Shared, at: &At<'_, '_>, tid: i64, i: usize) -> Vec<Json> {
                 json!({"name": l.name, "value": v, "variablesReference": 0})
             }
         })
-        .collect()
+        .collect();
+    vars.extend(
+        state_vars(sh, s, at, i)
+            .into_iter()
+            .map(|(n, t, x)| value_var(sh, at, &n, &t, &x, &|| Node::Value(t.clone(), x.clone()))),
+    );
+    vars
 }
 
 /// The children of a region: regions, processes (with their state) and signals.
@@ -968,7 +1054,7 @@ fn variables(sh: &Shared, at: &At<'_, '_>, req: &Json) {
                     .iter()
                     .zip(&xs)
                     .enumerate()
-                    .map(|(k, ((f, t), x))| value_var(sh, f, t, x, || n.child(k)))
+                    .map(|(k, ((f, t), x))| value_var(sh, at, f, t, x, &|| n.child(k, t, x)))
                     .collect(),
                 Some((t, Lit::Array(xs))) => {
                     let LitType::Array { elem, .. } = &t else {
@@ -980,7 +1066,7 @@ fn variables(sh: &Shared, at: &At<'_, '_>, req: &Json) {
                         .take(count)
                         .map(|(k, x)| {
                             let i = t.index(k as u64).unwrap_or(k as i64);
-                            value_var(sh, &i.to_string(), elem, x, || n.child(k))
+                            value_var(sh, at, &i.to_string(), elem, x, &|| n.child(k, elem, x))
                         })
                         .collect()
                 }
@@ -1045,18 +1131,71 @@ impl Names<'_, '_, '_> {
     }
 }
 
+impl Names<'_, '_, '_> {
+    /// A variable of the protected object of the frame.
+    fn state_var(&self, name: &str) -> Option<(LitType, Lit)> {
+        let s = stop_of(self.at, self.tid)?;
+        state_vars(self.sh, s, self.at, self.frame?)
+            .into_iter()
+            .find(|(n, ..)| n.eq_ignore_ascii_case(name))
+            .map(|(_, t, x)| (t, x))
+    }
+}
+
 impl cond::Env for Names<'_, '_, '_> {
     fn get(&self, name: &str) -> Option<(LitType, Lit)> {
-        match self.find(name)? {
-            Ok((i, n)) => {
+        match self.find(name) {
+            Some(Ok((i, n))) => {
                 let (t, v, _) = local(self.sh, stop_of(self.at, self.tid)?, i, &n)?;
                 Some((t, v))
             }
-            Err(k) => {
-                let s = &self.sh.design.sigs[k];
+            found => {
+                if let Some(v) = self.state_var(name) {
+                    return Some(v);
+                }
+                let s = &self.sh.design.sigs[found?.err()?];
                 Some((s.lit.clone(), s.value(&|r| self.at.read(r))?))
             }
         }
+    }
+
+    fn deref(&self, t: &LitType, v: &Lit) -> Option<(LitType, Lit)> {
+        deref(self.sh, self.at, t, v)
+    }
+
+    fn type_name(&self, name: &str) -> Option<String> {
+        match self.find(name)? {
+            Ok(_) => None,
+            Err(k) => Some(self.sh.design.sigs[k].ty.clone()),
+        }
+    }
+}
+
+/// What a condition can know before the run: the types of the signals, by a name that means one
+/// signal of the design. ponytail: a local that hides such a signal is taken for the signal.
+struct Typed<'a>(&'a Design);
+
+impl Typed<'_> {
+    fn sig(&self, name: &str) -> Option<&design::Sig> {
+        let mut named = self
+            .0
+            .sigs
+            .iter()
+            .filter(|s| s.name.eq_ignore_ascii_case(name));
+        let s = named.next()?;
+        named.next().is_none().then_some(s)
+    }
+}
+
+impl cond::Env for Typed<'_> {
+    fn get(&self, name: &str) -> Option<(LitType, Lit)> {
+        let t = self.sig(name)?.lit.clone();
+        let v = cond::zero(&t);
+        Some((t, v))
+    }
+
+    fn type_name(&self, name: &str) -> Option<String> {
+        Some(self.sig(name)?.ty.clone())
     }
 }
 
@@ -1076,19 +1215,23 @@ fn evaluate(sh: &Shared, at: &At<'_, '_>, req: &Json) {
 
 /// The value of `expr` seen from frame `i` of thread `tid`, as an `evaluate` response body.
 fn eval_var(sh: &Shared, at: &At<'_, '_>, tid: i64, i: usize, expr: &str) -> Result<Json, String> {
+    let top = (tid == 0)
+        .then(|| sh.design.roots.first())
+        .flatten()
+        .map(|&r| sh.design.regions[r].path.as_str());
     let names = Names {
         sh,
         at,
         tid,
         frame: Some(i),
-        region: None,
+        region: top,
     };
     let found = names.find(expr);
     let mut j = match found {
         Some(Ok((frame, name))) => {
             let s = stop_of(at, tid).ok_or("no locals here")?;
             match local(sh, s, frame, &name) {
-                Some((t, v, _)) => value_var(sh, &name, &t, &v, || Node::Local {
+                Some((t, v, _)) => value_var(sh, at, &name, &t, &v, &|| Node::Local {
                     tid,
                     frame,
                     name: name.clone(),
@@ -1102,8 +1245,20 @@ fn eval_var(sh: &Shared, at: &At<'_, '_>, tid: i64, i: usize, expr: &str) -> Res
                 }
             }
         }
-        Some(Err(k)) => signal_var(sh, at, k),
-        None => return Err(format!("no variable or signal `{expr}` here")),
+        Some(Err(k)) if names.state_var(expr).is_none() => signal_var(sh, at, k),
+        // A part of a local or a signal, or any expression: what a condition computes.
+        _ => {
+            let unknown = || {
+                let help = console::did_you_mean(sh, expr);
+                let help = help.map_or(String::new(), |h| format!(": {h}"));
+                format!("no variable or signal `{expr}` here{help}")
+            };
+            let (t, v) = cond::parse(expr)
+                .map_err(|_| unknown())?
+                .evaluate(&names)
+                .map_err(|e| e.unwrap_or_else(unknown))?;
+            value_var(sh, at, expr, &t, &v, &|| Node::Value(t.clone(), v.clone()))
+        }
     };
     // A variable becomes a result.
     if let Some(o) = j.as_object_mut() {
@@ -1264,6 +1419,29 @@ fn select(t: &LitType, suffix: &str) -> Result<(Vec<Vec<usize>>, LitType), Strin
     Ok((vec![path], t))
 }
 
+/// The part `suffix` selects of value `v` of type `t`.
+fn part_of(t: &LitType, v: &Lit, suffix: &str) -> Result<(LitType, Lit), String> {
+    let (paths, ty) = select(t, suffix)?;
+    let at_path = |p: &[usize]| {
+        let mut cur = v;
+        for &i in p {
+            cur = match cur {
+                Lit::Record(xs) | Lit::Array(xs) => xs.get(i)?,
+                _ => return None,
+            };
+        }
+        Some(cur.clone())
+    };
+    let part = if let LitType::Array { .. } = &ty
+        && paths.len() != 1
+    {
+        Lit::Array(paths.iter().filter_map(|p| at_path(p)).collect())
+    } else {
+        at_path(&paths[0]).ok_or("the part is not readable here")?
+    };
+    Ok((ty, part))
+}
+
 /// Write `v` (one value, or an array of one per path) into `whole` at `paths`.
 fn set_part(whole: &mut Lit, paths: &[Vec<usize>], v: &Lit) -> Result<(), String> {
     let parts: Vec<&Lit> = match (paths.len(), v) {
@@ -1365,7 +1543,7 @@ fn set_variable(sh: &Shared, at: &At<'_, '_>, req: &Json) {
                     path: Vec::new(),
                 })
                 .ok_or_else(|| format!("no signal `{name}` here")),
-            Some(n) => child_pos(sh, at, &n, name).map(|k| n.child(k)),
+            Some(n) => child_pos(sh, at, &n, name).map(|k| n.below(k)),
             None => Err(format!("no variables {r}")),
         }
     } else {
@@ -1452,6 +1630,11 @@ fn write_node(sh: &Shared, at: &At<'_, '_>, n: &Node, text: &str) -> Result<Stri
             )?;
         }
         Node::Region(_) => return Err("a region has no value".into()),
+        Node::Value(..) => {
+            return Err(
+                "this value is shown, not written: only a local or a signal can be set".into(),
+            );
+        }
     }
     Ok(shown)
 }
@@ -1471,6 +1654,7 @@ fn handle(sh: &Shared, tx: &Sender<Msg>, req: Json) {
                     "supportsTerminateRequest": true,
                     "supportsDataBreakpoints": true,
                     "supportsSetVariable": true,
+                    "supportsCompletionsRequest": true,
                 }),
             );
             sh.event("initialized", json!({}));
@@ -1608,14 +1792,19 @@ fn apply_lines(sh: &Shared, key: &str) -> Vec<Json> {
         // A condition is evaluated here; the interpreter then stops on every hit.
         let hit = hit.and_then(|hit| match bp["condition"].as_str() {
             None => Ok((hit, None)),
-            Some(c) => cond::parse(c).map(|cond| {
-                let c = Arc::new(LineCond {
-                    cond,
-                    hit,
-                    hits: std::sync::atomic::AtomicU64::new(0),
-                });
-                (HitCond::Always, Some(c))
-            }),
+            Some(c) => cond::parse(c)
+                .and_then(|c| {
+                    c.check_types(&Typed(&sh.design))?;
+                    Ok(c)
+                })
+                .map(|cond| {
+                    let c = Arc::new(LineCond {
+                        cond,
+                        hit,
+                        hits: std::sync::atomic::AtomicU64::new(0),
+                    });
+                    (HitCond::Always, Some(c))
+                }),
         });
         let found = sh.design.line_stmts(key, line);
         match (found, hit) {
@@ -1932,14 +2121,7 @@ pub fn serve(
     let mut closer = None;
     let (reader, writer): (Box<dyn Read + Send>, Box<dyn Write + Send>) = match transport {
         Transport::Stdio => {
-            let out: Box<dyn Write + Send> = match STDOUT.get().map(std::fs::File::try_clone) {
-                Some(f) => {
-                    Box::new(std::io::BufWriter::new(f.map_err(|err| {
-                        io_err("cannot duplicate standard output", err)
-                    })?))
-                }
-                None => Box::new(std::io::stdout()),
-            };
+            let out = stdio_out().map_err(|err| io_err("cannot duplicate standard output", err))?;
             (Box::new(std::io::stdin()), out)
         }
         Transport::Tcp(port) => {
@@ -1963,7 +2145,82 @@ pub fn serve(
             (Box::new(r), Box::new(s))
         }
     };
-    serve_on(loaded, reader, writer, closer, options, attach, report)
+    session(
+        loaded, reader, writer, closer, options, attach, report, true,
+    )
+}
+
+/// How long a client gets to end a session that could not start; then the process exits with `code`.
+const REFUSED_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// A session that cannot start, with a client that knows nothing of it yet: `initialize` is
+/// answered, `launch` or `attach` fail with `text`, which is what an editor shows, and everything
+/// else until the client ends it (#934). The diagnostic on standard error is the caller's.
+fn refuse_session(reader: Box<dyn Read + Send>, mut send: impl FnMut(Json), text: &str, code: u8) {
+    std::thread::spawn(move || {
+        std::thread::sleep(REFUSED_WAIT);
+        std::process::exit(i32::from(code));
+    });
+    let answer = |req: &Json, m: Json| {
+        let mut r =
+            json!({"type": "response", "request_seq": req["seq"], "command": req["command"]});
+        if let (Some(r), Some(m)) = (r.as_object_mut(), m.as_object()) {
+            r.extend(m.clone());
+        }
+        r
+    };
+    let event = |event: &str, body: Json| json!({"type": "event", "event": event, "body": body});
+    let mut r = BufReader::new(reader);
+    while let Ok(Some(req)) = read_message(&mut r) {
+        if req["type"] != "request" {
+            continue;
+        }
+        match req["command"].as_str().unwrap_or_default() {
+            "initialize" => send(answer(&req, json!({"success": true, "body": {}}))),
+            "disconnect" | "terminate" => {
+                send(answer(&req, json!({"success": true, "body": {}})));
+                return;
+            }
+            c => {
+                let launch = matches!(c, "launch" | "attach");
+                if launch {
+                    send(event(
+                        "output",
+                        json!({"category": "stderr", "output": text}),
+                    ));
+                }
+                send(answer(&req, json!({"success": false, "message": text})));
+            }
+        }
+    }
+}
+
+/// The session on standard input and output.
+fn stdio_out() -> std::io::Result<Box<dyn Write + Send>> {
+    Ok(match STDOUT.get().map(std::fs::File::try_clone) {
+        Some(f) => Box::new(std::io::BufWriter::new(f?)),
+        None => Box::new(std::io::stdout()),
+    })
+}
+
+/// `--dap=stdio` failed before there is a session (no such top level, an elaboration error): tell
+/// the client that started this process, which sees nothing of standard error. `text` is the
+/// diagnostic as a user reads it. Nothing happens on a terminal: nobody speaks the protocol there.
+pub fn refuse(text: &str, code: u8) {
+    if std::io::stdin().is_terminal() {
+        return;
+    }
+    let Ok(mut out) = stdio_out() else {
+        return;
+    };
+    let mut seq = 0;
+    let send = |mut m: Json| {
+        seq += 1;
+        m["seq"] = json!(seq);
+        // A closed connection ends the loop through the reader's end of input.
+        let _ = write_message(&mut *out, &m);
+    };
+    refuse_session(Box::new(std::io::stdin()), send, text, code);
 }
 
 /// How one simulation of a session ended.
@@ -1974,7 +2231,23 @@ enum Outcome {
 }
 
 /// [`serve`] over a connection the caller made: the console speaks DAP to the server over a pipe.
+/// A failure before the session started is only returned: the caller is the client.
 pub fn serve_on(
+    loaded: Loaded,
+    reader: Box<dyn Read + Send>,
+    writer: Box<dyn Write + Send>,
+    closer: Option<std::net::TcpStream>,
+    options: Options,
+    attach: impl Attach,
+    report: Report,
+) -> Result<u8, Box<Diagnostic>> {
+    session(
+        loaded, reader, writer, closer, options, attach, report, false,
+    )
+}
+
+#[allow(clippy::too_many_arguments)] // `serve` and `serve_on` are its two callers
+fn session(
     loaded: Loaded,
     reader: Box<dyn Read + Send>,
     writer: Box<dyn Write + Send>,
@@ -1982,6 +2255,7 @@ pub fn serve_on(
     options: Options,
     mut attach: impl Attach,
     report: Report,
+    tell_client: bool,
 ) -> Result<u8, Box<Diagnostic>> {
     let (tx, rx) = channel();
     let link = Arc::new(Link {
@@ -2003,9 +2277,10 @@ pub fn serve_on(
         reload: Mutex::new(options.reload),
     });
     if let Some(value) = &options.hook {
-        let (hook, lines) = console::Hook::connect(value).map_err(|why| {
-            Box::new(
-                Diagnostic::error(
+        let (hook, lines) = match console::Hook::connect(value) {
+            Ok(h) => h,
+            Err(why) => {
+                let d = Diagnostic::error(
                     console::HOOK_ERROR,
                     format!("the console hook in `{}` cannot be used", console::HOOK_VAR),
                 )
@@ -2014,9 +2289,15 @@ pub fn serve_on(
                     "a test runner sets `{}` for a session while it serves the hook; unset it to \
                      run without one",
                     console::HOOK_VAR
-                )),
-            )
-        })?;
+                ));
+                if tell_client {
+                    let text =
+                        yavs_diag::render(&loaded.db.sources, &d, MessageFormat::Human, false);
+                    refuse_session(reader, |m| link.send(m), &text, 2);
+                }
+                return Err(Box::new(d));
+            }
+        };
         let _ = link.hook.set(hook);
         let (link, tx) = (link.clone(), tx.clone());
         std::thread::spawn(move || console::hook_reader(lines, &link, &tx));
@@ -2035,6 +2316,7 @@ pub fn serve_on(
     let mut loaded = loaded;
     let code = loop {
         let first = start.is_some();
+        let db = loaded.db.clone();
         // The reader thread starts once the first simulation can take requests.
         let begin = |sh: &Arc<Shared>, start: &mut Option<(Box<dyn Read + Send>, Sender<Msg>)>| {
             *sh.link.current.lock().unwrap_or_else(|p| p.into_inner()) = Some(sh.clone());
@@ -2072,9 +2354,31 @@ pub fn serve_on(
             |sh| begin(sh, &mut start),
             &mut attach,
             &mut report,
-        )? {
-            Outcome::Exit(code) => break code,
-            Outcome::Again(next) => loaded = next,
+        ) {
+            Ok(Outcome::Exit(code)) => break Ok(code),
+            Ok(Outcome::Again(next)) => loaded = next,
+            Err(d) => {
+                let text = yavs_diag::render(&db.sources, &d, MessageFormat::Human, false);
+                match start.take() {
+                    // Nothing read the connection yet.
+                    Some((reader, _)) => {
+                        if tell_client {
+                            refuse_session(reader, |m| link.send(m), &text, 2);
+                            if let Some(s) = &closer {
+                                let _ = s.shutdown(std::net::Shutdown::Write);
+                            }
+                        }
+                        return Err(d);
+                    }
+                    // A `restart` that failed: the session ends here, in the open.
+                    None => {
+                        link.output("stderr", &text);
+                        link.event("exited", json!({"exitCode": 2}));
+                        link.event("terminated", json!({}));
+                        break Err(d);
+                    }
+                }
+            }
         }
     };
     // Answer the disconnect, or wait for it.
@@ -2114,7 +2418,7 @@ pub fn serve_on(
             }
         }
     }
-    Ok(code)
+    code
 }
 
 /// Build one simulation of a session and serve it until it ends or restarts.
@@ -2403,6 +2707,13 @@ fn one_run(
         report(sim.stats(), rt.as_deref());
     }
     let code = console::exit_status(&sh).unwrap_or(code);
+    // An editor shows nothing else of it; a terminal has the process's own status.
+    if !link.console.load(Ordering::Relaxed) {
+        sh.output(
+            "console",
+            &format!("the session ended with exit status {code}\n"),
+        );
+    }
     sh.event("exited", json!({"exitCode": code}));
     sh.event("terminated", json!({}));
     Ok(Outcome::Exit(code))

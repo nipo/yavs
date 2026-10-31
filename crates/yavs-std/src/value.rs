@@ -620,6 +620,12 @@ pub enum LitType {
         elem: Box<LitType>,
     },
     Record(Vec<(String, LitType)>),
+    /// An access value or a protected object, as a debugger shows it: `target` is the IR type of
+    /// what it designates (a debugger reads that when asked).
+    Handle {
+        target: u32,
+        protected: bool,
+    },
 }
 
 /// A value of a [`LitType`]: enumeration positions, physical values in primary units.
@@ -631,6 +637,8 @@ pub enum Lit {
     Phys(i64),
     Array(Vec<Lit>),
     Record(Vec<Lit>),
+    /// 0 is `null`.
+    Handle(u64),
 }
 
 impl LitType {
@@ -657,7 +665,7 @@ impl LitType {
             LitType::Int(_) => What::Integer,
             LitType::Real(_) => What::Real,
             LitType::Phys(..) => What::Physical,
-            LitType::Array { .. } | LitType::Record(_) => What::Aggregate,
+            LitType::Array { .. } | LitType::Record(_) | LitType::Handle { .. } => What::Aggregate,
         }
     }
 }
@@ -687,6 +695,14 @@ pub fn literal_image(v: &Lit, ty: &LitType) -> String {
         },
         (Lit::Int(x), _) => x.to_string(),
         (Lit::Real(x), _) => x.to_string(),
+        (Lit::Handle(0), _) => "null".to_string(),
+        (
+            Lit::Handle(_),
+            LitType::Handle {
+                protected: true, ..
+            },
+        ) => "protected".to_string(),
+        (Lit::Handle(_), _) => "access".to_string(),
         (Lit::Phys(x), LitType::Phys(t, _)) => {
             format!("{x} {}", latin1(&t.primary().name))
         }
@@ -803,6 +819,10 @@ fn lit_at(s: &[u8], i: usize, ty: &LitType) -> R<(Lit, usize)> {
         },
         LitType::Record(_) if s.get(i) == Some(&b'(') => aggregate(s, i, ty),
         LitType::Record(_) => Err(agg_err(s, i..i + 1, "a record aggregate such as (a => 1)")),
+        LitType::Handle { .. } if s[i..].eq_ignore_ascii_case(b"null") => {
+            Ok((Lit::Handle(0), s.len()))
+        }
+        LitType::Handle { .. } => Err(agg_err(s, i..s.len(), "`null`")),
         _ => {
             let (end, _) = element_end(s, i);
             let end = end - s[i..end].iter().rev().take_while(|&&c| is_ws(c)).count();
@@ -812,7 +832,9 @@ fn lit_at(s: &[u8], i: usize, ty: &LitType) -> R<(Lit, usize)> {
                 LitType::Int(b) => Lit::Int(integer_value(t, *b)?),
                 LitType::Real(b) => Lit::Real(real_value(t, *b)?),
                 LitType::Phys(p, b) => Lit::Phys(physical_value(t, p, *b)?),
-                LitType::Array { .. } | LitType::Record(_) => unreachable!("matched above"),
+                LitType::Array { .. } | LitType::Record(_) | LitType::Handle { .. } => {
+                    unreachable!("matched above")
+                }
             };
             Ok((v, end))
         }

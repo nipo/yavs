@@ -102,6 +102,8 @@ pub(crate) struct Out {
     werror: bool,
     /// Per-code `-W` actions, the last option for a code wins.
     codes: std::collections::HashMap<String, Action>,
+    /// The errors as a user reads them: for a debugger client, which sees no standard error.
+    pub(crate) error_text: String,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -119,6 +121,7 @@ impl Out {
             errors: 0,
             warnings: 0,
             werror: false,
+            error_text: String::new(),
             codes: Default::default(),
         }
     }
@@ -170,12 +173,16 @@ impl Out {
         if d.severity == Severity::Warning && action == Some(Action::Allow) {
             return;
         }
+        let errors = self.errors;
         match d.severity {
             Severity::Error => self.errors += 1,
             Severity::Warning if action == Some(Action::Deny) => self.errors += 1,
             Severity::Warning if self.werror && action != Some(Action::Keep) => self.errors += 1,
             Severity::Warning => self.warnings += 1,
             Severity::Note => {}
+        }
+        if self.errors > errors {
+            self.error_text += &yavs_diag::render(sources, d, MessageFormat::Human, false);
         }
         crate::stdout::flush();
         let _ = std::io::stderr()

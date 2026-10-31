@@ -78,9 +78,11 @@ impl Fx<'_, '_> {
         let db = self.db;
         let (t, sd, so) = match method_type(db, d) {
             Some(t) => {
+                // Typed, so a debugger finds the object's variables through it.
+                let ty = self.ty(t, span)?;
                 let off = self
                     .fb
-                    .param("self", Width::B8, ParamClass::Value, Mode::In, None);
+                    .param("self", Width::B8, ParamClass::Value, Mode::In, Some(ty));
                 self.fb.root(off, RootKind::Handle);
                 self.cx.method_self.insert(scope, (t, depth, off));
                 (t, depth, off)

@@ -176,8 +176,9 @@ fn scalar_cell(v: &Val) -> Option<u64> {
     }
 }
 
-fn scalar_val(t: &Ty, c: u64) -> Option<Val> {
+fn scalar_val<const HANDLES: bool>(t: &Ty, c: u64) -> Option<Val> {
     Some(match t {
+        Ty::Access { .. } | Ty::Protected { .. } if HANDLES => Val::Int(c as i64),
         Ty::Enum { .. } => Val::Enum(c as u32),
         Ty::Int { .. } => Val::Int(c as i64),
         Ty::Physical { .. } => Val::Phys(c as i64),
@@ -347,10 +348,10 @@ fn logic_codes(prog: &Program, ty: TyId, v: &Val, out: &mut Vec<u64>) -> Option<
 
 /// The value of IR type `ty` in `data` with descriptor `desc`, and the descriptor bytes it
 /// used (the inverse of [`put`]).
-fn get(prog: &Program, ty: TyId, data: &[u8], desc: &[u8]) -> Option<(Val, usize)> {
+fn get<const H: bool>(prog: &Program, ty: TyId, data: &[u8], desc: &[u8]) -> Option<(Val, usize)> {
     let t = prog.types.get(ty)?;
     if let Some(n) = t.scalar_size() {
-        return Some((scalar_val(t, read(data, 0, n as usize)?)?, 0));
+        return Some((scalar_val::<H>(t, read(data, 0, n as usize)?)?, 0));
     }
     let (l, used) = Ty::layout(&prog.types, &prog.consts, ty, desc).ok()?;
     match t {
@@ -405,8 +406,8 @@ fn get(prog: &Program, ty: TyId, data: &[u8], desc: &[u8]) -> Option<(Val, usize
             for k in 0..l.count as usize {
                 let at = k * l.stride as usize;
                 xs.push(match et.elem_size() {
-                    Some(n) => scalar_val(et, read(data, at, n as usize)?)?,
-                    None => get(prog, *elem, data.get(at..)?, ed)?.0,
+                    Some(n) => scalar_val::<H>(et, read(data, at, n as usize)?)?,
+                    None => get::<H>(prog, *elem, data.get(at..)?, ed)?.0,
                 });
             }
             Some((make(&bounds, xs), used))
@@ -419,7 +420,7 @@ fn get(prog: &Program, ty: TyId, data: &[u8], desc: &[u8]) -> Option<(Val, usize
                     Some(c) => pool(prog, c)?,
                     None => desc.get(at..)?,
                 };
-                let (x, n) = get(prog, f.ty, data.get(off as usize..)?, fd)?;
+                let (x, n) = get::<H>(prog, f.ty, data.get(off as usize..)?, fd)?;
                 if f.desc.is_none() {
                     at += n;
                 }
@@ -500,8 +501,17 @@ fn logic_val(prog: &Program, ty: TyId, desc: &[u8], codes: &[u32]) -> Option<Val
 /// The value of a call result of IR type `ty` (the inverse of [`encode`]).
 pub fn decode(prog: &Program, ty: TyId, r: &CallVal) -> Option<Val> {
     match r {
-        CallVal::Cell(c) => scalar_val(prog.types.get(ty)?, *c),
-        CallVal::Composite { data, desc } => get(prog, ty, data, desc).map(|(v, _)| v),
+        CallVal::Cell(c) => scalar_val::<false>(prog.types.get(ty)?, *c),
+        CallVal::Composite { data, desc } => get::<false>(prog, ty, data, desc).map(|(v, _)| v),
+    }
+}
+
+/// [`decode`] for a debugger: access values and protected objects read as `Val::Int` of the
+/// handle, so a value that holds them is shown too; never a constant to compute with.
+pub fn decode_shown(prog: &Program, ty: TyId, r: &CallVal) -> Option<Val> {
+    match r {
+        CallVal::Cell(c) => scalar_val::<true>(prog.types.get(ty)?, *c),
+        CallVal::Composite { data, desc } => get::<true>(prog, ty, data, desc).map(|(v, _)| v),
     }
 }
 

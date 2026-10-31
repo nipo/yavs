@@ -1,5 +1,5 @@
 > initialize {"adapterID":"yavs"}
-< {"body":{"supportsConditionalBreakpoints":true,"supportsConfigurationDoneRequest":true,"supportsDataBreakpoints":true,"supportsEvaluateForHovers":true,"supportsHitConditionalBreakpoints":true,"supportsSetVariable":true,"supportsTerminateRequest":true},"command":"initialize","request_seq":1,"success":true,"type":"response"}
+< {"body":{"supportsCompletionsRequest":true,"supportsConditionalBreakpoints":true,"supportsConfigurationDoneRequest":true,"supportsDataBreakpoints":true,"supportsEvaluateForHovers":true,"supportsHitConditionalBreakpoints":true,"supportsSetVariable":true,"supportsTerminateRequest":true},"command":"initialize","request_seq":1,"success":true,"type":"response"}
 > launch {}
 < {"body":{},"event":"initialized","type":"event"}
 < {"body":{},"command":"launch","request_seq":2,"success":true,"type":"response"}
@@ -14,6 +14,7 @@
 < {"body":{"category":"stdout","output":"** Note: 11000000fs+0: n=6 b=A d=00 q=00 t=0 fs r.a=1\n    Process :vals:p\n"},"event":"output","type":"event"}
 < {"body":{"category":"stdout","output":"** Note: 12000000fs+0: q=00 big(299)=7\n    Process :vals:p\n"},"event":"output","type":"event"}
 < {"body":{"changes":[[0,0,"AQAAAAAAAAA="],[0,1,"AgICAg=="],[0,2,"BQAAAAAAAAA="],[0,3,"AwIDAg=="]],"from":0,"times":[0],"to":12000000},"event":"yavs/waves","type":"event"}
+< {"body":{"category":"console","output":"the session ended with exit status 0\n"},"event":"output","type":"event"}
 < {"body":{"exitCode":0},"event":"exited","type":"event"}
 < {"body":{},"event":"terminated","type":"event"}
 > disconnect {}

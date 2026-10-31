@@ -234,9 +234,26 @@ function decodeWave(sig, b64) {
   }
 }
 
+// A launch that cannot start: VS Code shows the failure of the launch request (#934).
+async function failedLaunch() {
+  const bad = new DebugClient(q(yavs), `run ${q('--work=' + work)} --dap=stdio nosuch`, 'yavs', {
+    shell: true,
+    cwd: dir,
+  });
+  bad.defaultTimeout = 10000;
+  await bad.start();
+  await bad.initializeRequest({ clientID: 'vscode', adapterID: 'yavs', linesStartAt1: true, columnsStartAt1: true });
+  await assert.rejects(bad.launch({}), (e) => {
+    assert.match(e.message, /error\[E0104\]: .*nosuch/);
+    return true;
+  });
+  await bad.stop();
+}
+
 // Exit 1 unless the session passed (an unsettled promise must not end as success).
 process.exitCode = 1;
 main()
+  .then(failedLaunch)
   .then(() => {
     fs.rmSync(dir, { recursive: true, force: true });
     console.log('ok: VS Code style session passed');

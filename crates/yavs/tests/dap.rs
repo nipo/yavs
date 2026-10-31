@@ -535,6 +535,216 @@ fn wave_file_is_readable_at_a_stop() {
 
 /// `--tier` under `--dap` is checked like without it (#835): a tier whose feature this build
 /// lacks is `E0120`, exit 2, not a quiet interpreted session.
+/// A session that cannot start tells the client: the diagnostic is the failure of `launch` (#934).
+#[test]
+fn a_launch_that_fails_early_says_why() {
+    let d = setup("refuse");
+    let surfer_path = tempdir("dap-refuse-path");
+    for (top, extra, code) in [
+        ("nosuch", vec![], "E0104"),
+        // No `surfer` in an empty PATH: this one fails after elaboration.
+        ("tb", vec!["--surfer"], "E0130"),
+    ] {
+        let mut args = vec!["--dap=stdio"];
+        args.extend(extra);
+        let mut c = yavs()
+            .current_dir(&d)
+            .args(["run", "--work=work:lib", top])
+            .args(&args)
+            .env("PATH", &*surfer_path)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("yavs");
+        let _w = Watchdog::new(c.id(), 120);
+        let mut cl = stdio_client(&mut c);
+        let init = cl.request("initialize", json!({"adapterID": "yavs"}));
+        assert_eq!(init["success"], true, "{init}");
+        let launch = cl.request("launch", json!({}));
+        assert_eq!(launch["success"], false, "{launch}");
+        let m = launch["message"].as_str().expect("a message");
+        assert!(m.contains(&format!("error[{code}]")), "{m}");
+        let d2 = cl.request("disconnect", json!({}));
+        assert_eq!(d2["success"], true, "{d2}");
+        drop(cl);
+        let o = c.wait_with_output().expect("wait");
+        assert_eq!(o.status.code(), Some(2));
+        let err = String::from_utf8_lossy(&o.stderr);
+        assert!(err.contains(&format!("error[{code}]")), "{err}");
+    }
+}
+
+/// An analysis error in a terminal is not a session: no waiting for a client. Pipes with nothing
+/// behind them end at once too.
+#[test]
+fn a_failed_launch_ends_when_the_client_is_gone() {
+    let d = setup("refuse-eof");
+    let o = yavs()
+        .current_dir(&d)
+        .args(["run", "--work=work:lib", "nosuch", "--dap=stdio"])
+        .stdin(Stdio::null())
+        .output()
+        .expect("yavs");
+    assert_eq!(o.status.code(), Some(2));
+    assert!(o.stdout.is_empty());
+}
+
+/// Tab of a client's console: commands, names in scope, fields, subcommands, files.
+#[test]
+fn completions() {
+    let d = setup("complete");
+    let mut c = spawn(&d, "tb", &["--dap=stdio"]);
+    let _w = Watchdog::new(c.id(), 120);
+    let mut cl = stdio_client(&mut c);
+    cl.request("initialize", json!({"adapterID": "yavs"}));
+    cl.request("launch", json!({"stopOnEntry": true}));
+    cl.request("configurationDone", json!({}));
+    cl.until(|m| m["event"] == "stopped");
+    let mut ask = |text: &str| -> Vec<String> {
+        let r = cl.request(
+            "completions",
+            json!({"text": text, "column": text.len() + 1}),
+        );
+        r["body"]["targets"]
+            .as_array()
+            .expect("targets")
+            .iter()
+            .map(|t| t["label"].as_str().expect("a label").to_string())
+            .collect()
+    };
+    assert_eq!(ask("exam"), ["examine"]);
+    assert_eq!(ask("step "), ["delta", "timestep"]);
+    assert_eq!(ask("wave "), ["add", "cursor"]);
+    assert_eq!(ask("wave cu"), ["cursor"]);
+    assert_eq!(ask("break del"), ["delete"]);
+    assert_eq!(ask("break tb"), ["tb.vhd:"]);
+    assert_eq!(ask("run; st"), ["step", "stop"]);
+    assert!(
+        ask("examine cn").contains(&"cnt".to_string()),
+        "{:?}",
+        ask("examine cn")
+    );
+    assert!(ask("help x").is_empty());
+    let d2 = cl.request("disconnect", json!({}));
+    assert_eq!(d2["success"], true);
+}
+
+/// What the Variables view and a Watch see of access values, protected bodies and parts (#930, #936).
+#[test]
+fn views_of_access_values_protected_bodies_and_parts() {
+    let d = tempdir("dap-views");
+    let src = "entity t is end;
+architecture a of t is
+  type rec is record x : integer; y : integer; end record;
+  type ptr_t is access rec;
+  type vec is array (0 to 3) of integer;
+  type counter_t is protected
+    procedure incr;
+  end protected;
+  type counter_t is protected body
+    variable n : integer := 0;
+    procedure incr is
+    begin
+      n := n + 1;
+    end procedure;
+  end protected body;
+  shared variable sc : counter_t;
+  signal pt : rec := (5, 6);
+  signal sv : bit_vector(3 downto 0) := \"0101\";
+begin
+  process
+    variable q : ptr_t := new rec'(x => 7, y => 8);
+    variable nul : ptr_t;
+    variable v : vec := (1, 2, 3, 4);
+  begin
+    sc.incr;
+    wait for 1 ns;
+    wait;
+  end process;
+end;
+";
+    std::fs::write(d.join("t.vhd"), src).expect("write");
+    let ok = yavs()
+        .current_dir(&d)
+        .args(["analyze", "--work=work:lib", "t.vhd"])
+        .status()
+        .expect("yavs")
+        .success();
+    assert!(ok, "analyze failed");
+    let path = std::path::absolute(d.join("t.vhd")).expect("path");
+    let mut c = spawn(&d, "t", &["--dap=stdio"]);
+    let _w = Watchdog::new(c.id(), 120);
+    let mut cl = stdio_client(&mut c);
+    cl.request("initialize", json!({"adapterID": "yavs"}));
+    cl.request("launch", json!({}));
+    cl.request(
+        "setBreakpoints",
+        json!({"source": {"path": path}, "breakpoints": [{"line": 13}, {"line": 27}]}),
+    );
+    cl.request("configurationDone", json!({}));
+    let stop = cl.event("stopped");
+    let thread = stop["body"]["threadId"].as_i64().expect("thread");
+    let frames = cl.request("stackTrace", json!({"threadId": thread}));
+    let frame = frames["body"]["stackFrames"][0]["id"]
+        .as_i64()
+        .expect("frame");
+    let locals = |cl: &mut Client<_, _>, frame: i64| -> Vec<Value> {
+        let r = cl.request("variables", json!({"variablesReference": frame << 2 | 1}));
+        r["body"]["variables"]
+            .as_array()
+            .expect("variables")
+            .clone()
+    };
+    // In the protected body: its variable, not the object's handle.
+    let vars = locals(&mut cl, frame);
+    let names: Vec<&str> = vars.iter().filter_map(|v| v["name"].as_str()).collect();
+    assert_eq!(names, ["n"], "{vars:?}");
+    assert_eq!(vars[0]["value"], "0");
+    let n = cl.request("evaluate", json!({"expression": "n + 1", "frameId": frame}));
+    assert_eq!(n["body"]["result"], "1", "{n}");
+    cl.request("continue", json!({"threadId": thread}));
+    let stop = cl.event("stopped");
+    let thread = stop["body"]["threadId"].as_i64().expect("thread");
+    let frames = cl.request("stackTrace", json!({"threadId": thread}));
+    let frame = frames["body"]["stackFrames"][0]["id"]
+        .as_i64()
+        .expect("frame");
+    let vars = locals(&mut cl, frame);
+    let q = vars.iter().find(|v| v["name"] == "q").expect("q");
+    assert_eq!(q["value"], "(x => 7, y => 8)");
+    assert_eq!(q["namedVariables"], 2, "{q}");
+    let kids = cl.request(
+        "variables",
+        json!({"variablesReference": q["variablesReference"]}),
+    );
+    assert_eq!(kids["body"]["variables"][1]["name"], "y");
+    assert_eq!(kids["body"]["variables"][1]["value"], "8");
+    let nul = vars.iter().find(|v| v["name"] == "nul").expect("nul");
+    assert_eq!(nul["value"], "null");
+    assert_eq!(nul["variablesReference"], 0);
+    // A Watch of a part, of a variable and of a signal.
+    for (e, want) in [
+        ("q.x", "7"),
+        ("q.all.y", "8"),
+        ("v(2)", "3"),
+        ("pt.x", "5"),
+        ("sv(1 downto 0)", "\"01\""),
+    ] {
+        let r = cl.request("evaluate", json!({"expression": e, "frameId": frame}));
+        assert_eq!(r["body"]["result"], want, "{e}: {r}");
+    }
+    let bad = cl.request("evaluate", json!({"expression": "q.z", "frameId": frame}));
+    assert_eq!(bad["success"], false);
+    assert!(
+        bad["message"]
+            .as_str()
+            .is_some_and(|m| m.contains("no field")),
+        "{bad}"
+    );
+    cl.request("disconnect", json!({}));
+}
+
 #[test]
 fn missing_tier_is_e0120_under_dap() {
     let tier = if !cfg!(feature = "clift") {

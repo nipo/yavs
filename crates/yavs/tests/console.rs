@@ -318,6 +318,179 @@ fn leaving_an_endless_loop_in_a_subprogram() {
     }
 }
 
+const PARTS: &str = "library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+entity t is end;
+architecture a of t is
+  type rec is record x : integer; y : integer; end record;
+  type vec is array (0 to 3) of integer;
+  type ptr_t is access rec;
+  type node_t;
+  type node_ptr is access node_t;
+  type node_t is record v : integer; next_n : node_ptr; end record;
+  type counter_t is protected
+    procedure incr;
+  end protected;
+  type counter_t is protected body
+    variable n : integer := 0;
+    variable text : string(1 to 2) := \"ab\";
+    procedure incr is
+    begin
+      n := n + 1;
+    end procedure;
+  end protected body;
+  shared variable sc : counter_t;
+  signal cnt : unsigned(7 downto 0) := to_unsigned(3, 8);
+  signal sg : signed(3 downto 0) := to_signed(-2, 4);
+  signal slv : std_logic_vector(3 downto 0) := \"0101\";
+  signal pt : rec := (5, 6);
+begin
+  process
+    variable p : rec := (1, 2);
+    variable v : vec := (1, 2, 3, 4);
+    variable s : string(1 to 5) := \"hello\";
+    variable q : ptr_t := new rec'(x => 7, y => 8);
+    variable nul : ptr_t;
+    variable lst : node_ptr := new node_t'(1, new node_t'(2, null));
+  begin
+    sc.incr;
+    wait for 1 ns;
+    report \"stop here\";
+    wait;
+  end process;
+end;
+";
+
+fn parts(name: &str) -> common::Tmp {
+    let d = setup(name);
+    std::fs::write(d.join("t.vhd"), PARTS).expect("write");
+    let ok = yavs()
+        .current_dir(&*d)
+        .args(["analyze", "--std=2008", "--work=work:lib", "t.vhd"])
+        .status()
+        .expect("yavs")
+        .success();
+    assert!(ok, "analyze failed");
+    d
+}
+
+/// Every line of `exprs` examined at the `report` statement, one answer per line (#930, #936).
+#[track_caller]
+fn check_examine(d: &Path, cases: &[(&str, &str)]) {
+    let cmds: Vec<String> = cases.iter().map(|(e, _)| format!("examine {e}")).collect();
+    let o = script(d, "t", &format!("break t.vhd:39; run; {}", cmds.join("; ")));
+    let got = stdout(&o);
+    let lines: Vec<&str> = got.lines().skip(1).collect();
+    let want: Vec<&str> = cases.iter().map(|(_, w)| *w).collect();
+    assert_eq!(lines, want, "{}", stderr(&o));
+}
+
+#[test]
+fn examine_parts_of_variables_and_access_values() {
+    let d = parts("parts");
+    check_examine(
+        &d,
+        &[
+            ("p", "(x => 1, y => 2)"),
+            ("p.x", "1"),
+            ("v(2)", "3"),
+            ("s(2 to 3)", "\"el\""),
+            ("q", "(x => 7, y => 8)"),
+            ("q.all", "(x => 7, y => 8)"),
+            ("q.all.x", "7"),
+            ("q.y", "8"),
+            ("nul", "null"),
+            ("lst", "(v => 1, next_n => access)"),
+            ("lst.next_n.v", "2"),
+            ("lst.next_n.next_n", "null"),
+            ("cnt(1 downto 0)", "\"11\""),
+            ("pt.y", "6"),
+        ],
+    );
+}
+
+#[test]
+fn examine_computes_as_a_condition_does() {
+    let d = parts("computes");
+    check_examine(
+        &d,
+        &[
+            ("cnt = 3", "TRUE"),
+            ("3 = cnt", "TRUE"),
+            ("cnt > 3", "FALSE"),
+            ("sg = -2", "TRUE"),
+            ("sg < 0", "TRUE"),
+            ("to_integer(cnt) + 1", "4"),
+            ("to_integer(sg)", "-2"),
+            ("v(1) + 1", "3"),
+            ("nul = null", "TRUE"),
+            ("q /= null", "TRUE"),
+        ],
+    );
+}
+
+#[test]
+fn examine_errors_say_what_is_wrong() {
+    let d = parts("experr");
+    for (e, want) in [
+        ("nosuch", "no variable or signal `nosuch` here"),
+        ("p.nosuch", "no field `nosuch`"),
+        ("v(9)", "index 9 is outside the array"),
+        ("nul.x", "the access value is null"),
+        ("p.all", "not an access value"),
+        ("slv = 3", "`std_ulogic_vector`, which has no numbers"),
+        ("cnt + 1", "to_integer(name)"),
+    ] {
+        let o = script(&d, "t", &format!("break t.vhd:39; run; examine {e}"));
+        assert!(stderr(&o).contains(want), "{e}: {}", stderr(&o));
+        assert_eq!(o.status.code(), Some(1), "{e}");
+    }
+}
+
+/// The variables of a protected body, in the frame of its method (#936).
+#[test]
+fn variables_of_a_protected_body() {
+    let d = parts("prot");
+    let o = script(
+        &d,
+        "t",
+        "break t.vhd:20; run; examine n; examine text; examine text(1); examine n + 1",
+    );
+    assert_eq!(
+        stdout(&o).lines().skip(1).collect::<Vec<_>>(),
+        ["0", "\"ab\"", "'a'", "1"],
+        "{}",
+        stderr(&o)
+    );
+}
+
+/// A typo in a command names the command; a condition on a number works and its error comes when
+/// it is set (#935).
+#[test]
+fn typos_and_conditions_are_helped() {
+    let d = parts("typos");
+    let o = script(&d, "t", "hepl");
+    assert!(
+        stderr(&o).contains("similar name exists: `help`"),
+        "{}",
+        stderr(&o)
+    );
+    let o = script(&d, "t", "break t.vhd:39 if slv = 3");
+    assert!(
+        stderr(&o).contains("which has no numbers"),
+        "{}",
+        stderr(&o)
+    );
+    assert_eq!(o.status.code(), Some(1));
+    let o = script(&d, "t", "break t.vhd:39 if cnt = 4; run; where");
+    assert!(stderr(&o).contains("ended"), "{}", stderr(&o));
+    let o = script(&d, "t", "break t.vhd:39 if cnt = 3; run; where");
+    assert!(stdout(&o).contains("t.vhd:39"), "{}", stdout(&o));
+    let o = script(&d, "t", "break t.vhd:39 if to_integer(cnt) = 3; run; where");
+    assert!(stdout(&o).contains("t.vhd:39"), "{}", stdout(&o));
+}
+
 #[test]
 fn restart_recreates_the_wave_file() {
     let d = setup("wave");

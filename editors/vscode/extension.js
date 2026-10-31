@@ -76,6 +76,28 @@ class Factory {
   }
 }
 
+/** What the adapter does not get to say itself: it ended before it answered anything (a command
+ * line it refuses, a crash). A diagnostic the server could send is the failure of `launch`. */
+class ExitTracker {
+  createDebugAdapterTracker(session) {
+    if (session.configuration.port) return undefined;
+    let answered = false;
+    return {
+      onDidSendMessage: (m) => {
+        if (m.type === 'response') answered = true;
+      },
+      onExit: (code, signal) => {
+        if (answered || (code === 0 && !signal)) return;
+        const c = session.configuration;
+        const how = signal ? `was ended by ${signal}` : `exited with status ${code}`;
+        vscode.window.showErrorMessage(
+          `yavs ${how} before the session started. In a terminal: ${c.yavsPath || 'yavs'} ${runArgs(c).join(' ')}`,
+        );
+      },
+    };
+  }
+}
+
 /** A command sending custom request `command` to the yavs session, asking for a time first
  * when `prompt` is given. */
 function custom(command, prompt) {
@@ -182,6 +204,7 @@ function activate(context) {
       vscode.debug.startDebugging(vscode.workspace.workspaceFolders?.[0], ATTACH),
     ),
     vscode.debug.registerDebugAdapterDescriptorFactory('yavs', new Factory()),
+    vscode.debug.registerDebugAdapterTrackerFactory('yavs', new ExitTracker()),
     reg('yavs.runFor', custom('yavs/runFor', 'Run for how long (from now)?')),
     reg('yavs.runUntil', custom('yavs/runUntil', 'Run until which simulation time?')),
     reg('yavs.stepDelta', custom('yavs/stepDelta')),

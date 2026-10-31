@@ -76,6 +76,9 @@ moves the cursor.
 The simulation never waits for the viewer, and its output and exit status do not depend on it: losing Surfer during a run is
 warning ``W0131``, also under ``-W error``. Starting it or connecting to it is checked first (``E0130``).
 
+A signal shows in Surfer under its last name: ``x`` for ``tb.r.x``, ``(0)`` for ``tb.m(0)``, and its times in femtoseconds, since
+the file has that resolution.
+
 See also
 --------
 

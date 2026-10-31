@@ -18,6 +18,42 @@ enum Ev {
     Ended,
 }
 
+/// Tab at the prompt: the server's `completions`, which is what an editor's console asks too.
+struct Tab {
+    c: Arc<Client>,
+    answers: Mutex<Receiver<Vec<(String, usize)>>>,
+}
+
+impl rustyline::completion::Completer for Tab {
+    type Candidate = String;
+
+    fn complete(
+        &self,
+        line: &str,
+        pos: usize,
+        _: &rustyline::Context<'_>,
+    ) -> rustyline::Result<(usize, Vec<String>)> {
+        let answers = self.answers.lock().unwrap_or_else(|p| p.into_inner());
+        self.c
+            .request("completions", json!({"text": line, "column": pos + 1}));
+        // The prompt never waits for long: the server answers at the stop the prompt is at.
+        let found = answers
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap_or_default();
+        let start = found.first().map_or(pos, |(_, n)| pos.saturating_sub(*n));
+        Ok((start, found.into_iter().map(|(l, _)| l).collect()))
+    }
+}
+
+impl rustyline::hint::Hinter for Tab {
+    type Hint = String;
+}
+impl rustyline::highlight::Highlighter for Tab {}
+impl rustyline::validate::Validator for Tab {}
+impl rustyline::Helper for Tab {}
+
+type Editor = rustyline::Editor<Tab, rustyline::history::DefaultHistory>;
+
 struct Client {
     w: Mutex<std::io::PipeWriter>,
     seq: Mutex<i64>,
@@ -49,7 +85,12 @@ fn print_out(text: &str) {
 }
 
 /// Print what the server says, until the session is over.
-fn printer(r: std::io::PipeReader, c: &Client, ev: &Sender<Ev>) {
+fn printer(
+    r: std::io::PipeReader,
+    c: &Client,
+    ev: &Sender<Ev>,
+    tab: &Sender<Vec<(String, usize)>>,
+) {
     let mut r = BufReader::new(r);
     while let Ok(Some(m)) = read_message(&mut r) {
         match m["type"].as_str() {
@@ -62,6 +103,14 @@ fn printer(r: std::io::PipeReader, c: &Client, ev: &Sender<Ev>) {
                 }
                 Some("evaluate") => {
                     eprintln!("error: {}", m["message"].as_str().unwrap_or_default());
+                }
+                Some("completions") => {
+                    let targets = m["body"]["targets"].as_array();
+                    let found = targets.into_iter().flatten().filter_map(|t| {
+                        let label = t["label"].as_str()?.to_string();
+                        Some((label, t["length"].as_u64()? as usize))
+                    });
+                    let _ = tab.send(found.collect());
                 }
                 Some("disconnect") => return,
                 _ => {}
@@ -98,16 +147,21 @@ fn wait(ev: &Receiver<Ev>) -> Option<bool> {
 }
 
 /// The line editor, when standard input is a terminal.
-fn editor() -> Option<Box<rustyline::DefaultEditor>> {
-    let tty = std::io::stdin().is_terminal();
-    tty.then(rustyline::DefaultEditor::new)
-        .and_then(Result::ok)
-        .map(Box::new)
+fn editor(tab: Tab) -> Option<Box<Editor>> {
+    if !std::io::stdin().is_terminal() {
+        return None;
+    }
+    let config = rustyline::Config::builder()
+        .completion_type(rustyline::CompletionType::List)
+        .build();
+    let mut e = Editor::with_config(config).ok()?;
+    e.set_helper(Some(tab));
+    Some(Box::new(e))
 }
 
 /// The next line from the terminal, with editing and history, or plainly from a pipe; `None` at
 /// the end of input.
-fn next_line(editor: &mut Option<Box<rustyline::DefaultEditor>>) -> Option<String> {
+fn next_line(editor: &mut Option<Box<Editor>>) -> Option<String> {
     let Some(e) = editor else {
         let mut l = String::new();
         return match std::io::stdin().read_line(&mut l) {
@@ -134,7 +188,7 @@ fn driver(
     ev: &Receiver<Ev>,
     script: &[String],
     interactive: bool,
-    mut editor: Option<Box<rustyline::DefaultEditor>>,
+    mut editor: Option<Box<Editor>>,
 ) {
     c.request("initialize", json!({}));
     c.request("launch", json!({"yavsConsole": true}));
@@ -197,7 +251,15 @@ pub(crate) fn serve(
     // Before the Ctrl-C handler: the editor takes SIGINT when it is made (and restores it only when
     // dropped), and a handler installed after it is the one that runs, then calls the editor's. At
     // the prompt the terminal is raw, so Ctrl-C is a key, not a signal (#932).
-    let editor = editor().filter(|_| interactive);
+    // ponytail: each Ctrl-C of a run also leaves a byte in the editor's own pipe, read at its next
+    // interrupted read: a window resize at the prompt after a pause can drop the typed line once.
+    // Restoring the handler around each line would need an unsafe `sigaction`.
+    let (tab_tx, tab_rx) = channel();
+    let tab = Tab {
+        c: c.clone(),
+        answers: Mutex::new(tab_rx),
+    };
+    let editor = if interactive { editor(tab) } else { None };
     if interactive {
         let sig = c.clone();
         let plain = !std::io::stdin().is_terminal();
@@ -219,7 +281,7 @@ pub(crate) fn serve(
     let (tx, rx) = channel();
     let out = {
         let c = c.clone();
-        std::thread::spawn(move || printer(cli_r, &c, &tx))
+        std::thread::spawn(move || printer(cli_r, &c, &tx, &tab_tx))
     };
     let script = script.to_vec();
     std::thread::spawn(move || driver(&c, &rx, &script, interactive, editor));

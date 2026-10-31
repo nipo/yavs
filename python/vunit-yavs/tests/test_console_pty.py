@@ -44,6 +44,31 @@ begin
 end;
 """
 
+SLOW_TB = """
+library vunit_lib;
+context vunit_lib.vunit_context;
+
+entity tb_slow is
+  generic (runner_cfg : string);
+end entity;
+
+architecture tb of tb_slow is
+  signal clk : bit;
+begin
+  clk <= not clk after 5 ns;
+  main : process
+  begin
+    test_runner_setup(runner, runner_cfg);
+    while test_suite loop
+      if run("forever") then
+        wait for 1000 sec;
+      end if;
+    end loop;
+    test_runner_cleanup(runner);
+  end process;
+end architecture;
+"""
+
 # Line 7 is the statement of the loop
 SPIN = """entity spin is end;
 architecture a of spin is
@@ -199,6 +224,69 @@ class TestConsolePty(unittest.TestCase):
         self.assertIn(b"pause at", term.expect(PROMPT))
         term.send(b"quit\r")
         self.assertEqual(term.wait(), 0)
+
+    def test_tab_completes_commands_names_and_files(self):
+        term = self._console("clocked", ENDLESS)
+        term.send(b"exam" + TAB)
+        term.expect(b"examine")
+        term.send(b" cl" + TAB)
+        term.expect(b"clk")
+        term.send(b"\r")
+        term.expect(PROMPT)
+        term.send(b"break clo" + TAB)
+        term.expect(b"clocked.vhd:")
+        term.send(b"6\r")
+        term.expect(b"breakpoint 1")
+        term.expect(PROMPT)
+        # Two candidates: the second Tab lists them
+        term.send(b"step " + TAB + TAB)
+        term.expect(b"delta")
+        term.expect(b"timestep")
+        term.send(CTRL_C)
+        term.expect(PROMPT)
+        term.send(b"quit\r")
+        self.assertEqual(term.wait(), 0)
+
+    def _runner(self, *args):
+        """The project's run.py in a terminal: the runner shares the terminal with its yavs"""
+        env = dict(
+            self.env,
+            VUNIT_SIMULATOR="yavs",
+            VUNIT_YAVS_PATH=str(YAVS_DIR),
+            EXTRA_VHDL=str(self.dir / "tb_slow.vhd"),
+        )
+        (self.dir / "tb_slow.vhd").write_text(SLOW_TB, encoding="utf-8")
+        run = HERE / "project" / "run.py"
+        term = Terminal(
+            [sys.executable, str(run), "-o", str(self.dir / "out"), "lib.tb_slow.*", "--yavs-interactive", *args],
+            self.dir,
+            env,
+        )
+        self.addCleanup(term.close)
+        term.expect(PROMPT, timeout=200)
+        return term
+
+    def test_the_runner_in_a_terminal(self):
+        term = self._runner()
+        # Its commands complete, and its flags reach `yavs run`
+        term.send(b"vunit_lo" + TAB)
+        term.expect(b"vunit_load")
+        term.send(b" --no-such-flag\r")
+        self.assertIn(b"--no-such-flag", term.expect(PROMPT))
+        term.send(b"vunit_load --stop-time=30ns\r")
+        term.expect(PROMPT)
+        term.send(b"run\r")
+        self.assertIn(b"ended at 30 ns", term.expect(PROMPT))
+        # Ctrl-C reaches both, and only yavs takes it: the session goes on
+        term.send(b"vunit_load\r")
+        term.expect(PROMPT)
+        term.send(b"run\r")
+        term.expect(b"\r\n")
+        time.sleep(0.5)
+        term.send(CTRL_C)
+        self.assertIn(b"pause at", term.expect(PROMPT))
+        term.send(b"quit\r")
+        term.wait(60)
 
 
 if __name__ == "__main__":
