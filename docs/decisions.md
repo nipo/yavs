@@ -12983,3 +12983,17 @@ index (machine written; a damaged index says to re-analyze).
 - **Not applicable / deferred:** the Python scripting API (#132) does not exist yet; the VS Code
   extension has no coverage settings. (maintainer, 2026-10-30, #883 plan; defaults of the plan
   comment taken.)
+
+## A run ends with its parent through standard input (#940, 2026-10-31)
+
+- **`yavs run --exit-on-stdin-close`; `vunit-yavs` passes it to every run but `--yavs-interactive`.** The
+  runner's `Process` keeps a pipe to the child's standard input and never writes to it, so the pipe closes when
+  the runner dies by any means, SIGKILL and TerminateProcess included, on Linux and Windows alike. Rejected: a
+  process group kill (does not cover SIGKILL), `PR_SET_PDEATHSIG` and a parent pid poll (Unix only, `unsafe`
+  or polling, and the signal follows the creating thread, not the process), a Windows-only job object. Cost:
+  the design cannot read standard input in such a run; waveform and coverage files are not finished (status
+  130, as a second Ctrl-C). Not covered: a viewer that `--surfer` started keeps running. The VS Code extension
+  needs nothing: it uses `--dap=stdio`, whose stream ending already ends the session. (maintainer request, #940.)
+- **Foreign scalar copy-back (#937):** `ForeignArg::ScalarRef` carries the formal's base type and its static
+  `(low, high)` (none when the bounds are known at run time: the base type's range then applies), so an `out`
+  or `inout` scalar is checked like the elements of arrays and the fields of records.

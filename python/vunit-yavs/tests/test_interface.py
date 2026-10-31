@@ -373,7 +373,11 @@ class TestYavsInterface(unittest.TestCase):
         cmd = process.call_args[0][0]
         response_file = Path(self.output_path) / "yavs" / "args.rsp"
         sub = "elab" if elaborate_only else "run"
-        self.assertEqual(cmd, [str(Path("prefix") / "yavs"), sub] + list(mode_flags) + [f"@{response_file}"])
+        # A run ends with the pipe from its test runner (#940); an interactive one owns the terminal
+        ends_with_parent = [] if elaborate_only or "--interactive" in mode_flags else ["--exit-on-stdin-close"]
+        self.assertEqual(
+            cmd, [str(Path("prefix") / "yavs"), sub] + list(mode_flags) + ends_with_parent + [f"@{response_file}"]
+        )
         args = response_file.read_bytes().decode("utf-8").split("\n")
         self.assertEqual(args.pop(), "")
         return status, cmd[:2] + args, process

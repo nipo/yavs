@@ -14,7 +14,7 @@ use yavs_diag::{Diagnostic, MessageFormat, SourceMap};
 use yavs_lib::{Libraries, UnitKind, UnitRef};
 use yavs_sem::{Db, LangRev, Options};
 
-use std::io::Write;
+use std::io::{Read, Write};
 
 use yavs_kernel::{EndReason, RunStatus};
 
@@ -235,6 +235,13 @@ pub struct RunArgs {
     /// on standard input and output (`stdio`). A port that cannot be opened is E0701.
     #[arg(long, value_name = "PORT|stdio", value_parser = yavs_dap::parse_transport)]
     dap: Option<yavs_dap::Transport>,
+    /// End the run (exit status 130) when standard input is closed or ends, for a parent that
+    /// holds a pipe to it and may die without a word (SIGKILL, a crash): the run does not outlive
+    /// it, even while it waits for a debugger. Reads standard input, so not with `--interactive`;
+    /// with `--dap=stdio` the protocol stream plays this part. Waveform and coverage files are
+    /// not finished.
+    #[arg(long, conflicts_with = "interactive")]
+    exit_on_stdin_close: bool,
     /// Run from a `yavs>` prompt: stops at time 0, then takes console commands (`help` lists
     /// them; run, step, examine, force, breakpoints, restart, source, quit).
     #[arg(long, conflicts_with = "dap")]
@@ -1667,6 +1674,9 @@ pub fn run(
         a.wave = Some(dir.join(format!("{unit}.fst")).display().to_string());
         a.wave_default = true;
     }
+    if a.exit_on_stdin_close && a.dap != Some(yavs_dap::Transport::Stdio) {
+        exit_when_stdin_ends(!a.common.load.is_empty() || !a.vhpi.is_empty());
+    }
     // First: a token server that is not `<port>:<secret>` or refuses the secret stops the run before
     // any work; one that cannot be reached is a warning, below, and the run has one thread.
     let (tokens, token_warning) =
@@ -2296,6 +2306,33 @@ fn exit_after_signal(code: u8, keep_exit: bool) -> ! {
     }
     let _ = keep_exit;
     std::process::exit(code.into())
+}
+
+/// `--exit-on-stdin-close`: a thread that reads standard input to its end and then ends the process
+/// as a signal would (status 130). Whatever arrives on the way is dropped.
+// ponytail: no orderly stop (wave and coverage files stay unfinished); route it through
+// `SimControl::stop` like Ctrl-C if a parent that dies mid-run should leave them complete.
+fn exit_when_stdin_ends(keep_exit: bool) {
+    std::thread::Builder::new()
+        .name("stdin-watch".into())
+        .spawn(move || {
+            let mut buf = [0u8; 256];
+            let mut stdin = std::io::stdin();
+            loop {
+                match stdin.read(&mut buf) {
+                    Ok(n) if n > 0 => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+                    _ => break,
+                }
+            }
+            crate::stdout::flush();
+            let _ = writeln!(
+                std::io::stderr(),
+                "yavs: standard input closed (the parent ended): stopping the run"
+            );
+            exit_after_signal(130, keep_exit)
+        })
+        .expect("cannot start the thread of --exit-on-stdin-close");
 }
 
 /// The first Ctrl-C/SIGTERM sets `flag` and ends the run between cycles; the second writes out

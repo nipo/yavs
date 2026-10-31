@@ -99,6 +99,11 @@ bare ``--yavs-debug`` would be read as the port, so put the name first. The simu
 editor's Debug Console, not to VUnit's log: a failing check shows as ``fail`` in the terminal without its message,
 and so does a test you disconnect from before it ends.
 
+A debugged run waits for your client, so a test runner that died would leave it holding the port. Every simulation
+therefore watches the pipe the runner keeps to its standard input (``--exit-on-stdin-close``) and ends when the pipe
+closes, which also happens when only ``python run.py`` is killed, even with SIGKILL, on Linux and Windows. The waves and
+coverage files of such a run are not finished.
+
 Newer than 0.11.0, there are two more ways to look at one test:
 
 * ``--yavs-interactive`` runs it at the yavs console, with ``vunit_help`` and the other ``vunit_*`` commands

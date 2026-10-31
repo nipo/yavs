@@ -605,6 +605,10 @@ class YavsInterface(SimulatorInterface):
             mode_flags = [f"--dap={self._debug_port}"]
         if interactive:
             mode_flags = ["--interactive", f"--do={START}"]
+        elif not elaborate_only:
+            # The test runner's Process keeps a pipe to yavs's stdin: when the test runner dies, even by SIGKILL,
+            # the pipe closes and yavs ends, instead of waiting for a debugger or finishing alone
+            mode_flags += ["--exit-on-stdin-close"]
 
         env = hooks.get_run_env(self)
         # The VUnit commands of the console, in the debug console of an editor too

@@ -220,6 +220,18 @@ fn get_c(buf: &[u8], at: usize, ct: CType) -> u64 {
     from_c_bits(ct, u64::from_le_bytes(b))
 }
 
+/// Check of a value C wrote into an `out`/`inout` parameter against the formal's subtype.
+fn check_range(v: u64, lo: i64, hi: i64, name: &str, k: usize) -> R<()> {
+    let i = v as i64;
+    if (lo..=hi).contains(&i) {
+        return Ok(());
+    }
+    rt_err(format!(
+        "foreign `{name}` wrote an invalid value to argument {}: {i} is outside {lo} to {hi}",
+        k + 1
+    ))
+}
+
 /// Range check of a value C wrote into an `out`/`inout` parameter.
 fn check_back(t: &Ty, v: u64, name: &str, k: usize) -> R<()> {
     let bad = match t {
@@ -622,7 +634,7 @@ impl Machine {
             arrays.push(None);
             match *a {
                 ForeignArg::Value(_) => arg.cells = vec![v],
-                ForeignArg::ScalarRef(_, w) => arg.cells = vec![self.load(v, w)?],
+                ForeignArg::ScalarRef(_, w, ..) => arg.cells = vec![self.load(v, w)?],
                 ForeignArg::Array { ty, .. } => {
                     let (buf, data, lens) = self.marshal_array(ty, v, name, ArgLayout::Length)?;
                     let n: u64 = lens.iter().product();
@@ -730,7 +742,7 @@ impl Machine {
             let arg = &call.args[k];
             let cells = &arg.cells;
             match *a {
-                ForeignArg::ScalarRef(_, w) => {
+                ForeignArg::ScalarRef(_, w, ..) => {
                     let (_, et) = self.kind_of(p.ty)?;
                     let c = *cells.first().ok_or_else(|| ice("model argument cells"))?;
                     check_back(&et, c, name, k)?;
@@ -917,7 +929,7 @@ impl Machine {
                 ForeignArg::Signal { .. } => {
                     return Err(ice("a signal parameter of a VHPIDIRECT subprogram"));
                 }
-                ForeignArg::ScalarRef(ct, w) => {
+                ForeignArg::ScalarRef(ct, w, ..) => {
                     let cur = self.load(v, w)?;
                     Temp::Scalar(Box::new([arg_bits(to_c(ct, cur, name, k)?)]), ct, w)
                 }
@@ -998,8 +1010,13 @@ impl Machine {
         for (k, (a, t)) in fargs.iter().zip(temps).enumerate() {
             let v = self.r(regs[k]);
             match (*a, t) {
-                (ForeignArg::ScalarRef(..), Temp::Scalar(b, ct, w)) => {
-                    self.store(v, w, from_c_bits(ct, b[0]))?;
+                (ForeignArg::ScalarRef(_, _, ty, range), Temp::Scalar(b, ct, w)) => {
+                    let c = from_c_bits(ct, b[0]);
+                    check_back(&self.ty(ty)?, c, name, k)?;
+                    if let Some((lo, hi)) = range {
+                        check_range(c, lo, hi, name, k)?;
+                    }
+                    self.store(v, w, c)?;
                 }
                 (
                     ForeignArg::Array {

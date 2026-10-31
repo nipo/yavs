@@ -734,6 +734,8 @@ fn html_toggles() {
         "{src}"
     );
     assert!(page(&tmp, "index.html").contains("toggles"));
+    // One test reads in the singular (#950).
+    assert!(page(&tmp, "index.html").contains("1 test: cov_toggle<"));
     let _ = std::fs::remove_dir_all(&tmp);
 }
 

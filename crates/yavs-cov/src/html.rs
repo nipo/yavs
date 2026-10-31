@@ -183,16 +183,16 @@ pub fn pages(
     if !ex.is_empty() {
         let _ = writeln!(
             b,
-            "<p class=\"dim\">{} excluded items are not in the totals.</p>",
-            ex.len()
+            "<p class=\"dim\">{} not in the totals.</p>",
+            crate::count(ex.len(), "excluded item is", "excluded items are")
         );
     }
     if !db.tests.is_empty() {
         let t: Vec<String> = db.tests.iter().map(|t| esc(t)).collect();
         let _ = writeln!(
             b,
-            "<p class=\"dim\">{} tests: {}</p>",
-            t.len(),
+            "<p class=\"dim\">{}: {}</p>",
+            crate::count(t.len(), "test", "tests"),
             t.join(", ")
         );
     }

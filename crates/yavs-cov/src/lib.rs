@@ -899,8 +899,9 @@ impl Database {
         let mut done = vec![false; self.items.len()];
         let mut so_far = 0;
         let mut s = format!(
-            "{n} tests hit {hit} of {} items\n\nminimal set (greedy):\n",
-            self.items.len()
+            "{} hit {hit} of {}\n\nminimal set (greedy):\n",
+            count(n, "test", "tests"),
+            count(self.items.len(), "item", "items")
         );
         let w = self.tests.iter().map(String::len).max().unwrap_or(0).max(4);
         let mut picked = vec![false; n];
@@ -1241,6 +1242,11 @@ pub fn tenths(hit: usize, all: usize) -> Option<u64> {
     (all > 0).then(|| (hit as u64 * 1000) / all as u64)
 }
 
+/// `n` with the noun in the right number.
+pub(crate) fn count(n: usize, one: &str, many: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { many })
+}
+
 /// [`tenths`] as `88.8%`, or `-` without items.
 pub fn percent(hit: usize, all: usize) -> String {
     tenths(hit, all).map_or_else(|| "-".to_string(), |t| format!("{}.{}%", t / 10, t % 10))
@@ -1456,6 +1462,13 @@ mod tests {
         assert_eq!(m2.write(), m.write());
         let r = m.rank();
         assert!(r.starts_with("3 tests hit 4 of 5 items\n"), "{r}");
+        // One test and one item read in the singular (#950).
+        let mut one = Database::default();
+        let (k, e) = item(":t", Kind::Statement, 1, 1, 1);
+        one.items.insert(k, e);
+        one.attribute("a");
+        let r1 = one.rank();
+        assert!(r1.starts_with("1 test hit 1 of 1 item\n"), "{r1}");
         assert!(r.contains("  a     +3  3/4\n  b     +1  4/4\n"), "{r}");
         assert!(r.contains("not needed: c"), "{r}");
         assert!(r.contains("a            3         2\n"), "{r}");

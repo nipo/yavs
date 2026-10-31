@@ -514,6 +514,12 @@ Arguments:
 
    Run under a Debug Adapter Protocol client: on 127.0.0.1:PORT (0 picks a free port) or on standard input and output (``stdio``). A port that cannot be opened is E0701.
 
+.. option:: --exit-on-stdin-close
+
+   End the run (exit status 130) when standard input is closed or ends, for a parent that holds a pipe to it and may die without a word (SIGKILL, a crash): the run does not outlive it, even while it waits for a debugger. Reads standard input, so not with ``--interactive``; with ``--dap=stdio`` the protocol stream plays this part. Waveform and coverage files are not finished.
+
+   Cannot be combined with ``--interactive``.
+
 .. option:: --interactive
 
    Run from a ``yavs>`` prompt: stops at time 0, then takes console commands (``help`` lists them; run, step, examine, force, breakpoints, restart, source, quit).

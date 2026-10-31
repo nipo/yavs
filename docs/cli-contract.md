@@ -521,6 +521,15 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   elements, lookup by name and index; names as in `crates/yavs-vhpi/AGENTS.md`) and read
   values with `vhpi_get_value` (#270, formats as in `crates/yavs-vhpi/AGENTS.md`);
   value-change callbacks and `vhpi_put_value` need #271.
+- `--exit-on-stdin-close` (`run`): a thread reads standard input and, when it is closed or ends, writes
+  `yavs: standard input closed (the parent ended): stopping the run` to stderr and ends the process with status 130, also
+  while the run waits for a debugger, analyses or elaborates. For a parent that holds a pipe to the child and may die
+  without a word (SIGKILL, TerminateProcess, a crash): the kernel closes the pipe on Linux and on Windows alike, so no
+  signal, process group or polling is involved. Waveform and coverage files are not finished (a Ctrl-C does that). Bytes that
+  arrive on the way are dropped, so the design cannot read standard input (`textio` `input`). Not with `--interactive`
+  (clap usage error, exit 2). With `--dap=stdio` it does nothing: the protocol stream is standard input, and its end
+  already ends the session. Not covered: a child that was started with an inherited terminal or `/dev/null` as standard
+  input (nothing closes), and processes yavs starts itself (`--surfer`'s viewer). #940.
 - `--dap=PORT|stdio`: run under a Debug Adapter Protocol client instead of printing to stdout.
   With a port, yavs listens on `127.0.0.1:PORT` (`0` picks a free one) for one client, and its
   first line on stderr is exactly `yavs: DAP listening on 127.0.0.1:<port>`, the second
@@ -814,6 +823,7 @@ attach port; `0` a free one), reads the `DAP listening` line and prints the addr
 terminal, since the runner shows a test's output only when it fails. It runs one simulation:
 `--yavs-debug` with `--elaborate` or `-p` above 1 is refused at the start, and a second
 simulation of the run is refused before yavs starts. `elab` never gets `--dap`.
+Every other run (not `--yavs-interactive`, not `elab`) also gets `--exit-on-stdin-close`: the test runner keeps a pipe to the child's standard input open and never writes to it, so when the runner ends, even killed with SIGKILL, the pipe closes and the child ends (below).
 `--yavs-interactive` runs `yavs run --interactive @FILE` on the terminal, with the same limits, and serves the console hook (section "Console hook"); `--yavs-debug` serves it too.
 `--yavs-surfer[=HOST:PORT]` adds `--wave=<test output>/yavs/wave.fst --surfer[=HOST:PORT]`, one simulation like the others.
 

@@ -526,3 +526,125 @@ fn elab_loads_libraries() {
     assert_eq!(code, 2, "{err}");
     assert!(err.contains("error[E0106]"), "{err}");
 }
+
+const SCALAR_C: &str = r#"
+#include <stdint.h>
+#ifdef _WIN32
+#define EXPORT __declspec(dllexport)
+#else
+#define EXPORT
+#endif
+EXPORT void set_bool(uint8_t *b) { *b = 7; }
+EXPORT void set_nat(int32_t *n) { *n = -5; }
+EXPORT void set_ok(int32_t *n) { *n = 3; }
+"#;
+
+const SCALAR_VHDL: &str = r#"
+package s is
+  procedure set_bool(x : out boolean);
+  attribute foreign of set_bool : procedure is "VHPIDIRECT set_bool";
+  procedure set_nat(n : out natural);
+  attribute foreign of set_nat : procedure is "VHPIDIRECT set_nat";
+  procedure set_ok(n : inout natural);
+  attribute foreign of set_ok : procedure is "VHPIDIRECT set_ok";
+end;
+package body s is
+  procedure set_bool(x : out boolean) is begin end;
+  procedure set_nat(n : out natural) is begin end;
+  procedure set_ok(n : inout natural) is begin end;
+end;
+
+use work.s.all;
+entity bool_tb is end;
+architecture a of bool_tb is begin
+  process
+    variable x : boolean;
+  begin
+    set_bool(x);
+    report boolean'image(x);
+    wait;
+  end process;
+end;
+
+use work.s.all;
+entity nat_tb is end;
+architecture a of nat_tb is begin
+  process
+    variable n : natural;
+  begin
+    set_nat(n);
+    report integer'image(n);
+    wait;
+  end process;
+end;
+
+use work.s.all;
+entity ok_tb is end;
+architecture a of ok_tb is begin
+  process
+    variable n : natural := 0;
+  begin
+    set_ok(n);
+    assert n = 3;
+    report "scalar ok";
+    wait;
+  end process;
+end;
+"#;
+
+/// A scalar `out`/`inout` written back by C is range-checked against the formal's subtype, as
+/// array and record copy-backs are (#937), on every tier.
+#[test]
+fn scalar_copy_back_is_range_checked() {
+    let tmp = tempdir("foreign_scalar");
+    let c = tmp.join("s_test.c");
+    std::fs::write(&c, SCALAR_C).expect("write");
+    let so = tmp.join(if cfg!(windows) {
+        "s_test.dll"
+    } else {
+        "libs_test.so"
+    });
+    shared_lib(&c, &so);
+    let src = tmp.join("s.vhd");
+    std::fs::write(&src, SCALAR_VHDL).expect("write");
+    let lib = format!("--work=work:{}", tmp.join("lib").display());
+    let load = format!("--load={}", so.display());
+    let (code, err, _) = yavs(&["analyze", &lib, &src.display().to_string()]);
+    assert_eq!(code, 0, "{err}");
+
+    let tiers: &[&[&str]] = &[
+        &["--tier=interp"],
+        #[cfg(feature = "clift")]
+        &["--tier=clift"],
+        #[cfg(feature = "llvm")]
+        &["--tier=llvm"],
+    ];
+    for tier in tiers {
+        let run = |top: &str| {
+            let mut args = vec!["run", &lib, &load];
+            args.extend_from_slice(tier);
+            args.push(top);
+            yavs(&args)
+        };
+        let (code, err, _) = run("bool_tb");
+        assert_eq!(code, 1, "{tier:?}: {err}");
+        assert!(
+            err.contains("foreign `set_bool` wrote an invalid value to argument 1"),
+            "{tier:?}: {err}"
+        );
+        let (code, err, _) = run("nat_tb");
+        assert_eq!(code, 1, "{tier:?}: {err}");
+        assert!(
+            err.contains(
+                "foreign `set_nat` wrote an invalid value to argument 1: -5 is outside 0 to"
+            ),
+            "{tier:?}: {err}"
+        );
+        let (code, err, out) = run("ok_tb");
+        assert_eq!(code, 0, "{tier:?}: {err}");
+        assert!(
+            out.contains("scalar ok") || err.contains("scalar ok"),
+            "{tier:?}: {out}{err}"
+        );
+    }
+}

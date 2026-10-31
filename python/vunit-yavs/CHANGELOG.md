@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- A simulation ends with its test runner: yavs gets `--exit-on-stdin-close` and ends when the pipe the runner keeps to
+  its standard input closes, so killing only `python run.py` (SIGKILL included) no longer leaves yavs waiting for a
+  debugger on the port. Needs a yavs with that option.
 - `native_library_hooks` passes `--load` to the elaborate-only step (`--elaborate`) as well as to the run, because a foreign
   function may be called while the design is elaborated; it returns `elab_flags` instead of `run_flags`.
 - `yavs.cov_kind` takes `combination`, and `--yavs-cov-directives apply|ignore` passes `--coverage-directives` to

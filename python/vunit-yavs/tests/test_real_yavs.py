@@ -458,6 +458,45 @@ class TestRealYavs(unittest.TestCase):
         output += list(iter(lines.get, None))
         return events, exit_code, proc.wait(timeout=TIMEOUT), "".join(output)
 
+    def test_killing_only_the_test_runner_ends_the_debugged_run(self):
+        """SIGKILL of run.py alone (#940): yavs notices the closed pipe and frees the debug port"""
+        proc = subprocess.Popen(  # pylint: disable=consider-using-with
+            self._command("--yavs-debug=0", PASS),
+            env=self._env(),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        self.addCleanup(proc.wait)
+        address = None
+        for line in proc.stdout:
+            if f"Debugging {PASS}: attach a DAP client to " in line:
+                address = line.rsplit(" ", 1)[1].strip()
+                break
+        if address is None:
+            proc.kill()
+            self.fail("run.py never said where to attach")
+        port = int(address.rsplit(":", 1)[1])
+
+        def port_is_free():
+            # Binding fails while a listener holds the port; connecting would take its client slot
+            with socket.socket() as probe:
+                try:
+                    probe.bind(("127.0.0.1", port))
+                except OSError:
+                    return False
+                return True
+
+        self.assertFalse(port_is_free(), "yavs does not wait for a debugger")
+        proc.kill()  # Only the test runner: no process group, no yavs
+        deadline = time.monotonic() + 60
+        while not port_is_free() and time.monotonic() < deadline:
+            time.sleep(0.1)
+        if not port_is_free():
+            # Free the port for later tests: a client that disconnects ends the run
+            socket.create_connection(("127.0.0.1", port), timeout=10).close()
+            self.fail("yavs still waits for a debugger after its test runner was killed")
+
     def test_surfer_gets_the_wave_file_of_the_test(self):
         frames = []
         listener = socket.create_server(("127.0.0.1", 0))

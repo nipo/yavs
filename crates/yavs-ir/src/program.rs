@@ -969,8 +969,9 @@ pub enum ForeignArg {
     /// A scalar by value; the register is converted to the C type (range-checked).
     Value(CType),
     /// A scalar `out`/`inout`: the register holds the address of the VHDL value (`Width`),
-    /// C gets a pointer to a C-typed temp that is written back after the call.
-    ScalarRef(CType, Width),
+    /// C gets a pointer to a C-typed temp that is written back after the call, range-checked
+    /// against the base type `ty` and the formal subtype's static `(low, high)`, when it has one.
+    ScalarRef(CType, Width, TyId, Option<(i64, i64)>),
     /// An array of scalars of type `ty`: the register holds the address of a fat pair
     /// `[data, dope]` (constrained arrays too). C gets a pointer to a C-layout copy (one C
     /// element per VHDL element, left to right; logic elements as one code byte), followed

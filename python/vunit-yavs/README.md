@@ -107,6 +107,10 @@ together with `--elaborate` or `-p` above 1 is an error at the start. A bare
 `--yavs-debug` reads a following test name as its port: put test names first, or write
 `--yavs-debug=4711`.
 
+Every simulation (not `--yavs-interactive`) is started with `--exit-on-stdin-close`: it ends when the pipe the
+runner keeps to its standard input closes, so killing only `python run.py`, even with SIGKILL, does not leave yavs
+waiting for a debugger on the port. The waves and coverage files of such a run are not finished.
+
 ## Token server
 
 With `-p N --yavs-jobserver` (Linux and Windows) the run script starts a token server on

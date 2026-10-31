@@ -258,8 +258,8 @@ impl Fx<'_, '_> {
                         return Err(bad(self, "the type has no C mapping"));
                     };
                     if copy_back {
-                        let (_, _, w) = self.scalar(p.subtype, span)?;
-                        ForeignArg::ScalarRef(ct, w)
+                        let (ty, _, w) = self.scalar(p.subtype, span)?;
+                        ForeignArg::ScalarRef(ct, w, ty, self.static_pos_range(p.subtype))
                     } else {
                         ForeignArg::Value(ct)
                     }
@@ -269,8 +269,8 @@ impl Fx<'_, '_> {
             if vhpi.is_none() {
                 fat.args.push(match arg {
                     ForeignArg::Value(_) => ForeignArg::Value(self.fat_ctype(t, span)?),
-                    ForeignArg::ScalarRef(_, w) => {
-                        ForeignArg::ScalarRef(self.fat_ctype(t, span)?, w)
+                    ForeignArg::ScalarRef(_, w, ty, r) => {
+                        ForeignArg::ScalarRef(self.fat_ctype(t, span)?, w, ty, r)
                     }
                     a => a,
                 });
@@ -392,6 +392,18 @@ impl Fx<'_, '_> {
             }),
             None => Err(unsupported(self, "non-static index")),
         }
+    }
+
+    /// `(low, high)` of an integer, physical or enumeration subtype with static bounds.
+    fn static_pos_range(&self, st: SubtypeId) -> Option<(i64, i64)> {
+        let (l, d, r) = self.db.static_bounds(st)?;
+        let pos = |v: &ConstValue| match v {
+            ConstValue::Int(i) | ConstValue::Phys(i) => Some(*i),
+            ConstValue::Enum(e) => Some(i64::from(*e)),
+            _ => None,
+        };
+        let (l, r) = (pos(&l)?, pos(&r)?);
+        Some(if d == Direction::To { (l, r) } else { (r, l) })
     }
 
     /// The C type of scalar type `t` in the fat-pointer layout.
