@@ -79,6 +79,13 @@ context menu of the Variables and Watch views, and of a selection or a word in a
 The simulation never waits for the viewer, and its output and exit status do not depend on it: losing Surfer during a run is
 warning ``W0131``, also under ``-W error``. Starting it or connecting to it is checked first (``E0130``).
 
+Keep Surfer's window in view. Surfer handles commands only while it draws its window, has no setting to do so otherwise, and
+a covered or minimized window may not be drawn. After 5 s without an answer the Debug Console or the terminal prompt says so,
+and ``wave add`` answers at once with the same reason; what it names is added when Surfer answers. Bring the window to the
+front, or keep it beside the editor, and the view catches up by itself. Commands Surfer refuses are told one by one and the
+view goes on following. When the connection is gone, because Surfer was closed or crashed, that is told when it happens, and
+the view stays as it was: run again with ``--surfer`` to watch. The waveform file is written either way.
+
 A signal shows in Surfer under its last name: ``x`` for ``tb.r.x``, ``(0)`` for ``tb.m(0)``, and its times in femtoseconds, since
 the file has that resolution.
 

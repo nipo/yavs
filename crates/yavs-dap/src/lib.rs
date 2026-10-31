@@ -220,14 +220,35 @@ pub struct ViewStop {
 /// Where a viewer's "go to declaration" goes, with the signal as `top.u1.s`.
 pub type GotoFn = Box<dyn Fn(&str) + Send + std::marker::Sync>;
 
-/// A waveform viewer following the session; it never holds the simulation up, except for the
-/// answer to a console's `wave add`.
+/// Where a viewer says what happened to it (it stalled, it answers again, it is gone), when it
+/// happens.
+pub type NoticeFn = Box<dyn Fn(&str) + Send + std::marker::Sync>;
+
+/// Why a viewer's `add` did not add.
+pub enum AddError {
+    /// The waveform file does not hold the name.
+    NotRecorded(String),
+    /// The viewer did not answer in time, or is gone.
+    Viewer(String),
+}
+
+impl AddError {
+    fn text(self) -> String {
+        match self {
+            Self::NotRecorded(m) | Self::Viewer(m) => m,
+        }
+    }
+}
+
+/// A waveform viewer following the session; it never holds the simulation up, and a console's
+/// `wave add` and `wave save` wait for it for a few seconds at most.
 pub trait Viewer: Send + std::marker::Sync {
     fn stop(&self, s: ViewStop);
     /// Add signals or scopes (`top.u1.s`) to the view; how many were added.
-    fn add(&self, items: Vec<String>) -> Result<usize, String>;
+    fn add(&self, items: Vec<String>) -> Result<usize, AddError>;
     fn cursor(&self, fs: u64);
     fn on_goto(&self, f: GotoFn);
+    fn on_notice(&self, f: NoticeFn);
     /// What the view shows now, in its order (`top.u1.s`).
     fn items(&self) -> Result<Vec<String>, String>;
 }

@@ -71,6 +71,11 @@ struct Fake {
     refuse: Arc<Mutex<Option<String>>>,
     /// Close the socket after this many frames.
     close_after: Arc<Mutex<Option<usize>>>,
+    /// At the first of this command, answer nothing for this long, then all answers in order:
+    /// what a Surfer does whose window is not drawn.
+    stall: Arc<Mutex<Option<(String, Duration)>>>,
+    /// The first `reload` ends without `waveforms_loaded`: what a load that fails does.
+    skip_loaded: Arc<Mutex<bool>>,
 }
 
 impl Fake {
@@ -134,6 +139,10 @@ impl Fake {
                 continue;
             }
             let cmd = m["command"].as_str().unwrap_or_default();
+            let stall = self.stall.lock().expect("lock").take_if(|(c, _)| c == cmd);
+            if let Some((_, time)) = stall {
+                std::thread::sleep(time);
+            }
             if self.refuse.lock().expect("lock").as_deref() == Some(cmd) {
                 send(
                     &mut w,
@@ -174,6 +183,9 @@ impl Fake {
                     );
                 }
                 _ => send(&mut w, json!({"type": "response", "command": "ack"})),
+            }
+            if cmd == "reload" && std::mem::take(&mut *self.skip_loaded.lock().expect("lock")) {
+                continue;
             }
             if matches!(cmd, "load" | "reload") {
                 send(
@@ -420,6 +432,279 @@ fn a_lost_viewer_is_a_warning_and_changes_nothing() {
         assert_eq!(o.status.code(), plain.status.code(), "{}", stderr(&o));
         assert!(stderr(&o).contains("W0131"), "{}", stderr(&o));
     }
+}
+
+/// A console session fed line by line, its stderr read as it comes.
+struct Session {
+    child: std::process::Child,
+    stdin: std::process::ChildStdin,
+    err: std::sync::mpsc::Receiver<String>,
+    out: std::sync::mpsc::Receiver<String>,
+    /// What was read so far.
+    seen: String,
+}
+
+impl Session {
+    /// Starts a session with `--surfer` on the fake and Surfer's answer wait in ms.
+    fn start(d: &Path, addr: &str, wait_ms: u64) -> Self {
+        let mut child = yavs()
+            .current_dir(d)
+            .args(["run", "--work=work:build/work", "tb", "--interactive"])
+            .arg(format!("--surfer={addr}"))
+            .env("YAVS_SURFER_WAIT", wait_ms.to_string())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("yavs");
+        fn lines(r: impl Read + Send + 'static) -> std::sync::mpsc::Receiver<String> {
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                for l in BufReader::new(r).lines().map_while(Result::ok) {
+                    if tx.send(l).is_err() {
+                        return;
+                    }
+                }
+            });
+            rx
+        }
+        let err = lines(child.stderr.take().expect("stderr"));
+        let out = lines(child.stdout.take().expect("stdout"));
+        let stdin = child.stdin.take().expect("stdin");
+        Self {
+            child,
+            stdin,
+            err,
+            out,
+            seen: String::new(),
+        }
+    }
+
+    fn send(&mut self, line: &str) {
+        writeln!(self.stdin, "{line}").expect("write");
+    }
+
+    /// Waits for `text` on stdout or stderr; fails after `limit`.
+    fn expect(&mut self, text: &str, limit: Duration) {
+        let t0 = Instant::now();
+        loop {
+            for rx in [&self.err, &self.out] {
+                while let Ok(l) = rx.try_recv() {
+                    self.seen += &l;
+                    self.seen.push('\n');
+                }
+            }
+            if self.seen.contains(text) {
+                self.seen = self.seen.replacen(text, "", 1);
+                return;
+            }
+            assert!(
+                t0.elapsed() < limit,
+                "no `{text}` within {limit:?} in:\n{}",
+                self.seen
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// Quits; the exit status and the rest of what it printed.
+    fn quit(mut self) -> (Option<i32>, String) {
+        self.send("quit");
+        drop(self.stdin);
+        let status = self.child.wait().expect("wait").code();
+        for rx in [&self.err, &self.out] {
+            while let Ok(l) = rx.recv_timeout(Duration::from_secs(1)) {
+                self.seen += &l;
+                self.seen.push('\n');
+            }
+        }
+        (status, self.seen)
+    }
+}
+
+const SHORT: Duration = Duration::from_secs(20);
+
+/// A Surfer that does not answer for a while (its window not drawn): the stall is told when it
+/// happens, `wave add` answers at once, and when the answers come all at once the connection goes
+/// on, with what was added in the meantime and the right count for a later `wave add`.
+#[test]
+fn a_stalled_viewer_is_told_and_catches_up() {
+    let d = setup("stall");
+    let fake = Fake::default();
+    let held = Duration::from_secs(4);
+    *fake.stall.lock().expect("lock") = Some(("reload".into(), held));
+    let (addr, t) = fake.listen(vec![]);
+    let mut s = Session::start(&d, &addr, 200);
+    s.send("break tb.vhd:23");
+    s.send("run");
+    let t0 = Instant::now();
+    s.expect("Surfer has not answered for 0.2 s", SHORT);
+    s.send("wave add cnt");
+    s.expect("`tb.cnt` is not in its view yet", SHORT);
+    assert!(t0.elapsed() < held, "the debugger waited for the viewer");
+    s.send("wave save nothing.txt");
+    s.expect("what its view shows is not known", SHORT);
+    assert!(t0.elapsed() < held, "the debugger waited for the viewer");
+    s.expect("Surfer answers again", SHORT);
+    // Two names: a late answer taken for this one's would say 1.
+    s.send("wave add v cnt");
+    s.expect("2 added", SHORT);
+    let (status, rest) = s.quit();
+    t.join().expect("fake");
+    assert_eq!(status, Some(0), "{rest}");
+    assert!(!rest.contains("W0131"), "{rest}");
+    let adds = fake.all("add_items");
+    // What was not answered goes with the first add once Surfer answers.
+    assert_eq!(
+        adds[0]["items"].as_array().expect("items").last(),
+        Some(&json!("tb.cnt"))
+    );
+    assert_eq!(adds[1]["items"], json!(["tb.v", "tb.cnt"]), "{adds:?}");
+    // Nothing more was asked while it did not answer, and the end is as usual.
+    assert_eq!(fake.all("reload").len(), 2, "{:?}", fake.commands());
+    assert_eq!(fake.all("zoom_to_fit").len(), 1, "{:?}", fake.commands());
+}
+
+/// The answer to an `add_items` that comes too late still counts for that one, and a later
+/// `wave add` gets its own answer.
+#[test]
+fn a_late_answer_is_not_the_answer_to_a_later_command() {
+    let d = setup("late");
+    let fake = Fake::default();
+    *fake.stall.lock().expect("lock") = Some(("add_items".into(), Duration::from_secs(2)));
+    let (addr, t) = fake.listen(vec![]);
+    let mut s = Session::start(&d, &addr, 200);
+    s.send("break tb.vhd:23");
+    s.send("run");
+    s.expect("breakpoint at", SHORT);
+    // The first add_items at the start of the run has its values at this stop: wait for it.
+    s.expect("Surfer answers again", SHORT);
+    s.send("wave add v cnt");
+    s.expect("2 added", SHORT);
+    let (status, rest) = s.quit();
+    t.join().expect("fake");
+    assert_eq!(status, Some(0), "{rest}");
+}
+
+/// A refused command concerns that command: it is told, and the next ones work.
+#[test]
+fn a_refused_command_does_not_end_the_connection() {
+    let d = setup("refused");
+    let fake = Fake::default();
+    *fake.refuse.lock().expect("lock") = Some("set_viewport_to".into());
+    let (addr, t) = fake.listen(vec![]);
+    let o = run(
+        &d,
+        &[
+            &format!("--surfer={addr}"),
+            "--do=break tb.vhd:23; run; wave add cnt; wave save kept.txt; quit",
+        ],
+    );
+    t.join().expect("fake");
+    assert_eq!(o.status.code(), Some(0), "{}", stderr(&o));
+    assert!(
+        stderr(&o).contains("Surfer refused `set_viewport_to`: no"),
+        "{}",
+        stderr(&o)
+    );
+    assert!(!stderr(&o).contains("W0131"), "{}", stderr(&o));
+    assert!(stdout(&o).contains("1 added"), "{}", stdout(&o));
+    assert_eq!(fake.all("zoom_to_fit").len(), 1, "{:?}", fake.commands());
+}
+
+/// Surfer sends `waveforms_loaded` only for a load that works: one that fails does not hold the
+/// view up for good, and the reloads go on.
+#[test]
+fn a_load_without_its_event_does_not_hold_the_view() {
+    let d = setup("noload");
+    let fake = Fake::default();
+    *fake.skip_loaded.lock().expect("lock") = true;
+    let (addr, t) = fake.listen(vec![]);
+    let mut s = Session::start(&d, &addr, 50);
+    s.send("break tb.vhd:23");
+    s.send("run");
+    s.expect("did not finish reading", SHORT);
+    s.send("wave add cnt");
+    s.expect("1 added", SHORT);
+    let (status, rest) = s.quit();
+    t.join().expect("fake");
+    assert_eq!(status, Some(0), "{rest}");
+    assert!(!rest.contains("W0131"), "{rest}");
+    assert!(fake.all("reload").len() >= 2, "{:?}", fake.commands());
+}
+
+/// Surfer closed during a session: told when it happens, not only at the end, and with a text of
+/// its own; the session goes on.
+#[test]
+fn a_lost_connection_is_told_when_it_happens() {
+    let d = setup("gone");
+    let fake = Fake::default();
+    // The greeting, the load, and at the first stop's reload it is gone.
+    *fake.close_after.lock().expect("lock") = Some(3);
+    let (addr, t) = fake.listen(vec![]);
+    let mut s = Session::start(&d, &addr, 200);
+    s.send("break tb.vhd:23");
+    s.send("run");
+    s.expect("The connection to Surfer is gone", SHORT);
+    s.send("wave add cnt");
+    s.expect("The connection to Surfer is gone", SHORT);
+    s.send("print cnt");
+    s.expect("\n3\n", SHORT);
+    let (status, rest) = s.quit();
+    t.join().expect("fake");
+    assert_eq!(status, Some(0), "{rest}");
+    assert!(rest.contains("W0131"), "{rest}");
+    assert!(rest.contains("lost the connection to Surfer"), "{rest}");
+}
+
+#[test]
+fn a_bad_answer_wait_is_e0130() {
+    let d = setup("badwait");
+    let o = yavs()
+        .current_dir(&*d)
+        .args([
+            "run",
+            "--work=work:build/work",
+            "tb",
+            "--surfer=127.0.0.1:1",
+        ])
+        .env("YAVS_SURFER_WAIT", "soon")
+        .output()
+        .expect("yavs");
+    assert_eq!(o.status.code(), Some(2));
+    assert!(stderr(&o).contains("E0130"), "{}", stderr(&o));
+    assert!(stderr(&o).contains("YAVS_SURFER_WAIT"), "{}", stderr(&o));
+}
+
+/// A Surfer that does not answer at the end does not hold the exit up, and the result is the same.
+#[test]
+fn a_stalled_viewer_at_the_end_does_not_hold_the_exit() {
+    let d = setup("stallend");
+    let plain = run(&d, &[]);
+    let fake = Fake::default();
+    let held = Duration::from_secs(6);
+    *fake.stall.lock().expect("lock") = Some(("reload".into(), held));
+    let (addr, t) = fake.listen(vec![]);
+    let t0 = Instant::now();
+    let o = yavs()
+        .current_dir(&*d)
+        .args(["run", "--work=work:build/work", "tb"])
+        .arg(format!("--surfer={addr}"))
+        .args(["-W", "error"])
+        .env("YAVS_SURFER_WAIT", "200")
+        .stdin(Stdio::null())
+        .output()
+        .expect("yavs");
+    assert!(t0.elapsed() < held, "the exit waited for the viewer");
+    t.join().expect("fake");
+    assert_eq!(stdout(&o), stdout(&plain));
+    assert_eq!(o.status.code(), plain.status.code(), "{}", stderr(&o));
+    assert!(
+        stderr(&o).contains("Surfer did not answer at the end of the run"),
+        "{}",
+        stderr(&o)
+    );
+    assert!(stderr(&o).contains("W0131"), "{}", stderr(&o));
 }
 
 /// `--dap` and `--interactive` stops: reload, cursor and viewport at the stop time, a marker at a

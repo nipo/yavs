@@ -176,8 +176,12 @@ const EXPLAIN: &[(&str, &str)] = &[
     ),
     (
         "W0131",
-        "The connection to Surfer failed during the run, or Surfer stopped answering for 30 seconds. The viewer stopped \
-         following; the simulation and its exit status are not affected, and `-W error` does not make this an error.",
+        "The connection to Surfer ended during the run, or Surfer did not answer at the end of the run. A connection that \
+         ended means Surfer was closed or crashed: the viewer stops following, and the run must start again to show it. \
+         Surfer handles commands only while it draws its window, so a covered or minimized window may leave it silent: \
+         bring the window to the front. Both are also told in the console when they happen. A Surfer that answers again \
+         during the run catches up and this warning does not appear. The simulation and its exit status are not affected, \
+         and `-W error` does not make this an error.",
     ),
     (
         "E0703",

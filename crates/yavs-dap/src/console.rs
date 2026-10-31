@@ -20,8 +20,9 @@ use yavs_kernel::Time;
 use yavs_std::value::LitType;
 
 use crate::{
-    At, CONSOLE_BREAKS, Link, Msg, Next, RUN_UNTIL, Run, Shared, SigBp, apply_lines, apply_signals,
-    cond, eval_var, rewatch, signal_change, split_part, state_vars, stop_of, thread_proc, tools,
+    AddError, At, CONSOLE_BREAKS, Link, Msg, Next, RUN_UNTIL, Run, Shared, SigBp, apply_lines,
+    apply_signals, cond, eval_var, rewatch, signal_change, split_part, state_vars, stop_of,
+    thread_proc, tools,
 };
 
 /// The environment variable naming a test runner's hook: `<port>:<secret>`.
@@ -1411,7 +1412,7 @@ fn wave(sh: &Shared, at: &At<'_, '_>, rest: &str) -> Result<String, String> {
             if items.is_empty() {
                 return Err("`wave add` needs a signal or scope".into());
             }
-            Ok(format!("{} added", v.add(items)?))
+            Ok(format!("{} added", v.add(items).map_err(AddError::text)?))
         }
         "cursor" => {
             let t = if args.is_empty() {
@@ -1438,7 +1439,10 @@ fn wave(sh: &Shared, at: &At<'_, '_>, rest: &str) -> Result<String, String> {
             for i in items {
                 match v.add(vec![i.clone()]) {
                     Ok(k) => n += k,
-                    Err(_) => gone.push(i),
+                    Err(AddError::NotRecorded(_)) => gone.push(i),
+                    Err(AddError::Viewer(m)) => {
+                        return Err(format!("stopped at `{i}` with {n} added: {m}"));
+                    }
                 }
             }
             let mut o = format!("{n} added from `{}`", file.display());
@@ -1536,6 +1540,12 @@ pub(crate) fn set_viewer(link: &std::sync::Arc<Link>, v: std::sync::Arc<dyn crat
         return;
     }
     let link = std::sync::Arc::downgrade(link);
+    let told = link.clone();
+    v.on_notice(Box::new(move |text| {
+        if let Some(link) = told.upgrade() {
+            link.output("stderr", &format!("{text}\n"));
+        }
+    }));
     v.on_goto(Box::new(move |name| {
         let Some(link) = link.upgrade() else {
             return;

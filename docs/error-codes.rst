@@ -121,7 +121,7 @@ Syntax, command line, waveforms, coverage, debugger, plugins (E0 and W0)
    * - _`E0130`
      - ``--surfer`` cannot use Surfer: ``surfer`` is not on PATH, it ended or did not connect within 30 seconds, the address does not answer, it refuses the greeting, or it does not load the file.
    * - _`W0131`
-     - The connection to Surfer failed during the run, or Surfer stopped answering for 30 seconds.
+     - The connection to Surfer ended during the run, or Surfer did not answer at the end of the run.
    * - _`E0133`
      - ``yavs lint`` was given nothing to check, a path that does not exist, or a rule that does not exist: name files or directories, or give ``--work`` with an analyzed library.
    * - _`E0134`

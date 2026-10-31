@@ -34,6 +34,12 @@ Read by yavs
      - ``yavs/std`` in your cache directory
      - ``analyze``, ``elab``, ``run``, ``cache clean``
      - 0.9.0
+   * - ``YAVS_SURFER_WAIT``
+     - How long, in milliseconds, a running Surfer may take to answer before ``--surfer`` says it does not answer. Any other value than a number above zero is error ``E0130``.
+     - ``2000``
+     - ``5000``
+     - ``run``
+     - 0.12.0
    * - ``YAVS_WAVE_FLUSH``
      - Also end a waveform block after this much run time, so that a killed run leaves more of the file (:doc:`waveforms`). Any other value is error ``E0801``.
      - ``5s``, ``500ms``, ``never``
