@@ -3,7 +3,7 @@
 //! in `yavs_dap`. stdout: reports, textio output and results of commands, as a batch run would
 //! print them. stderr: stop notices and errors (docs/cli-contract.md 5).
 
-use std::io::{BufRead, BufReader, IsTerminal, Write};
+use std::io::{BufReader, IsTerminal, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
@@ -97,49 +97,45 @@ fn wait(ev: &Receiver<Ev>) -> Option<bool> {
     }
 }
 
-/// Lines from the terminal with editing and history, or plainly from a pipe.
-enum Input {
-    Editor(Box<rustyline::DefaultEditor>),
-    Plain(std::io::StdinLock<'static>),
+/// The line editor, when standard input is a terminal.
+fn editor() -> Option<Box<rustyline::DefaultEditor>> {
+    let tty = std::io::stdin().is_terminal();
+    tty.then(rustyline::DefaultEditor::new)
+        .and_then(Result::ok)
+        .map(Box::new)
 }
 
-impl Input {
-    fn open() -> Input {
-        if std::io::stdin().is_terminal()
-            && let Ok(e) = rustyline::DefaultEditor::new()
-        {
-            return Input::Editor(Box::new(e));
-        }
-        Input::Plain(std::io::stdin().lock())
-    }
-
-    /// The next line; `None` at the end of input.
-    fn next(&mut self) -> Option<String> {
-        match self {
-            Input::Editor(e) => loop {
-                match e.readline("yavs> ") {
-                    Ok(l) => {
-                        let _ = e.add_history_entry(l.as_str());
-                        return Some(l);
-                    }
-                    // Ctrl-C at the prompt drops the line.
-                    Err(rustyline::error::ReadlineError::Interrupted) => {}
-                    Err(_) => return None,
-                }
-            },
-            Input::Plain(i) => {
-                let mut l = String::new();
-                match i.read_line(&mut l) {
-                    Ok(n) if n > 0 => Some(l),
-                    _ => None,
-                }
+/// The next line from the terminal, with editing and history, or plainly from a pipe; `None` at
+/// the end of input.
+fn next_line(editor: &mut Option<Box<rustyline::DefaultEditor>>) -> Option<String> {
+    let Some(e) = editor else {
+        let mut l = String::new();
+        return match std::io::stdin().read_line(&mut l) {
+            Ok(n) if n > 0 => Some(l),
+            _ => None,
+        };
+    };
+    loop {
+        match e.readline("yavs> ") {
+            Ok(l) => {
+                let _ = e.add_history_entry(l.as_str());
+                return Some(l);
             }
+            // Ctrl-C at the prompt drops the line.
+            Err(rustyline::error::ReadlineError::Interrupted) => {}
+            Err(_) => return None,
         }
     }
 }
 
 /// Send the script, then the terminal's lines, then `quit`.
-fn driver(c: &Client, ev: &Receiver<Ev>, script: &[String], interactive: bool) {
+fn driver(
+    c: &Client,
+    ev: &Receiver<Ev>,
+    script: &[String],
+    interactive: bool,
+    mut editor: Option<Box<rustyline::DefaultEditor>>,
+) {
     c.request("initialize", json!({}));
     c.request("launch", json!({"yavsConsole": true}));
     c.request("configurationDone", json!({}));
@@ -163,8 +159,7 @@ fn driver(c: &Client, ev: &Receiver<Ev>, script: &[String], interactive: bool) {
         }
     }
     if interactive {
-        let mut input = Input::open();
-        while let Some(line) = input.next() {
+        while let Some(line) = next_line(&mut editor) {
             if line.trim().is_empty() {
                 continue;
             }
@@ -199,6 +194,10 @@ pub(crate) fn serve(
         seq: Mutex::new(0),
         busy: AtomicBool::new(false),
     });
+    // Before the Ctrl-C handler: the editor takes SIGINT when it is made (and restores it only when
+    // dropped), and a handler installed after it is the one that runs, then calls the editor's. At
+    // the prompt the terminal is raw, so Ctrl-C is a key, not a signal (#932).
+    let editor = editor().filter(|_| interactive);
     if interactive {
         let sig = c.clone();
         let plain = !std::io::stdin().is_terminal();
@@ -223,7 +222,7 @@ pub(crate) fn serve(
         std::thread::spawn(move || printer(cli_r, &c, &tx))
     };
     let script = script.to_vec();
-    std::thread::spawn(move || driver(&c, &rx, &script, interactive));
+    std::thread::spawn(move || driver(&c, &rx, &script, interactive, editor));
     let code = yavs_dap::serve_on(
         loaded,
         Box::new(srv_r),

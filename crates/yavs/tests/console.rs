@@ -211,6 +211,113 @@ fn restart_out_of_a_process_that_never_suspends() {
     assert_eq!(o.status.code(), Some(0));
 }
 
+/// `Output` of `cmd`, killed and failed when it does not end: a hang must fail the test, not CI.
+fn bounded(mut cmd: Command, input: &str) -> Output {
+    let mut child = cmd
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("yavs");
+    child
+        .stdin
+        .take()
+        .expect("piped")
+        .write_all(input.as_bytes())
+        .expect("write");
+    let t0 = std::time::Instant::now();
+    while child.try_wait().expect("wait").is_none() {
+        if t0.elapsed() > std::time::Duration::from_secs(120) {
+            let _ = child.kill();
+            panic!("still running: {:?}", child.wait_with_output());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    child.wait_with_output().expect("output")
+}
+
+/// A stop in a loop inside a subprogram, and in a loop with no statement at all: the session
+/// can be left and restarted (#918).
+#[test]
+fn leaving_an_endless_loop_in_a_subprogram() {
+    let d = setup("spinsub");
+    std::fs::write(
+        d.join("l.vhd"),
+        "entity l is end;\narchitecture a of l is\n  procedure spin is\n    variable i : natural := 0;\n  begin\n    loop\n      i := (i + 1) mod 7;\n    end loop;\n  end procedure;\nbegin\n  process begin\n    spin;\n    wait;\n  end process;\nend;\n",
+    )
+    .expect("write");
+    std::fs::write(
+        d.join("e.vhd"),
+        "entity e is end;\narchitecture a of e is\n  procedure spin is\n  begin\n    loop\n    end loop;\n  end procedure;\nbegin\n  process begin\n    report \"before\";\n    spin;\n    wait;\n  end process;\nend;\n",
+    )
+    .expect("write");
+    analyze(&d, "l.vhd");
+    analyze(&d, "e.vhd");
+    let session = |top: &str, args: &[&str], input: &str| {
+        let mut c = yavs();
+        c.current_dir(&*d).args(["run", "--work=work:lib", top]);
+        c.args(args);
+        bounded(c, input)
+    };
+    let stop = "--do=break l.vhd:7; run";
+    for (input, status) in [("quit\n", 0), ("quit 3\n", 3), ("", 0)] {
+        let o = session("l", &[stop, "--interactive"], input);
+        assert_eq!(o.status.code(), Some(status), "{input:?}: {}", stderr(&o));
+    }
+    let o = session(
+        "l",
+        &[stop, "--interactive"],
+        "restart\nwhere\nrun\nexamine i\nquit\n",
+    );
+    assert_eq!(o.status.code(), Some(0), "{}", stderr(&o));
+    assert!(stdout(&o).contains("time 0 fs, delta 0"), "{}", stdout(&o));
+    // No statement in the loop: nothing to stop at, but the session still ends.
+    let mut c = yavs();
+    c.current_dir(&*d)
+        .args(["run", "--work=work:lib", "e", "--dap=stdio"]);
+    let mut child = c
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("yavs");
+    let mut w = child.stdin.take().expect("piped");
+    let mut r = BufReader::new(child.stdout.take().expect("piped"));
+    let send = |w: &mut std::process::ChildStdin, seq: i64, cmd: &str| {
+        let m = json!({"type": "request", "seq": seq, "command": cmd, "arguments": {}}).to_string();
+        write!(w, "Content-Length: {}\r\n\r\n{m}", m.len()).expect("write");
+    };
+    let read = |r: &mut BufReader<std::process::ChildStdout>| -> Value {
+        let mut n = 0;
+        loop {
+            let mut l = String::new();
+            assert!(r.read_line(&mut l).expect("read") > 0, "the session ended");
+            if let Some(v) = l.trim().strip_prefix("Content-Length: ") {
+                n = v.parse().expect("a length");
+            } else if l.trim().is_empty() {
+                break;
+            }
+        }
+        let mut b = vec![0; n];
+        std::io::Read::read_exact(r, &mut b).expect("read");
+        serde_json::from_slice(&b).expect("json")
+    };
+    for (seq, cmd) in [(1, "initialize"), (2, "launch"), (3, "configurationDone")] {
+        send(&mut w, seq, cmd);
+    }
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    send(&mut w, 4, "disconnect");
+    while read(&mut r)["command"] != "disconnect" {}
+    let t0 = std::time::Instant::now();
+    while child.try_wait().expect("wait").is_none() {
+        assert!(
+            t0.elapsed() < std::time::Duration::from_secs(60),
+            "still running"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
 #[test]
 fn restart_recreates_the_wave_file() {
     let d = setup("wave");

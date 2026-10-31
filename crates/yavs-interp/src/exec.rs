@@ -5168,6 +5168,12 @@ impl Machine {
                     .ok_or_else(|| ice_f!("pc {pc} beyond `{}`", f.name))?;
                 if DEBUG {
                     self.debug_tick(prog, f, pc, inst, ctx)?;
+                    // A debugger ending the run gets out of a process that never gives control
+                    // back, in any frame and between any two instructions (#918): nothing runs
+                    // this process again.
+                    if ctx.as_deref().is_some_and(|c| c.stop_requested()) {
+                        return Ok(Outcome::Suspended);
+                    }
                 }
                 // The common instructions are executed here; the rest go through `step`.
                 macro_rules! jump {
@@ -5194,15 +5200,6 @@ impl Machine {
                     Inst::Br { to } => jump!(to),
                     Inst::CondBr { c, t, f: e } => jump!(if self.r(c) != 0 { t } else { e }),
                     Inst::Stmt => {
-                        // A debugger ending the run gets out of a process that never gives
-                        // control back, as `step_out` does without one.
-                        // ponytail: the process's own statements; a loop in a subprogram holds on.
-                        if DEBUG
-                            && f.kind == FuncKind::Process
-                            && ctx.as_deref().is_some_and(|c| c.stop_requested())
-                        {
-                            return Ok(Outcome::Suspended);
-                        }
                         self.end_stmt();
                         pc += 1;
                         continue;
