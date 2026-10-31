@@ -5455,6 +5455,8 @@ runs the test as written.
 
 ## vhpi export (`crates/yavs-vhpi`, `crates/yavs`)
 
+Done (#849, 2026-11-01): cocotb's regression on Windows, the jobs that need no make (pytest through its Python runner, the examples, the pytest plugin): workflow `cocotb-windows`, 6 of 6 jobs on `windows-latest`. Its VHPI library is built with MSVC by `tools/cocotb/run.py`. The makefile jobs stay on Linux (they need make and a POSIX shell).
+
 Done (#829, 2026-10-31): equivalent processes as regions, `vhpiEqProcessStmts`, `vhpiSensitivities`, `vhpiSeqStmts`, `vhpiIsPassiveP`, `vhpiIsPostponedP`, `vhpiIsGuardedP`, `vhpiStaticnessP`. Not: statement, subprogram-call, suspend and resume callbacks, stack frames and expressions (`W0904`).
 
 Done (#831, 2026-10-31): aliases, files, implicit signals, components, configuration specifications, subprograms, package bodies, libraries, use clauses, attributes of units and labels, `vhpiEndLineNoP`; see `crates/yavs-vhpi/AGENTS.md`. Not: the value of an alias of a part of an object, file parameters of foreign subprograms, `vhpiConfigDecl`, attribute names as expressions.

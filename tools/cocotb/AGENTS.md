@@ -10,6 +10,9 @@ change the cocotb regression (#122, epic #143).
   `tests/test_cases` directories through make, the examples through make and pytest,
   `pytest -k simulator_required` and the pytest plugin's tests), with the noxfile's environment
   (`PYTHONWARNINGS=error,...`, the debug switches).
+- On Windows (workflow `cocotb-windows`, #849) it builds the VHPI library with MSVC against import
+  libraries it makes itself and runs only the jobs that need no make; the makefile jobs need make
+  and a POSIX shell.
 - `Makefile.yavs` and `yavs_runner.py` are the yavs integration for cocotb's makefiles and its
   Python runner and pytest plugin: the change cocotb itself would need, kept here until it is
   upstream. Setup copies them into the venv and appends the registration to cocotb's runner table
