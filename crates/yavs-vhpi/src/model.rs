@@ -30,6 +30,8 @@ pub(crate) struct At<'a> {
     leaf: u32,
     k: u64,
     reps: u64,
+    /// A collapsed port: the elements of its actual's leaf it is, counted from their start.
+    from: u32,
     /// Generics and constants: the elaborated value.
     cv: Option<ConstValue>,
     /// Where the leaves are stored.
@@ -47,7 +49,13 @@ impl At<'_> {
             first
         };
         let at = self.locs[self.leaf as usize];
-        at.signal.slice(at.base + offset as u32, len as u32)
+        at.signal
+            .slice(at.base + self.from + offset as u32, len as u32)
+    }
+
+    /// Its first kernel leaf.
+    pub(crate) fn leaf(&self) -> u32 {
+        self.leaf
     }
 }
 
@@ -79,6 +87,15 @@ pub(crate) enum Object {
     Process(usize),
     /// Driver `i` a foreign architecture's model created.
     Driver(usize),
+    /// Driver `i` of `Design::net` (`connect.rs`).
+    NetDriver(u32),
+    /// Association `conn` of `Design::net`, seen from its actual (`inward`) or formal.
+    Conn {
+        conn: u32,
+        inward: bool,
+    },
+    /// A transaction of a driver, as `vhpiTransactions` found it.
+    Transaction(Box<crate::connect::Txn>),
     /// Parameter `idx` of foreign call `call`, or a part of it.
     Param {
         call: u64,
@@ -291,6 +308,10 @@ pub(crate) const INT_PROPS: &[vhpiIntPropertyT] = &[
     vhpiIsSharedP,
     vhpiGenerateIndexP,
     vhpiCapabilitiesP,
+    vhpiIsResolvedP,
+    vhpiIsBasicP,
+    vhpiSigKindP,
+    vhpiIsForcedP,
 ];
 pub(crate) const STR_PROPS: &[vhpiStrPropertyT] = &[
     vhpiNameP,
@@ -315,6 +336,8 @@ pub(crate) struct State {
     /// The tool's arguments (`vhpiArgcP`, `vhpiArgvs`): the program name, then the plusargs.
     pub(crate) argv: Vec<String>,
     pub(crate) control: Option<Control>,
+    /// `vhpiCbTransaction` callbacks on a driver with a transaction due in this cycle.
+    pub(crate) txn_due: HashSet<u64>,
     /// Puts waiting for the kernel, in call order.
     pub(crate) puts: Vec<Put>,
     /// A read-only phase (end of time step, end of simulation): puts are refused.
@@ -409,9 +432,9 @@ impl State {
         };
         let node = self.design.node(base);
         let mut l = node.layout.as_ref().ok_or_else(misuse)?;
-        let (mut leaf, mut k, mut reps) = match node.origin {
-            Origin::Signal { leaf, .. } => (leaf, 0u64, 1u64),
-            _ => (0, 0, 1),
+        let (mut leaf, mut k, mut reps, from) = match node.origin {
+            Origin::Signal { leaf, part, .. } => (leaf, 0u64, 1u64, part.map_or(0, |r| r.offset)),
+            _ => (0, 0, 1, 0),
         };
         let mut cv = match &node.origin {
             Origin::Decl { value, .. } => value.clone(),
@@ -443,6 +466,7 @@ impl State {
             leaf,
             k,
             reps,
+            from,
             cv,
             locs: &self.design.locs,
         })
@@ -483,6 +507,9 @@ impl State {
         let misuse = |m: &str| (Fault::Misuse, format!("vhpi_get_value: {m}"));
         if matches!(obj, Object::Call(_) | Object::Param { .. }) {
             return self.foreign_read(obj);
+        }
+        if matches!(obj, Object::NetDriver(_) | Object::Transaction(_)) {
+            return self.net_read(obj);
         }
         let at = self.at(obj, "vhpi_get_value")?;
         let (ty, len, array) = Self::scalars(at.l, "vhpi_get_value")?;
@@ -700,7 +727,10 @@ impl State {
                         first
                     };
                     let loc = at.locs[at.leaf as usize + j];
-                    (loc.signal, Range::new(loc.base + offset as u32, m as u32))
+                    (
+                        loc.signal,
+                        Range::new(loc.base + at.from + offset as u32, m as u32),
+                    )
                 })
                 .collect(),
         )
@@ -723,7 +753,10 @@ impl State {
             Object::Type(o) => self.design.types.kind(*o),
             Object::Foreign(_) | Object::Call(_) | Object::Param { .. } => self.foreign_kind(obj),
             Object::Process(_) => vhpiProcessStmtK,
-            Object::Driver(_) => vhpiDriverK,
+            Object::Driver(_) | Object::NetDriver(_) => vhpiDriverK,
+            Object::Conn { inward: true, .. } => vhpiInPortK,
+            Object::Conn { .. } => vhpiOutPortK,
+            Object::Transaction(_) => vhpiTransactionK,
             Object::Node(n) => self.design.node(*n).kind,
             Object::Elem { base, path } => {
                 self.design
@@ -762,6 +795,14 @@ impl State {
                 if prop != vhpiKindStrP =>
             {
                 return self.foreign_str(obj, prop);
+            }
+            // A driver goes by the signal it drives.
+            (
+                Object::NetDriver(d),
+                vhpiNameP | vhpiCaseNameP | vhpiFullNameP | vhpiFullCaseNameP,
+            ) => {
+                let owner = self.design.net.drivers[*d as usize].owner?;
+                return self.str_property(&Object::Node(owner), prop);
             }
             (_, vhpiKindStrP) => {
                 let k = i64::from(self.kind(obj));
@@ -811,9 +852,14 @@ impl State {
             (Object::Tool, vhpiCapabilitiesP) => {
                 vhpiProvidesHierarchy
                     | vhpiProvidesStaticAccess
+                    | vhpiProvidesConnectivity
                     | vhpiProvidesForeignModel
                     | vhpiProvidesAdvancedForeignModel
                     | vhpiProvidesDebugRuntime
+            }
+            (_, vhpiIsResolvedP | vhpiIsBasicP | vhpiSigKindP | vhpiIsForcedP)
+            | (Object::NetDriver(_) | Object::Transaction(_), _) => {
+                return self.net_prop(obj, prop);
             }
             (_, vhpiLineNoP | vhpiStartLineNoP) => node?.line?,
             (Object::Node(n), vhpiNumPortsP | vhpiNumGensP)
@@ -856,6 +902,13 @@ impl State {
         kind: vhpiOneToOneT,
         reference: Option<&Object>,
     ) -> Result<Object, bool> {
+        if let (
+            vhpiSimNet | vhpiResolFunc | vhpiSignal | vhpiEqProcessStmt | vhpiFormal | vhpiActual,
+            Some(o),
+        ) = (kind, reference)
+        {
+            return self.net_one(kind, o);
+        }
         let node = reference.and_then(Self::base).map(|n| self.design.node(n));
         match (kind, reference) {
             (vhpiRootInst, _) => Ok(Object::Node(ROOT)),
@@ -948,6 +1001,20 @@ impl State {
                 .ok_or(false)?;
             return list(items.into_iter().map(Object::Type).collect());
         }
+        if let (
+            vhpiDrivers
+            | vhpiLocalContributors
+            | vhpiOptimizedContributors
+            | vhpiLocalLoads
+            | vhpiOptimizedLoads
+            | vhpiDrivenSigs
+            | vhpiBasicSignals
+            | vhpiTransactions,
+            Some(o),
+        ) = (rel, reference)
+        {
+            return list(self.net_iter(rel, o).ok_or(false)?);
+        }
         let decls = |n: NodeId, k: Option<vhpiClassKindT>| {
             list(
                 self.design
@@ -1029,7 +1096,7 @@ impl State {
 }
 
 /// Kernel leaves of a layout: one per scalar of its record structure.
-fn leaves(l: &Layout) -> u32 {
+pub(crate) fn leaves(l: &Layout) -> u32 {
     match l {
         Layout::Scalar(_) | Layout::Open => 1,
         Layout::Array { elem, .. } => leaves(elem),

@@ -11,8 +11,8 @@ use smallvec::{SmallVec, smallvec};
 use crate::error::ErrorKind;
 use crate::time::Time;
 use crate::value::{
-    Buf, Elem, SignalType, bits, bytes_eq, fill_bits, plane_code, plane_is, put_bits, put_bytes,
-    put_plane_code,
+    Buf, Elem, SignalType, Value, bits, bytes_eq, fill_bits, plane_code, plane_is, put_bits,
+    put_bytes, put_plane_code,
 };
 use yavs_logic::Block;
 use yavs_logic::wide::{nmask, put_block};
@@ -2722,6 +2722,14 @@ impl Signal {
         })
     }
 
+    /// Whether an element of `r` has a force in effect (`Hook::forced`).
+    pub fn is_forced(&self, r: Range) -> bool {
+        [&self.force_eff, &self.force_drv].iter().any(|l| {
+            l.as_ref()
+                .is_some_and(|l| r.elems().any(|i| l.mask[i / 64] >> (i % 64) & 1 != 0))
+        })
+    }
+
     pub fn active_in(&self, r: Range, cycle: u64) -> bool {
         let n = self.ty.len as usize;
         (!self.blk_active.is_empty()
@@ -3059,6 +3067,32 @@ impl Waveform {
             && self.quick.is_none()
             && self.vquick.is_none()
             && self.bquick.is_none()
+    }
+
+    /// The pending transactions in time order (`Hook::driver_transactions`), however they are
+    /// held.
+    pub fn transactions(&self) -> Vec<(Time, Range, Option<Value>)> {
+        if let Some(q) = &self.quick {
+            let v = Buf::one_code(q.code).to_value();
+            return vec![(q.time, Range::new(q.elem, 1), Some(v))];
+        }
+        if let Some(q) = &self.vquick {
+            let v = Buf::Planes {
+                len: q.len as usize,
+                b: smallvec![q.planes],
+            };
+            return vec![(q.time, Range::new(q.elem, q.len), Some(v.to_value()))];
+        }
+        if let Some(q) = &self.bquick {
+            let v = Buf::Bytes {
+                es: q.es as usize,
+                data: SmallVec::from_slice(&q.val[..q.es as usize]),
+            };
+            return vec![(q.time, Range::new(q.elem, 1), Some(v.to_value()))];
+        }
+        (self.pending.iter())
+            .map(|t| (t.time, t.range, t.value.as_ref().map(Buf::to_value)))
+            .collect()
     }
 
     /// The time of the first pending transaction.

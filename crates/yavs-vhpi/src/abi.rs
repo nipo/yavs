@@ -362,6 +362,16 @@ pub extern "C" fn vhpi_get_phys(prop: vhpiPhysPropertyT, h: vhpiHandleT) -> vhpi
         if prop == vhpiResolutionLimitP && h.is_null() {
             return phys(s.clock.resolution.fs());
         }
+        if prop == vhpiTimeP
+            && let Some(Object::Transaction(t)) = s.handles.get(h)
+        {
+            let t = t.time;
+            let v = s.clock.vhpi_time(t);
+            return vhpiPhysT {
+                high: v.high,
+                low: v.low,
+            };
+        }
         let known = matches!(
             prop,
             vhpiPhysLeftBoundP | vhpiPhysRightBoundP | vhpiPhysPositionP
@@ -489,12 +499,17 @@ pub unsafe extern "C" fn vhpi_register_cb(cb: *mut vhpiCbDataT, flags: i32) -> v
             s.fail(Fault::Misuse, "vhpi_register_cb: NULL cb_rtn");
             return std::ptr::null_mut();
         }
-        let watch = if matches!(data.reason, vhpiCbValueChange | vhpiCbSensitivity) {
-            s.handles
-                .get(data.obj)
-                .cloned()
-                .and_then(|o| Some((s.watch(&o)?, o)))
-                .map(|(w, o)| (o, w))
+        let watch = if matches!(
+            data.reason,
+            vhpiCbValueChange | vhpiCbSensitivity | vhpiCbForce | vhpiCbRelease | vhpiCbTransaction
+        ) {
+            match s.handles.get(data.obj).cloned() {
+                Some(o @ Object::NetDriver(_)) if data.reason == vhpiCbTransaction => {
+                    Some((o, Box::default()))
+                }
+                Some(o) => s.watch(&o).map(|w| (o, w)),
+                None => None,
+            }
         } else {
             None
         };

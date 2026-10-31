@@ -364,6 +364,77 @@ impl Hook<'_> {
         })
     }
 
+    /// Whether an element of `r` is active in this cycle (a transaction, a force, a deposit;
+    /// meaningful after the update, with no unchanged assignments skipped).
+    pub fn active(&self, r: impl Into<SigRef>) -> Result<bool, SimError> {
+        let (s, r) = check_ref(self.signals, r.into()).map_err(|k| self.err(k))?;
+        Ok(s.active_in(r, self.cycle))
+    }
+
+    /// Whether an element of `r` is forced.
+    pub fn forced(&self, r: impl Into<SigRef>) -> Result<bool, SimError> {
+        let (s, r) = check_ref(self.signals, r.into()).map_err(|k| self.err(k))?;
+        Ok(s.is_forced(r))
+    }
+
+    /// The drivers overlapping `r` that process `owner` has (none for no such process).
+    pub fn drivers_of(&self, owner: ProcId, r: SigRef) -> Vec<DriverId> {
+        (self.drivers.iter().enumerate())
+            .filter(|(_, d)| {
+                d.owner == owner
+                    && d.signal == r.signal
+                    && r.range.is_none_or(|x| d.range.overlaps(x))
+            })
+            .map(|(i, _)| DriverId(i as u32))
+            .collect()
+    }
+
+    /// The elements driver `d` drives.
+    pub fn driver_target(&self, d: DriverId) -> Option<(SignalId, Range)> {
+        let i = self.drivers.get(d.0 as usize)?;
+        Some((i.signal, i.range))
+    }
+
+    /// The current value of driver `d`, which observers see between phases.
+    pub fn driver_value(&self, d: DriverId) -> Option<Value> {
+        let i = self.drivers.get(d.0 as usize)?;
+        let s = self.signals.get(i.signal.0 as usize)?;
+        let (off, n) = (i.range.offset as usize, i.range.len as usize);
+        Some(if s.lag && (i.direct || i.bdirect) {
+            s.driving.extract(off, n).to_value()
+        } else {
+            s.drivers[i.slot as usize].value.to_value()
+        })
+    }
+
+    /// The pending transactions of driver `d` in time order: when, the elements of the signal,
+    /// and the value (`None`: a null transaction). A zero-delay entry of a direct driver has
+    /// already reached the signal (`Signal::lag`) and is not listed.
+    pub fn driver_transactions(&self, d: DriverId) -> Vec<(Time, Range, Option<Value>)> {
+        let Some(i) = self.drivers.get(d.0 as usize) else {
+            return Vec::new();
+        };
+        lock(&self.slots[i.owner.0 as usize]).st.waveforms[i.local as usize].transactions()
+    }
+
+    /// Whether driver `d` has a transaction due now: asked before the update of the cycle
+    /// (`Phase::NextCycle`). A direct driver answers with [`Hook::driver_is_sole`] after it.
+    pub fn driver_due(&self, d: DriverId) -> bool {
+        let Some(i) = self.drivers.get(d.0 as usize) else {
+            return false;
+        };
+        lock(&self.slots[i.owner.0 as usize]).st.waveforms[i.local as usize].first_time()
+            == Some(self.now)
+    }
+
+    /// Driver `d` commits directly to its signal as the only source of its elements: an activity
+    /// of those elements is its transaction.
+    pub fn driver_is_sole(&self, d: DriverId) -> bool {
+        self.drivers
+            .get(d.0 as usize)
+            .is_some_and(|i| i.direct || i.bdirect)
+    }
+
     /// The name of process `p`, as reports show it.
     pub fn process_name(&self, p: ProcId) -> Option<&str> {
         self.names.get(p.0 as usize).map(String::as_str)
@@ -547,6 +618,13 @@ pub trait Observer: Send {
             }
         }
     }
+    /// Whether this observer reads [`Self::forces`] (the default is no).
+    fn wants_forces(&self) -> bool {
+        false
+    }
+    /// The forces and releases applied in this update, in order: the signal, its elements and
+    /// whether it is a force. After the update of the signals' values, before value changes.
+    fn forces(&mut self, _hook: &mut Hook<'_>, _ops: &[(SignalId, Range, bool)]) {}
     fn report(&mut self, _hook: &mut Hook<'_>, _report: &Report) {}
     /// A sink for the reports and `OUTPUT` text of processes that run serially: they reach it
     /// as they are made instead of when the process suspends, and this observer's `report`
@@ -989,6 +1067,10 @@ pub struct SimControl {
     live_mask: u64,
     /// The phases some observer wants (bit `Phase as u32`), and whether one wants value changes.
     phase_mask: u16,
+    /// Some observer reads the forces and releases of an update (`Observer::wants_forces`),
+    /// listed in `force_log` while they are applied.
+    log_forces: bool,
+    force_log: Vec<(SignalId, Range, bool)>,
     /// The phases some observer wants whether or not a serial process ran.
     phase_always: u16,
     /// Per observer: the phases it wants, and those it wants only after a serial process ran.
@@ -1400,6 +1482,8 @@ impl SimControl {
             part_names: HashMap::new(),
             live_mask: 0,
             phase_mask: 0,
+            log_forces: false,
+            force_log: Vec::new(),
             phase_always: 0,
             obs_phases: Vec::new(),
             serial_ran: true,
@@ -1775,6 +1859,7 @@ impl SimControl {
             .fold(0, |m, &p| m | 1 << p as u32);
         self.watch_changes = self.observers.iter().any(|o| o.wants_value_changes());
         self.next_wanted = self.observers.iter().any(|o| o.wants_next_time());
+        self.log_forces = self.observers.iter().any(|o| o.wants_forces());
         if self.watch_changes {
             self.signals.iter_mut().for_each(|s| {
                 s.watched = true;
@@ -2749,6 +2834,10 @@ impl SimControl {
             let deposit = self.idle_active && sig_ops.iter().any(|op| op.mode == OpMode::Deposit);
             for op in sig_ops {
                 apply_op(sig, &op, now, cycle)?;
+                if self.log_forces && op.mode != OpMode::Deposit {
+                    let force = matches!(op.mode, OpMode::Force(_));
+                    self.force_log.push((SignalId(s), op.range, force));
+                }
             }
             if deposit {
                 // The value a deposit leaves is not what the drivers' processes last assigned:
@@ -2792,6 +2881,14 @@ impl SimControl {
                     down.push(Reverse((sig.level, f)));
                 }
             }
+        }
+        if !self.force_log.is_empty() {
+            let log = std::mem::take(&mut self.force_log);
+            self.notify(|o, h| {
+                if o.wants_forces() {
+                    o.forces(h, &log);
+                }
+            });
         }
         if self.implicits.is_empty() || due.is_empty() && self.implicit_srcs_quiet() {
             due.clear();

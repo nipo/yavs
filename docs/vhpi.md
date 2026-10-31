@@ -15,11 +15,12 @@ For calling a plain C function from VHDL without a plugin, see "Calling C from V
 | Area | Supported | Not supported yet |
 |---|---|---|
 | Loading | `--vhpi=LIB[:ENTRY]`, several plugins, `+args` | |
+| Connectivity | drivers, contributors, loads, the simulated net, basic signals, pending transactions, resolution, signal kind, whether a signal is forced | processes that read a signal, as loads |
 | Hierarchy | instances, blocks, generates, processes, packages, generics, ports, signals, constants, variables, record fields, array elements, user attributes of declarations | aliases, files, equivalent processes of concurrent statements, statements, variables of subprograms |
 | Lookup | by name, by index, iterators, parent/prefix handles | |
 | Reading values | all common formats, from callbacks | whole records, protected objects, raw data |
 | Writing values | signals and ports (deposit or force with propagation), variables, driver transactions | forcing variables, constants, generics, non-propagating modes on signals |
-| Callbacks | start/end of simulation and initialization, time step, delta cycle, process and postponed phases, after delay, time-out, value change, sensitivity on a signal | transactions, force and release, statements, subprogram calls, tool phases, save and restart |
+| Callbacks | start/end of simulation and initialization, time step, delta cycle, process and postponed phases, after delay, time-out, value change, sensitivity on a signal, transaction, force, release | statements, subprogram calls, tool phases, save and restart |
 | Foreign models | functions, procedures, architectures, library and application hooks | file parameters |
 | Misc calls | `vhpi_control` stop and finish, `vhpi_format_value`, `vhpi_get_next_time` (in the read-only phase) | `vhpi_get_data`, `vhpi_put_data`, `vhpi_protected_call` (exported so plugins link, but they report "not implemented") |
 

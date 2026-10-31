@@ -48,7 +48,12 @@ pub(crate) enum Origin {
     Scope(ScopeId),
     /// A signal or port: its elaborated object and its first kernel leaf (its leaves are
     /// consecutive, one per scalar of the layout's record structure).
-    Signal { obj: ObjId, leaf: u32 },
+    /// `part`: a port collapsed into part of its actual's leaf: the kernel elements it is.
+    Signal {
+        obj: ObjId,
+        leaf: u32,
+        part: Option<yavs_kernel::Range>,
+    },
     /// A generic, constant or variable, declared in elaborated region `scope` (a package's
     /// objects have none), with its value when elaboration knows it (generics, constants).
     Decl {
@@ -258,6 +263,7 @@ pub(crate) fn vhpi_name(s: &str) -> String {
 }
 
 pub(crate) struct Design {
+    pub(crate) net: crate::connect::Net,
     pub(crate) nodes: Vec<Node>,
     pub(crate) packages: Vec<NodeId>,
     pub(crate) types: Types,
@@ -314,6 +320,7 @@ impl Design {
 
     fn empty() -> Design {
         Design {
+            net: Default::default(),
             nodes: Vec::new(),
             packages: Vec::new(),
             types: Types::default(),
@@ -335,12 +342,14 @@ impl Design {
             base_tys: RefCell::default(),
             attrs: HashMap::new(),
             attr_nodes: HashMap::new(),
+            subps: HashMap::new(),
         };
         for (id, a) in db.attr_values.iter() {
             b.attrs.entry(a.entity).or_default().push(id);
         }
         b.region(ScopeId(0), None);
         b.packages();
+        b.net();
         b.d.types = b.types.into_inner();
         b.d.locs = e.nets.loc.clone();
         b.d
@@ -352,7 +361,12 @@ impl Design {
         let id = NodeId(self.nodes.len() as u32);
         let unit = matches!(
             n.kind,
-            vhpiArchBodyK | vhpiEntityDeclK | vhpiPackDeclK | vhpiAttrDeclK
+            vhpiArchBodyK
+                | vhpiEntityDeclK
+                | vhpiPackDeclK
+                | vhpiAttrDeclK
+                | vhpiFuncDeclK
+                | vhpiProcDeclK
         );
         if !unit {
             self.by_name.entry(vhpi_name(&n.full)).or_insert(id);
@@ -491,6 +505,8 @@ struct Builder<'a> {
     attrs: HashMap<DeclId, Vec<AttrValueId>>,
     /// The `vhpiAttrDeclK` node of each attribute declaration (made once).
     attr_nodes: HashMap<DeclId, NodeId>,
+    /// The `vhpiFuncDeclK` or `vhpiProcDeclK` node of each subprogram (made once).
+    subps: HashMap<DeclId, NodeId>,
 }
 
 impl Builder<'_> {
@@ -607,6 +623,12 @@ impl Builder<'_> {
             ty: None,
             origin: Origin::Scope(s),
         });
+        if matches!(sc.kind, ScopeKind::Process { .. })
+            && let Some(p) = e.procs.iter().position(|p| p.scope == s)
+        {
+            self.d.net.proc_node.insert(p as u32, n);
+            self.d.net.node_proc.insert(n, p as u32);
+        }
         // After the region itself: the root instance is the first node.
         if let Some(u) = unit {
             let u = self.unit(u);
@@ -665,6 +687,7 @@ impl Builder<'_> {
                 Origin::Signal {
                     obj,
                     leaf: e.nets.obj(obj).leaves.0.0,
+                    part: e.nets.obj(obj).part,
                 },
             ),
             None if kind == vhpiVarDeclK => {
@@ -727,6 +750,9 @@ impl Builder<'_> {
             ty: Some(ty),
             origin,
         });
+        if let Some(obj) = signal {
+            self.d.net.obj_nodes.insert(obj, node);
+        }
         self.attr_specs(node, s, d);
     }
 
@@ -793,6 +819,257 @@ impl Builder<'_> {
             };
             self.d.attr_decls.insert(spec, decl_node);
         }
+    }
+
+    /// The net graph of `Design::net` (`connect.rs`), once every signal has its node.
+    fn net(&mut self) {
+        use crate::connect::{Conn, LeafInfo, NetDriver};
+        use yavs_elab::{LeafRes, ObjKind};
+        use yavs_kernel::{GuardKind, PortMode, Range};
+        let e = self.e;
+        let nets = &e.nets;
+        // The element count of a leaf, and an object's kernel elements.
+        let cover = |o: ObjId| -> Vec<(yavs_kernel::SignalId, Range)> {
+            let obj = nets.obj(o);
+            (obj.leaves.0.0..obj.leaves.1.0)
+                .map(|l| {
+                    let l = yavs_elab::LeafId(l);
+                    nets.kpart(l, obj.part.unwrap_or(Range::new(0, nets.leaf(l).ty.len)))
+                })
+                .collect()
+        };
+        let mut on: HashMap<yavs_kernel::SignalId, Vec<(ObjId, Range)>> = HashMap::new();
+        for i in 0..nets.objs.len() {
+            let o = ObjId(i as u32);
+            for (s, r) in cover(o) {
+                on.entry(s).or_default().push((o, r));
+            }
+        }
+        let depth = |mut s: ScopeId| {
+            let mut d = 0u32;
+            while let Some(p) = e.hier.scope(s).parent {
+                (s, d) = (p, d + 1);
+            }
+            d
+        };
+        // Whether `outer` is `s` or encloses it.
+        let encloses = |outer: ScopeId, mut s: ScopeId| loop {
+            if s == outer {
+                return true;
+            }
+            match e.hier.scope(s).parent {
+                Some(p) => s = p,
+                None => return false,
+            }
+        };
+        // A collapsed port shares its actual's elements, so the object a driver belongs to is
+        // the innermost one on its elements whose scope holds the process.
+        for (pi, p) in e.procs.iter().enumerate() {
+            for &di in &p.drivers {
+                let d = &nets.drivers[di];
+                let (sig, range) = nets.kpart(d.leaf, d.range);
+                let objs: Vec<ObjId> = (on.get(&sig).into_iter().flatten())
+                    .filter(|&&(_, r)| r.overlaps(range))
+                    .map(|&(o, _)| o)
+                    .collect();
+                let inner = |o: &&ObjId| encloses(nets.obj(**o).scope, p.scope);
+                let obj = (objs.iter().filter(inner))
+                    .max_by_key(|o| depth(nets.obj(**o).scope))
+                    .or_else(|| objs.iter().min_by_key(|o| depth(nets.obj(**o).scope)));
+                let Some(&obj) = obj else {
+                    continue;
+                };
+                let ty = self.leaf_scalar(d.leaf);
+                let i = self.d.net.drivers.len() as u32;
+                self.d.net.of_obj.entry(obj).or_default().push(i);
+                self.d.net.of_proc.entry(pi as u32).or_default().push(i);
+                self.d.net.drivers.push(NetDriver {
+                    proc: pi as u32,
+                    sig,
+                    range,
+                    owner: self.d.net.obj_nodes.get(&obj).copied(),
+                    ty,
+                });
+            }
+        }
+        // Port associations, collapsed ones from the actual they share elements with; the
+        // ports of components, which have no node, are joined out of the chains.
+        let mode_of = |m: PortMode| match m {
+            PortMode::In => vhpiInMode,
+            PortMode::Inout => vhpiInoutMode,
+            PortMode::Buffer => vhpiBufferMode,
+            _ => vhpiOutMode,
+        };
+        let mut conns: Vec<Conn> = Vec::new();
+        for edge in &nets.ports {
+            let (fs, fr) = nets.kpart(edge.formal.0, edge.formal.1);
+            let (ad, ar) = nets.kpart(edge.actual.0, edge.actual.1);
+            conns.push(Conn {
+                formal: (nets.leaf(edge.formal.0).obj, fs, fr),
+                actual: (nets.leaf(edge.actual.0).obj, ad, ar),
+                mode: mode_of(edge.mode),
+            });
+        }
+        for edge in &nets.conv_ports {
+            for &(fl, fr) in &edge.formal {
+                for &(al, ar) in &edge.actual {
+                    let (fs, fr) = nets.kpart(fl, fr);
+                    let (ad, ar) = nets.kpart(al, ar);
+                    conns.push(Conn {
+                        formal: (nets.leaf(fl).obj, fs, fr),
+                        actual: (nets.leaf(al).obj, ad, ar),
+                        mode: mode_of(edge.mode),
+                    });
+                }
+            }
+        }
+        for i in 0..nets.objs.len() {
+            let o = ObjId(i as u32);
+            let (ObjKind::Port(m) | ObjKind::ComponentPort(m)) = nets.obj(o).kind else {
+                continue;
+            };
+            for (s, r) in cover(o) {
+                // Its own elements have an edge when it is not collapsed.
+                if conns.iter().any(|c| c.formal.0 == o && c.formal.1 == s) {
+                    continue;
+                }
+                let scope = nets.obj(o).scope;
+                let up = (on.get(&s).into_iter().flatten())
+                    .filter(|&&(x, q)| {
+                        x != o
+                            && q.overlaps(r)
+                            && nets.obj(x).scope != scope
+                            && encloses(nets.obj(x).scope, scope)
+                    })
+                    .max_by_key(|&&(x, _)| depth(nets.obj(x).scope));
+                if let Some(&(x, q)) = up {
+                    conns.push(Conn {
+                        formal: (o, s, r),
+                        actual: (x, s, q),
+                        mode: mode_of(m),
+                    });
+                }
+            }
+        }
+        let hidden = |o: ObjId| matches!(nets.obj(o).kind, ObjKind::ComponentPort(_));
+        // Each association up to a component port continues to what that port is associated to.
+        let mut joined: Vec<Conn> = Vec::new();
+        for c in conns.iter().filter(|c| !hidden(c.formal.0)) {
+            let (mut a, mut guard) = (c.actual, 0);
+            while hidden(a.0) && guard < 16 {
+                let Some(next) = conns.iter().find(|n| n.formal.0 == a.0) else {
+                    break;
+                };
+                a = next.actual;
+                guard += 1;
+            }
+            if !hidden(a.0) {
+                joined.push(Conn {
+                    formal: c.formal,
+                    actual: a,
+                    mode: c.mode,
+                });
+            }
+        }
+        self.d.net.conns = joined;
+        // Per leaf: resolution and kind.
+        for l in &nets.leaves {
+            let (mut resolved, mut whole) = (l.resolution.is_some(), false);
+            let func = match &l.resolution {
+                Some(LeafRes::Func(d)) => Some(*d),
+                Some(LeafRes::Whole(d)) => {
+                    whole = true;
+                    Some(*d)
+                }
+                Some(LeafRes::StdLogic) => self.std_logic_resolved(nets.obj(l.obj).decl),
+                None => None,
+            };
+            if func.is_some() {
+                resolved = true;
+            }
+            let resol_func = func.map(|d| self.subp(d));
+            self.d.net.leaves.push(LeafInfo {
+                resolved,
+                whole,
+                sig_kind: match l.guard {
+                    Some(GuardKind::Register) => vhpiRegister,
+                    Some(GuardKind::Bus) => vhpiBus,
+                    None => vhpiNormal,
+                },
+                resol_func,
+            });
+        }
+    }
+
+    /// The resolution function of the subtype of object `d` (`resolved` for `std_logic`).
+    fn std_logic_resolved(&self, d: DeclId) -> Option<DeclId> {
+        let db = self.db;
+        let DeclKind::Object(o) = &db.decls[d].kind else {
+            return None;
+        };
+        let mut st = Some(o.subtype);
+        while let Some(x) = st {
+            let mut r = db.subtypes[x].resolution.as_ref();
+            while let Some(res) = r {
+                match res {
+                    yavs_sem::types::Resolution::Function(f) => return Some(*f),
+                    yavs_sem::types::Resolution::Element(e) => r = Some(e),
+                    yavs_sem::types::Resolution::Record(fs) => r = fs.first().map(|f| &f.1),
+                }
+            }
+            st = db.subtypes[x].parent;
+        }
+        None
+    }
+
+    /// The value type of leaf `l`: the scalar at the end of its path in the object's shape.
+    fn leaf_scalar(&self, l: yavs_elab::LeafId) -> Scalar {
+        let leaf = self.e.nets.leaf(l);
+        let mut layout = self.shape_layout(&self.e.nets.obj(leaf.obj).shape);
+        let mut path = leaf.path.iter();
+        loop {
+            layout = match layout {
+                Layout::Scalar(s) => return s,
+                Layout::Array { elem, .. } => *elem,
+                Layout::Record(mut f) => {
+                    let &i = path.next().expect("a leaf's path names its record fields");
+                    f.swap_remove(i as usize).1
+                }
+                Layout::Open => unreachable!("a signal's shape is elaborated"),
+            };
+        }
+    }
+
+    /// The node of subprogram `d`: no parent, not in the name index (made once).
+    fn subp(&mut self, d: DeclId) -> NodeId {
+        if let Some(&n) = self.subps.get(&d) {
+            return n;
+        }
+        let decl = &self.db.decls[d];
+        let kind = match &decl.kind {
+            DeclKind::Subprogram(s) if s.ret.is_none() => vhpiProcDeclK,
+            _ => vhpiFuncDeclK,
+        };
+        let name = decl.name.to_string();
+        let (file, line) = self.place(decl.name_span());
+        let n = self.d.push(Node {
+            kind,
+            full: name.clone(),
+            name,
+            parent: None,
+            file,
+            line,
+            regions: Vec::new(),
+            decls: Vec::new(),
+            unit: None,
+            def_name: None,
+            mode: None,
+            layout: None,
+            ty: None,
+            origin: Origin::Named,
+        });
+        self.subps.insert(d, n);
+        n
     }
 
     /// Package instances: every analyzed non-generic package and package instantiation the

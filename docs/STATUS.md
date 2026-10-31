@@ -5455,6 +5455,8 @@ runs the test as written.
 
 ## vhpi export (`crates/yavs-vhpi`, `crates/yavs`)
 
+Done (#830, 2026-10-31): connectivity from the net graph (`crates/yavs-vhpi/src/connect.rs`): drivers, contributors, loads, simulated net, basic signals, transactions, resolution function, signal kind, `vhpiIsForcedP`; `vhpiCbTransaction`, `vhpiCbForce`, `vhpiCbRelease`; `vhpiProvidesConnectivity` is set. A port collapsed into part of a leaf now reads and watches its own elements (it read the leaf's first ones). Not listed: processes that read a signal as loads.
+
 Done (#266): the `yavs` executable exports the full `vhpi_*` C ABI of `vhpi_user.h` (42 symbols:
 34 functions and the eight time constants `vhpiFS` to `vhpiHR`; counted in `exports.txt` and `nm -D` of the default build on 2026-10-28; since the first VHPI audit round every function works except `vhpi_get_next_time`, `vhpi_get_data`, `vhpi_put_data` and `vhpi_protected_call`, which report "not implemented", see `docs/vhpi.md`) on Linux x86_64 and aarch64 (also in the
 glibc 2.17 cargo-zigbuild release builds, where the linker exports more than the list) and in the

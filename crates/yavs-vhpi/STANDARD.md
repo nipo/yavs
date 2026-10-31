@@ -12,16 +12,16 @@ gap has an issue.
 | Area | Status | What works | Missing (issue) |
 |---|---|---|---|
 | Functions | partial | all 34 exported; every one works except the three on the right; `vhpi_get_next_time` in the end-of-time-step phase | `vhpi_get_data`, `vhpi_put_data` ([#832](https://github.com/ru551n/yavs/issues/832)), `vhpi_protected_call` ([#833](https://github.com/ru551n/yavs/issues/833)) |
-| Plugin loading, tool object | supported | startup table or `LIB:ENTRY`, Linux and Windows export tables, `vhpiArgcP`, `vhpiArgvs`, `vhpiNameP`, `vhpiToolVersionP`, `vhpiCapabilitiesP` (hierarchy, static access, foreign models, advanced foreign models, run-time debug) | `vhpiPhaseP` ([#832](https://github.com/ru551n/yavs/issues/832)) |
+| Plugin loading, tool object | supported | startup table or `LIB:ENTRY`, Linux and Windows export tables, `vhpiArgcP`, `vhpiArgvs`, `vhpiNameP`, `vhpiToolVersionP`, `vhpiCapabilitiesP` (hierarchy, static access, connectivity, foreign models, advanced foreign models, run-time debug) | `vhpiPhaseP` ([#832](https://github.com/ru551n/yavs/issues/832)) |
 | Region classes | partial | root and component instances, blocks, `for` and `if`/`case` generates, processes, package instances, entities, architectures, packages | equivalent processes of concurrent statements, statements ([#829](https://github.com/ru551n/yavs/issues/829)); components, configurations, subprograms, libraries ([#831](https://github.com/ru551n/yavs/issues/831)) |
 | Declaration classes | partial | generics, ports, signals, constants, variables, shared variables, user attribute specifications and declarations of declarations | aliases, files, implicit signals, attribute names ([#831](https://github.com/ru551n/yavs/issues/831)) |
 | Types | supported | type and subtype declarations of every scalar, array and record kind, constraints, literals, record elements, units | access, file and protected types as objects ([#831](https://github.com/ru551n/yavs/issues/831), [#833](https://github.com/ru551n/yavs/issues/833)) |
-| One-to-one relations | partial | `vhpiRootInst`, `vhpiTool`, `vhpiUpperRegion`, `vhpiImmRegion`, `vhpiDesignUnit`, `vhpiPrimaryUnit`, `vhpiPrefix`, `vhpiParent`, `vhpiType`, `vhpiSubtype`, `vhpiBaseType`, `vhpiElemType`, `vhpiAttrDecl` | expressions, statements, stack frames ([#829](https://github.com/ru551n/yavs/issues/829)), connectivity ([#830](https://github.com/ru551n/yavs/issues/830)), aliases and configurations ([#831](https://github.com/ru551n/yavs/issues/831)) |
-| One-to-many relations | partial | the region, declaration, element, type, parameter, driver (foreign models) and argument iterators of the hierarchy table below, `vhpiAttrSpecs` of a declaration | `vhpiSensitivitys`, `vhpiSeqStmts` ([#829](https://github.com/ru551n/yavs/issues/829)), drivers, loads and contributors of signals ([#830](https://github.com/ru551n/yavs/issues/830)), `vhpiAliasDecls`, `vhpiSigAttrs`, `vhpiDesignUnits` ([#831](https://github.com/ru551n/yavs/issues/831)); `vhpiGenerateStmts` deliberately not (both references refuse it) |
-| Properties | partial | names, kind, file and line, mode, size, composite and scalar flags, type properties, `vhpiNumPortsP`, `vhpiNumGensP`, `vhpiLabelNameP`, `vhpiGenerateIndexP`, `vhpiIsSharedP`, `vhpiStartLineNoP`, `vhpiResolutionLimitP` | staticness, passive, postponed, guarded ([#829](https://github.com/ru551n/yavs/issues/829)), resolved, signal kind, forced ([#830](https://github.com/ru551n/yavs/issues/830)), library and component names, end line ([#831](https://github.com/ru551n/yavs/issues/831)) |
+| One-to-one relations | partial | `vhpiRootInst`, `vhpiTool`, `vhpiUpperRegion`, `vhpiImmRegion`, `vhpiDesignUnit`, `vhpiPrimaryUnit`, `vhpiPrefix`, `vhpiParent`, `vhpiType`, `vhpiSubtype`, `vhpiBaseType`, `vhpiElemType`, `vhpiAttrDecl`, `vhpiSimNet`, `vhpiResolFunc`, `vhpiSignal` and `vhpiEqProcessStmt` of a driver, `vhpiFormal` and `vhpiActual` of a port association | expressions, statements, stack frames ([#829](https://github.com/ru551n/yavs/issues/829)), aliases and configurations ([#831](https://github.com/ru551n/yavs/issues/831)) |
+| One-to-many relations | partial | the region, declaration, element, type, parameter, driver (foreign models) and argument iterators of the hierarchy table below, `vhpiAttrSpecs` of a declaration, `vhpiDrivers`, `vhpiDrivenSigs`, `vhpiLocalContributors`, `vhpiOptimizedContributors`, `vhpiLocalLoads`, `vhpiOptimizedLoads`, `vhpiBasicSignals`, `vhpiTransactions` | `vhpiSensitivitys`, `vhpiSeqStmts` ([#829](https://github.com/ru551n/yavs/issues/829)), `vhpiAliasDecls`, `vhpiSigAttrs`, `vhpiDesignUnits` ([#831](https://github.com/ru551n/yavs/issues/831)); `vhpiGenerateStmts` deliberately not (both references refuse it) |
+| Properties | partial | names, kind, file and line, mode, size, composite and scalar flags, type properties, `vhpiNumPortsP`, `vhpiNumGensP`, `vhpiLabelNameP`, `vhpiGenerateIndexP`, `vhpiIsSharedP`, `vhpiStartLineNoP`, `vhpiResolutionLimitP`, `vhpiIsResolvedP`, `vhpiIsBasicP`, `vhpiSigKindP`, `vhpiIsForcedP`, `vhpiTimeP` | staticness, passive, postponed, guarded ([#829](https://github.com/ru551n/yavs/issues/829)), library and component names, end line ([#831](https://github.com/ru551n/yavs/issues/831)) |
 | Value formats | partial | every format except the four on the right, on scalars, arrays of any dimension, record fields | records as a whole, `vhpiRawDataVal`, `vhpiSmallPhysVal`, `vhpiSmallPhysVecVal`, `vhpiPtrVecVal` ([#833](https://github.com/ru551n/yavs/issues/833)) |
 | Put modes | supported | `vhpiDepositPropagate`, `vhpiForcePropagate`, `vhpiRelease`, `vhpiDeposit` on variables, `vhpiSizeConstraint` on foreign results, `vhpi_schedule_transaction` on foreign drivers (inertial with pulse rejection, transport) | `vhpiDeposit` and `vhpiForce` on signals refused on purpose (two of three references refuse them) |
-| Callback reasons | partial | the simulation-cycle reasons, after delay, value change, `vhpiCbTimeOut`, `vhpiCbRepTimeOut`, `vhpiCbSensitivity` on a signal | transaction, force, release ([#830](https://github.com/ru551n/yavs/issues/830)); statement, subprogram call, suspend and resume ([#829](https://github.com/ru551n/yavs/issues/829)); tool, analysis and elaboration phases, quiescence, interrupt, errors, interactive, save, restart and reset ([#832](https://github.com/ru551n/yavs/issues/832)) |
+| Callback reasons | partial | the simulation-cycle reasons, after delay, value change, `vhpiCbTimeOut`, `vhpiCbRepTimeOut`, `vhpiCbSensitivity` on a signal, transaction (signal or driver), force, release | statement, subprogram call, suspend and resume ([#829](https://github.com/ru551n/yavs/issues/829)); tool, analysis and elaboration phases, quiescence, interrupt, errors, interactive, save, restart and reset ([#832](https://github.com/ru551n/yavs/issues/832)) |
 | Foreign models | supported | `vhpiFuncF`, `vhpiProcF`, `vhpiArchF`, `vhpiLibF`, `vhpiAppF`, `vhpi_create` of processes and drivers | file parameters, `vhpiForeignfs` ([#831](https://github.com/ru551n/yavs/issues/831)) |
 | Simulation control | partial | `vhpi_control(vhpiStop)`, `vhpi_control(vhpiFinish)` | `vhpiReset` ([#832](https://github.com/ru551n/yavs/issues/832)) |
 | Errors and handles | supported | `vhpi_check_error` after every call, `vhpi_assert`, `vhpi_printf`, generational handles, `vhpi_compare_handles`, `vhpi_release_handle`, iterators released when exhausted | |
@@ -54,6 +54,18 @@ Writing them or a value-change callback on them is `W0903`.
 Types: `vhpiType` (and `vhpiSubtype`), `vhpiBaseType` and `vhpiElemType` give kind, name,
 constraints (integer, enumeration, floating and physical ranges with bounds, direction, null
 flag), enumeration literals, record elements, physical units and dimensions.
+
+### Connectivity
+
+From the signal, port or sub-element: `vhpiDrivers`, `vhpiLocalContributors` (its drivers and the
+port associations feeding it), `vhpiOptimizedContributors` (every driver reaching it through
+ports), `vhpiLocalLoads` (the associations it feeds), `vhpiOptimizedLoads` (the ports it reaches),
+`vhpiSimNet` (the outermost actual), `vhpiBasicSignals`, `vhpiResolFunc`, `vhpiIsResolvedP`,
+`vhpiSigKindP`, `vhpiIsBasicP`, `vhpiIsForcedP`. From a process: `vhpiDrivenSigs`. A driver
+(`vhpiDriverK`) has `vhpiSignal`, `vhpiEqProcessStmt`, `vhpiSizeP`, its value and
+`vhpiTransactions`; a transaction (`vhpiTransactionK`) has `vhpiTimeP`, `vhpiIsNullP` and its
+value, as pending when the iterator was made. A port association (`vhpiInPortK`, `vhpiOutPortK`)
+has `vhpiFormal` and `vhpiActual`. Processes that read a signal are not listed as loads.
 
 ### Values
 
@@ -95,6 +107,10 @@ reasons, each also in its `Rep` (repeating) form where the standard has one:
 - `vhpiCbAfterDelay`
 - `vhpiCbValueChange` on signals, ports and their sub-elements: runs once in every cycle in
   which any element changed, with the value in the format the `value` field asks for.
+- `vhpiCbTransaction` on signals, ports, their sub-elements and drivers: once in every cycle
+  with a transaction, also one that changes nothing, right after the update.
+- `vhpiCbForce` and `vhpiCbRelease` on signals, ports and their sub-elements: for a VHDL force
+  or release and for `vhpi_put_value` alike, once per operation.
 - The foreign-model reasons: `vhpiCbTimeOut` and `vhpiCbRepTimeOut` behave as after-delay
   callbacks (the repeating one every period until removed), `vhpiCbSensitivity` on a signal
   as a value-change callback.

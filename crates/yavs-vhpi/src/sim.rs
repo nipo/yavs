@@ -198,9 +198,26 @@ impl yavs_kernel::Observer for VhpiObserver {
             hooked(hook, crate::foreign::start_models);
             with_state(|s| requests(s, hook, false));
         }
+        // Transactions (#830): a driver's as the cycle starts, the rest after the update.
+        if phase == Phase::NextCycle {
+            with_state(|s| s.note_driver_due(hook));
+        } else if phase == Phase::StartOfProcesses {
+            let ids = with_state(|s| s.transaction_due(hook));
+            if !ids.is_empty() {
+                Self::dispatch(hook, false, false, |_| ids);
+            }
+        }
         for &r in reasons {
             Self::dispatch(hook, read_only, early, |s| s.cbs.due(r));
         }
+    }
+
+    fn wants_forces(&self) -> bool {
+        true
+    }
+
+    fn forces(&mut self, hook: &mut Hook<'_>, ops: &[(SignalId, Range, bool)]) {
+        Self::dispatch(hook, false, false, |s| s.cbs.forces(ops));
     }
 
     fn wake(&mut self, hook: &mut Hook<'_>, id: WakeId) {

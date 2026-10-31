@@ -1068,7 +1068,7 @@ fn vhpi_user_attributes_and_properties() {
             "root: gens=1 ports=0",
             "g1(3): label=g1 index=3 line=12",
             "p:v: shared=0",
-            "tool: capabilities=307",
+            "tool: capabilities=311",
         ],
         "{out}"
     );
@@ -1177,4 +1177,126 @@ fn vhpi_format_value_converts_between_formats() {
         ],
         "{out}"
     );
+}
+
+const CONNECT: &str = "library ieee; use ieee.std_logic_1164.all;\n\
+    entity child is port (i : in std_logic; o : out std_logic); end;\n\
+    architecture a of child is begin\n\
+    drv: process (i) begin o <= i; end process;\n\
+    end;\n\
+    library ieee; use ieee.std_logic_1164.all;\n\
+    entity wrap is port (i : in std_logic; o : out std_logic); end;\n\
+    architecture a of wrap is\n\
+    component child is port (i : in std_logic; o : out std_logic); end component;\n\
+    begin\n\
+    w: child port map (i => i, o => o);\n\
+    end;\n\
+    library ieee; use ieee.std_logic_1164.all;\n\
+    entity top is end;\n\
+    architecture a of top is\n\
+    signal clk, bus_s, g : std_logic := '0';\n\
+    signal v : std_logic_vector(3 downto 0) := \"0000\";\n\
+    signal f : bit := '0';\n\
+    signal same : bit := '0';\n\
+    signal y : std_logic;\n\
+    type rec is record a : bit; b : bit_vector(1 downto 0); end record;\n\
+    signal r : rec;\n\
+    constant c : integer := 1;\n\
+    begin\n\
+    u1: entity work.child port map (i => clk, o => v(2));\n\
+    u2: entity work.wrap port map (i => clk, o => y);\n\
+    p1: process begin\n\
+      bus_s <= '0' after 1 ns, '1' after 4 ns;\n\
+      clk <= '1' after 2 ns;\n\
+      same <= '0' after 3 ns;\n\
+      wait;\n\
+    end process;\n\
+    p2: process begin bus_s <= '1' after 3 ns; wait; end process;\n\
+    pf: process begin\n\
+      wait for 6 ns; f <= force '1';\n\
+      wait for 2 ns; f <= release;\n\
+      wait for 2 ns; std.env.finish;\n\
+    end process;\n\
+    end;\n";
+
+fn connect(entry: &str) -> String {
+    let (lib, so) = setup_with("connect", CONNECT);
+    let spec = format!("--vhpi={}:{entry}", so.display());
+    let (code, err, out) = yavs(&["run", &lib, &spec, "--resolution=ns", "top"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(!err.contains("W0904"), "{err}");
+    out
+}
+
+/// Drivers, contributors, loads, the net and the transactions of signals, through ports that
+/// are collapsed, kept and hidden behind a component (#830).
+#[test]
+fn vhpi_connectivity_of_signals() {
+    let out = connect("graph");
+    for want in [
+        "top:bus_s: resolved=1 kind=1003 basic=1 forced=0",
+        "  drivers: driver(:top:p1 of :top:bus_s) driver(:top:p2 of :top:bus_s)",
+        "top:v: resolved=1 kind=1003 basic=0 forced=0",
+        "  local contributors: vhpiOutPortK(:top:u1:o<-:top:v)",
+        "  optimized contributors: driver(:top:u1:drv of :top:u1:o)",
+        "top:u1:i: resolved=1 kind=1003 basic=1 forced=0",
+        "  net: :top:v",
+        "  net: :top:clk",
+        "  local loads: vhpiInPortK(:top:u1:i<-:top:clk) vhpiInPortK(:top:u2:i<-:top:clk)",
+        "  resolution: vhpiFuncDeclK resolved",
+        "  basic signals of r: :top:r.a :top:r.b(1) :top:r.b(0)",
+        "  signals p1 drives: :top:clk :top:bus_s :top:same",
+        "  vhpiTransactionK at 1 null=0 value 0",
+        "  vhpiTransactionK at 4 null=0 value 1",
+        "  vhpiTransactionK at 3 null=0 value 1",
+    ] {
+        assert!(out.contains(want), "no `{want}` in\n{out}");
+    }
+    // A component port has no node: the wrapper's port is what the child's is associated to.
+    assert!(out.contains("vhpiOutPortK(:top:u2:o<-:top:y)"), "{out}");
+}
+
+/// Transaction, force and release callbacks, with values and times (#830).
+#[test]
+fn vhpi_transaction_force_and_release_callbacks() {
+    let out = connect("cbs");
+    let lines: Vec<&str> = (out.lines())
+        .filter(|l| {
+            [
+                "transaction",
+                "driver",
+                "unchanged",
+                "force",
+                "release",
+                "changed",
+            ]
+            .iter()
+            .any(|t| l.starts_with(t))
+        })
+        .collect();
+    assert_eq!(
+        lines,
+        [
+            "force on a constant: NULL error=1",
+            "changed :top:u1:o at 0: 0",
+            "transaction :top:bus_s at 1: 0",
+            "driver :top:bus_s at 1: 0",
+            "changed :top:u1:o at 2: 1",
+            "transaction :top:bus_s at 3: X",
+            "unchanged :top:same at 3: 0",
+            "transaction :top:bus_s at 4: 1",
+            "driver :top:bus_s at 4: 1",
+            "force :top:f at 6: 1",
+            "release :top:f at 8: 0",
+        ],
+        "{out}"
+    );
+}
+
+/// A force and a release from the plugin reach the same callbacks; `vhpiIsForcedP` follows.
+#[test]
+fn vhpi_force_release_through_vhpi_and_forced_flag() {
+    let out = connect("vhpiforce");
+    assert!(out.contains("force at 2 forced=1"), "{out}");
+    assert!(out.contains("release at 5 forced=0"), "{out}");
 }

@@ -21,6 +21,7 @@ pub mod sys;
 
 mod abi;
 mod callbacks;
+mod connect;
 mod design;
 mod foreign;
 mod model;

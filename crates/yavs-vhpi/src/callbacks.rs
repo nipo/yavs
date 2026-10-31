@@ -121,7 +121,7 @@ pub(crate) struct Callbacks {
 /// reason yavs does not support. A value-change callback repeats until it is removed.
 fn split(reason: i32) -> Option<(i32, bool)> {
     Some(match reason {
-        vhpiCbValueChange => (reason, true),
+        vhpiCbValueChange | vhpiCbForce | vhpiCbRelease | vhpiCbTransaction => (reason, true),
         vhpiCbStartOfSimulation
         | vhpiCbEndOfSimulation
         | vhpiCbStartOfInitialization
@@ -157,7 +157,33 @@ pub(crate) enum RegisterError {
     Misuse(&'static str),
 }
 
+impl Callback {
+    /// The kernel elements of a value-change, force, release or transaction callback.
+    pub(crate) fn watching(&self) -> &[(SignalId, Range)] {
+        &self.watch
+    }
+}
+
 impl Callbacks {
+    /// The enabled force (`force`) or release callbacks watching an element of `ops`, in
+    /// registration order per operation.
+    pub(crate) fn forces(&self, ops: &[(SignalId, Range, bool)]) -> Vec<u64> {
+        let mut ids: Vec<u64> = Vec::new();
+        for &(s, r, force) in ops {
+            let reason = if force { vhpiCbForce } else { vhpiCbRelease };
+            for &id in self.armed.get(&reason).into_iter().flatten() {
+                let hit = self.all[&id]
+                    .watch
+                    .iter()
+                    .any(|&(x, w)| x == s && w.overlaps(r));
+                if hit && !ids.contains(&id) {
+                    ids.push(id);
+                }
+            }
+        }
+        ids
+    }
+
     /// Registers a callback; `delay` is the `time` field the caller passed (after-delay
     /// reasons need it), `watch` the object of a value-change callback and its kernel
     /// elements. Returns the callback's id.
@@ -174,6 +200,16 @@ impl Callbacks {
             (vhpiCbValueChange, None) => {
                 return Err(RegisterError::Misuse(
                     "a value-change callback needs a signal, a port or a sub-element of one",
+                ));
+            }
+            (vhpiCbForce | vhpiCbRelease, None) => {
+                return Err(RegisterError::Misuse(
+                    "a force or release callback needs a signal, a port or a sub-element of one",
+                ));
+            }
+            (vhpiCbTransaction, None) => {
+                return Err(RegisterError::Misuse(
+                    "a transaction callback needs a signal, a port, a sub-element or a driver",
                 ));
             }
             (_, w) => w.map_or((None, Box::default()), |(o, w)| (Some(o), w)),
