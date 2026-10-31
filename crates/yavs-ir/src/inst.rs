@@ -1191,8 +1191,7 @@ impl Inst {
             }
             Inst::Call { dst, .. }
             | Inst::CallNative { dst, .. }
-            | Inst::CallForeign { dst, .. }
-            | Inst::Elab { dst, .. } => {
+            | Inst::CallForeign { dst, .. } => {
                 if let Some(r) = dst {
                     d(r, None);
                 }

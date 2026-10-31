@@ -134,4 +134,3 @@ cargo test -p yavs-lower -p yavs-elab                       # producers
 ## 6. Coordination
 
 - Requests to IR/interp go in `crates/yavs-ir/README.md` "Requests" with a dated answer.
-- Open issues (snapshot 2026-10-18, `gh issue list -R ru551n/yavs --label crate:ir`): none left of #79.

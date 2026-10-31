@@ -224,7 +224,7 @@ pub(crate) fn verify_func(
                     Ok((r, Role::Def)) => def[r.0 as usize] = (b.0, epoch),
                 }
             }
-            check_inst(prog, f, id, inst, depth, is_fn, &mut |m| err(Some(pc), m));
+            check_inst(prog, f, inst, depth, is_fn, &mut |m| err(Some(pc), m));
             let suspends = match *inst {
                 Inst::Suspend { .. } => true,
                 Inst::Call { func, .. } => prog
@@ -243,7 +243,6 @@ pub(crate) fn verify_func(
 fn check_inst(
     prog: &Program,
     f: &crate::Func,
-    id: FuncId,
     inst: &Inst,
     depth: u8,
     is_fn: bool,
