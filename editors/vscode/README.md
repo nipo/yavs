@@ -115,6 +115,7 @@ Set breakpoints, start the configuration with F5, and the run continues to the f
 - "Break on Value Change" on a signal in the Variables view stops after the cycle in which it
   changed.
 - Every stop shows the simulation time and delta. Reports go to the Debug Console.
+- The Breakpoints view has filters that stop at a report of a severity: Assertion: failure, error, warning, Report: note.
 
 Commands in the palette, available only while a `yavs` session runs:
 
@@ -126,6 +127,8 @@ Commands in the palette, available only while a `yavs` session runs:
 | yavs: Step to the next time step | run the next cycle and all deltas at that time |
 | yavs: Break when a signal equals... | stop when the signal takes a VHDL literal of its type |
 | yavs: Clear signal value breakpoints | remove those |
+| yavs: Show Drivers | in the context menu of a signal in the Variables view: each driver, its value and source line, in the Debug Console |
+| yavs: Find Signals or Variables... | search the hierarchy with a pattern; what you pick is added to the wave, or else examined |
 | yavs: Force a signal..., Deposit a signal value..., Release a forced signal... | also in the context menu of a signal in the Variables view; the target may be a field, an element or a slice |
 
 Values are VHDL literals of the target's type: `'1'`, `42`, `16#FF#`, `"01ZX"`, `x"A5"`, `10 ns`,

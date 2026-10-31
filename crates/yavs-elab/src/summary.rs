@@ -15,7 +15,15 @@ fn place(sources: &SourceMap, span: Option<Span>) -> String {
         || "(no source place)".to_string(),
         |s| {
             let f = sources.get(s.file);
-            format!("{}:{}", f.path, f.line_col(s.start).0)
+            let p = std::path::Path::new(&f.path);
+            let short = std::env::current_dir()
+                .ok()
+                .and_then(|d| p.strip_prefix(d).ok().map(|x| x.display().to_string()));
+            format!(
+                "{}:{}",
+                short.as_deref().unwrap_or(&f.path),
+                f.line_col(s.start).0
+            )
         },
     )
 }

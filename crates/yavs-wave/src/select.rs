@@ -48,6 +48,11 @@ fn any_match(patterns: &[String], path: &str) -> bool {
     })
 }
 
+/// Whether `path` matches `pattern` (case folded; `*`, `**`, `?` as in [`Selection`]).
+pub fn glob_match(pattern: &str, path: &str) -> bool {
+    glob(pattern.as_bytes(), path.as_bytes())
+}
+
 fn glob(p: &[u8], s: &[u8]) -> bool {
     match p.split_first() {
         None => s.is_empty(),

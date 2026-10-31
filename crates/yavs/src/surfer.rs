@@ -31,6 +31,8 @@ pub enum Msg {
     Add(Vec<(String, bool)>, Sender<Result<usize, String>>),
     /// A console's `wave cursor`, in fs.
     Cursor(u64),
+    /// What the view shows, for `wave save`.
+    Items(Sender<Result<Vec<String>, String>>),
     /// The run starts over and the file with it: its size with no values yet.
     Restart(Option<u64>),
 }
@@ -46,6 +48,17 @@ pub struct Surfer {
     recorded: HashMap<String, (String, bool)>,
 }
 
+/// The names of `recorded` that are variables, in a fixed order.
+fn variables(recorded: &HashMap<String, (String, bool)>) -> Vec<String> {
+    let mut v: Vec<String> = recorded
+        .iter()
+        .filter(|(_, x)| !x.1)
+        .map(|(k, _)| k.clone())
+        .collect();
+    v.sort_unstable();
+    v
+}
+
 impl Surfer {
     /// Connects to the Surfer at `addr`, or starts `surfer` from PATH when `None`, loads `file`
     /// and adds `names`; then reloads every `every` while the file grows. An error is E0130.
@@ -55,6 +68,7 @@ impl Surfer {
         names: Vec<String>,
         recorded: HashMap<String, (String, bool)>,
         every: Option<Duration>,
+        layout: Option<PathBuf>,
     ) -> Result<Arc<Self>, Box<Diagnostic>> {
         let fail = |m: &str, note: String, help: &str| {
             Box::new(
@@ -102,7 +116,19 @@ impl Surfer {
         // Before the run: the thread comes to it when the run may have written.
         let empty = std::fs::metadata(&file).map(|m| m.len()).ok();
         let path = file.clone();
-        let thread = std::thread::spawn(move || drive(&mut w, &rx, &path, every, names, empty));
+        let known = variables(&recorded);
+        let thread = std::thread::spawn(move || {
+            drive(
+                &mut w,
+                &rx,
+                &path,
+                every,
+                names,
+                empty,
+                &known,
+                layout.as_deref(),
+            )
+        });
         Ok(Arc::new(Self {
             tx: Mutex::new(Some(tx)),
             thread: Mutex::new(Some(thread)),
@@ -177,6 +203,13 @@ impl yavs_dap::Viewer for Surfer {
         self.send(Msg::Add(found, tx));
         rx.recv_timeout(WAIT + WAIT)
             .map_err(|_| "Surfer does not answer".to_string())?
+    }
+
+    fn items(&self) -> Result<Vec<String>, String> {
+        let (tx, rx) = channel();
+        self.send(Msg::Items(tx));
+        rx.recv_timeout(2 * WAIT)
+            .unwrap_or_else(|_| Err("Surfer does not answer".to_string()))
     }
 
     fn cursor(&self, fs: u64) {
@@ -333,6 +366,16 @@ fn spawn() -> io::Result<TcpStream> {
     }
 }
 
+/// The recorded name that the name Surfer displays (`cnt [3:0]`, `…u1.clk`) stands for, if one.
+fn shown_name(display: &str, known: &[String]) -> Option<String> {
+    let name = display.split(" [").next()?.trim_start_matches('…');
+    let key = name.to_ascii_lowercase();
+    let tail = format!(".{}", key.trim_start_matches('.'));
+    let mut hits = known.iter().filter(|k| **k == key || k.ends_with(&tail));
+    let first = hits.next()?;
+    hits.next().is_none().then(|| first.clone())
+}
+
 /// One WCP connection: messages read by a thread of their own, `waveforms_loaded` counted, and
 /// the displayed items by name.
 struct Wcp {
@@ -473,6 +516,29 @@ impl Wcp {
     }
 
     /// Sends a command and waits for its response.
+    /// The signal list of the view, in order, as dotted names. Surfer gives only the name it
+    /// displays: what yavs added it knows by id, the rest it finds by that name in `known`, and
+    /// what stays ambiguous is left out.
+    fn items(&mut self, known: &[String]) -> io::Result<Vec<String>> {
+        let ids = self.command("get_item_list", json!({}))?;
+        let ids = ids["ids"].clone();
+        let info = self.command("get_item_info", json!({"ids": ids.clone()}))?;
+        let list = info["results"].as_array().cloned().unwrap_or_default();
+        let ids = ids.as_array().cloned().unwrap_or_default();
+        let by_id = |id: &Json| {
+            self.shown
+                .iter()
+                .find(|(_, v)| *v == id)
+                .map(|(k, _)| k.clone())
+        };
+        Ok(list
+            .iter()
+            .zip(&ids)
+            .filter(|(i, _)| i["type"] == "Variable")
+            .filter_map(|(i, id)| by_id(id).or_else(|| shown_name(i["name"].as_str()?, known)))
+            .collect())
+    }
+
     fn command(&mut self, cmd: &str, mut m: Json) -> io::Result<Json> {
         m["type"] = json!("command");
         m["command"] = json!(cmd);
@@ -554,6 +620,7 @@ impl View<'_> {
 /// The viewer thread: a reload when the file grew (at most one under way), the cursor, markers
 /// and colours at debugger stops (those queued count as one), and when the run is over (the sender
 /// dropped) the whole run in view.
+#[allow(clippy::too_many_arguments)]
 fn drive(
     w: &mut Wcp,
     rx: &Receiver<Msg>,
@@ -561,6 +628,8 @@ fn drive(
     every: Option<Duration>,
     names: Vec<String>,
     empty: Option<u64>,
+    known: &[String],
+    layout: Option<&Path>,
 ) -> io::Result<()> {
     let mut v = View {
         file,
@@ -632,6 +701,9 @@ fn drive(
                 };
                 let _ = answer.send(r);
             }
+            Ok(Msg::Items(answer)) => {
+                let _ = answer.send(w.items(known).map_err(|e| e.to_string()));
+            }
             Ok(Msg::Cursor(t)) => {
                 w.command("set_cursor", json!({"timestamp": t}))?;
                 w.command("set_viewport_to", json!({"timestamp": t}))?;
@@ -651,9 +723,31 @@ fn drive(
                     v.reload(w)?;
                     w.wait_loaded(v.asked)?;
                 }
+                // The list of this session, for the next, unless it shows nothing.
+                if let Some(f) = layout
+                    && let Ok(items) = w.items(known)
+                    && !items.is_empty()
+                {
+                    let _ = yavs_dap::save_layout(f, &items);
+                }
                 w.command("zoom_to_fit", json!({"viewport_idx": 0}))?;
                 return Ok(());
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::shown_name;
+
+    #[test]
+    fn a_displayed_name_is_found_when_it_means_one_signal() {
+        let known = ["xt.clk", "xt.u1.clk", "xt.cnt"].map(String::from);
+        assert_eq!(shown_name("cnt [3:0]", &known).as_deref(), Some("xt.cnt"));
+        assert_eq!(shown_name("…u1.clk", &known).as_deref(), Some("xt.u1.clk"));
+        assert_eq!(shown_name("xt.clk", &known).as_deref(), Some("xt.clk"));
+        assert_eq!(shown_name("clk", &known), None);
+        assert_eq!(shown_name("nope", &known), None);
     }
 }

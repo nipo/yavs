@@ -82,6 +82,16 @@ warning ``W0131``, also under ``-W error``. Starting it or connecting to it is c
 A signal shows in Surfer under its last name: ``x`` for ``tb.r.x``, ``(0)`` for ``tb.m(0)``, and its times in femtoseconds, since
 the file has that resolution.
 
+Keep the signal list
+--------------------
+
+The list a session shows in the viewer survives a restart and a new run: when a session ends, yavs
+saves it, and the next ``--surfer`` run of the same testbench shows it instead of the default.
+Names that no longer exist are left out. ``wave save [FILE]`` and ``wave load [FILE]`` do the same
+at the console, for this testbench's list or a file of your own (:doc:`on-disk`). The list holds
+names only, not colours or the order of groups, and an entry added in the viewer whose short name
+fits several signals is left out.
+
 See also
 --------
 

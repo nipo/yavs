@@ -198,6 +198,17 @@ async function surferGoesToTheDeclaration(folder, tb, stoppedAgain) {
   const at = new vscode.Position(6, 10); // `signal v : ...`
   editor.selection = new vscode.Selection(at, at);
   await vscode.commands.executeCommand('yavs.addToWave');
+  // "Show Drivers" and the quick pick of "Find Signals or Variables...".
+  await vscode.commands.executeCommand('yavs.showDrivers', { variable: { name: 'cnt', evaluateName: 'tb.cnt' } });
+  const shown = await session.customRequest('evaluate', { expression: 'drivers cnt', context: 'repl' });
+  assert.match(shown.result, /tb\.cnt/);
+  const { showInputBox, showQuickPick } = vscode.window;
+  vscode.window.showInputBox = async () => '*cn*';
+  vscode.window.showQuickPick = async (items) => items;
+  added.length = 0;
+  await vscode.commands.executeCommand('yavs.findSignals');
+  vscode.window.showInputBox = showInputBox;
+  vscode.window.showQuickPick = showQuickPick;
   const ended = waitFor('end of the Surfer session', 60000, (r) => vscode.debug.onDidTerminateDebugSession(r));
   await session.customRequest('continue', { threadId: 1 });
   await ended;

@@ -7,6 +7,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+fst-reader = "0.17.1"
 wavefst = { version = "0.4.0", default-features = false, features = ["writer", "lz4", "simd"] }
 yavs-elab = { path = "../yavs-elab" }
 yavs-interp = { path = "../yavs-interp" }

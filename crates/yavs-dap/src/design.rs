@@ -189,6 +189,12 @@ pub(crate) struct Sig {
     /// Lower-case path, `:top:u1:s`.
     pub path: String,
     pub ty: String,
+    /// The name of its subtype as declared (`std_logic`, where `ty` is the base type).
+    pub declared: String,
+    /// `signal`, or the mode of a port.
+    pub kind: String,
+    /// The resolution function of its type, if any.
+    pub resolution: Option<String>,
     /// Where it is declared: the file and line.
     pub decl: Option<(String, u32)>,
     /// The type values are read and written in.
@@ -211,6 +217,59 @@ impl Sig {
     pub fn show(&self, read: &dyn Fn(SigRef) -> Option<Value>) -> String {
         self.value(read)
             .map_or_else(|| "?".into(), |v| literal_image(&v, &self.lit))
+    }
+
+    /// How many kernel parts store it.
+    pub fn leaf_count(&self) -> usize {
+        self.leaves.len()
+    }
+
+    /// The kernel signal and elements of each part.
+    pub fn leaf_parts(&self) -> impl Iterator<Item = (SignalId, Range)> + use<'_> {
+        self.leaves.iter().copied()
+    }
+
+    /// A value of (part of) leaf `l` as VHDL: logic as a literal, others element by element in
+    /// the type's images.
+    pub fn leaf_image(&self, l: usize, v: &Value) -> String {
+        fn leaf<'a>(f: &'a Fmt, t: &'a LitType, l: &mut usize) -> Option<(&'a Fmt, &'a LitType)> {
+            match (f, t) {
+                (Fmt::Logic(_) | Fmt::Bytes(_), _) if *l == 0 => Some((f, t)),
+                (Fmt::Logic(_) | Fmt::Bytes(_), _) => {
+                    *l -= 1;
+                    None
+                }
+                (Fmt::Array(_, e), LitType::Array { elem, .. }) => leaf(e, elem, l),
+                (Fmt::Record(fs), LitType::Record(ts)) => {
+                    fs.iter().zip(ts).find_map(|(f, (_, t))| leaf(f, t, l))
+                }
+                _ => None,
+            }
+        }
+        match (v, leaf(&self.fmt, &self.lit, &mut { l })) {
+            (Value::Logic(x), Some((Fmt::Logic(base), LitType::Enum(_)))) if *base == 0 => {
+                if x.len() == 1 {
+                    format!("'{x}'")
+                } else {
+                    format!("\"{x}\"")
+                }
+            }
+            (Value::Logic(x), _) => format!("\"{x}\""),
+            (Value::Bytes(b), Some((Fmt::Bytes(size), t))) => {
+                let f = Fmt::Bytes(*size);
+                let n = b.len() / (*size).max(1) as usize;
+                let vals = [Some(v.clone())];
+                let one = |k: usize| {
+                    f.decode(t, &vals, k as u64)
+                        .map_or_else(|| "?".to_string(), |x| literal_image(&x, t))
+                };
+                match n {
+                    1 => one(0),
+                    _ => format!("({})", (0..n).map(one).collect::<Vec<_>>().join(", ")),
+                }
+            }
+            _ => "?".to_string(),
+        }
     }
 
     /// The kernel signals that store it.
@@ -324,6 +383,48 @@ pub(crate) struct Region {
     pub procs: Vec<String>,
 }
 
+/// The name of the subtype an object is declared with (`std_logic`, not its base type).
+fn declared_type(db: &Db, d: yavs_sem::DeclId) -> Option<String> {
+    let DeclKind::Object(o) = &db.decls[d].kind else {
+        return None;
+    };
+    let mut cur = Some(o.subtype);
+    while let Some(s) = cur {
+        if let Some(n) = &db.subtypes[s].name {
+            return Some(n.text.to_string());
+        }
+        cur = db.subtypes[s].parent;
+    }
+    None
+}
+
+fn mode_word(m: yavs_kernel::PortMode) -> &'static str {
+    match m {
+        yavs_kernel::PortMode::In => "in",
+        yavs_kernel::PortMode::Out => "out",
+        yavs_kernel::PortMode::Inout => "inout",
+        yavs_kernel::PortMode::Buffer => "buffer",
+    }
+}
+
+/// The name of the resolution function of `shape`, of itself or of its elements.
+fn resolution_of(db: &Db, shape: &Shape) -> Option<String> {
+    let name = |d: yavs_sem::DeclId| db.decls[d].name.to_string();
+    match shape {
+        Shape::Scalar { res, .. } => res.map(name),
+        Shape::Array { res, elem, .. } => res
+            .map(name)
+            .or_else(|| resolution_of(db, elem).map(|e| format!("{e} (per element)"))),
+        Shape::Record { res, fields, .. } => res.map(name).or_else(|| {
+            let parts: Vec<String> = fields
+                .iter()
+                .filter_map(|(n, f)| Some(format!("{} by {}", n.text, resolution_of(db, f)?)))
+                .collect();
+            (!parts.is_empty()).then(|| parts.join(", "))
+        }),
+    }
+}
+
 /// A file path as the client sees it: absolute.
 pub(crate) fn absolute(p: &str) -> String {
     std::path::absolute(p).map_or_else(|_| p.to_string(), |c| c.display().to_string())
@@ -412,6 +513,13 @@ impl Design {
                     name: obj.name.text.to_string(),
                     path: path.clone(),
                     ty: db.types[obj.shape.ty()].name.text.to_string(),
+                    declared: declared_type(db, obj.decl)
+                        .unwrap_or_else(|| db.types[obj.shape.ty()].name.text.to_string()),
+                    kind: match obj.kind {
+                        ObjKind::Port(m) => format!("port, mode {}", mode_word(m)),
+                        _ => "signal".to_string(),
+                    },
+                    resolution: resolution_of(db, &obj.shape),
                     decl: decl_of(db, obj.name.span, source_map),
                     leaves: (obj.leaves.0.0..obj.leaves.1.0)
                         .map(|l| {

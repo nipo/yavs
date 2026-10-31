@@ -1715,10 +1715,9 @@ pub fn run(
         .profile
         .is_some()
         .then(yavs_kernel::profile::Profile::install);
-    let activity = a
-        .activity
-        .is_some()
-        .then(yavs_kernel::profile::Activity::install);
+    // A debug session always counts, for the console's `activity`.
+    let activity =
+        (a.activity.is_some() || a.debugged()).then(yavs_kernel::profile::Activity::install);
     if a.debugged() {
         let (db, e) = (Arc::new(db), Arc::new(e));
         // One signal thread, for the simulation of the moment.
@@ -1731,6 +1730,9 @@ pub fn run(
                       db: &Arc<yavs_sem::Db>,
                       e: &Arc<yavs_elab::Elaborated>| {
             let rec = observers(&a, db, e, sim, built, &mut out, &view)?;
+            if let Some(ac) = &activity {
+                sim.subscribe(ac.observer());
+            }
             *live.lock().unwrap_or_else(|p| p.into_inner()) = Some(sim.interrupt());
             if rec.is_some() && a.dap.is_some() && !std::mem::replace(&mut hooked, true) {
                 // Ctrl-C ends the run between cycles so the file is finished (rule 11).
@@ -1746,6 +1748,7 @@ pub fn run(
             }
             let viewer = view.lock().unwrap_or_else(|p| p.into_inner()).clone();
             let viewer = viewer.map(|v| v as Arc<dyn yavs_dap::Viewer>);
+            let wave_file = rec.as_ref().map(|r| r.0.clone());
             let (finish, sync) = match rec {
                 Some((path, rec)) => {
                     let r = rec.clone();
@@ -1761,6 +1764,8 @@ pub fn run(
                 finish,
                 sync,
                 viewer,
+                wave_file,
+                activity: activity.clone(),
             })
         };
         let report: yavs_dap::Report = Box::new(|stats, rt| {
@@ -1776,6 +1781,10 @@ pub fn run(
             reload: Some(reloader(argv, format, color, encoding)),
             hook: std::env::var(yavs_dap::HOOK_VAR).ok(),
             source_map: a.source_map.clone(),
+            layout: layout_path(&a),
+            hang_report: a.hang_report,
+            assert_summary: a.assert_summary,
+            activity: a.activity.clone(),
         };
         let loaded = yavs_dap::Loaded {
             db: db.clone(),
@@ -2257,6 +2266,13 @@ fn handler_error(err: std::io::Error) -> Box<Diagnostic> {
     )
 }
 
+/// Where the wave layout of this testbench is kept: in the work library, by the name of the top.
+fn layout_path(a: &RunArgs) -> Option<std::path::PathBuf> {
+    let dir = std::path::Path::new(a.common.work.split_once(':')?.1);
+    let top = a.common.top.to_ascii_lowercase();
+    Some(dir.join("yavs-wave-layout").join(format!("{top}.txt")))
+}
+
 /// The `--surfer` viewer of a run, made with its first recorder.
 type ViewSlot = Arc<std::sync::Mutex<Option<Arc<crate::surfer::Surfer>>>>;
 
@@ -2371,7 +2387,17 @@ fn observers(
                                     );
                                 }
                                 let all = !a.wave_include.is_empty();
-                                let (names, over) = crate::surfer::names(&hier, all);
+                                let (mut names, over) = crate::surfer::names(&hier, all);
+                                let recorded = crate::surfer::recorded(&hier);
+                                // The list of the last session of this testbench, what still exists.
+                                if let Some(saved) = layout_path(a).and_then(|f| {
+                                    yavs_dap::load_layout(&f, &|i| {
+                                        recorded.contains_key(&i.to_ascii_lowercase())
+                                    })
+                                    .ok()
+                                }) {
+                                    names = saved.0;
+                                }
                                 if over > 0 {
                                     let note = format!(
                                         "{over} more signals are recorded but not shown: `wave add` or Surfer's own commands add them"
@@ -2385,8 +2411,9 @@ fn observers(
                                     addr.as_deref(),
                                     std::path::Path::new(path),
                                     names,
-                                    crate::surfer::recorded(&hier),
+                                    recorded,
                                     every,
+                                    layout_path(a),
                                 )?);
                             }
                         }

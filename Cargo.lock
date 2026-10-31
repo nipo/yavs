@@ -2340,6 +2340,7 @@ name = "yavs-wave"
 version = "0.11.0"
 dependencies = [
  "ctrlc",
+ "fst-reader",
  "signal-hook",
  "tempfile",
  "wavefst",

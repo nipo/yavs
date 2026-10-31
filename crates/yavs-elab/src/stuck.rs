@@ -45,6 +45,11 @@ fn proc_span(prog: &Program, f: FuncId) -> Option<Span> {
 }
 
 impl ProcTable {
+    /// The IR function of process `p`.
+    pub fn func(&self, p: ProcId) -> Option<FuncId> {
+        self.funcs.get(p.0 as usize).copied().flatten()
+    }
+
     /// Where kernel signal `s` is declared.
     pub fn signal_place(&self, s: SignalId) -> Option<Span> {
         self.decls.get(s.0 as usize).copied().flatten()

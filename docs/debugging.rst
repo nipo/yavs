@@ -110,7 +110,13 @@ Add ``--surfer`` to follow the waveforms in Surfer, the cursor at each stop (:do
 flushes the file at every stop, so any viewer that reloads it shows the run up to the breakpoint.
 
 The Debug Console takes the commands of the :doc:`interactive` too (``run 10 ns``, ``restart``,
-``break list``).
+``break list``, ``drivers q``, ``trace x q``).
+
+The context menu of a signal in the Variables view has "Show Drivers". The command
+"yavs: Find Signals or Variables..." searches the hierarchy, lists matches in a quick pick, and adds
+what you choose to the wave, or else examines it. The Breakpoints view has filters that stop at a report of a
+severity with the stack intact: "Assertion: failure", "Assertion: error", "Assertion: warning" and
+"Report: note".
 
 Other editors
 -------------

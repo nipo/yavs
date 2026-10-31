@@ -61,6 +61,16 @@
     ],
     "commands": [
       {
+        "command": "yavs.showDrivers",
+        "title": "Show Drivers",
+        "category": "yavs"
+      },
+      {
+        "command": "yavs.findSignals",
+        "title": "Find Signals or Variables...",
+        "category": "yavs"
+      },
+      {
         "command": "yavs.attach",
         "title": "Attach",
         "category": "yavs"
@@ -160,6 +170,10 @@
         }
       ],
       "debug/variables/context": [
+        {
+          "command": "yavs.showDrivers",
+          "when": "debugType == 'yavs' && debugProtocolVariableMenuContext == 'signal'"
+        },
         {
           "command": "yavs.force",
           "when": "debugType == 'yavs' && debugProtocolVariableMenuContext == 'signal'"

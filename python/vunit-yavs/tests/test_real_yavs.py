@@ -617,6 +617,16 @@ class TestRealYavs(unittest.TestCase):
         self.assertIn("Test Run Failed!", out)
         self.assertIn("error: Test Run Failed!\n", out)
 
+    def test_debug_tools_at_the_console_and_through_sim_flags(self):
+        project = self._copy_project()
+        code, out = self._session(
+            project, project / "run.py", PASS, "find signals nosuch\nwaits\nvunit_run\nasserts\nquit\n"
+        )
+        self.assertIn("no signal matches `nosuch`", out)
+        self.assertIn("waits for", out)
+        self.assertIn("Assertion summary:", out)
+        self.assertEqual(code, 0, out)
+
     def test_interactive_refuses(self):
         for args in [("-p", "2"), ("--yavs-debug=0",), ("--elaborate",)]:
             code, out = self._session(HERE / "project", HERE / "project" / "run.py", PASS, "", *args)

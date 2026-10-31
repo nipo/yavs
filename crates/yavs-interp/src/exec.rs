@@ -9119,7 +9119,6 @@ impl Machine {
             return Ok(());
         }
         let session = d.session.clone();
-        let index = d.index;
         let stmt = f.loc[pc];
         let depth = self.frames.len();
         let mut reason = None;
@@ -9150,6 +9149,21 @@ impl Machine {
         let Some(reason) = reason else {
             return Ok(());
         };
+        self.debug_stop(prog, stmt, reason, ctx);
+        Ok(())
+    }
+
+    /// Show a stop to the session, and take over how it resumes.
+    fn debug_stop(
+        &mut self,
+        prog: &Program,
+        stmt: StmtId,
+        reason: StopReason,
+        ctx: &mut Option<&mut Ctx<'_>>,
+    ) {
+        let Some(d) = self.dbg.as_ref() else { return };
+        let (session, index) = (d.session.clone(), d.index);
+        let depth = self.frames.len();
         session.update(index, |s| s.state = ProcState::Running);
         let c = ctx.as_deref();
         let stop = Stop {
@@ -9166,7 +9180,7 @@ impl Machine {
         };
         let resume = session.stop(&stop);
         if resume == crate::Resume::Skip {
-            return Ok(());
+            return;
         }
         if resume == crate::Resume::GlobalStep {
             session.request_global_step();
@@ -9174,7 +9188,31 @@ impl Machine {
         if let Some(d) = self.dbg.as_mut() {
             d.mode = StepMode::after(resume, depth);
         }
-        Ok(())
+    }
+
+    /// `break assert`: the report just made stops the process if its severity was asked for.
+    pub(crate) fn assert_stop(
+        &mut self,
+        s: yavs_kernel::Severity,
+        message: &str,
+        ctx: &mut Option<&mut Ctx<'_>>,
+    ) {
+        let wanted = self
+            .dbg
+            .as_ref()
+            .is_some_and(|d| d.session.assert_wanted(s));
+        if !wanted {
+            return;
+        }
+        let Some(stmt) = self.trace().first().copied() else {
+            return;
+        };
+        let rt = self.rt.clone();
+        let reason = StopReason::Assert {
+            severity: s,
+            message: message.to_string(),
+        };
+        self.debug_stop(&rt.prog, stmt, reason, ctx);
     }
 
     /// Evaluate a breakpoint condition: a function nested in the current frame's function.
@@ -10678,9 +10716,15 @@ impl Machine {
                         self.rt
                             .asserts
                             .note_site(|| self.trace().first().copied(), s, &text);
+                        // Past the report, so that it is shown before the stop.
+                        let shown = self.dbg.is_some().then(|| text.clone());
                         c.report(s, text);
+                        let stops = s >= c.stop_severity();
+                        if let Some(text) = shown {
+                            self.assert_stop(s, &text, ctx);
+                        }
                         // The simulation ends after this cycle: execute no further.
-                        if s >= c.stop_severity() {
+                        if stops {
                             return Ok(Flow::Suspend);
                         }
                     }

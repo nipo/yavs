@@ -26,6 +26,8 @@ The directory of ``--work=NAME:PATH`` or ``--map=NAME:PATH``:
      - The lock file. ``analyze`` holds it while it updates the library, so parallel calls are safe.
    * - ``yavs-cache/``
      - The compile cache of this library (next section).
+   * - ``yavs-wave-layout/TOP.txt``
+     - The signal list of the waveform viewer for testbench ``TOP`` (:doc:`waveforms`): one name per line. Deleting it brings back the default list.
 
 A library holds no copy of your sources: it records their absolute paths and hashes, and ``run`` reads
 them again. So the sources must stay where they were analyzed (``L0033`` if not) and unchanged (``L0034``).

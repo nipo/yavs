@@ -296,8 +296,13 @@ pub(crate) fn report(m: &mut Machine, ctx: Cx<'_, '_, '_>, s: Severity, text: &s
             };
             m.rt.asserts
                 .note_site(|| m.trace().first().copied(), s, &text);
+            let shown = m.has_debugger().then(|| text.clone());
             c.report(s, text);
-            if s >= c.stop_severity() {
+            let stops = s >= c.stop_severity();
+            if let Some(text) = shown {
+                m.assert_stop(s, &text, ctx);
+            }
+            if stops {
                 m.ieee_stop = true;
             }
         }

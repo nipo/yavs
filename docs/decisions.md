@@ -12877,6 +12877,20 @@ duplicate implementations without changing diagnostics (issue #894; implemented 
 - **`--activity` is a wrapper and an observer, like `--profile`.** Without the option nothing is wrapped or subscribed, and
   `SimControl` has no new field (one moved the hot layout before). It counts runs of a process and, per signal, cycles
   with an event. Activations the kernel skips (pure clocked processes, gates) do not run, so they do not count.
+- **`break assert` stops after the report, at the severity and worse.** The report is made first so that it is not lost if
+  the session ends there. The console's `break assert SEVERITY` is a threshold (`error` by default). VS Code's exception
+  filters are one checkbox per severity, so they are a set; the session stops at the union of both.
+- **`trace x` reads the statements, not the waits.** The signals a process reads come from its statements (`Db::reads_deep`),
+  because a flip-flop's data input is exactly what a sensitivity list leaves out. Elements are not followed one by one: a
+  signal counts if any element is unknown. What it cannot see is printed with every trace.
+- **Past values come from the wave file through `fst-reader`, read per question.** The value-change history is not kept in
+  memory. `wellen` stays a test dependency: it prints to stdout from the library when reading VHDL type data.
+- **The wave layout lives in the work library, `yavs-wave-layout/<top>.txt`.** It is per testbench, goes with what it
+  belongs to, and is deleted with the library; a text file a user can edit or commit. WCP gives only the displayed name of an
+  item: what yavs added is known by id, the rest is found by suffix, and what stays ambiguous is left out.
+- **The console's commands are one table.** `help`, Tab and `docs/console-commands.inc` read `COMMANDS`, and the test
+  `cli_reference_console_commands_is_current` fails when the page is stale. The `vunit_*` rows come from the help text of the
+  test runner's package.
 
 ## One "did you mean" helper for every name (#949, 2026-10-31)
 

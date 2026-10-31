@@ -13,6 +13,8 @@
 mod cond;
 mod console;
 mod design;
+mod layout;
+mod tools;
 mod waves;
 mod wire;
 
@@ -132,6 +134,12 @@ struct Link {
     no_restart: Option<String>,
     source_map: Vec<(String, String)>,
     reload: Mutex<Option<ReloadFn>>,
+    /// Where this testbench's wave layout is kept.
+    layout: Option<std::path::PathBuf>,
+    hang_report: Option<usize>,
+    assert_summary: bool,
+    /// `--activity[=FILE]`.
+    activity: Option<Option<String>>,
 }
 
 /// State shared by the reader thread, the simulation thread and the front end, for one simulation.
@@ -179,6 +187,15 @@ struct Shared {
     elab: Arc<Elaborated>,
     built: OnceLock<Built>,
     sync: OnceLock<Sync>,
+    /// The caller's `--wave` file.
+    wave_file: OnceLock<String>,
+    /// The port associations of the design (`tools`).
+    ports: OnceLock<Vec<yavs_kernel::PortLink>>,
+    /// The name of each kernel signal.
+    signal_names: OnceLock<Vec<String>>,
+    activity: OnceLock<Arc<yavs_kernel::profile::Activity>>,
+    /// When each signal (by path) was last deposited.
+    deposits: Mutex<HashMap<String, Time>>,
 }
 
 /// Work at the end of the run, before `exited` (the caller's `--wave` recorder finishing its
@@ -211,13 +228,22 @@ pub trait Viewer: Send + std::marker::Sync {
     fn add(&self, items: Vec<String>) -> Result<usize, String>;
     fn cursor(&self, fs: u64);
     fn on_goto(&self, f: GotoFn);
+    /// What the view shows now, in its order (`top.u1.s`).
+    fn items(&self) -> Result<Vec<String>, String>;
 }
+
+pub use console::commands as console_commands;
+pub use layout::{load as load_layout, save as save_layout};
 
 /// What `attach` adds to one simulation: what to do at its end and at each stop.
 pub struct Attached {
     pub finish: Option<Finish>,
     pub sync: Option<Sync>,
     pub viewer: Option<Arc<dyn Viewer>>,
+    /// The `--wave` file of `sync`.
+    pub wave_file: Option<String>,
+    /// The counts of this simulation (`SimControl` has the observer).
+    pub activity: Option<Arc<yavs_kernel::profile::Activity>>,
 }
 
 /// A design to run: what `reload` hands the session.
@@ -407,6 +433,26 @@ impl Shared {
         self.link.fail(req, message);
     }
 
+    fn wave_path(&self) -> Option<&str> {
+        self.wave_file.get().map(String::as_str)
+    }
+
+    /// Everything recorded so far is in the file.
+    fn sync_wave(&self) {
+        if let Some(s) = self.sync.get() {
+            s();
+        }
+    }
+
+    fn signal_names(&self) -> Vec<String> {
+        self.signal_names.get().cloned().unwrap_or_default()
+    }
+
+    fn deposited(&self, path: &str) -> Option<Time> {
+        let d = self.deposits.lock().unwrap_or_else(|p| p.into_inner());
+        d.get(path).copied()
+    }
+
     fn session(&self) -> &Arc<DebugSession> {
         self.session.get().expect("set before the reader starts")
     }
@@ -520,6 +566,7 @@ impl Debugger for Front {
                 ("pause", None)
             }
             StopReason::ConditionError(m) => ("exception", Some(m.clone())),
+            StopReason::Assert { message, .. } => ("exception", Some(message.clone())),
         };
         let mut body = json!({
             "reason": reason,
@@ -531,6 +578,12 @@ impl Debugger for Front {
         }
         if let Some(t) = text {
             body["text"] = json!(t);
+        }
+        if let StopReason::Assert { severity, .. } = &stop.reason
+            && let (Some(t), Some(d)) = (stop.now, stop.delta)
+        {
+            let word = console::SEVERITIES[*severity as usize];
+            body["description"] = json!(format!("assertion of severity {word} at {t}, delta {d}"));
         }
         match serve_stop(sh, &At::Process(stop), body) {
             Some(Next::Resume(r)) => r,
@@ -623,6 +676,16 @@ fn serve_stop(sh: &Shared, at: &At<'_, '_>, stopped: Json) -> Option<Next> {
             }
             "completions" => {
                 console::completions(sh, at, &req);
+                None
+            }
+            "yavs/find" => {
+                let a = &req["arguments"];
+                let list = tools::find_list(
+                    sh,
+                    a["kind"].as_str().unwrap_or("signals"),
+                    a["pattern"].as_str().unwrap_or("*"),
+                );
+                sh.respond(&req, json!({"items": list}));
                 None
             }
             "evaluate" => {
@@ -1374,6 +1437,12 @@ fn signal_change(sh: &Shared, at: &At<'_, '_>, cmd: &str, a: &Json) -> Result<Js
             .value(&|r| at.read(r))
             .ok_or("the signal is not readable here")?;
         set_part(&mut whole, &paths, &v)?;
+        if cmd == "yavs/deposit"
+            && let Some(t) = at.now()
+        {
+            let mut d = sh.deposits.lock().unwrap_or_else(|p| p.into_inner());
+            d.insert(s.path.clone(), t);
+        }
         put(sh, at, k, &paths, Some(&whole), kind)?;
         Ok(json!({"signal": target, "value": literal_image(&v, &ty)}))
     }
@@ -1719,6 +1788,12 @@ fn handle(sh: &Shared, tx: &Sender<Msg>, req: Json) {
                     "supportsDataBreakpoints": true,
                     "supportsSetVariable": true,
                     "supportsCompletionsRequest": true,
+                    "exceptionBreakpointFilters": [
+                        {"filter": "failure", "label": "Assertion: failure", "default": false},
+                        {"filter": "error", "label": "Assertion: error", "default": false},
+                        {"filter": "warning", "label": "Assertion: warning", "default": false},
+                        {"filter": "note", "label": "Report: note", "default": false},
+                    ],
             });
             // For the extension's "Add to Wave".
             if sh.link.viewer.get().is_some() {
@@ -1741,7 +1816,11 @@ fn handle(sh: &Shared, tx: &Sender<Msg>, req: Json) {
         "dataBreakpointInfo" => data_breakpoint_info(sh, &req),
         "setDataBreakpoints" => set_signal_breakpoints(sh, &req, 0),
         "yavs/setSignalBreakpoints" => set_signal_breakpoints(sh, &req, 1),
-        "setExceptionBreakpoints" => sh.respond(&req, json!({})),
+        "setExceptionBreakpoints" => {
+            let filters = req["arguments"]["filters"].as_array().cloned();
+            console::set_filters(sh, &filters.unwrap_or_default());
+            sh.respond(&req, json!({}));
+        }
         "yavs/hierarchy" => sh.respond(&req, hierarchy(sh)),
         "yavs/waveSubscribe" => wave_subscribe(sh, &req),
         "yavs/waveUnsubscribe" => {
@@ -2150,6 +2229,14 @@ pub struct Options {
     pub hook: Option<String>,
     /// Source paths as compiled, and as the debugger shows and takes them (`--source-map`).
     pub source_map: Vec<(String, String)>,
+    /// Where this testbench's wave layout is kept (`wave save`, `wave load`).
+    pub layout: Option<std::path::PathBuf>,
+    /// `--hang-report[=MAX]`: at the end of the run, where each process waits.
+    pub hang_report: Option<usize>,
+    /// `--assert-summary`.
+    pub assert_summary: bool,
+    /// `--activity[=FILE]`.
+    pub activity: Option<Option<String>>,
 }
 
 /// The callback that subscribes the caller's observers (`--wave`, `--vhpi`) to each built
@@ -2345,6 +2432,10 @@ fn session(
         hook: OnceLock::new(),
         no_restart: options.no_restart,
         source_map: options.source_map,
+        layout: options.layout,
+        hang_report: options.hang_report,
+        assert_summary: options.assert_summary,
+        activity: options.activity,
         reload: Mutex::new(options.reload),
     });
     if let Some(value) = &options.hook {
@@ -2546,6 +2637,11 @@ fn one_run(
         elab: e_arc.clone(),
         built: OnceLock::new(),
         sync: OnceLock::new(),
+        wave_file: OnceLock::new(),
+        ports: OnceLock::new(),
+        signal_names: OnceLock::new(),
+        activity: OnceLock::new(),
+        deposits: Mutex::new(HashMap::new()),
     });
     let session = DebugSession::new(&ir.program, Box::new(Front(sh.clone())));
     let _ = sh.session.set(session.clone());
@@ -2577,10 +2673,25 @@ fn one_run(
     if let Some(sync) = attached.sync {
         let _ = sh.sync.set(sync);
     }
+    if let Some(f) = attached.wave_file {
+        let _ = sh.wave_file.set(f);
+    }
+    if let Some(a) = attached.activity {
+        let _ = sh.activity.set(a);
+    }
+    let _ = sh.ports.set(sim.port_links());
+    let names = (0..sim.signal_count()).map(|s| {
+        let s = sim.signal_name(yavs_kernel::SignalId(s as u32));
+        s.unwrap_or("?").to_string()
+    });
+    let _ = sh.signal_names.set(names.collect());
     if let Some(v) = attached.viewer {
         console::set_viewer(link, v);
     }
     let rt = built.as_ref().map(|b| b.rt.clone());
+    if let Some(rt) = &rt {
+        rt.keep_assert_sites();
+    }
     if let Some(b) = built {
         let _ = sh.built.set(b);
     }
@@ -2693,6 +2804,27 @@ fn one_run(
             None => break sim.run_until(stop),
         }
     };
+    if let Some(max) = link.hang_report {
+        let why = match &r {
+            Ok(RunStatus::Paused) => Some(yavs_elab::StuckWhy::StopTime(stop)),
+            Ok(RunStatus::Ended(EndReason::Idle)) => Some(yavs_elab::StuckWhy::Idle),
+            _ => None,
+        };
+        if let Some(why) = why {
+            let report = sim.stuck_report();
+            let stuck = report
+                .procs
+                .iter()
+                .any(|p| p.state == yavs_kernel::ProcWait::Never);
+            if why != yavs_elab::StuckWhy::Idle || stuck {
+                let d = e.stuck_diagnostic(&report, why, &e.proc_table(), max);
+                sh.output(
+                    "stderr",
+                    &yavs_diag::render(&db.sources, &d, MessageFormat::Human, false),
+                );
+            }
+        }
+    }
     // Leave this simulation: its files are finished, so that the next one can write them.
     let restart = |sh: &Shared| sh.restart.lock().unwrap_or_else(|p| p.into_inner()).take();
     if let Some(new) = restart(&sh) {
@@ -2726,7 +2858,7 @@ fn one_run(
         Ok(RunStatus::Ended(EndReason::Severity(_) | EndReason::Requested)) => 1,
         Ok(_) => 0,
         Err(err) => {
-            let d = e.runtime_diagnostic(&err);
+            let d = e.runtime_diagnostic_in(&err, &e.proc_table());
             sh.output(
                 "stderr",
                 &yavs_diag::render(&db.sources, &d, MessageFormat::Human, false),
@@ -2734,6 +2866,18 @@ fn one_run(
             if err.exit_status() == 101 { 3 } else { 1 }
         }
     };
+    if link.assert_summary {
+        sh.output("console", &format!("{}\n", tools::asserts(&sh)));
+    }
+    if let Some(file) = &link.activity {
+        sh.output("console", &format!("{}\n", tools::activity(&sh)));
+        if let Some(Err(m)) = file.as_ref().map(|f| tools::activity_file(&sh, f)) {
+            sh.output(
+                "stderr",
+                &format!("cannot write the activity report: {m}\n"),
+            );
+        }
+    }
     let failed = rt.as_ref().is_some_and(|rt| {
         rt.assert_count(yavs_kernel::Severity::Error)
             + rt.assert_count(yavs_kernel::Severity::Failure)

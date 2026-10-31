@@ -29,7 +29,7 @@ or later (`pip install vunit-yavs` installs it, a pre-release) and yavs 0.11.0 o
 | `yavs.global_flags` | `yavs analyze`, `run` and `elab` |
 | `yavs.a_flags` | `yavs analyze` |
 | `yavs.elab_flags` | `yavs run` and `elab` |
-| `yavs.sim_flags` | `yavs run` |
+| `yavs.sim_flags` | `yavs run`, such as `--assert-summary`, `--activity`, `--hang-report`, `--wave-include`: they pass through to the run |
 | `yavs.max_threads` (integer, at least 1) | `yavs run --threads=N`, the most threads of one simulation |
 | `enable_coverage` (VUnit's option) | `yavs run --cov=<test output>/yavs/coverage.ycov --cov-test=<test name>` (coverage, below) |
 | `yavs.cov_kind` (list of strings) | `yavs run --cov-kind=LIST`: `statement`, `branch`, `toggle`, `condition`, `expression` |

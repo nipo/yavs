@@ -1,5 +1,5 @@
 > initialize {"adapterID":"yavs"}
-< {"body":{"supportsCompletionsRequest":true,"supportsConditionalBreakpoints":true,"supportsConfigurationDoneRequest":true,"supportsDataBreakpoints":true,"supportsEvaluateForHovers":true,"supportsHitConditionalBreakpoints":true,"supportsSetVariable":true,"supportsTerminateRequest":true},"command":"initialize","request_seq":1,"success":true,"type":"response"}
+< {"body":{"exceptionBreakpointFilters":[{"default":false,"filter":"failure","label":"Assertion: failure"},{"default":false,"filter":"error","label":"Assertion: error"},{"default":false,"filter":"warning","label":"Assertion: warning"},{"default":false,"filter":"note","label":"Report: note"}],"supportsCompletionsRequest":true,"supportsConditionalBreakpoints":true,"supportsConfigurationDoneRequest":true,"supportsDataBreakpoints":true,"supportsEvaluateForHovers":true,"supportsHitConditionalBreakpoints":true,"supportsSetVariable":true,"supportsTerminateRequest":true},"command":"initialize","request_seq":1,"success":true,"type":"response"}
 > launch {"stopOnEntry":true}
 < {"body":{},"event":"initialized","type":"event"}
 < {"body":{},"command":"launch","request_seq":2,"success":true,"type":"response"}

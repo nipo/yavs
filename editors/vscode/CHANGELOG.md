@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- "Show Drivers" in the context menu of a signal, and "Find Signals or Variables...": a quick pick of matches to add to the wave.
+- The Breakpoints view has filters that stop at a report of a severity, with the stack intact.
 - A launch that fails early shows why: the diagnostic in the Debug Console, or a notification with the command when yavs refuses its command line.
 - The Debug Console completes commands, names, fields and source files, and shows the exit status at the end of a session.
 - A Watch takes a field, an element, a slice, `.all` and expressions; the Variables view expands access values and lists the variables of a protected object.

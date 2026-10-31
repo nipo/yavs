@@ -546,9 +546,88 @@ See also
 * :doc:`cli-reference`: ``--message-format``, ``-Werror`` and exit statuses.
 ";
 
+/// The command list of the user guide's interactive debugger page, included there.
+#[cfg(test)]
+const CONSOLE_PAGE: &str = "docs/console-commands.inc";
+
+/// The commands of the console, from its own table; the `vunit_*` ones from the help text of the
+/// test runner's package.
+#[cfg(test)]
+fn console_page() -> String {
+    fn group(o: &mut String, title: &str, intro: &str, rows: &[(String, String)]) {
+        let _ = writeln!(o, "{title}\n{}\n", "~".repeat(title.len()));
+        if !intro.is_empty() {
+            let _ = writeln!(o, "{intro}\n");
+        }
+        let _ = writeln!(o, ".. list-table::\n   :widths: 40 60\n");
+        for (syntax, meaning) in rows {
+            let _ = writeln!(o, "   * - ``{syntax}``\n     - {meaning}");
+        }
+        o.push('\n');
+    }
+    let mut o = String::from(
+        "..\n   Generated from the console's command table: YAVS_BLESS=1 cargo test -p yavs --bin yavs cli_reference\n\n",
+    );
+    for (g, rows) in yavs_dap::console_commands() {
+        let rows: Vec<(String, String)> = rows
+            .iter()
+            .map(|(a, b)| {
+                let mut m = b.to_string();
+                if let Some(f) = m.get_mut(0..1) {
+                    f.make_ascii_uppercase();
+                }
+                (a.to_string(), format!("{m}."))
+            })
+            .collect();
+        group(&mut o, g, "", &rows);
+    }
+    let py = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../python/vunit-yavs/vunit_yavs/console.py");
+    let py = std::fs::read_to_string(py).expect("the test runner package's console");
+    let help = py
+        .split("HELP = \"\"\"List of VUnit commands:\n")
+        .nth(1)
+        .and_then(|t| t.split("\"\"\"").next())
+        .expect("the help text of the vunit commands");
+    let mut rows: Vec<(String, Vec<String>)> = Vec::new();
+    for line in help.lines() {
+        match line.strip_prefix("  - ") {
+            Some(m) => {
+                if let Some(r) = rows.last_mut() {
+                    r.1.push(m.to_string());
+                }
+            }
+            None => rows.push((line.to_string(), Vec::new())),
+        }
+    }
+    let rows: Vec<(String, String)> = rows
+        .into_iter()
+        .map(|(a, b)| (a, format!("{}.", b.join("; "))))
+        .collect();
+    group(
+        &mut o,
+        "VUnit commands",
+        "These are only available through the VUnit interface, that is ``vunit-yavs`` with \
+         ``python run.py lib.tb.test --yavs-interactive``, not in a plain \
+         ``yavs run --interactive``.",
+        &rows,
+    );
+    o.trim_end().to_string() + "\n"
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every command of the console is in the user guide; `help` shows the same table.
+    #[test]
+    fn cli_reference_console_commands_is_current() {
+        check_page(
+            CONSOLE_PAGE,
+            &console_page(),
+            "a console command or its help text",
+        );
+    }
 
     /// A generated page is what its source defines now, or rewritten under `YAVS_BLESS`.
     fn check_page(rel: &str, now: &str, what: &str) {

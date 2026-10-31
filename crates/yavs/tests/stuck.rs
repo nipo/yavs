@@ -440,12 +440,15 @@ fn assert_summary_counts_by_severity_and_place() {
         e.starts_with("Assertion summary: 0 failures, 1 error, 2 warnings, 3 notes\n"),
         "{e}"
     );
-    for row in [
-        "error         1  $DIR/summary_asserts.vhd:25  first error",
-        "warning       2  $DIR/summary_asserts.vhd:23  too early",
-        "note          3  $DIR/summary_asserts.vhd:22  tick",
-    ] {
-        assert!(e.contains(row), "{row} in {e}");
+    for tier in tiers() {
+        let e = clean(&run("summary_asserts", &["--assert-summary", tier]));
+        for row in [
+            "error         1  summary_asserts.vhd:25  first error",
+            "warning       2  summary_asserts.vhd:23  too early",
+            "note          3  summary_asserts.vhd:22  tick",
+        ] {
+            assert!(e.contains(row), "{row} in {tier}: {e}");
+        }
     }
 }
 

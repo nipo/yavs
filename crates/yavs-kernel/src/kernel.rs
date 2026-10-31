@@ -25,8 +25,10 @@ use yavs_logic::StdULogic;
 use yavs_logic::wide::nmask;
 
 mod hang;
+pub(crate) use hang::signal_sources;
 pub use hang::{
-    ChangingSignal, DeadClock, LoopCause, LoopLink, ProcWait, StuckProc, StuckReport, StuckSignal,
+    ChangingSignal, DeadClock, LoopCause, LoopLink, PortLink, ProcWait, SignalSources, SourceInfo,
+    StuckProc, StuckReport, StuckSignal,
 };
 
 /// Estimated work (ns) of the parallel processes of a batch, less its largest one, from which

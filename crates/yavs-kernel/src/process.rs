@@ -1161,6 +1161,17 @@ pub struct Ctx<'a> {
 }
 
 impl Ctx<'_> {
+    /// What makes up the value of signal `s` now (a debugger stopped inside a process).
+    pub fn sources(&self, s: SignalId) -> Option<crate::SignalSources> {
+        let g = self.sh.signals.get(s.0 as usize)?;
+        Some(crate::kernel::signal_sources(
+            g,
+            s,
+            self.sh.drivers,
+            self.sh.now,
+        ))
+    }
+
     #[inline]
     pub fn now(&self) -> Time {
         self.sh.now

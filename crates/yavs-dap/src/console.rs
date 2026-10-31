@@ -21,7 +21,7 @@ use yavs_std::value::LitType;
 
 use crate::{
     At, CONSOLE_BREAKS, Link, Msg, Next, RUN_UNTIL, Run, Shared, SigBp, apply_lines, apply_signals,
-    cond, eval_var, rewatch, signal_change, split_part, state_vars, stop_of, thread_proc,
+    cond, eval_var, rewatch, signal_change, split_part, state_vars, stop_of, thread_proc, tools,
 };
 
 /// The environment variable naming a test runner's hook: `<port>:<secret>`.
@@ -32,55 +32,139 @@ const HOOK_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub(crate) const ENDED: &str = "the simulation has ended: `restart` runs it again, `quit` leaves";
 
-const COMMANDS: &[(&str, &str)] = &[
+/// The groups of `COMMANDS`, in the order `help` and the user guide show them.
+const GROUPS: [&str; 8] = [
+    "Run and step",
+    "Breakpoints",
+    "Inspect",
+    "Change values",
+    "Waves",
+    "Find",
+    "Diagnose",
+    "Session and scripts",
+];
+
+/// The console's commands for the user guide: per group its `(syntax, meaning)` rows.
+pub fn commands() -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> {
+    GROUPS
+        .iter()
+        .map(|&g| {
+            let rows = COMMANDS.iter().filter(|c| c.1 == g && !c.2.is_empty());
+            (g, rows.filter_map(|c| c.2.split_once(": ")).collect())
+        })
+        .collect()
+}
+
+/// In `Severity as u8` order.
+pub(crate) const SEVERITIES: [&str; 4] = ["note", "warning", "error", "failure"];
+
+const COMMANDS: &[(&str, &str, &str)] = &[
     (
         "run",
+        "Run and step",
         "run [TIME | until CONDITION]: to the end or a breakpoint, for TIME, or until a change of a signal in the condition makes it true",
     ),
     (
         "step",
+        "Run and step",
         "step [delta | timestep]: to the next statement, entering calls; or to the end of the delta or time step",
     ),
-    ("next", "next: to the next statement, over calls"),
+    (
+        "next",
+        "Run and step",
+        "next: to the next statement, over calls",
+    ),
     (
         "stop",
+        "Run and step",
         "stop: pause a running simulation (Ctrl-C on a terminal)",
     ),
     (
         "examine",
-        "examine NAME: the value of a local or a signal, or a field, element or slice of one (also `print`)",
+        "Inspect",
+        "examine NAME [@ TIME]: the value of a local or a signal, or a field, element or slice of one; with a time, from the wave file (also `print`)",
     ),
-    ("print", ""),
+    ("print", "Inspect", ""),
+    (
+        "drivers",
+        "Diagnose",
+        "drivers NAME: what drives a signal: each driver's value and source line, the resolved value, any force",
+    ),
+    (
+        "describe",
+        "Inspect",
+        "describe NAME: type, bounds, resolution function, mode and declaration of a signal or variable",
+    ),
+    (
+        "find",
+        "Find",
+        "find signals PATTERN | find variables PATTERN: search the hierarchy; `*` within a level, `**` across, a pattern without a dot matches the last name",
+    ),
+    (
+        "waits",
+        "Diagnose",
+        "waits: where each process stands and what it waits for",
+    ),
+    (
+        "trace",
+        "Diagnose",
+        "trace x NAME: follow an unknown value back through drivers and the signals they read",
+    ),
+    (
+        "activity",
+        "Diagnose",
+        "activity: the processes that ran most often and the signals that changed most often, so far",
+    ),
+    (
+        "asserts",
+        "Diagnose",
+        "asserts: assertion failures and reports so far, by severity and source line",
+    ),
     (
         "force",
+        "Change values",
         "force NAME VALUE [-out]: hold a signal at a value, from the next cycle",
     ),
     (
         "deposit",
+        "Change values",
         "deposit NAME VALUE: give a signal a value once, in the next cycle",
     ),
-    ("release", "release NAME [-out]: end a force"),
-    ("where", "where: time, delta, process and source line"),
+    (
+        "release",
+        "Change values",
+        "release NAME [-out]: end a force",
+    ),
+    (
+        "where",
+        "Inspect",
+        "where: time, delta, process and source line",
+    ),
     (
         "break",
-        "break [FILE:]LINE [if CONDITION] | SIGNAL [= VALUE] [if CONDITION] | list | delete N | delete all",
+        "Breakpoints",
+        "break [FILE:]LINE [if CONDITION] | SIGNAL [= VALUE] [if CONDITION] | assert [note|warning|error|failure] | list | delete N | delete assert | delete all: stop at a line, at a change of a signal, or at a report of this severity and worse; list or delete them",
     ),
     (
         "wave",
-        "wave add NAME... | wave cursor [TIME]: with `--surfer`, show signals or scopes in the viewer; move its cursor (default: now)",
+        "Waves",
+        "wave add NAME|PATTERN... | wave cursor [TIME] | wave save [FILE] | wave load [FILE]: with `--surfer`, show signals or scopes in the viewer; move its cursor (default: now); save or load the signal list",
     ),
     (
         "restart",
+        "Session and scripts",
         "restart: back to time 0 with the same design and breakpoints (also `reset`)",
     ),
-    ("reset", ""),
+    ("reset", "Session and scripts", ""),
     (
         "source",
+        "Session and scripts",
         "source FILE: run the commands of a file; the first failure ends it",
     ),
-    ("help", "help: this list"),
+    ("help", "Session and scripts", "help: this list"),
     (
         "quit",
+        "Session and scripts",
         "quit [STATUS]: leave; the exit status is STATUS, else that of the ended run, else 0",
     ),
 ];
@@ -88,6 +172,10 @@ const COMMANDS: &[(&str, &str)] = &[
 /// What the client asked for at breakpoints, kept over a restart and resolved again.
 #[derive(Default)]
 pub(crate) struct Kept {
+    /// `break assert`: severities to stop at, one bit each (`SEVERITIES` order).
+    asserts: u8,
+    /// The client's exception filters, likewise.
+    filters: u8,
     lines: BTreeMap<String, Vec<Json>>,
     signals: [Vec<Json>; CONSOLE_BREAKS + 1],
     next_id: u64,
@@ -122,6 +210,7 @@ impl Kept {
 
 /// Resolve what is kept against a new simulation; what no longer resolves is said.
 pub(crate) fn keep_breakpoints(sh: &Shared) {
+    apply_asserts(sh);
     let (files, sets): (Vec<String>, Vec<usize>) = {
         let k = kept(sh);
         let sets = (0..k.signals.len()).filter(|&s| !k.signals[s].is_empty());
@@ -241,7 +330,7 @@ pub(crate) fn is_command(sh: &Shared, req: &Json) -> bool {
         .first()
         .and_then(|c| c.split_whitespace().next())
         .unwrap_or_default();
-    COMMANDS.iter().any(|(n, _)| *n == word)
+    COMMANDS.iter().any(|(n, ..)| *n == word)
         || sh
             .link
             .hook
@@ -428,7 +517,7 @@ pub(crate) fn on_stop(sh: &Shared, at: &At<'_, '_>, stopped: &Json) {
 }
 
 /// The first word of `line` and the rest.
-fn word(line: &str) -> (&str, &str) {
+pub(crate) fn word(line: &str) -> (&str, &str) {
     let line = line.trim();
     match line.find(char::is_whitespace) {
         Some(i) => (&line[..i], line[i..].trim_start()),
@@ -437,7 +526,7 @@ fn word(line: &str) -> (&str, &str) {
 }
 
 /// A name that can hold spaces inside parentheses (`s(3 downto 0)`), and the rest.
-fn name_word(text: &str) -> (&str, &str) {
+pub(crate) fn name_word(text: &str) -> (&str, &str) {
     let text = text.trim();
     let mut depth = 0;
     for (i, c) in text.char_indices() {
@@ -453,7 +542,7 @@ fn name_word(text: &str) -> (&str, &str) {
 
 /// `name` as the signal functions read it: between cycles no process sees it, so a simple name
 /// is taken from the top level.
-fn qualify(sh: &Shared, at: &At<'_, '_>, name: &str) -> String {
+pub(crate) fn qualify(sh: &Shared, at: &At<'_, '_>, name: &str) -> String {
     if at.process().is_some() || split_part(sh, None, name).is_some() {
         return name.to_string();
     }
@@ -467,7 +556,7 @@ fn qualify(sh: &Shared, at: &At<'_, '_>, name: &str) -> String {
     }
 }
 
-fn thread_of(at: &At<'_, '_>) -> i64 {
+pub(crate) fn thread_of(at: &At<'_, '_>) -> i64 {
     at.process().map_or(0, |p| p as i64 + 1)
 }
 
@@ -495,7 +584,7 @@ pub(crate) fn similar(word: &str, noun: &'static str, names: &[String]) -> Optio
 
 /// The help for a word that names no command.
 pub(crate) fn did_you_mean(sh: &Shared, word: &str) -> Option<String> {
-    let commands = COMMANDS.iter().map(|(n, _)| n.to_string());
+    let commands = COMMANDS.iter().map(|(n, ..)| n.to_string());
     let hook = sh.link.hook.get().into_iter().flat_map(|h| &h.commands);
     let all: Vec<String> = commands.chain(hook.map(|(n, _)| n.clone())).collect();
     similar(word, "command", &all)
@@ -552,7 +641,7 @@ fn bad_sub(cmd: &str, sub: &str, subs: &[&str]) -> String {
 
 /// The names `examine` and the like see at this stop: the frame's locals, the variables of its
 /// protected object, the process frame's locals and the signals in scope.
-fn names_here(sh: &Shared, at: &At<'_, '_>, tid: i64, frame: usize) -> Vec<String> {
+pub(crate) fn names_here(sh: &Shared, at: &At<'_, '_>, tid: i64, frame: usize) -> Vec<String> {
     let mut out = Vec::new();
     if let Some(s) = stop_of(at, tid) {
         for i in [frame, 0] {
@@ -601,22 +690,26 @@ pub(crate) fn completions(sh: &Shared, at: &At<'_, '_>, req: &Json) {
             let hook = sh.link.hook.get().into_iter().flat_map(|h| &h.commands);
             COMMANDS
                 .iter()
-                .map(|(n, _)| n.to_string())
+                .map(|(n, ..)| n.to_string())
                 .chain(hook.map(|(n, _)| n.clone()))
                 .chain(names())
                 .collect()
         }
         ["examine" | "print"] | ["force" | "deposit" | "release"] | ["run", "until"] => names(),
         ["wave", "add", ..] => names(),
-        ["wave"] => vec!["add".into(), "cursor".into()],
+        ["wave"] => ["add", "cursor", "save", "load"].map(String::from).to_vec(),
+        ["drivers" | "describe"] | ["trace", "x"] => names(),
+        ["trace"] => vec!["x".into()],
+        ["find"] => vec!["signals".into(), "variables".into()],
+        ["break", "assert"] => SEVERITIES.map(String::from).to_vec(),
         ["step"] => vec!["delta".into(), "timestep".into()],
         ["run"] => vec!["until".into()],
         ["break"] => {
             let files = sh.design.files().into_iter().map(|f| format!("{f}:"));
-            let subs = ["list", "delete"].into_iter().map(String::from);
+            let subs = ["list", "delete", "assert"].into_iter().map(String::from);
             subs.chain(files).chain(names()).collect()
         }
-        ["break", "delete"] => vec!["all".into()],
+        ["break", "delete"] => vec!["all".into(), "assert".into()],
         ["break", ..] if words.contains(&"if") => names(),
         ["break", _] => vec!["if".into()],
         _ => Vec::new(),
@@ -735,7 +828,13 @@ fn break_cmd(sh: &Shared, at: &At<'_, '_>, rest: &str) -> Result<String, String>
     match first {
         "" => return Err("`break` needs a place: see `help`".into()),
         "list" => return Ok(break_list(sh)),
+        "delete" if tail == "assert" => {
+            kept(sh).asserts = 0;
+            apply_asserts(sh);
+            return Ok("no stops at assertions".into());
+        }
         "delete" => return break_delete(sh, tail),
+        "assert" => return break_assert(sh, tail),
         _ => {}
     }
     let (head, cond_text) = split_if(rest);
@@ -818,9 +917,48 @@ fn break_line(
     ))
 }
 
+/// `break assert [SEVERITY]`: stop at reports of this severity and worse.
+fn break_assert(sh: &Shared, what: &str) -> Result<String, String> {
+    let at = if what.is_empty() { "error" } else { what };
+    let Some(k) = SEVERITIES.iter().position(|s| *s == at) else {
+        return Err(bad_sub("break assert", at, &SEVERITIES));
+    };
+    kept(sh).asserts = 0xf << k & 0xf;
+    apply_asserts(sh);
+    Ok(format!(
+        "stop at assertions and reports of severity {}",
+        SEVERITIES[k..].join(", ")
+    ))
+}
+
+/// What the console and the client's exception filters ask for, told to the session.
+pub(crate) fn apply_asserts(sh: &Shared) {
+    let k = kept(sh);
+    sh.session().set_assert_break(k.asserts | k.filters);
+}
+
+/// The client's exception filters (`setExceptionBreakpoints`).
+pub(crate) fn set_filters(sh: &Shared, filters: &[Json]) {
+    let mut mask = 0;
+    for f in filters.iter().filter_map(Json::as_str) {
+        if let Some(k) = SEVERITIES.iter().position(|s| *s == f) {
+            mask |= 1 << k;
+        }
+    }
+    kept(sh).filters = mask;
+    apply_asserts(sh);
+}
+
 fn break_list(sh: &Shared) -> String {
     let k = kept(sh);
     let mut out = Vec::new();
+    if k.asserts != 0 {
+        let on: Vec<&str> = (0..4)
+            .filter(|b| k.asserts >> b & 1 == 1)
+            .map(|b| SEVERITIES[b])
+            .collect();
+        out.push(format!("assert: severity {}", on.join(", ")));
+    }
     for (f, list) in &k.lines {
         for b in list {
             let mut t = format!("{} {}:{}", b["yavsId"], sh.design.shown_file(f), b["line"]);
@@ -853,7 +991,13 @@ fn break_delete(sh: &Shared, what: &str) -> Result<String, String> {
     let all = what == "all";
     let id = what.parse::<u64>().ok();
     if !all && id.is_none() {
-        return Err(bad_sub("break delete", what, &["all"]) + ", or a breakpoint's number");
+        return Err(
+            bad_sub("break delete", what, &["all", "assert"]) + ", or a breakpoint's number"
+        );
+    }
+    if all {
+        kept(sh).asserts = 0;
+        apply_asserts(sh);
     }
     let gone = |b: &Json| all || b["yavsId"].as_u64() == id;
     let (files, sets, n) = {
@@ -980,14 +1124,17 @@ fn wrapped(line: &str, width: usize) -> String {
 }
 
 fn help(sh: &Shared) -> String {
-    let core = COMMANDS.iter().map(|(_, h)| *h).filter(|h| !h.is_empty());
-    let mut lines: Vec<String> = core.map(String::from).collect();
+    let width = sh.link.columns.load(Ordering::Relaxed);
+    let mut lines = Vec::new();
+    for g in GROUPS {
+        lines.push(format!("{g}:"));
+        let rows = COMMANDS.iter().filter(|c| c.1 == g && !c.2.is_empty());
+        lines.extend(rows.map(|c| wrapped(c.2, width)));
+    }
     if let Some(h) = sh.link.hook.get() {
         let shown = h.commands.iter().filter(|(_, help)| !help.is_empty());
-        lines.extend(shown.map(|(n, help)| format!("{n}: {help}")));
+        lines.extend(shown.map(|(n, help)| wrapped(&format!("{n}: {help}"), width)));
     }
-    let width = sh.link.columns.load(Ordering::Relaxed);
-    let lines: Vec<String> = lines.iter().map(|l| wrapped(l, width)).collect();
     lines.join("\n")
 }
 
@@ -1003,7 +1150,17 @@ fn exec(sh: &Shared, at: &At<'_, '_>, line: &str) -> Result<Exec, String> {
         },
         "next" => step(sh, Next::Resume(Resume::StepOver)),
         "stop" => Ok(Exec::Text("the simulation is stopped".into())),
+        "examine" | "print" if rest.contains('@') => {
+            tools::examine_at(sh, at, rest).map(Exec::Text)
+        }
         "examine" | "print" => examine(sh, at, rest).map(Exec::Text),
+        "drivers" => tools::drivers(sh, at, rest).map(Exec::Text),
+        "describe" => tools::describe(sh, at, rest).map(Exec::Text),
+        "find" => tools::find(sh, at, rest).map(Exec::Text),
+        "waits" => Ok(Exec::Text(tools::waits(sh, at))),
+        "trace" => tools::trace_x(sh, at, rest).map(Exec::Text),
+        "activity" => Ok(Exec::Text(tools::activity(sh))),
+        "asserts" => Ok(Exec::Text(tools::asserts(sh))),
         "force" | "deposit" | "release" => change(sh, at, cmd, rest).map(Exec::Text),
         "where" => Ok(Exec::Text(where_text(sh, at))),
         "break" => break_cmd(sh, at, rest).map(Exec::Text),
@@ -1021,6 +1178,13 @@ fn exec(sh: &Shared, at: &At<'_, '_>, line: &str) -> Result<Exec, String> {
                 && h.commands.iter().any(|(n, _)| n == cmd)
             {
                 return Ok(Exec::Call(cmd.to_string(), rest.to_string()));
+            }
+            if cmd.starts_with("vunit_") {
+                return Err(format!(
+                    "`{cmd}` is only available through the test runner interface: start the test \
+                     with `python run.py lib.tb.test --yavs-interactive` (vunit-yavs), not with \
+                     `yavs run --interactive`"
+                ));
             }
             examine(sh, at, line).map(Exec::Text).map_err(|_| {
                 let help = did_you_mean(sh, cmd).unwrap_or_else(|| "see `help`".to_string());
@@ -1041,7 +1205,15 @@ fn wave(sh: &Shared, at: &At<'_, '_>, rest: &str) -> Result<String, String> {
             let mut items = Vec::new();
             while !args.is_empty() {
                 let (name, more) = name_word(args);
-                items.push(viewer_name(sh, at, name)?);
+                if name.contains('*') || name.contains('?') {
+                    let found = tools::matching_signals(sh, name);
+                    if found.is_empty() {
+                        return tools::find(sh, at, &format!("signals {name}"));
+                    }
+                    items.extend(found.into_iter().map(|k| dotted(&sh.design.sigs[k].path)));
+                } else {
+                    items.push(viewer_name(sh, at, name)?);
+                }
                 args = more;
             }
             if items.is_empty() {
@@ -1061,8 +1233,41 @@ fn wave(sh: &Shared, at: &At<'_, '_>, rest: &str) -> Result<String, String> {
             v.cursor(t.as_fs());
             Ok(String::new())
         }
-        _ => Err(bad_sub("wave", sub, &["add", "cursor"])),
+        "save" => {
+            let file = layout_file(sh, args)?;
+            let n = crate::layout::save(&file, &v.items()?)?;
+            Ok(format!("{n} signals saved to `{}`", file.display()))
+        }
+        "load" => {
+            let file = layout_file(sh, args)?;
+            let (items, _) = crate::layout::load(&file, &|_| true)?;
+            // One by one: a list from another run may name what this one does not record.
+            let (mut n, mut gone) = (0, Vec::new());
+            for i in items {
+                match v.add(vec![i.clone()]) {
+                    Ok(k) => n += k,
+                    Err(_) => gone.push(i),
+                }
+            }
+            let mut o = format!("{n} added from `{}`", file.display());
+            for m in gone {
+                o += &format!("\nnot in this design: {m}");
+            }
+            Ok(o)
+        }
+        _ => Err(bad_sub("wave", sub, &["add", "cursor", "save", "load"])),
     }
+}
+
+/// The file of `wave save` and `wave load`: the one named, else this testbench's.
+fn layout_file(sh: &Shared, name: &str) -> Result<std::path::PathBuf, String> {
+    if !name.is_empty() {
+        return Ok(name.into());
+    }
+    sh.link
+        .layout
+        .clone()
+        .ok_or_else(|| "this run has no work library to keep a layout in: name a file".to_string())
 }
 
 /// What the console means by `name`, as a dotted path: a signal or a part of one, a variable of
@@ -1218,7 +1423,7 @@ impl Hook {
             if name.is_empty() || name.contains(char::is_whitespace) {
                 return Err(format!("the hook registers a bad command name `{name}`"));
             }
-            if COMMANDS.iter().any(|(n, _)| *n == name) {
+            if COMMANDS.iter().any(|(n, ..)| *n == name) {
                 return Err(format!("the hook registers `{name}`, a yavs command"));
             }
             commands.push((name, c["help"].as_str().unwrap_or_default().to_string()));

@@ -70,6 +70,15 @@ async function main() {
   const threads = await dc.threadsRequest();
   assert.deepEqual(threads.body.threads.map((t) => t.name), [':tb:p', ':tb:q']);
 
+  // The console's tools in the Debug Console, and the list behind the quick pick.
+  const drivers = await dc.evaluateRequest({ expression: 'drivers cnt', context: 'repl' });
+  assert.match(drivers.body.result, /process tb\.\w+/);
+  const found = await dc.customRequest('yavs/find', { kind: 'signals', pattern: '*cn*' });
+  assert.equal(found.body.items[0].path, 'tb.cnt');
+  const caps = await dc.setExceptionBreakpointsRequest({ filters: ['error'] });
+  assert.ok(caps.success);
+  await dc.setExceptionBreakpointsRequest({ filters: [] });
+
   // Live waves of `cnt` from here on: the hierarchy, then batches of time steps.
   const waves = [];
   dc.on('yavs/waves', (e) => waves.push(e.body));

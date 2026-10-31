@@ -102,6 +102,11 @@ pub enum StopReason {
     Pause,
     /// A breakpoint condition raised an error; the message says which.
     ConditionError(String),
+    /// A failed assertion or a report of a severity asked for (`set_assert_break`).
+    Assert {
+        severity: yavs_kernel::Severity,
+        message: String,
+    },
 }
 
 /// A stop inside a process.
@@ -150,6 +155,8 @@ pub struct DebugSession {
     lines: Mutex<HashMap<StmtId, Arc<LineBp>>>,
     global_step: AtomicBool,
     pause: AtomicBool,
+    /// The severities to stop at, one bit each (`Severity as u8`).
+    asserts: std::sync::atomic::AtomicU8,
     procs: Mutex<Vec<ProcStatus>>,
 }
 
@@ -166,6 +173,7 @@ impl DebugSession {
             lines: Mutex::new(HashMap::new()),
             global_step: AtomicBool::new(false),
             pause: AtomicBool::new(false),
+            asserts: std::sync::atomic::AtomicU8::new(0),
             procs: Mutex::new(Vec::new()),
         })
     }
@@ -209,6 +217,15 @@ impl DebugSession {
 
     pub(crate) fn take_global_step(&self) -> bool {
         self.global_step.swap(false, Ordering::Relaxed)
+    }
+
+    /// Stop at reports of these severities (bit `Severity as u8`), replacing the set before.
+    pub fn set_assert_break(&self, mask: u8) {
+        self.asserts.store(mask, Ordering::Relaxed);
+    }
+
+    pub(crate) fn assert_wanted(&self, s: yavs_kernel::Severity) -> bool {
+        self.asserts.load(Ordering::Relaxed) >> s as u8 & 1 == 1
     }
 
     /// Stop the running process at its next statement.

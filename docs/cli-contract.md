@@ -436,6 +436,11 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
     continues; the signal is handled between two delta cycles, so a process that never suspends
     (`W3102`) cannot be reported. SIGUSR1 is not handled on Windows. The report goes to stderr; a
     warning does not change the exit status (`-Werror` and `-Wno-W3101` apply).
+  - A session (`--dap`, `--interactive`, `--do`) takes `--hang-report`, `--assert-summary` and
+    `--activity[=FILE]` too, printed as console output at the end of the run, in text.
+  - The console commands are in the user guide, generated from the table of `yavs-dap`
+    (`docs/console-commands.inc`). `wave save` and the end of a session write
+    `<work library>/yavs-wave-layout/<top in lower case>.txt`, one dotted name per line, `#` comments.
   - `--assert-summary` adds to stderr, after the reports and whatever the outcome: a table of the
     reports and failed assertions per severity and source line with the first message, or with
     `--message-format=json` one object `{"assert_summary": {"totals": {SEVERITY: N}, "places":

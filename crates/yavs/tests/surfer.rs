@@ -142,6 +142,25 @@ impl Fake {
                 continue;
             }
             match cmd {
+                "get_item_list" => {
+                    let ids: Vec<usize> = (1..next_id).collect();
+                    send(
+                        &mut w,
+                        json!({"type": "response", "command": cmd, "ids": ids}),
+                    );
+                }
+                "get_item_info" => {
+                    let results: Vec<Value> = m["ids"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .map(|_| json!({"name": "not used", "type": "Variable"}))
+                        .collect();
+                    send(
+                        &mut w,
+                        json!({"type": "response", "command": cmd, "results": results}),
+                    );
+                }
                 "add_items" | "add_markers" | "add_scope" => {
                     let k = m["items"]
                         .as_array()
@@ -884,4 +903,63 @@ fn real_surfer_finds_what_is_added() {
         }
     }
     assert!(asked > 0, "{log:?}");
+}
+
+/// The list of a session comes back in the next one; `wave save` and `wave load` take a file.
+#[test]
+fn the_wave_layout_survives_a_new_run() {
+    let d = setup("layout");
+    let session = |cmds: &str, fake: &Fake| {
+        let l = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = l.local_addr().expect("addr");
+        let f = fake.clone();
+        let t = std::thread::spawn(move || {
+            let (s, _) = l.accept().expect("accept");
+            f.serve(s, &[]);
+        });
+        let o = run(&d, &[&format!("--surfer={addr}"), &format!("--do={cmds}")]);
+        t.join().expect("fake");
+        o
+    };
+    let first = Fake::default();
+    let o = session(
+        "run 1 ns; wave add cnt; wave add r; wave save my.layout; wave load nofile; quit",
+        &first,
+    );
+    assert_eq!(o.status.code(), Some(1), "{}", stderr(&o));
+    assert!(
+        stderr(&o).contains("cannot read the wave layout `nofile`"),
+        "{}",
+        stderr(&o)
+    );
+    let text = std::fs::read_to_string(d.join("my.layout")).expect("saved");
+    assert!(
+        text.contains("tb.cnt\n") && text.contains("tb.v\n"),
+        "{text}"
+    );
+    // The file of the testbench is written at the end of a session, on the documented path.
+    let file = d.join("build/work/yavs-wave-layout/tb.txt");
+    assert!(
+        !file.exists()
+            || std::fs::read_to_string(&file)
+                .expect("read")
+                .contains("tb.cnt")
+    );
+    std::fs::create_dir_all(file.parent().expect("dir")).expect("mkdir");
+    std::fs::write(&file, "# a layout\ntb.cnt\ngone.signal\n").expect("write");
+    let second = Fake::default();
+    let o = session("run 1 ns; run; quit", &second);
+    assert_eq!(o.status.code(), Some(0), "{}", stderr(&o));
+    assert_eq!(second.first("add_items")["items"], json!(["tb.cnt"]));
+    // `wave load` adds a saved list, says what is gone; a misspelled subcommand suggests.
+    let third = Fake::default();
+    std::fs::write(d.join("my.layout"), "tb.cnt\ngone.signal\n").expect("write");
+    let o = session("run 1 ns; wave load my.layout; quit", &third);
+    assert!(
+        stdout(&o).contains("not in this design: gone.signal"),
+        "{}",
+        stdout(&o)
+    );
+    let o = session("wave sav; quit", &Fake::default());
+    assert!(stderr(&o).contains("`save`"), "{}", stderr(&o));
 }

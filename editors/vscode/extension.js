@@ -88,6 +88,7 @@ class ExitTracker {
         // The menus of "Add to Wave": this session shows its waves in a viewer.
         if (m.type === 'response' && m.command === 'initialize') {
           vscode.commands.executeCommand('setContext', 'yavs.viewer', m.body?.yavsViewer === true);
+          viewers.set(session.id, m.body?.yavsViewer === true);
         }
       },
       onExit: (code, signal) => {
@@ -220,6 +221,52 @@ function signalOp(command, withValue) {
   };
 }
 
+/** Per session id: its waves are shown in a viewer. */
+const viewers = new Map();
+
+/** The console's `drivers` for a signal of the Variables view, in the Debug Console. */
+async function showDrivers(item) {
+  const s = vscode.debug.activeDebugSession;
+  if (!s || s.type !== 'yavs') return;
+  const name = item?.variable?.evaluateName ?? item?.variable?.name;
+  if (!name) return;
+  try {
+    const r = await s.customRequest('evaluate', { expression: `drivers ${name}`, context: 'repl' });
+    vscode.debug.activeDebugConsole.appendLine(r.result);
+    vscode.commands.executeCommand('workbench.debug.action.focusRepl');
+  } catch (e) {
+    vscode.window.showErrorMessage(`yavs: ${e.message}`);
+  }
+}
+
+/** Search the hierarchy, then add what was picked to the wave, or examine it. */
+async function findSignals() {
+  const s = vscode.debug.activeDebugSession;
+  if (!s || s.type !== 'yavs') return;
+  const pattern = await vscode.window.showInputBox({
+    prompt: 'Which signals or variables? `*` within a level, `**` across levels',
+    value: '*',
+  });
+  if (!pattern) return;
+  try {
+    const [sig, vars] = await Promise.all(['signals', 'variables'].map((kind) =>
+      s.customRequest('yavs/find', { kind, pattern })));
+    const items = [...sig.items, ...vars.items].map((i) => ({ label: i.path, description: i.detail }));
+    if (!items.length) {
+      vscode.window.showInformationMessage(`yavs: nothing matches ${pattern}`);
+      return;
+    }
+    const picked = await vscode.window.showQuickPick(items, { canPickMany: true, matchOnDescription: true });
+    for (const p of picked ?? []) {
+      const command = viewers.get(s.id) ? `wave add ${p.label}` : `examine ${p.label}`;
+      const r = await s.customRequest('evaluate', { expression: command, context: 'repl' });
+      vscode.debug.activeDebugConsole.appendLine(`${command}: ${r.result}`);
+    }
+  } catch (e) {
+    vscode.window.showErrorMessage(`yavs: ${e.message}`);
+  }
+}
+
 function activate(context) {
   const reg = vscode.commands.registerCommand;
   context.subscriptions.push(
@@ -247,6 +294,8 @@ function activate(context) {
     reg('yavs.stepTimestep', custom('yavs/stepTimestep')),
     reg('yavs.breakOnValue', breakOnValue),
     reg('yavs.addToWave', addToWave),
+    reg('yavs.showDrivers', showDrivers),
+    reg('yavs.findSignals', findSignals),
     reg('yavs.force', signalOp('yavs/force', true)),
     reg('yavs.deposit', signalOp('yavs/deposit', true)),
     reg('yavs.release', signalOp('yavs/release', false)),
@@ -256,6 +305,7 @@ function activate(context) {
     }),
     vscode.debug.onDidTerminateDebugSession((s) => {
       valueBps.delete(s.id);
+      viewers.delete(s.id);
       if (s.type === 'yavs') vscode.commands.executeCommand('setContext', 'yavs.viewer', false);
     }));
 }

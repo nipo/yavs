@@ -15,6 +15,7 @@
 //! Composites are declared by the caller as scopes ([`ScopeKind::Record`], [`ScopeKind::Array`])
 //! whose leaves are ordinary signals, so every sub-element has its own [`SignalId`].
 
+pub mod history;
 mod model;
 mod select;
 mod sim;
@@ -26,6 +27,6 @@ pub use model::{
     Bounds, Dir, EnumType, HierItem, Hierarchy, HierarchyBuilder, ObjClass, PortDir, ScalarType,
     ScopeKind, SigType, SignalId, Skipped,
 };
-pub use select::Selection;
+pub use select::{Selection, glob_match};
 pub use sim::{Recorder, Sink, record, record_to, var_counts};
 pub use writer::{Error, WaveConfig, WaveWriter};

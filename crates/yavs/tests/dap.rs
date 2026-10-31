@@ -615,7 +615,7 @@ fn completions() {
     };
     assert_eq!(ask("exam"), ["examine"]);
     assert_eq!(ask("step "), ["delta", "timestep"]);
-    assert_eq!(ask("wave "), ["add", "cursor"]);
+    assert_eq!(ask("wave "), ["add", "cursor", "load", "save"]);
     assert_eq!(ask("wave cu"), ["cursor"]);
     assert_eq!(ask("break del"), ["delete"]);
     assert_eq!(ask("break tb"), ["tb.vhd:"]);
@@ -788,4 +788,116 @@ fn coverage_with_dap_reports_a_command_limitation() {
     assert!(err.contains("error[E0199]"), "{err}");
     assert!(err.contains("not implemented yet"), "{err}");
     assert!(!err.contains("E9999"), "{err}");
+}
+
+/// The exception filters of VS Code stop at reports of those severities; `yavs/find` lists.
+#[test]
+fn exception_filters_and_find() {
+    let d = tempdir("dap-filters");
+    let src =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/cli/debug_tools.vhd");
+    std::fs::copy(src, d.join("debug_tools.vhd")).expect("copy");
+    let ok = std::process::Command::new(env!("CARGO_BIN_EXE_yavs"))
+        .current_dir(&d)
+        .args([
+            "analyze",
+            "--std=2008",
+            "--work=work:lib",
+            "debug_tools.vhd",
+        ])
+        .status()
+        .expect("yavs");
+    assert!(ok.success());
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_yavs"))
+        .current_dir(&d)
+        .args(["run", "--work=work:lib", "debug_tools", "--dap=stdio"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("spawn");
+    let mut to = child.stdin.take().expect("stdin");
+    let mut from = std::io::BufReader::new(child.stdout.take().expect("stdout"));
+    let mut seq = 0;
+    let mut send = |cmd: &str, args: serde_json::Value| {
+        seq += 1;
+        let m =
+            serde_json::json!({"seq": seq, "type": "request", "command": cmd, "arguments": args})
+                .to_string();
+        use std::io::Write;
+        write!(to, "Content-Length: {}\r\n\r\n{m}", m.len()).expect("send");
+        to.flush().expect("flush");
+    };
+    let mut until = |pred: &dyn Fn(&serde_json::Value) -> bool| -> serde_json::Value {
+        use std::io::{BufRead, Read};
+        loop {
+            let mut n = 0;
+            loop {
+                let mut l = String::new();
+                from.read_line(&mut l).expect("line");
+                let l = l.trim();
+                if l.is_empty() {
+                    break;
+                }
+                n = l
+                    .strip_prefix("Content-Length: ")
+                    .expect("header")
+                    .parse()
+                    .expect("n");
+            }
+            let mut b = vec![0; n];
+            from.read_exact(&mut b).expect("body");
+            let m: serde_json::Value = serde_json::from_slice(&b).expect("json");
+            if pred(&m) {
+                return m;
+            }
+        }
+    };
+    send("initialize", serde_json::json!({}));
+    let caps = until(&|m| m["command"] == "initialize");
+    assert_eq!(
+        caps["body"]["exceptionBreakpointFilters"][0]["filter"],
+        "failure"
+    );
+    send("launch", serde_json::json!({}));
+    send(
+        "setExceptionBreakpoints",
+        serde_json::json!({"filters": ["warning"]}),
+    );
+    send("configurationDone", serde_json::json!({}));
+    let s = until(&|m| m["event"] == "stopped");
+    assert_eq!(s["body"]["reason"], "exception");
+    assert_eq!(
+        s["body"]["text"], "fatal now",
+        "only the warning, not the error before it"
+    );
+    send(
+        "yavs/find",
+        serde_json::json!({"kind": "signals", "pattern": "*cn*"}),
+    );
+    let f = until(&|m| m["command"] == "yavs/find");
+    assert_eq!(f["body"]["items"][0]["path"], "debug_tools.cnt", "{f}");
+    send(
+        "yavs/find",
+        serde_json::json!({"kind": "variables", "pattern": "tot*"}),
+    );
+    let f = until(&|m| m["command"] == "yavs/find");
+    assert_eq!(
+        f["body"]["items"][0]["path"], "debug_tools.counter.total",
+        "{f}"
+    );
+    send(
+        "evaluate",
+        serde_json::json!({"expression": "drivers cnt", "context": "repl"}),
+    );
+    let f = until(&|m| m["command"] == "evaluate");
+    assert!(
+        f["body"]["result"]
+            .as_str()
+            .expect("text")
+            .contains("process debug_tools.counter"),
+        "{f}"
+    );
+    send("disconnect", serde_json::json!({}));
+    let _ = child.wait();
 }

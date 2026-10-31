@@ -40,6 +40,113 @@ pub struct ChangingSignal {
     pub value: Option<String>,
 }
 
+/// One source of a signal: a process's driver, or a port that feeds it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SourceInfo {
+    /// The driving process; `None` for a port (`SimControl::port_links`).
+    pub owner: Option<ProcId>,
+    /// Its slot among the signal's sources.
+    pub slot: u32,
+    /// The elements it drives.
+    pub range: Range,
+    pub value: Value,
+    /// Some of its elements are disconnected (a guarded signal).
+    pub disconnected: bool,
+}
+
+/// What makes up the value of a signal now (the console's `drivers` and `trace x`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SignalSources {
+    pub sources: Vec<SourceInfo>,
+    /// The resolved driving value.
+    pub driving: Value,
+    /// The effective value.
+    pub effective: Value,
+    /// A resolution function combines the sources.
+    pub resolved: bool,
+    /// Elements under a `force` of the effective value, with the forced values.
+    pub forced: Vec<(Range, Value)>,
+    /// Elements under a `force out` of the driving value, with the forced values.
+    pub forced_out: Vec<(Range, Value)>,
+    /// Time of the last event, `None` if it never had one.
+    pub last_event: Option<Time>,
+}
+
+/// A port association, for following a signal through the hierarchy.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PortLink {
+    pub formal: Vec<(SignalId, Range)>,
+    pub actual: Vec<(SignalId, Range)>,
+    pub mode: PortMode,
+    /// Per actual part, its source slot fed by the formal (for `out`, `inout`, `buffer`).
+    pub slots: Vec<u32>,
+}
+
+/// The runs of `mask` as ranges with their values.
+fn layer_runs(l: Option<&crate::signal::Layer>, len: u32) -> Vec<(Range, Value)> {
+    let Some(l) = l else { return Vec::new() };
+    let on = |e: u32| l.mask[e as usize / 64] >> (e % 64) & 1 == 1;
+    let mut out = Vec::new();
+    let mut e = 0;
+    while e < len {
+        if on(e) {
+            let start = e;
+            while e < len && on(e) {
+                e += 1;
+            }
+            let v = l.value.extract(start as usize, (e - start) as usize);
+            out.push((Range::new(start, e - start), v.to_value()));
+        } else {
+            e += 1;
+        }
+    }
+    out
+}
+
+/// The sources of signal `s`.
+pub(crate) fn signal_sources(
+    g: &Signal,
+    s: SignalId,
+    drivers: &[crate::process::DriverInfo],
+    now: Time,
+) -> SignalSources {
+    let sources = g
+        .drivers
+        .iter()
+        .enumerate()
+        .map(|(k, slot)| {
+            let owner = drivers
+                .iter()
+                .find(|d| d.signal == s && d.slot == k as u32)
+                .map(|d| d.owner);
+            // A direct commit leaves a sole source's own value behind (`Signal::lag`).
+            let value = if g.lag && !slot.shared {
+                g.driving_of(slot.range).to_value()
+            } else {
+                slot.value.to_value()
+            };
+            SourceInfo {
+                owner,
+                slot: k as u32,
+                range: slot.range,
+                value,
+                disconnected: slot.off.as_ref().is_some_and(|o| o.iter().any(|&w| w != 0)),
+            }
+        })
+        .collect();
+    let all = Range::new(0, g.ty.len);
+    let since = g.last_event(all, now);
+    SignalSources {
+        sources,
+        driving: g.driving_of(all).to_value(),
+        effective: g.cur.to_value(),
+        resolved: g.resolution.is_some(),
+        forced: layer_runs(g.force_eff.as_deref(), g.ty.len),
+        forced_out: layer_runs(g.force_drv.as_deref(), g.ty.len),
+        last_event: (since != Time::MAX).then(|| now.since(since)),
+    }
+}
+
 /// What a process is doing, between two cycles.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProcWait {
@@ -146,6 +253,25 @@ impl Parts {
 }
 
 impl SimControl {
+    /// What makes up the value of signal `s` now.
+    pub fn sources(&self, s: SignalId) -> Option<SignalSources> {
+        let g = self.signals.get(s.0 as usize)?;
+        Some(signal_sources(g, s, &self.drivers, self.now))
+    }
+
+    /// The port associations of the design; they do not change during a run.
+    pub fn port_links(&self) -> Vec<PortLink> {
+        self.ports
+            .iter()
+            .map(|e| PortLink {
+                formal: e.formal.clone(),
+                actual: e.actual.clone(),
+                mode: e.mode,
+                slots: e.slots.clone(),
+            })
+            .collect()
+    }
+
     /// Name parts of signal `s` (the fields of a record pack): hang and loop reports speak of
     /// them instead of the whole signal. The parts must cover the signal in order.
     pub fn name_parts(&mut self, s: SignalId, parts: Vec<(Range, String)>) {
