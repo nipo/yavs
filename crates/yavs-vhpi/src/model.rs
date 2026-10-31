@@ -313,6 +313,12 @@ pub(crate) const INT_PROPS: &[vhpiIntPropertyT] = &[
     vhpiSigKindP,
     vhpiIsForcedP,
     vhpiIsProtectedTypeP,
+    vhpiEndLineNoP,
+    vhpiCompInstKindP,
+    vhpiNumParamsP,
+    vhpiIsPureP,
+    vhpiPredefAttrP,
+    vhpiAttrKindP,
 ];
 pub(crate) const STR_PROPS: &[vhpiStrPropertyT] = &[
     vhpiNameP,
@@ -325,6 +331,10 @@ pub(crate) const STR_PROPS: &[vhpiStrPropertyT] = &[
     vhpiDefNameP,
     vhpiToolVersionP,
     vhpiLabelNameP,
+    vhpiCompNameP,
+    vhpiCompInstNameP,
+    vhpiLibLogicalNameP,
+    vhpiLibPhysicalNameP,
 ];
 
 #[derive(Default)]
@@ -885,6 +895,11 @@ impl State {
     }
 
     pub(crate) fn str_property(&self, obj: &Object, prop: vhpiStrPropertyT) -> Option<String> {
+        if let Object::Node(n) = obj
+            && let Some(s) = self.design.extra.strs.get(&(*n, prop))
+        {
+            return Some(s.clone());
+        }
         let node = Self::base(obj).map(|n| self.design.node(n));
         Some(match (obj, prop) {
             (Object::Tool, vhpiNameP) => "yavs".into(),
@@ -939,6 +954,11 @@ impl State {
     }
 
     pub(crate) fn int_property(&self, obj: &Object, prop: vhpiIntPropertyT) -> Option<vhpiIntT> {
+        if let Object::Node(n) = obj
+            && let Some(&v) = self.design.extra.ints.get(&(*n, prop))
+        {
+            return Some(v);
+        }
         let node = Self::base(obj).map(|n| self.design.node(n));
         Some(match (obj, prop) {
             (_, vhpiKindP) => self.kind(obj),
@@ -1010,6 +1030,25 @@ impl State {
         kind: vhpiOneToOneT,
         reference: Option<&Object>,
     ) -> Result<Object, bool> {
+        if let Some(Object::Node(n)) = reference {
+            if let Some(&x) = self.design.extra.one.get(&(*n, kind)) {
+                return Ok(Object::Node(x));
+            }
+            if kind == vhpiReturnType {
+                return match self.design.node(*n).ty {
+                    Some(t) if self.design.node(*n).kind == vhpiFuncDeclK => {
+                        Ok(Object::Type(TypeObj::Ty(t)))
+                    }
+                    _ => Err(false),
+                };
+            }
+        }
+        if matches!(
+            kind,
+            vhpiAliasedName | vhpiSubpBody | vhpiSubpDecl | vhpiCompDecl | vhpiLibraryDecl
+        ) {
+            return Err(false);
+        }
         if let (
             vhpiSimNet | vhpiResolFunc | vhpiSignal | vhpiEqProcessStmt | vhpiFormal | vhpiActual,
             Some(o),
@@ -1092,6 +1131,21 @@ impl State {
     ) -> Result<Option<Iter>, bool> {
         let list =
             |items: Vec<Object>| Ok((!items.is_empty()).then_some(Iter::List { items, next: 0 }));
+        // The relations of `Design::extra` (#831); no entry is an empty iteration.
+        if matches!(
+            rel,
+            vhpiSigAttrs | vhpiAttrDecls | vhpiDesignUnits | vhpiUseClauses | vhpiConfigSpecs
+        ) || rel == vhpiLibraryDecls && matches!(reference, Some(Object::Node(n)) if *n != ROOT)
+        {
+            let Some(Object::Node(n)) = reference else {
+                return Err(false);
+            };
+            let items = self.design.extra.many.get(&(*n, rel));
+            return list(items.into_iter().flatten().map(|&x| Object::Node(x)).collect());
+        }
+        if rel == vhpiLibraryDecls {
+            return list(self.design.libraries.iter().map(|&x| Object::Node(x)).collect());
+        }
         if let (vhpiParamDecls, Some(o @ Object::Call(_))) = (rel, reference) {
             return list(self.foreign_params(o).ok_or(false)?);
         }
@@ -1151,11 +1205,26 @@ impl State {
                     .collect(),
             )
         };
-        // A declaration's user attribute specifications are its `vhpiAttrSpecK` children.
-        if let (vhpiAttrSpecs, Some(Object::Node(n))) = (rel, reference)
-            && self.design.node(*n).layout.is_some()
-        {
+        // The user attribute specifications of a declaration, region or design unit are its
+        // `vhpiAttrSpecK` children.
+        if let (vhpiAttrSpecs, Some(Object::Node(n))) = (rel, reference) {
             return decls(*n, Some(vhpiAttrSpecK));
+        }
+        if let (vhpiParamDecls, Some(Object::Node(n))) = (rel, reference) {
+            return list(
+                (self.design.node(*n).decls.iter())
+                    .filter(|&&d| {
+                        matches!(
+                            self.design.node(d).kind,
+                            vhpiConstParamDeclK
+                                | vhpiVarParamDeclK
+                                | vhpiSigParamDeclK
+                                | vhpiFileParamDeclK
+                        )
+                    })
+                    .map(|&d| Object::Node(d))
+                    .collect(),
+            );
         }
         let region = match reference {
             Some(Object::Node(n)) if self.design.node(*n).layout.is_none() => Some(*n),
@@ -1177,7 +1246,14 @@ impl State {
             (vhpiBlockStmts, Some(n)) => regions(n, &|k| k == vhpiBlockStmtK),
             (vhpiCompInstStmts, Some(n)) => regions(n, &|k| k == vhpiCompInstStmtK),
             (vhpiStmts, Some(n)) => regions(n, &|_| true),
-            (vhpiDecls, Some(n)) => decls(n, None),
+            // Attribute specifications have their own iterator; they decorate the region.
+            (vhpiDecls, Some(n)) => list(
+                (self.design.node(n).decls.iter())
+                    .filter(|&&d| self.design.node(d).kind != vhpiAttrSpecK)
+                    .map(|&d| Object::Node(d))
+                    .collect(),
+            ),
+            (vhpiAliasDecls, Some(n)) => decls(n, Some(vhpiAliasDeclK)),
             (vhpiSigDecls, Some(n)) => decls(n, Some(vhpiSigDeclK)),
             (vhpiPortDecls, Some(n)) => decls(n, Some(vhpiPortDeclK)),
             (vhpiGenericDecls, Some(n)) => decls(n, Some(vhpiGenericDeclK)),

@@ -262,7 +262,19 @@ pub(crate) fn vhpi_name(s: &str) -> String {
     out
 }
 
+/// What only some nodes have: their relations and properties by the VHPI constant (#831).
+#[derive(Default)]
+pub(crate) struct Extra {
+    pub(crate) one: HashMap<(NodeId, vhpiOneToOneT), NodeId>,
+    pub(crate) many: HashMap<(NodeId, vhpiOneToManyT), Vec<NodeId>>,
+    pub(crate) ints: HashMap<(NodeId, vhpiIntPropertyT), vhpiIntT>,
+    pub(crate) strs: HashMap<(NodeId, vhpiStrPropertyT), String>,
+}
+
 pub(crate) struct Design {
+    pub(crate) extra: Extra,
+    /// The libraries of the design (`vhpiLibraryDecls`).
+    pub(crate) libraries: Vec<NodeId>,
     pub(crate) net: crate::connect::Net,
     /// The variables of a protected type (`vhpi_protected_call`).
     pub(crate) protected: std::collections::HashSet<NodeId>,
@@ -322,6 +334,8 @@ impl Design {
 
     fn empty() -> Design {
         Design {
+            extra: Extra::default(),
+            libraries: Vec::new(),
             net: Default::default(),
             protected: Default::default(),
             nodes: Vec::new(),
@@ -346,12 +360,16 @@ impl Design {
             attrs: HashMap::new(),
             attr_nodes: HashMap::new(),
             subps: HashMap::new(),
+            decl_nodes: HashMap::new(),
+            comp_links: Vec::new(),
         };
         for (id, a) in db.attr_values.iter() {
             b.attrs.entry(a.entity).or_default().push(id);
         }
         b.region(ScopeId(0), None);
         b.packages();
+        b.units_and_libraries();
+        b.links();
         b.net();
         b.d.types = b.types.into_inner();
         b.d.locs = e.nets.loc.clone();
@@ -367,16 +385,32 @@ impl Design {
             vhpiArchBodyK
                 | vhpiEntityDeclK
                 | vhpiPackDeclK
+                | vhpiPackBodyK
+                | vhpiConfigDeclK
                 | vhpiAttrDeclK
-                | vhpiFuncDeclK
-                | vhpiProcDeclK
-        );
+                | vhpiLibraryDeclK
+                | vhpiUseClauseK
+                | vhpiCompConfigK
+                | vhpiSubpBodyK
+        ) || n.parent.is_none() && matches!(n.kind, vhpiFuncDeclK | vhpiProcDeclK);
         if !unit {
             self.by_name.entry(vhpi_name(&n.full)).or_insert(id);
         }
         if let Some(p) = n.parent {
             let parent = &mut self.nodes[p.0 as usize];
-            if n.layout.is_some() {
+            let declared = matches!(
+                n.kind,
+                vhpiFileDeclK
+                    | vhpiAliasDeclK
+                    | vhpiCompDeclK
+                    | vhpiFuncDeclK
+                    | vhpiProcDeclK
+                    | vhpiConstParamDeclK
+                    | vhpiVarParamDeclK
+                    | vhpiSigParamDeclK
+                    | vhpiFileParamDeclK
+            );
+            if n.layout.is_some() || declared {
                 parent.decls.push(id);
             } else {
                 parent.regions.push(id);
@@ -510,6 +544,11 @@ struct Builder<'a> {
     attr_nodes: HashMap<DeclId, NodeId>,
     /// The `vhpiFuncDeclK` or `vhpiProcDeclK` node of each subprogram (made once).
     subps: HashMap<DeclId, NodeId>,
+    /// The node of each listed declaration, by its elaborated region (`None`: a package's).
+    decl_nodes: HashMap<(Option<ScopeId>, DeclId), NodeId>,
+    /// `vhpiCompDecl` to fill in once every declaration has its node: the referring node, its
+    /// elaborated region and the component.
+    comp_links: Vec<(NodeId, ScopeId, DeclId)>,
 }
 
 impl Builder<'_> {
@@ -532,6 +571,8 @@ impl Builder<'_> {
         let (kind, primary) = match &unit.hir {
             UnitHir::Architecture { entity, .. } => (vhpiArchBodyK, Some(*entity)),
             UnitHir::Entity { .. } => (vhpiEntityDeclK, None),
+            UnitHir::PackageBody { package } => (vhpiPackBodyK, Some(*package)),
+            UnitHir::Configuration(_) => (vhpiConfigDeclK, None),
             _ => (vhpiPackDeclK, None),
         };
         let name = unit.name.text.to_string();
@@ -558,7 +599,141 @@ impl Builder<'_> {
             origin: Origin::Unit(u),
         });
         self.units.insert(u, n);
+        self.end_line(n, unit.span);
+        self.attr_specs(n, None, unit.decl);
         n
+    }
+
+    /// `vhpiEndLineNoP` of node `n`: the last line of `span`.
+    fn end_line(&mut self, n: NodeId, span: Span) {
+        let f = self.db.sources.get(span.file);
+        if let Ok(line) = i32::try_from(f.line_col(span.end).0) {
+            self.d.extra.ints.insert((n, vhpiEndLineNoP), line);
+        }
+    }
+
+    fn link_many(&mut self, n: NodeId, rel: vhpiOneToManyT, x: NodeId) {
+        self.d.extra.many.entry((n, rel)).or_default().push(x);
+    }
+
+    /// A node that only relations reach: no parent, no name in the index.
+    fn bare(&mut self, kind: vhpiClassKindT, name: String, span: Span) -> NodeId {
+        let (file, line) = self.place(span);
+        self.d.push(Node {
+            kind,
+            full: name.clone(),
+            name,
+            parent: None,
+            file,
+            line,
+            regions: Vec::new(),
+            decls: Vec::new(),
+            unit: None,
+            def_name: None,
+            mode: None,
+            layout: None,
+            ty: None,
+            origin: Origin::Named,
+        })
+    }
+
+    /// The label of statement region `s`: its declaration in the enclosing region.
+    fn label_of(&self, s: ScopeId) -> Option<DeclId> {
+        let (db, e) = (self.db, self.e);
+        let sc = e.hier.scope(s);
+        let mut p = sc.parent;
+        while let Some(x) = p
+            && matches!(e.hier.scope(x).kind, ScopeKind::Component { .. })
+        {
+            p = e.hier.scope(x).parent;
+        }
+        let regions = e.regions.get(&p?)?;
+        let wanted = sc.name.text.to_string();
+        regions.iter().find_map(|&r| {
+            db.scopes[r].order.iter().copied().find(|&d| {
+                matches!(db.decls[d].kind, DeclKind::Label(_))
+                    && db.decls[d].name.to_string().eq_ignore_ascii_case(&wanted)
+            })
+        })
+    }
+
+    /// The node of declaration `d` seen from elaborated region `s`.
+    fn find_decl(&self, mut s: Option<ScopeId>, d: DeclId) -> Option<NodeId> {
+        while let Some(x) = s {
+            if let Some(&n) = self.decl_nodes.get(&(Some(x), d)) {
+                return Some(n);
+            }
+            s = self.e.hier.scope(x).parent;
+        }
+        self.decl_nodes.get(&(None, d)).copied()
+    }
+
+    /// Fills in the relations that need every declaration's node.
+    fn links(&mut self) {
+        for (n, s, comp) in std::mem::take(&mut self.comp_links) {
+            if let Some(c) = self.find_decl(Some(s), comp) {
+                self.d.extra.one.insert((n, vhpiCompDecl), c);
+            }
+        }
+    }
+
+    /// Libraries, the design units of each and the use clauses of each unit (#831).
+    fn units_and_libraries(&mut self) {
+        let db = self.db;
+        let mut libs = HashMap::new();
+        for (l, lib) in db.libs.iter() {
+            let name = lib.name.text.to_string();
+            let n = self.bare(vhpiLibraryDeclK, name.clone(), lib.name.span);
+            self.d.extra.strs.insert((n, vhpiLibLogicalNameP), name);
+            let path = match &lib.source {
+                yavs_sem::loader::LibSource::Manifest(m) => Some(m.dir().to_path_buf()),
+                yavs_sem::loader::LibSource::StdDir(p) => Some(p.clone()),
+                yavs_sem::loader::LibSource::Files => None,
+            };
+            if let Some(p) = path {
+                let p = p.display().to_string();
+                self.d.extra.strs.insert((n, vhpiLibPhysicalNameP), p);
+            }
+            self.d.libraries.push(n);
+            libs.insert(l, n);
+        }
+        for (u, unit) in db.units.iter() {
+            if matches!(unit.hir, UnitHir::Pending | UnitHir::Context) {
+                continue;
+            }
+            let n = self.unit(u);
+            let lib = libs[&unit.lib];
+            self.d.extra.one.insert((n, vhpiLibraryDecl), lib);
+            self.link_many(lib, vhpiDesignUnits, n);
+            for r in [unit.context, unit.scope] {
+                for item in &db.scopes[r].uses {
+                    let name = self.use_name(item);
+                    let c = self.bare(vhpiUseClauseK, name, unit.span);
+                    self.link_many(n, vhpiUseClauses, c);
+                }
+                for &d in &db.scopes[r].order {
+                    if let DeclKind::Library(l) = db.decls[d].kind {
+                        self.link_many(n, vhpiLibraryDecls, libs[&l]);
+                    }
+                }
+            }
+        }
+    }
+
+    /// What a use clause names, as written with `.all` when it is a whole region.
+    fn use_name(&self, item: &yavs_sem::scope::UseItem) -> String {
+        use yavs_sem::scope::UseItem;
+        let db = self.db;
+        match item {
+            UseItem::All(s) => match db.scopes[*s].owner {
+                Some(d) => format!("{}.all", db.decls[d].name),
+                None => "all".to_owned(),
+            },
+            UseItem::One(ds) => ds
+                .first()
+                .map_or_else(String::new, |&d| db.decls[d].name.to_string()),
+            UseItem::Library(l) => format!("{}.all", db.libs[*l].name.text),
+        }
     }
 
     /// The region of elaborated scope `s` and everything below it.
@@ -626,6 +801,28 @@ impl Builder<'_> {
             ty: None,
             origin: Origin::Scope(s),
         });
+        // A statement's label: its attributes, and where it ends (#831).
+        if let Some(l) = self.label_of(s) {
+            self.attr_specs(n, Some(s), l);
+            if let DeclKind::Label(stmt) = db.decls[l].kind {
+                self.end_line(n, db.stmts[stmt].span);
+            }
+        }
+        if kind == vhpiCompInstStmtK || kind == vhpiRootInstK {
+            let comp = sc.parent.and_then(|p| match e.hier.scope(p).kind {
+                ScopeKind::Component { comp } => Some(comp),
+                _ => None,
+            });
+            let inst = if comp.is_some() { vhpiComp } else { vhpiDirect };
+            self.d.extra.ints.insert((n, vhpiCompInstKindP), inst);
+            let label = sc.name.text.to_string();
+            self.d.extra.strs.insert((n, vhpiCompInstNameP), label);
+            if let Some(c) = comp {
+                let name = db.decls[c].name.to_string();
+                self.d.extra.strs.insert((n, vhpiCompNameP), name);
+                self.comp_links.push((n, s, c));
+            }
+        }
         if matches!(sc.kind, ScopeKind::Process { .. })
             && let Some(p) = e.procs.iter().position(|p| p.scope == s)
         {
@@ -651,6 +848,12 @@ impl Builder<'_> {
                     self.decl(n, Some(s), d);
                 }
             }
+            for c in db.config_specs.get(&r).into_iter().flatten() {
+                let name = db.decls[c.component].name.to_string();
+                let x = self.bare(vhpiCompConfigK, name, c.span);
+                self.link_many(n, vhpiConfigSpecs, x);
+                self.comp_links.push((x, s, c.component));
+            }
         }
         for &c in &sc.children {
             self.region(c, Some(n));
@@ -661,10 +864,74 @@ impl Builder<'_> {
     fn decl(&mut self, n: NodeId, s: Option<ScopeId>, d: DeclId) {
         let (db, e) = (self.db, self.e);
         let decl = &db.decls[d];
+        match &decl.kind {
+            DeclKind::Alias(a) => return self.alias_decl(n, s, d, a),
+            DeclKind::Component(_) => {
+                let full = format!("{}:{}", self.d.node(n).full, decl.name);
+                let (file, line) = self.place(decl.name_span());
+                let c = self.d.push(Node {
+                    kind: vhpiCompDeclK,
+                    name: decl.name.to_string(),
+                    full,
+                    parent: Some(n),
+                    file,
+                    line,
+                    regions: Vec::new(),
+                    decls: Vec::new(),
+                    unit: None,
+                    def_name: None,
+                    mode: None,
+                    layout: None,
+                    ty: None,
+                    origin: Origin::Named,
+                });
+                self.end_line(c, decl.span);
+                self.decl_nodes.insert((s, d), c);
+                return;
+            }
+            DeclKind::Subprogram(_) if !decl.implicit => {
+                self.subp(d, Some(n));
+                return;
+            }
+            DeclKind::Attribute { .. } => {
+                let a = self.attr_node(d);
+                self.link_many(n, vhpiAttrDecls, a);
+                return;
+            }
+            _ => {}
+        }
         let DeclKind::Object(o) = &decl.kind else {
             return;
         };
+        if o.class == ObjClass::File && o.role != ObjRole::Param {
+            let ty = self.object_ty(o.subtype, &Layout::Open, s);
+            let full = format!("{}:{}", self.d.node(n).full, decl.name);
+            let (file, line) = self.place(decl.name_span());
+            let f = self.d.push(Node {
+                kind: vhpiFileDeclK,
+                name: decl.name.to_string(),
+                full,
+                parent: Some(n),
+                file,
+                line,
+                regions: Vec::new(),
+                decls: Vec::new(),
+                unit: None,
+                def_name: None,
+                mode: None,
+                layout: None,
+                ty: Some(ty),
+                origin: Origin::Named,
+            });
+            self.end_line(f, decl.span);
+            self.decl_nodes.insert((s, d), f);
+            return;
+        }
         let kind = match (&o.role, o.class) {
+            (ObjRole::Param, ObjClass::Constant) => vhpiConstParamDeclK,
+            (ObjRole::Param, ObjClass::Variable | ObjClass::SharedVariable) => vhpiVarParamDeclK,
+            (ObjRole::Param, ObjClass::Signal) => vhpiSigParamDeclK,
+            (ObjRole::Param, ObjClass::File) => vhpiFileParamDeclK,
             (ObjRole::Generic, ObjClass::Constant) => vhpiGenericDeclK,
             (ObjRole::Port, ObjClass::Signal | ObjClass::Variable) => vhpiPortDeclK,
             (ObjRole::Plain | ObjRole::Deferred, ObjClass::Signal) => vhpiSigDeclK,
@@ -672,14 +939,14 @@ impl Builder<'_> {
                 vhpiConstDeclK
             }
             (ObjRole::Plain, ObjClass::Variable | ObjClass::SharedVariable) => vhpiVarDeclK,
-            // ponytail: files, aliases and implicit signals are not listed yet.
+            // Implicit signals are listed under their prefix (`vhpiSigAttrs`, `Builder::net`).
             _ => return,
         };
         let name = decl.name.to_string();
         let signal = match s {
             Some(s) => e.sigs.get(&(s, d)).copied(),
             // A package signal lives in its package's elaborated scope.
-            None if o.class == ObjClass::Signal => {
+            None if o.class == ObjClass::Signal && o.role != ObjRole::Param => {
                 e.sigs.iter().find(|((_, x), _)| *x == d).map(|(_, &o)| o)
             }
             None => None,
@@ -753,6 +1020,8 @@ impl Builder<'_> {
             ty: Some(ty),
             origin,
         });
+        self.decl_nodes.insert((s, d), node);
+        self.end_line(node, decl.span);
         if let Some(obj) = signal {
             self.d.net.obj_nodes.insert(obj, node);
         }
@@ -772,7 +1041,9 @@ impl Builder<'_> {
             let DeclKind::Attribute { ty: st } = adecl.kind else {
                 continue;
             };
-            let v = db.value(av.value);
+            // A value that depends on a generic folds with the region's values (#831).
+            let v = self.fold(av.value, s);
+            let v = v.as_ref();
             let layout = self.layout(st, v, s);
             let ty = self.object_ty(st, &layout, s);
             let name = adecl.name.to_string();
@@ -799,32 +1070,73 @@ impl Builder<'_> {
                     value: v.cloned(),
                 },
             });
-            let decl_node = match self.attr_nodes.get(&av.attr) {
-                Some(&x) => x,
-                None => {
-                    let (file, line) = self.place(adecl.name_span());
-                    let x = self.d.push(Node {
-                        kind: vhpiAttrDeclK,
-                        name: name.clone(),
-                        full: name,
-                        parent: None,
-                        file,
-                        line,
-                        regions: Vec::new(),
-                        decls: Vec::new(),
-                        unit: None,
-                        def_name: None,
-                        mode: None,
-                        layout: None,
-                        ty: None,
-                        origin: Origin::Named,
-                    });
-                    self.attr_nodes.insert(av.attr, x);
-                    x
-                }
-            };
+            let decl_node = self.attr_node(av.attr);
             self.d.attr_decls.insert(spec, decl_node);
         }
+    }
+
+    /// The `vhpiAttrDeclK` node of attribute declaration `d` (made once).
+    fn attr_node(&mut self, d: DeclId) -> NodeId {
+        if let Some(&x) = self.attr_nodes.get(&d) {
+            return x;
+        }
+        let decl = &self.db.decls[d];
+        let x = self.bare(vhpiAttrDeclK, decl.name.to_string(), decl.name_span());
+        self.attr_nodes.insert(d, x);
+        x
+    }
+
+    /// An alias (#831): of a whole object it reads and writes like the object; of a part it has
+    /// the object as its `vhpiAliasedName` and no value.
+    // ponytail: no value for an alias of a field, element or slice; a path into the layout when
+    // a plugin needs one.
+    fn alias_decl(
+        &mut self,
+        n: NodeId,
+        s: Option<ScopeId>,
+        d: DeclId,
+        a: &yavs_sem::decl::Alias,
+    ) {
+        let db = self.db;
+        let decl = &db.decls[d];
+        let full = format!("{}:{}", self.d.node(n).full, decl.name);
+        let (file, line) = self.place(decl.name_span());
+        let (target, whole) = match a {
+            yavs_sem::decl::Alias::Object { target, .. } => match db.lsp(*target) {
+                Some(l) => match l.root {
+                    yavs_sem::hir::ObjRoot::Decl(t) => (self.find_decl(s, t), l.path.is_empty()),
+                    _ => (None, false),
+                },
+                None => (None, false),
+            },
+            yavs_sem::decl::Alias::NonObject { target } => (self.find_decl(s, *target), false),
+        };
+        let like = target.filter(|_| whole).map(|t| {
+            let t = self.d.node(t);
+            (t.layout.clone(), t.ty, t.origin.clone())
+        });
+        let (layout, ty, origin) = like.unwrap_or((None, None, Origin::Named));
+        let al = self.d.push(Node {
+            kind: vhpiAliasDeclK,
+            name: decl.name.to_string(),
+            full,
+            parent: Some(n),
+            file,
+            line,
+            regions: Vec::new(),
+            decls: Vec::new(),
+            unit: None,
+            def_name: None,
+            mode: None,
+            layout,
+            ty,
+            origin,
+        });
+        self.end_line(al, decl.span);
+        if let Some(t) = target {
+            self.d.extra.one.insert((al, vhpiAliasedName), t);
+        }
+        self.decl_nodes.insert((s, d), al);
     }
 
     /// The net graph of `Design::net` (`connect.rs`), once every signal has its node.
@@ -978,6 +1290,63 @@ impl Builder<'_> {
             }
         }
         self.d.net.conns = joined;
+        // Implicit signals that exist, under their prefix (#831).
+        for (i, obj) in nets.objs.iter().enumerate() {
+            if obj.kind != ObjKind::Implicit {
+                continue;
+            }
+            let leaf = nets.leaf(obj.leaves.0);
+            let Some((ik, src, _)) = leaf.implicit else {
+                continue;
+            };
+            let Some(&prefix) = self.d.net.obj_nodes.get(&nets.leaf(src).obj) else {
+                continue;
+            };
+            let (attr, pa, t) = match ik {
+                yavs_elab::ImplicitKind::Stable(t) => ("stable", vhpiStablePA, Some(t)),
+                yavs_elab::ImplicitKind::Quiet(t) => ("quiet", vhpiQuietPA, Some(t)),
+                yavs_elab::ImplicitKind::Delayed(t) => ("delayed", vhpiDelayedPA, Some(t)),
+                yavs_elab::ImplicitKind::Transaction => ("transaction", vhpiTransactionPA, None),
+            };
+            let at = t.map_or_else(String::new, |t| format!("({} fs)", t.as_fs()));
+            let p = self.d.node(prefix);
+            let name = format!("{}'{attr}{at}", p.name);
+            let full = format!("{}'{attr}{at}", p.full);
+            let ty = match &self.db.decls[obj.decl].kind {
+                DeclKind::Object(o) => {
+                    let l = self.shape_layout(&obj.shape);
+                    Some(self.object_ty(o.subtype, &l, None))
+                }
+                _ => None,
+            };
+            let layout = Some(self.shape_layout(&obj.shape));
+            let (file, line) = self.place(obj.name.span);
+            let n = self.d.push(Node {
+                kind: vhpiSimpAttrNameK,
+                name,
+                full,
+                parent: None,
+                file,
+                line,
+                regions: Vec::new(),
+                decls: Vec::new(),
+                unit: None,
+                def_name: None,
+                mode: None,
+                layout,
+                ty,
+                origin: Origin::Signal {
+                    obj: ObjId(i as u32),
+                    leaf: obj.leaves.0.0,
+                    part: obj.part,
+                },
+            });
+            self.d.net.obj_nodes.insert(ObjId(i as u32), n);
+            self.link_many(prefix, vhpiSigAttrs, n);
+            self.d.extra.one.insert((n, vhpiPrefix), prefix);
+            self.d.extra.ints.insert((n, vhpiPredefAttrP), pa);
+            self.d.extra.ints.insert((n, vhpiAttrKindP), vhpiSignalAK);
+        }
         // Per leaf: resolution and kind.
         for l in &nets.leaves {
             let (mut resolved, mut whole) = (l.resolution.is_some(), false);
@@ -993,7 +1362,7 @@ impl Builder<'_> {
             if func.is_some() {
                 resolved = true;
             }
-            let resol_func = func.map(|d| self.subp(d));
+            let resol_func = func.map(|d| self.subp(d, None));
             self.d.net.leaves.push(LeafInfo {
                 resolved,
                 whole,
@@ -1046,23 +1415,39 @@ impl Builder<'_> {
         }
     }
 
-    /// The node of subprogram `d`: no parent, not in the name index (made once).
-    fn subp(&mut self, d: DeclId) -> NodeId {
+    /// The node of subprogram `d` (made once): under region `parent`, or with none for a
+    /// resolution function that no listed region declares, with its parameters as declarations
+    /// and, for a VHDL body, a `vhpiSubpBodyK` node (#831).
+    fn subp(&mut self, d: DeclId, parent: Option<NodeId>) -> NodeId {
         if let Some(&n) = self.subps.get(&d) {
             return n;
         }
-        let decl = &self.db.decls[d];
-        let kind = match &decl.kind {
-            DeclKind::Subprogram(s) if s.ret.is_none() => vhpiProcDeclK,
-            _ => vhpiFuncDeclK,
+        let db = self.db;
+        let decl = &db.decls[d];
+        let sp = match &decl.kind {
+            DeclKind::Subprogram(sp) => Some(sp),
+            _ => None,
         };
+        let function = sp.is_none_or(|s| s.ret.is_some());
+        let ty = (sp.and_then(|s| s.ret)).map(|r| {
+            let l = self.layout(r, None, None);
+            self.object_ty(r, &l, None)
+        });
         let name = decl.name.to_string();
+        let full = match parent {
+            Some(p) => format!("{}:{name}", self.d.node(p).full),
+            None => name.clone(),
+        };
         let (file, line) = self.place(decl.name_span());
         let n = self.d.push(Node {
-            kind,
-            full: name.clone(),
-            name,
-            parent: None,
+            kind: if function {
+                vhpiFuncDeclK
+            } else {
+                vhpiProcDeclK
+            },
+            name: name.clone(),
+            full,
+            parent,
             file,
             line,
             regions: Vec::new(),
@@ -1071,10 +1456,30 @@ impl Builder<'_> {
             def_name: None,
             mode: None,
             layout: None,
-            ty: None,
+            ty,
             origin: Origin::Named,
         });
         self.subps.insert(d, n);
+        self.end_line(n, decl.span);
+        let Some(sp) = sp else {
+            return n;
+        };
+        let count = vhpiIntT::try_from(sp.params.len()).unwrap_or(vhpiIntT::MAX);
+        self.d.extra.ints.insert((n, vhpiNumParamsP), count);
+        if let yavs_sem::decl::SubprogramKind::Function { pure } = sp.kind {
+            self.d.extra.ints.insert((n, vhpiIsPureP), vhpiIntT::from(pure));
+        }
+        for p in &sp.params {
+            if let Some(pd) = p.decl {
+                self.decl(n, None, pd);
+            }
+        }
+        if let yavs_sem::decl::Body::Hir { stmts, .. } = &sp.body {
+            let span = stmts.first().map_or(decl.span, |&x| db.stmts[x].span);
+            let b = self.bare(vhpiSubpBodyK, name, span);
+            self.d.extra.one.insert((n, vhpiSubpBody), b);
+            self.d.extra.one.insert((b, vhpiSubpDecl), n);
+        }
         n
     }
 

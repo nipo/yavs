@@ -1092,16 +1092,12 @@ fn vhpi_user_attribute_misuse() {
             "decl value:",
             "    value: error",
             "generic-valued weight:",
-            "    value: error",
+            "    value: int 6",
         ],
         "{out}"
     );
     assert_eq!(err.matches("W0903").count(), 3, "{err}");
-    // An attribute value analysis cannot fold (it depends on a generic) is not read yet.
-    assert!(
-        err.contains("W0904") && err.contains("without an elaborated value"),
-        "{err}"
-    );
+    assert!(!err.contains("W0904"), "{err}");
 }
 
 /// The foreign-model callback reasons: a time-out, a repeating one removed after two, and a
@@ -1368,4 +1364,74 @@ fn vhpi_composites_raw_values_and_protected_objects() {
     ] {
         assert!(out.contains(want), "no `{want}` in\n{out}");
     }
+}
+
+const DECLS: &str = "library ieee; use ieee.std_logic_1164.all;\n\
+    package p is\n\
+      function f (a : integer; signal s : std_logic) return integer;\n\
+      procedure q (variable v : out integer);\n\
+    end;\n\
+    package body p is\n\
+      function f (a : integer; signal s : std_logic) return integer is begin return a; end;\n\
+      procedure q (variable v : out integer) is begin v := 1; end;\n\
+    end;\n\
+    library ieee; use ieee.std_logic_1164.all;\n\
+    entity sub is generic (g : integer := 1); port (i : in bit); end;\n\
+    architecture a of sub is begin end;\n\
+    use work.p.all;\n\
+    use std.textio.all;\n\
+    entity top is end;\n\
+    architecture a of top is\n\
+    attribute mark : string;\n\
+    attribute mark of a : architecture is \"arch\";\n\
+    attribute mark of inst : label is \"lab\";\n\
+    signal s : bit := '0';\n\
+    signal v : bit_vector(3 downto 0);\n\
+    alias sa : bit is s;\n\
+    alias part : bit is v(2);\n\
+    file out_f : text;\n\
+    component sub is generic (g : integer := 1); port (i : in bit); end component;\n\
+    function local (x : integer) return integer is begin return x; end;\n\
+    for inst : sub use entity work.sub(a);\n\
+    begin\n\
+    inst: sub port map (i => s);\n\
+    d: entity work.sub port map (i => s);\n\
+    w: process (s'stable(5 ns), s'transaction, s'delayed(1 ns)) begin end process;\n\
+    process begin wait for 2 ns; s <= '1'; wait for 2 ns; std.env.finish; end process;\n\
+    end;\n";
+
+/// Aliases, files, implicit signals, components, configuration specifications, subprograms,
+/// libraries, use clauses, user attributes of labels and units, end lines (#831).
+#[test]
+fn vhpi_more_declarations_and_units() {
+    let (lib, so) = setup_with("decls", DECLS);
+    let spec = format!("--vhpi={}:start", so.display());
+    let (code, err, out) = yavs(&["run", &lib, &spec, "--resolution=ns", "top"]);
+    assert_eq!(code, 0, "{err}{out}");
+    assert!(!err.contains("W0904"), "{err}");
+    for want in [
+        "alias sa -> :top:s value 0",
+        "alias part -> :top:v value none",
+        "aliases: sa part",
+        "file: vhpiFileDeclK out_f",
+        "sig attr vhpiSimpAttrNameK s'stable(5000000 fs) attr 1027 prefix :top:s",
+        "sig attr vhpiSimpAttrNameK s'transaction attr 1029 prefix :top:s",
+        "sig attr vhpiSimpAttrNameK s'delayed(1000000 fs) attr 1004 prefix :top:s",
+        "stable value at 3: 0",
+        "attr of unit: mark",
+        "attr of label: mark",
+        "attr decls: mark",
+        "inst: kind=1 comp=sub compdecl=vhpiCompDeclK label=inst",
+        "d: kind=0 comp=none compdecl=none label=d",
+        "config: vhpiCompConfigK sub comp=vhpiCompDeclK",
+        "func: vhpiFuncDeclK local params=1 pure=1 body=vhpiSubpBodyK ret=INTEGER",
+        "lib WORK logical=work",
+        "unit vhpiPackBodyK p primary=vhpiPackDeclK",
+        "use std.textio.all",
+        "param vhpiConstParamDeclK a",
+        "param vhpiSigParamDeclK s",
+    ] {
+        assert!(out.contains(want), "no `{want}` in\n{out}");
+    }
+    assert!(out.contains("end line of top: ") && !out.contains("end line of top: -1"), "{out}");
 }

@@ -307,6 +307,11 @@ pub struct UnitLoc<'a> {
 }
 
 impl Manifest {
+    /// The library directory; empty for a library that is not on disk.
+    pub fn dir(&self) -> &std::path::Path {
+        &self.dir
+    }
+
     pub(crate) fn new(name: &str, dir: &Path) -> Self {
         Manifest {
             name: name.into(),
