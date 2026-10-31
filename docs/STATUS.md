@@ -5240,8 +5240,8 @@ and stale handle, GC roots, natives, foreign call, elaboration call, serial mark
 tests (conditional line breakpoint with hit condition, step over, step in with frame and locals,
 global step across processes, signal breakpoint and process table), verifier and layout tests.
 Also 5 foreign marshalling tests, 5 textio/file/env tests and a protected-type test.
-Not done: `Elab*` instructions (yavs-elab), records with runtime layouts beyond `LayoutOf`,
-the PSL natives (out of scope, `lib/NATIVE.md` section 4), (`SetVhdlAssertFormat` is done, #922).
+Not done: the PSL natives (out of scope, `lib/NATIVE.md` section 4). `yavs-elab` builds the model directly,
+without elaboration instructions in the IR. `SetVhdlAssertFormat` is done (#922).
 
 std.reflection (`yavs-interp/src/reflect.rs`, `yavs-lower/src/reflect.rs`): all 123 mirror
 methods and `'reflect` (value and subtype mirrors, built from the value and its descriptor;

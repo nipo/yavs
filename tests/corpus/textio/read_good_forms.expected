@@ -1,0 +1,20 @@
+exit	0
+diag	note	0	0	:read_good_forms:_p0	bit true '1'
+diag	note	0	0	:read_good_forms:_p0	bit bad false 
+diag	note	0	0	:read_good_forms:_p0	bit_vector true 1010
+diag	note	0	0	:read_good_forms:_p0	bit_vector bad false 
+diag	note	0	0	:read_good_forms:_p0	boolean true true
+diag	note	0	0	:read_good_forms:_p0	boolean bad false 
+diag	note	0	0	:read_good_forms:_p0	character true 'q'
+diag	note	0	0	:read_good_forms:_p0	character at end false 
+diag	note	0	0	:read_good_forms:_p0	real true 2.5
+diag	note	0	0	:read_good_forms:_p0	real bad false 
+diag	note	0	0	:read_good_forms:_p0	string true abc
+diag	note	0	0	:read_good_forms:_p0	string short false 
+diag	note	0	0	:read_good_forms:_p0	time true 5000000 fs
+diag	note	0	0	:read_good_forms:_p0	time bad false 
+diag	note	0	0	:read_good_forms:_p0	oread true 
+diag	note	0	0	:read_good_forms:_p0	oread true 111
+diag	note	0	0	:read_good_forms:_p0	oread bad false 
+diag	note	0	0	:read_good_forms:_p0	hread true 1100
+diag	note	0	0	:read_good_forms:_p0	hread bad false 

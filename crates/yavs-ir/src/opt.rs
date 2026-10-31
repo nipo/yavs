@@ -5567,8 +5567,7 @@ pub(crate) fn leaves_temps(
             | Inst::SigParts { .. }
             | Inst::SigSlice { .. }
             | Inst::CallForeign { .. }
-            | Inst::CallIndirect { .. }
-            | Inst::Elab { .. } => true,
+            | Inst::CallIndirect { .. } => true,
             // (A wait or a suspension in a called procedure keeps the caller's temporaries.)
             _ => is_wait(i),
         }

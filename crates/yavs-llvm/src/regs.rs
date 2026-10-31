@@ -428,7 +428,6 @@ pub fn loud(i: &Inst, native: &dyn Fn(&Inst) -> bool) -> bool {
             | Inst::WaitEdge { .. }
             | Inst::WaitFor { .. }
             | Inst::WaitAt { .. }
-            | Inst::Elab { .. }
             | Inst::Unreachable { .. }
     )
 }
@@ -873,8 +872,7 @@ pub fn no_table(f: &Func) -> bool {
                 | Inst::NewFill { .. }
                 | Inst::Free { .. }
                 | Inst::Deref { .. }
-                | Inst::PkgAlloc { .. }
-                | Inst::Elab { .. } => return false,
+                | Inst::PkgAlloc { .. } => return false,
                 Inst::AddrOf { space, .. } => matches!(
                     space,
                     AddrSpace::Frame | AddrSpace::Inst | AddrSpace::Const(_)

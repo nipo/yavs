@@ -503,6 +503,7 @@ const PASS: &[&str] = &[
     "textio/file_in_generate_pkg",
     "textio/file_in_package",
     "textio/file_roundtrip",
+    "textio/read_good_forms",
     "textio/std_logic_textio",
     "textio/text_write_raw",
     "textio/write_read_line",

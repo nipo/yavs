@@ -27,7 +27,7 @@ pub use copies::{
     Copies, CopyBlob, CopyLoader, CopyStats, NoCopy, PkgData, PkgSource, cap_percent,
 };
 pub use inst::{
-    AddrSpace, AttrKind, BoolOp, CheckKind, CmpOp, DriveMode, EdgeKind, ElabOp, FOp, FUnOp,
+    AddrSpace, AttrKind, BoolOp, CheckKind, CmpOp, DriveMode, EdgeKind, FOp, FUnOp,
     ForceKind, Inst, IntOp, IntUnOp, LNumOp, LOp, Part, PhysOp, Reg, RegTy, Regs, Role,
     SCATTER_PART, SCATTER_REJECT, SIG_PART_BYTES, Width,
 };

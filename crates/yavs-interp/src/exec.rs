@@ -10780,11 +10780,6 @@ impl Machine {
             } => self.op_cover_in(dst.0, acc.0, src.0, shift, ulogic),
             Inst::CoverCond { cond, state } => self.op_cover_cond(prog, cond, state.0)?,
             Inst::Stmt => self.end_stmt(),
-            Inst::Elab { op, .. } => {
-                return rt_err_f!(
-                    "elaboration instruction {op:?} needs yavs-elab (not implemented yet)"
-                );
-            }
         }
         Ok(Flow::Next)
     }

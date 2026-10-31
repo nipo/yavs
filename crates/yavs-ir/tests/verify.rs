@@ -66,16 +66,6 @@ fn malformed_ir_is_rejected() {
         fb.stmt(StmtKind::Null, sp());
         fb.emit(Inst::Br { to: BlockId(9) });
     });
-    expect(FuncKind::Process, "elaboration-only instruction", |fb| {
-        fb.stmt(StmtKind::Null, sp());
-        let args = fb.regs(&[]);
-        fb.emit(Inst::Elab {
-            op: ElabOp::Signal,
-            args,
-            dst: None,
-        });
-        fb.emit(Inst::Ret { v: None });
-    });
     expect(FuncKind::Function, "cannot suspend", |fb| {
         fb.stmt(StmtKind::Wait, sp());
         fb.emit(Inst::Suspend { resume: 0 });

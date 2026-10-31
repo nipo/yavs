@@ -535,7 +535,6 @@ impl Dr<'_> {
                 | Inst::CallProt { .. }
                 | Inst::CallIndirect { .. }
                 | Inst::CallForeign { .. }
-                | Inst::Elab { .. }
                 | Inst::Ret { .. }
                 | Inst::Unreachable { .. } => v.push(Ev::Bar { idx, wait: false }),
                 Inst::Call { func, .. } => {

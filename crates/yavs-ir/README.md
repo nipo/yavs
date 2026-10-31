@@ -103,8 +103,7 @@ textual dump.
 
 ## Still moving
 
-- Exact instruction operand shapes for records with runtime layouts and `Elab*` instructions
-  (their semantics belong to `yavs-elab`).
+- Exact instruction operand shapes for records with runtime layouts.
 - `InstData` gains child instances and package links when elaboration needs them.
 - Binary (non-TEXT) file `read`/`write` handle scalars, arrays of scalars, records and arrays
   of composites; the PSL natives are out of scope (`lib/NATIVE.md` section 4; a runtime error naming the symbol);

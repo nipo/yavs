@@ -393,10 +393,6 @@ fn check_inst(
                 err(format!("resume index {resume} not numbered"));
             }
         }
-        Inst::Elab { op, .. } if f.kind != FuncKind::Elab => err(format!(
-            "elaboration-only instruction {op:?} in {:?} {id}",
-            f.kind
-        )),
         _ => {}
     }
 }

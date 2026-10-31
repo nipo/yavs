@@ -196,7 +196,7 @@ YAVS_BIN=target/release/yavs python3 tools/difftest/difftest.py --candidate yavs
 - Requests from lowering and elaboration are logged with answers in `crates/yavs-ir/README.md`
   "Requests".
 - Open issues (snapshot 2026-10-18, `gh issue list -R ru551n/yavs --label crate:interp`): #77 fold
-  calls and aggregates at elaboration (E2106); #79 unimplemented natives and `Elab*`; #97
+  calls and aggregates at elaboration (E2106); #97
   reflection runtime. Older unlabeled: #4
   `finish`/`stop` end the process at once; #9 array signals and
   constants in instance data; #10 `FToIRange` text.

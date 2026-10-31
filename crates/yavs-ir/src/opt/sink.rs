@@ -450,8 +450,7 @@ impl Sink<'_> {
                 | Inst::NewFill { .. }
                 | Inst::NewFrame { .. }
                 | Inst::Free { .. }
-                | Inst::Report { .. }
-                | Inst::Elab { .. } => barrier = true,
+                | Inst::Report { .. } => barrier = true,
                 Inst::Deref { .. } => my_org = Org::Heap,
                 // Writes into the block the first operand addresses, and no other.
                 Inst::Copy { .. }
@@ -477,7 +476,7 @@ impl Sink<'_> {
             r.wrote[p] = wrote;
             r.barrier[p] = barrier;
             r.suspends[p] = match i {
-                Inst::Suspend { .. } | Inst::CallIndirect { .. } | Inst::Elab { .. } => true,
+                Inst::Suspend { .. } | Inst::CallIndirect { .. } => true,
                 Inst::Call { func, .. } | Inst::CallProt { func, .. } => self
                     .prog
                     .funcs

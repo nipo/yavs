@@ -257,18 +257,6 @@ pub enum ForceKind {
     Default,
 }
 
-/// Elaboration-only operations (yavs-elab defines their operands). The verifier rejects
-/// them outside `FuncKind::Elab`.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum ElabOp {
-    Signal,
-    Driver,
-    Process,
-    Instance,
-    Port,
-    External,
-}
-
 #[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq)]
 pub enum Inst {
     // move / const
@@ -891,11 +879,6 @@ pub enum Inst {
     /// Statement boundary: the debugger hook, and the end of the previous statement's
     /// temporaries.
     Stmt,
-    Elab {
-        op: ElabOp,
-        args: Regs,
-        dst: Option<Reg>,
-    },
 }
 
 /// How an instruction uses a register.
@@ -926,8 +909,7 @@ impl Inst {
             | Inst::CallNative { args, .. }
             | Inst::CallForeign { args, .. }
             | Inst::CallIndirect { args, .. }
-            | Inst::CallProt { args, .. }
-            | Inst::Elab { args, .. } => Some(args),
+            | Inst::CallProt { args, .. } => Some(args),
             _ => None,
         }
     }
@@ -941,8 +923,7 @@ impl Inst {
             | Inst::CallNative { args, .. }
             | Inst::CallForeign { args, .. }
             | Inst::CallIndirect { args, .. }
-            | Inst::CallProt { args, .. }
-            | Inst::Elab { args, .. } => Some(args),
+            | Inst::CallProt { args, .. } => Some(args),
             _ => None,
         }
     }

@@ -291,7 +291,6 @@ has a `StmtId` in `Func.loc`.
 | effects | `Report{msg: Addr, len, severity}` (assert = branch + `Report`); `Output{stream, addr, len}` is only used by natives |
 | coverage | `Cover{item: CovItem}` (statement/branch counter increment, rule 10), toggle coverage is an observer, not IR |
 | debug | `Stmt{id}`: statement boundary; a nop in the fast dispatch loop, the breakpoint/step hook in the debug loop |
-| elab only | `ElabSignal`, `ElabDriver`, `ElabProcess`, `ElabInstance`, `ElabPort`, `ElabExternal` (3.6, 4); the verifier rejects them outside `FuncKind::Elab` |
 
 Lowering of the main statement forms:
 
@@ -624,11 +623,11 @@ called again for an in-process restart (rule 4).
 | 1. Reachability | units reachable from `top` through instances, configurations, packages; lowered once each into `Program` | missing unit names where yavs looked (library manifest) |
 | 2. Packages | elab functions of packages in dependency order; generic package instances get `InstData` + mangled identity | |
 | 3. Generics | `-g` overrides parsed as VHDL literals of the generic's type (rule 4), then generic map thunks evaluated in the parent instance | missing generic without default; type mismatch; bad override text |
-| 4. Declarations | the unit's `Elab` function: constants, subtype descriptors, signals (`ElabSignal`), shared variables, protected instances | bound/constraint failure at a declaration |
+| 4. Declarations | the unit's `Elab` function: constants, subtype descriptors, signals, shared variables, protected instances | bound/constraint failure at a declaration |
 | 5. Generates | `for`: evaluate range, one child scope per value, path `label(i)`; `if`/`case`: evaluate and pick one alternative (2008 alternative labels) | non-static range use errors |
 | 6. Binding | component instance: configuration declaration, then configuration specification, then default binding (LRM 7.3.3); entity instance directly | unbound component (warning per LRM, then open); port/generic mismatch between component and entity |
-| 7. Ports | association per formal sub-element (`ElabPort`), see below | type/mode mismatch, unassociated in-port without default |
-| 8. Processes | `ElabProcess` per process: drivers from the process's static driver list (per `Drive` slot, evaluated for this instance), flags (postponed, serial) | multiple drivers on an unresolved signal (LRM 14.7.2), names both processes |
+| 7. Ports | association per formal sub-element, see below | type/mode mismatch, unassociated in-port without default |
+| 8. Processes | One entry per process: drivers from the process's static driver list (per `Drive` slot, evaluated for this instance), flags (postponed, serial) | multiple drivers on an unresolved signal (LRM 14.7.2), names both processes |
 | 9. External names | bound in elaboration order against the partial hierarchy | target not found or not yet elaborated, with the path tried |
 | 10. Check | net graph verified (every port connected or defaulted, every driver has a target) | |
 
@@ -843,7 +842,7 @@ What the implementation does differently from sections 1 to 3, and what producer
 | std.env 2019 | call paths from the frame stack and `Bindings::sources`; the VHDL assert state is per-cycle snapshots plus each process's own changes, merged in process order (deterministic at any thread count); records go to natives as fat pairs (docs/decisions.md, #99) |
 | verifier | the "no register live across a suspension" check is intra-block only; the "written before read" dataflow check (debug builds, #430) covers cross-block liveness across a `Suspend` of a process for registers that are not constants |
 | serial marking | `TOUCHES_SHARED` from `AddrOf Shared`, `CallProt`, `New {shared: true}` and `CallNative` of a file or directory native (#82); `InterpProcess::new` refuses a serial process without a `SharedState`, and touching shared state without one is an ICE |
-| elaboration | `Elab` instructions are a runtime "needs yavs-elab" error; `InstData {data, sigs, cov_base}` has no child or package links yet. `call_shared` runs elaboration code with the `SharedState` (shared variables, shared protected objects) |
+| elaboration | `yavs-elab` builds the model directly, there are no elaboration instructions in the IR; `InstData {data, sigs, cov_base}` has no child or package links yet. `call_shared` runs elaboration code with the `SharedState` (shared variables, shared protected objects) |
 | native arguments | `in` scalars by value; `out`/`inout` scalars and access variables by cell address; unconstrained arrays as a fat-pair address, except for the natives of `ieee` (`yavs.ieee.*`), which take each array as four registers `data, left, right, dir` (`yavs_ir::ieee::ARRAY_REGS`, checked by the verifier; #697), and `yavs.textio.read.line_string*`, whose string target is four registers after the line (no fat pair per call, #771); files as the address of their 4-byte cell; records by address. Results: scalars by value, strings as a fat-pair address, `line` as a handle |
 | files | a file cell holds index + 1 into the runtime's file table (0: never opened); `FILE_INPUT` = 1 and `FILE_OUTPUT` = 2 are textio's `INPUT`/`OUTPUT`. Disk files are read and written directly (not via K6 streams), so a process that writes, closes and reopens a file in one delta reads what it wrote; every caller of a file native is serial, so the bytes do not depend on `--threads`. `STD_OUTPUT` goes through the kernel's OUTPUT stream, ordered with `report`. Implicit file ops are implemented for TEXT; binary `read`/`write` handle scalars and arrays of scalars (`src/binfile.rs`, format in decisions.md "Binary files"), not records or arrays of composites yet |
 | lines | `line` objects are `[1 to len][bytes]`; natives replace and deallocate them. A line cell in shared memory gets a shared-heap object |
