@@ -67,7 +67,7 @@ fn build_plugin(vhpi: &std::path::Path, tmp: &std::path::Path, so: &std::path::P
         c
     };
     let status = mk.status().expect("import library tool");
-    assert!(status.success(), "{mk:?}");
+    assert!(status.success(), "{} failed", common::command_line(&mk));
     let mut cmd = tool.to_command();
     cmd.current_dir(tmp);
     if tool.is_like_msvc() {
@@ -88,7 +88,7 @@ fn build_plugin(vhpi: &std::path::Path, tmp: &std::path::Path, so: &std::path::P
             .arg(&implib);
     }
     let status = cmd.status().expect("cc");
-    assert!(status.success(), "{cmd:?}");
+    assert!(status.success(), "{} failed", common::command_line(&cmd));
 }
 
 fn compiler() -> cc::Tool {

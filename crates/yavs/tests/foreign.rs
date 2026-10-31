@@ -2,7 +2,7 @@
 //! time with the compiler `cc` picks for the build target (#95).
 
 mod common;
-use common::tempdir;
+use common::{command_line, tempdir};
 
 use std::path::Path;
 use std::process::Command;
@@ -137,8 +137,8 @@ fn shared_lib(src: &Path, out: &Path) {
     }
     let status = cmd
         .status()
-        .unwrap_or_else(|e| panic!("cannot run {cmd:?}: {e}"));
-    assert!(status.success(), "{cmd:?} failed: {status}");
+        .unwrap_or_else(|e| panic!("cannot run {}: {e}", command_line(&cmd)));
+    assert!(status.success(), "{} failed: {status}", command_line(&cmd));
 }
 
 fn yavs(args: &[&str]) -> (i32, String, String) {

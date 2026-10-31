@@ -33,6 +33,16 @@ fn compiler() -> cc::Tool {
         .get_compiler()
 }
 
+/// A command as program and arguments, never `{:?}`: that lists its environment too, and a
+/// test log is public.
+fn command_line(c: &Command) -> String {
+    std::iter::once(c.get_program())
+        .chain(c.get_args())
+        .map(|a| a.to_string_lossy())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// Compiles one C file to an executable, or a shared library when
 /// `shared`. `link` is extra linker input (an import library).
 fn compile(src: &Path, include: &Path, out: &Path, shared: bool, link: Option<&Path>) {
@@ -71,14 +81,14 @@ fn compile(src: &Path, include: &Path, out: &Path, shared: bool, link: Option<&P
     }
     let status = cmd
         .status()
-        .unwrap_or_else(|e| panic!("cannot run {cmd:?}: {e}"));
-    assert!(status.success(), "{cmd:?} failed: {status}");
+        .unwrap_or_else(|e| panic!("cannot run {}: {e}", command_line(&cmd)));
+    assert!(status.success(), "{} failed: {status}", command_line(&cmd));
 }
 
 fn run(cmd: &mut Command) -> (i32, String, String) {
     let out = cmd
         .output()
-        .unwrap_or_else(|e| panic!("cannot run {cmd:?}: {e}"));
+        .unwrap_or_else(|e| panic!("cannot run {}: {e}", command_line(cmd)));
     let text = |b: &[u8]| String::from_utf8_lossy(b).replace("\r\n", "\n");
     (
         out.status.code().unwrap_or(-1),
