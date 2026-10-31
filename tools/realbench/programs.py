@@ -9,9 +9,10 @@ the test with what is needed.
   programs.py PROGRAM [key=value ...]     build (or find) the image, print its directory
 
 Programs:
-  microwatt_coremark  EEMBC CoreMark on Microwatt (iterations=N), own port in cpu/microwatt/coremark, as main_ram.hex (needs a POWER little-endian
-                    bare-metal compiler: $YAVS_PPC_PREFIX = the tool prefix of a GCC (powerpc64le-linux-gnu-), or $YAVS_PPC_ZIG = a zig 0.14+
-                    binary (its bundled clang and lld; the ziglang wheel), or powerpc64le-linux-gnu-gcc on PATH)
+  microwatt_coremark  EEMBC CoreMark on Microwatt (iterations=N), own port in cpu/microwatt/coremark, as main_ram.hex, with the per-cycle debug
+                    reports of the core removed from copies of its sources. The compiler is the pinned ziglang wheel of requirements.txt in
+                    <cache>/venv (made on first use, so by `run.py --prepare`); $YAVS_PPC_ZIG (a zig binary) or $YAVS_PPC_PREFIX (a POWER GCC
+                    tool prefix, e.g. powerpc64le-linux-gnu-) override it
   neorv32_coremark  EEMBC CoreMark on the NEORV32 port (iterations=N), as neorv32_imem_image.vhd (needs a RISC-V GCC:
                     $YAVS_RISCV_PREFIX = the tool prefix, e.g. /opt/riscv/bin/riscv-none-elf-, or riscv-none-elf-gcc,
                     riscv64-unknown-elf-gcc or riscv32-unknown-elf-gcc on PATH)
@@ -21,7 +22,7 @@ import hashlib, os, re, shlex, shutil, subprocess, sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-RECIPE = 1  # bump when a build step changes: the stored images of earlier recipes are not reused
+RECIPE = 2  # bump when a build step changes: the stored images of earlier recipes are not reused
 CACHE = Path(os.environ.get("YAVS_REALBENCH_CACHE", "~/.cache/yavs-realbench")).expanduser()
 CORPUS = Path(os.environ.get("YAVS_CORPUS", "~/.cache/rsim-corpus")).expanduser()
 
@@ -103,22 +104,71 @@ def neorv32_coremark(iterations):
     return d
 
 
+def venv_zig():
+    """zig from the PyPI ziglang wheel of tools/realbench/requirements.txt (pinned, hash-checked), installed into <cache>/venv on first use. Nothing
+    is installed outside the cache. Needs `python3 -m venv` and pip (`python3 -m pip`); a failure says which step failed."""
+    req = HERE / "requirements.txt"
+    venv, stamp = CACHE / "venv", CACHE / "venv" / ".requirements.sha256"
+    want = hashlib.sha256(req.read_bytes()).hexdigest()
+    py = venv / "bin" / "python"
+    if not (py.is_file() and stamp.is_file() and stamp.read_text().strip() == want):
+        shutil.rmtree(venv, ignore_errors=True)
+        run([sys.executable, "-m", "venv", "--without-pip", venv], None, "creating the virtual environment for ziglang (python3 -m venv)")
+        run([sys.executable, "-m", "pip", "--python", py, "install", "--require-hashes", "--no-deps", "-r", req], None,
+            "installing the pinned ziglang wheel into the harness's virtual environment (python3 -m pip, network access to PyPI)")
+        stamp.write_text(want + "\n")
+    zig = Path(run([py, "-c", "import ziglang, os; print(os.path.dirname(ziglang.__file__))"], None, "locating zig").strip()) / "zig"
+    if not zig.is_file():
+        raise Fail(f"the ziglang wheel in {venv} has no {zig}")
+    return str(zig)
+
+
 def ppc_tools():
-    """(compiler command, objcopy command, version) for POWER little-endian freestanding code, from the environment (see the module doc)."""
-    if os.environ.get("YAVS_PPC_ZIG"):
-        zig = os.environ["YAVS_PPC_ZIG"]
+    """(compiler command, objcopy command, version) for POWER little-endian freestanding code: $YAVS_PPC_ZIG (a zig binary) or $YAVS_PPC_PREFIX
+    (a GCC tool prefix) when set, else the pinned ziglang wheel in the harness's own virtual environment."""
+    if os.environ.get("YAVS_PPC_PREFIX") and not os.environ.get("YAVS_PPC_ZIG"):
+        pre = os.environ["YAVS_PPC_PREFIX"]
+        if not shutil.which(pre + "gcc"):
+            raise Fail(f"$YAVS_PPC_PREFIX={pre}: {pre}gcc not found")
+        cc, oc = [pre + "gcc", "-mcpu=power8", "-msoft-float", "-mstrict-align"], [pre + "objcopy"]
+    else:
+        zig = os.environ.get("YAVS_PPC_ZIG") or venv_zig()
         if not Path(zig).is_file():
             raise Fail(f"$YAVS_PPC_ZIG={zig} is not a file")
         cc, oc = [zig, "cc", "-target", "powerpc64le-freestanding", "-mcpu=pwr8", "-mno-power8-vector", "-mno-direct-move", "-mno-crypto"], [zig, "objcopy"]
-    else:
-        pre = os.environ.get("YAVS_PPC_PREFIX") or next((x for x in ("powerpc64le-linux-gnu-", "powerpc64le-unknown-linux-gnu-") if shutil.which(x + "gcc")), None)
-        if not pre or not shutil.which(pre + "gcc"):
-            raise Fail("no POWER cross compiler found. The microwatt_coremark image needs a little-endian POWER (ppc64le) bare-metal compiler: a GCC "
-                       "(Debian/Ubuntu package gcc-powerpc64le-linux-gnu: set YAVS_PPC_PREFIX=powerpc64le-linux-gnu- or put it on PATH), or a zig 0.14+ "
-                       "binary (the PyPI ziglang wheel carries one): set YAVS_PPC_ZIG to it. Alternatively a ready-made main_ram.hex of CoreMark for "
-                       "Microwatt would do, but the project publishes none")
-        cc, oc = [pre + "gcc", "-mcpu=power8", "-msoft-float", "-mstrict-align"], [pre + "objcopy"]
     return cc, oc, run(cc + ["--version"], None, "compiler version").splitlines()[0]
+
+
+BOUNDARY = {"then", "else", "elsif", "begin", "loop", "generate", "is", "=>", ":"}
+TOKEN = re.compile(r"--[^\n]*|\"(?:[^\"]|\"\")*\"|'(?:[^'\n]|'')'|=>|[A-Za-z_][A-Za-z_0-9]*|;|:")
+
+
+def silence_reports(text):
+    """VHDL text with every plain `report` statement (not part of an `assert`) replaced by `null;`, and how many there were. The statement
+    ends at the first `;` outside strings and comments; assertions, which check the design, stay."""
+    out, last, n, in_assert, start = [], 0, 0, False, None
+    for m in TOKEN.finditer(text):
+        t = m.group(0)
+        if t.startswith(("--", '"', "'")):
+            continue
+        low = t.lower()
+        if start is not None:
+            if t == ";":
+                out += [text[last:start], "null;"]
+                last, start, n = m.end(), None, n + 1
+            continue
+        if t == ";" or low in BOUNDARY:
+            in_assert = False
+        elif low == "assert":
+            in_assert = True
+        elif low == "report" and not in_assert:
+            start = m.start()
+    return "".join(out) + text[last:], n
+
+
+# Plain report statements per Microwatt file at the pinned commit (the per-cycle debug trace of the core); a different count means the pin moved.
+MW_REPORTS = {"cache_ram": 2, "control": 3, "core_debug": 2, "cr_file": 5, "dcache": 10, "decode1": 1, "decode2": 1, "execute1": 21, "fetch1": 1,
+              "helpers": 2, "icache": 14, "loadstore1": 1, "mmu": 5, "register_file": 6, "xics": 15}
 
 
 def microwatt_coremark(iterations):
@@ -142,6 +192,19 @@ def microwatt_coremark(iterations):
     for f in os.listdir(port):
         if f.endswith((".c", ".h")):
             shutil.copy(port / f, b / "cm" / f)
+    # Microwatt's core reports a line per unit per cycle (about 2 KB per clock cycle): the harness measures the quiet form only. The reports
+    # are removed from copies of the files (assertions stay), nothing else in the design changes.
+    (b / "mw").mkdir()
+    got = {}
+    for f in sorted(mw.glob("*.vhdl")):
+        if f.name.endswith("_tb.vhdl") or f.name.startswith("sim_"):
+            continue
+        text, n = silence_reports(f.read_text())
+        if n:
+            got[f.stem] = n
+            (b / "mw" / f.name).write_text(text)
+    if got != MW_REPORTS:
+        raise Fail(f"microwatt_coremark: the report statements found in Microwatt are {got}, expected {MW_REPORTS} (programs.py MW_REPORTS: the pin moved?)")
     shutil.copy(mw / "lib" / "console.c", b / "cm" / "console.c")
     shutil.copy(mw / "hello_world" / "head.S", b / "cm" / "head.S")
     flags = ["-O2", "-ffreestanding", "-fno-pic", "-fno-stack-protector", "-mno-vsx", "-mno-altivec", "-DPERFORMANCE_RUN=1",

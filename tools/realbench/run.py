@@ -677,8 +677,10 @@ def console_problem(t, out, ref):
 def timed(t, c, script, cores, **kw):
     """B.timed for a cell of test t: a run cell that ends with the test's expected exit status counts as passed (rc 0)."""
     w = B.timed(script, str(kw.pop("cwd")), cores, **kw)
-    if c.mode == "run" and t.get("exit_code") and w["rc"] == t["exit_code"]:
-        w["rc"] = 0
+    if c.mode == "run" and t.get("exit_code"):  # the expected status is the only passing one: a run that exits 0 did not end the way the program ends it
+        w["rc"] = 0 if w["rc"] == t["exit_code"] else (w["rc"] or -2)
+        if w["rc"] == -2:
+            w["tail"] = f"exit status 0, expected {t['exit_code']} (the program did not end the simulation)"
     return w
 
 
@@ -1132,6 +1134,19 @@ def self_test():
     assert "a: 1,000 simulated clock cycles" in mc and "| sim1 | 500 |" in mc and "| auto | 250 |" in mc and "| 0.50 |" in mc, mc
     # root rule 23: no rate against the reference for the interpreter
     assert [l for l in mc.splitlines() if l.startswith("| interp | 125")][0].endswith("| - |"), mc
+    # a test that expects an exit status (the program ends the simulation with a failure report) fails on 0 and on any other status
+    real_timed = B.timed
+    try:
+        cx = types.SimpleNamespace(mode="run")
+        for rc, want in ((1, 0), (0, -2), (3, 3)):
+            B.timed = lambda script, cwd, cores, rc=rc, **kw: dict(rc=rc, tail="")
+            assert timed({"exit_code": 1}, cx, "s", "0", cwd=".")["rc"] == want
+    finally:
+        B.timed = real_timed
+    # the quiet Microwatt form: plain reports go, assertions (the end of the test) stay
+    vt = 'p: process begin\n report "x;y"; -- report z;\n if c then report "q" severity note; end if;\n assert false report "end of test" severity failure;\n l: report "a" & "b""c" ;\n assert c\n  report "m";\nend process;'
+    qt, qn = P.silence_reports(vt)
+    assert qn == 3 and qt.count("null;") == 3 and "end of test" in qt and 'report "m"' in qt and "x;y" not in qt, qt
     # analysis calls (#745): consecutive files of one library, standard and flags share a call; --analyze-calls per-file splits them
     it = lambda lib, f, std="2008", fl=None: dict(lib=lib, std=std, file=f, flags=fl)
     items = [it("a", "1"), it("a", "2"), it("b", "3"), it("a", "4"), it("a", "5", "2019"), it("a", "6", "2019", ["--relaxed"])]
@@ -1158,7 +1173,8 @@ def main():
     ap.add_argument("--compare", nargs=2, metavar=("A", "B"))
     ap.add_argument("--ref", default="", help="reference labels, e.g. sim1")
     ap.add_argument("--cpubench", action="store_true", help="the CPU workloads (neorv32_coremark, microwatt_coremark) in one command: category cpubench, phases elab and run, "
-                    "tiers interp,auto,auto-cold,auto@4 (1 and 4 threads: --cores needs 4 CPUs, e.g. 9,10,11,12), 3 runs, counted cycles, timeout 900, label cpubench; each option still wins when given")
+                    "tiers auto,auto-cold,auto@4 (1 and 4 threads: --cores needs 4 CPUs, e.g. 9,10,11,12), 3 runs, counted cycles, timeout 900, label cpubench; each option still wins when given")
+    ap.add_argument("--with-interp", action="store_true", help="with --cpubench: also the interpreter tier (its own before/after, never compared with the reference; adds the longest cell)")
     ap.add_argument("--phases", default=",".join(PHASES), help="comma separated: analyze (the compile order, cold and warm; see --analyze-calls), elab (elaboration only), "
                     "codegen (llvm tier minus interp up to time 0), run (the --tiers cells)")
     ap.add_argument("--analyze-calls", choices=("batched", "per-file"), default="batched",
@@ -1181,7 +1197,7 @@ def main():
     a = ap.parse_args()
     if a.cpubench:
         a.category = a.category or "cpubench"
-        a.tiers = a.tiers if a.tiers != TIERS_DEFAULT else "interp,auto,auto-cold,auto@4"
+        a.tiers = a.tiers if a.tiers != TIERS_DEFAULT else ("interp," if a.with_interp else "") + "auto,auto-cold,auto@4"
         a.phases = a.phases if a.phases != ",".join(PHASES) else "elab,run"
         a.runs = "3" if a.runs == "auto" else a.runs
         a.timeout = 900 if a.timeout == 300 else a.timeout

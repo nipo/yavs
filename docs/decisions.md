@@ -12845,3 +12845,10 @@ duplicate implementations without changing diagnostics (issue #894; implemented 
 - **Design facts: `--facts=FILE`, `schema_version` 1** (maintainer, 2026-10-30, format by the agent): per architecture; a state machine has `type`, `signals`, `states`, `transitions`, `reset_state` (the initial value of its first signal, or null); `clock_domains`, `reset_domains`, `crossings`.
 - **No conformance row for lint** (agent, 2026-10-31, plan M4 listed one): the report counts suites that judge yavs, and a lint rule is not judged by a suite; `tools/corpus/lint.py` in the `corpus` job is the evidence.
 - **Extension point** (maintainer, 2026-10-30, not built): `yavs lint --elaborate` could judge widths after generics are resolved.
+
+## CPU workloads in realbench: CoreMark on NEORV32 and Microwatt (#924, maintainer, 2026-10-31)
+
+- **Microwatt is measured quiet only** (maintainer, 2026-10-31): the core's per-cycle debug reports (about 2 KB per clock cycle) are removed from copies of its sources by `tools/realbench/programs.py` (plain `report` statements; assertions stay; per-file counts pinned), so the test measures the CPU model. The noisy form is not measured. Cycle count and console are unchanged.
+- **The interpreter tier is opt-in for `--cpubench`** (maintainer, 2026-10-31): the defaults are `auto`, `auto-cold` and `auto@4`; `--with-interp` adds `interp`.
+- **The POWER compiler comes from a pinned `ziglang` wheel in the harness's own virtual environment** (maintainer, 2026-10-31): `tools/realbench/requirements.txt` (version and hashes), installed into `<cache>/venv` the first time an image needs it (so `--prepare` makes it), nothing outside the cache; `YAVS_PPC_ZIG` and `YAVS_PPC_PREFIX` override it.
+- **Microwatt's C simulation helpers are replaced, not loaded** (agent, 2026-10-31): they use the other foreign-string convention (#928); the console and JTAG-socket helpers are VHDL in `tools/realbench/cpu/microwatt`.
