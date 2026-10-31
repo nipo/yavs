@@ -465,6 +465,38 @@ fn variables_of_a_protected_body() {
     );
 }
 
+/// Every name that misses says what is close (rule: one helper for all of them).
+#[test]
+fn every_name_suggests() {
+    let d = parts("suggest");
+    for (cmds, want) in [
+        ("step dlta", "`delta`"),
+        ("wave adn", "needs a viewer"),
+        ("break delete al", "`all`"),
+        ("break t.vh:1", "similar name exists: `t.vhd`"),
+        ("run 1 ns; examine cn", "similar name exists: `cnt`"),
+        ("run 1 ns; print cn", "similar name exists: `cnt`"),
+        ("force slb '1'", "similar name exists: `slv`"),
+        ("deposit cn 1", "`cnt`"),
+        ("release cn", "`cnt`"),
+        ("break cn", "`cnt`"),
+        ("run 1 ns; examine pt.xx", "`x`"),
+        ("run 1 ns; examine cn = 3", "`cnt`"),
+    ] {
+        let o = script(&d, "t", cmds);
+        assert!(stderr(&o).contains(want), "{cmds}: {}", stderr(&o));
+    }
+}
+
+#[test]
+fn help_is_wrapped() {
+    let d = setup("helpwrap");
+    let o = script(&d, "tb", "help");
+    let out = stdout(&o);
+    assert!(out.contains("examine NAME"), "{out}");
+    assert!(out.lines().all(|l| l.len() <= 80), "{out}");
+}
+
 /// A typo in a command names the command; a condition on a number works and its error comes when
 /// it is set (#935).
 #[test]

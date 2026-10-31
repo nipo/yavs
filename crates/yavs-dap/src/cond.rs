@@ -505,7 +505,13 @@ impl Cond {
                     let k = fs
                         .iter()
                         .position(|(n, _)| n.eq_ignore_ascii_case(&f.text.to_string()))
-                        .ok_or_else(|| format!("no field `{}` in `{text}`", f.text))?;
+                        .ok_or_else(|| {
+                            let cands = fs.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>();
+                            let help =
+                                crate::console::similar(&f.text.to_string(), "field", &cands);
+                            let help = help.map_or(String::new(), |h| format!(": {h}"));
+                            format!("no field `{}` in `{text}`{help}", f.text)
+                        })?;
                     let (t, x) = (fs[k].1.clone(), xs[k].clone());
                     Ok(if is_bits(&t) {
                         V::Bits(t, x, None)

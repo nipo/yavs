@@ -101,6 +101,11 @@ fixed port in ``launch.json``:
 A run compiled from rewritten copies of your files can show the originals: ``--source-map=COMPILED=ORIGINAL``
 (repeatable; the copy must keep the lines of the original).
 
+"Add to Wave" (context menu of the Variables and Watch views and of a selection or word in a VHDL file) adds a signal or a
+process variable to the waveforms of a session with ``--surfer``, with its history since time 0; the item appears only in
+such a session. A name in the editor is resolved where the selected frame sees it, and a message says when it cannot be
+shown, such as a local of a subprogram.
+
 Add ``--surfer`` to follow the waveforms in Surfer, the cursor at each stop (:doc:`waveforms`). ``--wave=out.fst`` alone
 flushes the file at every stop, so any viewer that reloads it shows the run up to the breakpoint.
 

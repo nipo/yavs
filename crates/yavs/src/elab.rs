@@ -115,8 +115,9 @@ pub struct RunArgs {
     /// Leave out arrays and vectors with more elements than this.
     #[arg(long, value_name = "N", default_value = "65536")]
     wave_max_array: usize,
-    /// With `--wave`: also record the scalar variables of processes (sampled at the end of each
-    /// time step); the include and exclude globs apply to `top.proc.var`.
+    /// With `--wave`: also record the variables of processes and shared variables (sampled at the
+    /// end of each time step); the include and exclude globs apply to `top.proc.var`. A debug
+    /// session (`--dap`, `--interactive`, `--do`) that records a wave does this on its own.
     #[arg(long, requires = "wave")]
     wave_variables: bool,
     /// Print the wall and CPU time of each phase (analyze, elaborate, init, simulate) to
@@ -346,6 +347,12 @@ impl RunArgs {
     /// Whether the run goes through the debug server: a client or the console drives it.
     fn debugged(&self) -> bool {
         self.dap.is_some() || self.interactive || !self.do_commands.is_empty()
+    }
+
+    /// Whether the wave file holds variables: asked for, or a debug session, where `wave add` of a
+    /// variable then has its history since time 0.
+    fn wave_vars(&self) -> bool {
+        self.wave.is_some() && (self.wave_variables || self.debugged())
     }
 
     /// The tier of this run: the one asked for, else `auto` where it is built in and nothing
@@ -1625,7 +1632,7 @@ pub fn run(
     }
     // A plugin may deposit into process variables between activations, and the waveform
     // recorder reads them from their slots.
-    if !a.vhpi.is_empty() || a.wave_variables {
+    if !a.vhpi.is_empty() || a.wave_vars() {
         yavs_interp::external_variables();
     }
     // Before any plugin or foreign library loads: their prints must not reach the protocol.
@@ -2219,7 +2226,7 @@ fn observers(
                 std::path::Path::new(path),
                 sel,
                 cfg,
-                built.filter(|_| a.wave_variables),
+                built.filter(|_| a.wave_vars()),
             ) {
                 Ok((rec, hier)) => {
                     for s in &hier.skipped {
@@ -2269,6 +2276,7 @@ fn observers(
                                     addr.as_deref(),
                                     std::path::Path::new(path),
                                     names,
+                                    crate::surfer::recorded(&hier),
                                     every,
                                 )?);
                             }

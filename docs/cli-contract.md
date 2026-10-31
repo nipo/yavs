@@ -544,7 +544,9 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   held. `evaluate` takes a local or signal, a part of one (field, element, slice, `.all`) or any such
   expression. `completions` (`supportsCompletionsRequest`, at a stop) answers targets with `label` and
   `length`, the characters before the cursor it replaces. Access values and protected objects expand
-  through `variablesReference`; what is behind them is not written by `setVariable`.
+  through `variablesReference`; what is behind them is not written by `setVariable`. Variables carry
+  `evaluateName` (a signal's dotted path, a local's name, a part's). `initialize` answers `yavsViewer: true`
+  in a session with `--surfer`. `--dap`, `--interactive` and `--do` with a wave file imply `--wave-variables`.
   A failure before a session starts under `--dap=stdio`, and over TCP once a client connected: `initialize`
   succeeds, `launch` or `attach` get an `output` event of category `stderr` and a failed response with
   the rendered diagnostic as `message`, other requests fail with it; the process exits with its status at

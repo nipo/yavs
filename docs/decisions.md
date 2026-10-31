@@ -2344,6 +2344,9 @@ scalars; the on-disk format is implementation-defined, so it is fixed here (yavs
   or slice acts on its kernel elements only (#364), so a force of `d(7 downto 4)` leaves the
   other elements to their drivers. Why: the plan
   lets nothing else drive the kernel, and a stop inside a process is mid-cycle.
+- **"Add to Wave" appears only in a session with a viewer, and starts none** (agent, 2026-10-31): a file recorded from the start of the run is what `wave add` shows, so a viewer started later could only show a run that was not recorded from time 0. The server says so in `initialize` (`yavsViewer`), which also covers attach.
+- **A debug session that records a wave records variables** (maintainer, 2026-10-31): `--wave-variables` is implied by `--dap`, `--interactive` and `--do` with a wave file, so `wave add` of a variable has its history since time 0; there is no recording that starts mid-run. A plain run is unchanged. A subprogram's local has no place in the file, as it exists only during a call: `wave add` says so.
+- **`wave add` checks names against the file's hierarchy** (agent, 2026-10-31): Surfer opens its log window on a name it lacks and names differ between VHDL and its reader (`tb.m(0)`, `tb.m.(0)`); yavs knows both.
 - **A debugger's expressions have one evaluator; numbers on `unsigned` and `signed` by the type's name** (agent, #930, #935, 2026-10-31): `examine`, Watch, hover and conditions go through `cond.rs`. `cnt = 3` and `to_integer(cnt)` work without lowering because the signal's type name is known; a local's is not in the IR, so where signed and unsigned read differently the error asks for a bit string instead of guessing.
 - **The console's `--` starts a comment except after a space and before a letter inside a command** (agent, #933, 2026-10-31): the flags of a test runner's commands were cut off as comments.
 - **Breakpoint conditions are evaluated by the DAP server, not lowered to IR** (#326): the

@@ -61,7 +61,8 @@ Commands
     written again from the start. Runs with ``--vhpi`` or ``--load`` refuse it, as the state of
     the library cannot be reset: start the run again.
 ``wave add NAME...``, ``wave cursor [TIME]``
-    With ``--surfer`` (:doc:`waveforms`): show signals or scopes in the viewer; move its cursor, by default to now.
+    With ``--surfer`` (:doc:`waveforms`): show signals, variables of the stopped process or scopes in the viewer, with
+    their history since time 0 (a local of a subprogram is not recorded); move its cursor, by default to now.
 ``source FILE``
     Runs the commands of a file. The first command that fails ends it.
 ``help``, ``quit [STATUS]``

@@ -44,7 +44,10 @@
         "name": "yavs",
         "owner": "yavs",
         "source": "yavs",
-        "fileLocation": ["autoDetect", "${workspaceFolder}"],
+        "fileLocation": [
+          "autoDetect",
+          "${workspaceFolder}"
+        ],
         "pattern": {
           "regexp": "^(.+?):(\\d+):(\\d+): (error|warning|note)\\[([^\\]]*)\\]: (.*)$",
           "file": 1,
@@ -106,6 +109,11 @@
         "command": "yavs.release",
         "title": "Release a forced signal...",
         "category": "yavs"
+      },
+      {
+        "command": "yavs.addToWave",
+        "title": "Add to Wave",
+        "category": "yavs"
       }
     ],
     "menus": {
@@ -145,6 +153,10 @@
         {
           "command": "yavs.release",
           "when": "debugType == 'yavs'"
+        },
+        {
+          "command": "yavs.addToWave",
+          "when": "debugType == 'yavs' && yavs.viewer"
         }
       ],
       "debug/variables/context": [
@@ -159,6 +171,22 @@
         {
           "command": "yavs.release",
           "when": "debugType == 'yavs' && debugProtocolVariableMenuContext == 'signal'"
+        },
+        {
+          "command": "yavs.addToWave",
+          "when": "debugType == 'yavs' && yavs.viewer"
+        }
+      ],
+      "debug/watch/context": [
+        {
+          "command": "yavs.addToWave",
+          "when": "debugType == 'yavs' && yavs.viewer"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "yavs.addToWave",
+          "when": "debugType == 'yavs' && yavs.viewer && editorLangId == vhdl"
         }
       ]
     },

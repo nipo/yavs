@@ -116,6 +116,8 @@ struct Link {
     disconnect: Mutex<Option<Json>>,
     /// A terminal or a script drives the session: stop at time 0 before anything has run, stay
     /// at the end of the run, say so at each stop.
+    /// The width of a console's terminal (0: an editor, which wraps itself).
+    columns: std::sync::atomic::AtomicUsize,
     console: AtomicBool,
     stop_on_entry: AtomicBool,
     /// End of input from the client.
@@ -206,7 +208,7 @@ pub type GotoFn = Box<dyn Fn(&str) + Send + std::marker::Sync>;
 pub trait Viewer: Send + std::marker::Sync {
     fn stop(&self, s: ViewStop);
     /// Add signals or scopes (`top.u1.s`) to the view; how many were added.
-    fn add(&self, items: Vec<(String, bool)>) -> Result<usize, String>;
+    fn add(&self, items: Vec<String>) -> Result<usize, String>;
     fn cursor(&self, fs: u64);
     fn on_goto(&self, f: GotoFn);
 }
@@ -486,7 +488,16 @@ impl Debugger for Front {
                             }
                             // Not a stop: a step under way goes on.
                             Ok(_) => return Resume::Skip,
-                            Err(m) => Err(format!("breakpoint condition: {m}")),
+                            Err(m) => {
+                                let m = console::explain(
+                                    sh,
+                                    &At::Process(stop),
+                                    stop.process as i64 + 1,
+                                    stop.frames.depth().saturating_sub(1),
+                                    m,
+                                );
+                                Err(format!("breakpoint condition: {m}"))
+                            }
                         }
                     }
                 }
@@ -893,6 +904,34 @@ fn node_root(sh: &Shared, at: &At<'_, '_>, n: &Node) -> Option<(LitType, Lit)> {
     }
 }
 
+/// How a client writes what a node shows (`evaluateName` of its children).
+fn node_text(sh: &Shared, at: &At<'_, '_>, n: &Node) -> Option<String> {
+    let mut text = match n {
+        Node::Local { name, .. } => name.clone(),
+        Node::Signal { sig, .. } => console::dotted(&sh.design.sigs[*sig].path),
+        Node::Region(_) | Node::Value(..) => return None,
+    };
+    let (mut t, _) = node_root(sh, at, n)?;
+    for &k in node_path(n) {
+        t = match t {
+            LitType::Record(mut fs) if k < fs.len() => {
+                let (f, ft) = fs.swap_remove(k);
+                text += &format!(".{f}");
+                ft
+            }
+            LitType::Array { .. } => {
+                text += &format!("({})", t.index(k as u64)?);
+                let LitType::Array { elem, .. } = t else {
+                    return None;
+                };
+                *elem
+            }
+            _ => return None,
+        };
+    }
+    Some(text)
+}
+
 fn node_path(n: &Node) -> &[usize] {
     match n {
         Node::Local { path, .. } | Node::Signal { path, .. } => path,
@@ -952,6 +991,7 @@ fn signal_var(sh: &Shared, at: &At<'_, '_>, k: usize) -> Json {
         None => json!({"name": s.name, "value": "?", "variablesReference": 0}),
     };
     j["type"] = json!(s.ty);
+    j["evaluateName"] = json!(console::dotted(&s.path));
     // VS Code's context key for the extension's force, deposit and release.
     j["__vscodeVariableMenuContext"] = json!("signal");
     j
@@ -968,12 +1008,16 @@ fn local_vars(sh: &Shared, at: &At<'_, '_>, tid: i64, i: usize) -> Vec<Json> {
         // The object of a protected method: its variables come below.
         .filter(|l| l.name != "self" || state_vars(sh, s, at, i).is_empty())
         .map(|l| match local(sh, s, i, l.name) {
-            Some((t, v, _)) => value_var(sh, at, l.name, &t, &v, &|| Node::Local {
-                tid,
-                frame: i,
-                name: l.name.to_string(),
-                path: Vec::new(),
-            }),
+            Some((t, v, _)) => {
+                let mut j = value_var(sh, at, l.name, &t, &v, &|| Node::Local {
+                    tid,
+                    frame: i,
+                    name: l.name.to_string(),
+                    path: Vec::new(),
+                });
+                j["evaluateName"] = json!(l.name);
+                j
+            }
             // Files.
             None => {
                 let v = s
@@ -1050,23 +1094,37 @@ fn variables(sh: &Shared, at: &At<'_, '_>, req: &Json) {
             None => return sh.fail(req, &format!("no variables {r}")),
             Some(Node::Region(g)) => region_vars(sh, at, &sh.design.regions[*g].children, Some(*g)),
             Some(n) => match node_root(sh, at, n).and_then(|(t, v)| descend(t, v, node_path(n))) {
-                Some((LitType::Record(fs), Lit::Record(xs))) => fs
-                    .iter()
-                    .zip(&xs)
-                    .enumerate()
-                    .map(|(k, ((f, t), x))| value_var(sh, at, f, t, x, &|| n.child(k, t, x)))
-                    .collect(),
+                Some((LitType::Record(fs), Lit::Record(xs))) => {
+                    let base = node_text(sh, at, n);
+                    fs.iter()
+                        .zip(&xs)
+                        .enumerate()
+                        .map(|(k, ((f, t), x))| {
+                            let mut j = value_var(sh, at, f, t, x, &|| n.child(k, t, x));
+                            if let Some(b) = &base {
+                                j["evaluateName"] = json!(format!("{b}.{f}"));
+                            }
+                            j
+                        })
+                        .collect()
+                }
                 Some((t, Lit::Array(xs))) => {
                     let LitType::Array { elem, .. } = &t else {
                         return sh.fail(req, "this is a bug in yavs: an array of no array type");
                     };
+                    let base = node_text(sh, at, n);
                     xs.iter()
                         .enumerate()
                         .skip(start)
                         .take(count)
                         .map(|(k, x)| {
                             let i = t.index(k as u64).unwrap_or(k as i64);
-                            value_var(sh, at, &i.to_string(), elem, x, &|| n.child(k, elem, x))
+                            let mut j =
+                                value_var(sh, at, &i.to_string(), elem, x, &|| n.child(k, elem, x));
+                            if let Some(b) = &base {
+                                j["evaluateName"] = json!(format!("{b}({i})"));
+                            }
+                            j
                         })
                         .collect()
                 }
@@ -1249,14 +1307,15 @@ fn eval_var(sh: &Shared, at: &At<'_, '_>, tid: i64, i: usize, expr: &str) -> Res
         // A part of a local or a signal, or any expression: what a condition computes.
         _ => {
             let unknown = || {
-                let help = console::did_you_mean(sh, expr);
+                let help = console::name_help(sh, at, tid, i, expr)
+                    .or_else(|| console::did_you_mean(sh, expr));
                 let help = help.map_or(String::new(), |h| format!(": {h}"));
                 format!("no variable or signal `{expr}` here{help}")
             };
             let (t, v) = cond::parse(expr)
                 .map_err(|_| unknown())?
                 .evaluate(&names)
-                .map_err(|e| e.unwrap_or_else(unknown))?;
+                .map_err(|e| e.map_or_else(unknown, |e| console::explain(sh, at, tid, i, e)))?;
             value_var(sh, at, expr, &t, &v, &|| Node::Value(t.clone(), v.clone()))
         }
     };
@@ -1291,7 +1350,7 @@ fn signal_change(sh: &Shared, at: &At<'_, '_>, cmd: &str, a: &Json) -> Result<Js
             None => at.process().map_or(0, |p| p as i64 + 1),
         };
         let (k, suffix) = split_part(sh, thread_proc(sh, tid), name)
-            .ok_or_else(|| format!("no signal `{name}` here"))?;
+            .ok_or_else(|| console::no_signal(sh, tid, name))?;
         let s = &sh.design.sigs[k];
         let (paths, ty) = select(&s.lit, suffix)?;
         let target = format!("{}{}", s.path, suffix.to_ascii_lowercase());
@@ -1356,7 +1415,14 @@ fn select(t: &LitType, suffix: &str) -> Result<(Vec<Vec<usize>>, LitType), Strin
             let k = fs
                 .iter()
                 .position(|(n, _)| n.eq_ignore_ascii_case(f))
-                .ok_or_else(|| format!("no field `{f}`"))?;
+                .ok_or_else(|| {
+                    let cands = fs.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>();
+                    let help = console::similar(f, "field", &cands);
+                    format!(
+                        "no field `{f}`{}",
+                        help.map_or(String::new(), |h| format!(": {h}"))
+                    )
+                })?;
             path.push(k);
             t = fs[k].1.clone();
             rest = r[end..].trim_start();
@@ -1644,9 +1710,7 @@ fn handle(sh: &Shared, tx: &Sender<Msg>, req: Json) {
     let cmd = req["command"].as_str().unwrap_or_default().to_string();
     match cmd.as_str() {
         "initialize" => {
-            sh.respond(
-                &req,
-                json!({
+            let mut caps = json!({
                     "supportsConfigurationDoneRequest": true,
                     "supportsConditionalBreakpoints": true,
                     "supportsHitConditionalBreakpoints": true,
@@ -1655,8 +1719,12 @@ fn handle(sh: &Shared, tx: &Sender<Msg>, req: Json) {
                     "supportsDataBreakpoints": true,
                     "supportsSetVariable": true,
                     "supportsCompletionsRequest": true,
-                }),
-            );
+            });
+            // For the extension's "Add to Wave".
+            if sh.link.viewer.get().is_some() {
+                caps["yavsViewer"] = json!(true);
+            }
+            sh.respond(&req, caps);
             sh.event("initialized", json!({}));
         }
         "launch" | "attach" => {
@@ -1665,6 +1733,8 @@ fn handle(sh: &Shared, tx: &Sender<Msg>, req: Json) {
             if req["arguments"]["yavsConsole"] == true {
                 sh.link.console.store(true, Ordering::Relaxed);
             }
+            let columns = req["arguments"]["yavsColumns"].as_u64().unwrap_or(0);
+            sh.link.columns.store(columns as usize, Ordering::Relaxed);
             sh.respond(&req, json!({}));
         }
         "setBreakpoints" => set_breakpoints(sh, &req),
@@ -1940,7 +2010,7 @@ fn apply_signals(sh: &Shared, set: usize) -> Vec<Json> {
             let k = sh
                 .design
                 .find(p, name)
-                .ok_or_else(|| format!("no signal `{name}` here"))?;
+                .ok_or_else(|| console::no_signal(sh, bp["tid"].as_i64().unwrap_or(0), name))?;
             let value = match bp["value"].as_str() {
                 None => None,
                 Some(v) => Some(sh.design.sigs[k].parse(v)?),
@@ -2265,6 +2335,7 @@ fn session(
         stream: Arc::default(),
         disconnect: Mutex::new(None),
         console: AtomicBool::new(false),
+        columns: std::sync::atomic::AtomicUsize::new(0),
         stop_on_entry: AtomicBool::new(false),
         eof: AtomicBool::new(false),
         kept: Mutex::default(),

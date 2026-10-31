@@ -191,7 +191,15 @@ fn driver(
     mut editor: Option<Box<Editor>>,
 ) {
     c.request("initialize", json!({}));
-    c.request("launch", json!({"yavsConsole": true}));
+    // A pipe gets lines a person can read too.
+    let columns = editor
+        .as_mut()
+        .and_then(|e| e.dimensions())
+        .map_or(80, |(w, _)| w);
+    c.request(
+        "launch",
+        json!({"yavsConsole": true, "yavsColumns": columns}),
+    );
     c.request("configurationDone", json!({}));
     let finish = |line: &str| {
         c.line(line);

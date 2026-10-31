@@ -9,7 +9,7 @@
 > evaluate {"context":"watch","expression":"help; where"}
 < {"command":"evaluate","message":"no variable or signal `help; where` here","request_seq":4,"success":false,"type":"response"}
 > evaluate {"context":"repl","expression":"cnt"}
-< {"body":{"result":"0","type":"INTEGER","variablesReference":0},"command":"evaluate","request_seq":5,"success":true,"type":"response"}
+< {"body":{"evaluateName":"tb.cnt","result":"0","type":"INTEGER","variablesReference":0},"command":"evaluate","request_seq":5,"success":true,"type":"response"}
 > evaluate {"context":"repl","expression":"where"}
 < {"body":{"result":"time 0 fs, delta 0\n:tb:p, $TMP/tb.vhd:16","variablesReference":0},"command":"evaluate","request_seq":6,"success":true,"type":"response"}
 > evaluate {"context":"repl","expression":"break tb.vhd:24; break list"}

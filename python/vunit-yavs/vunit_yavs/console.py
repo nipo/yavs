@@ -23,6 +23,10 @@ from pathlib import Path
 
 from vunit.test.suites import get_result_file_name
 
+class CommandFailed(Exception):
+    """A VUnit command failed: its message is what the console shows, and a script ends there"""
+
+
 HOOK_VAR = "YAVS_CONSOLE_HOOK"
 START = "_vunit_start"
 
@@ -177,9 +181,16 @@ class VunitCommands:
 
     def _start(self, _args):
         """As VUnit's GUI script: load; if that worked, the GUI init file and the help"""
-        if self.vunit_load("") == "false":
+        try:
+            self.vunit_load("")
+        except CommandFailed as exc:
+            self.hook.print(str(exc))
+            return ""
+        try:
             self.vunit_user_init("")
-            self.vunit_help("")
+        except CommandFailed as exc:
+            self.hook.print(str(exc))
+        self.vunit_help("")
         return ""
 
     def vunit_help(self, _args):
@@ -191,17 +202,18 @@ class VunitCommands:
         if self._loaded or args.strip():
             ok, _, error = self.hook.reload(shlex.split(args))
             if not ok:
-                self.hook.print(error)
-                return "true"
+                raise CommandFailed(error)
         self._loaded = True
-        return "true" if self._source_all("yavs.init_files.after_load") else "false"
+        if self._source_all("yavs.init_files.after_load"):
+            raise CommandFailed("vunit_load: an after_load init file failed")
+        return ""
 
     def vunit_user_init(self, _args):
         option = "yavs.init_file.gui"
         file_name = self._config.sim_options.get(option, None)
         if file_name is not None and self._source(file_name, option):
-            return "true"
-        return "0"
+            raise CommandFailed("vunit_user_init: the GUI init file failed")
+        return ""
 
     def _suite_done(self):
         try:
@@ -213,14 +225,11 @@ class VunitCommands:
         self._source_all("yavs.init_files.before_run")
         ok, _, error = self.hook.exec("run")
         if not ok:
-            self.hook.print(error)
-            return "true"
+            raise CommandFailed(error)
         if not self._suite_done():
-            self.hook.print()
-            self.hook.print("Test Run Failed!")
-            self.hook.print()
-            return "true"
-        return "false"
+            raise CommandFailed("Test Run Failed!")
+        self.hook.print("Test Run Passed!")
+        return ""
 
     def vunit_compile(self, _args):
         self.hook.print(f"Re-compiling using command {' '.join(self._compile_cmd)}")
@@ -238,16 +247,13 @@ class VunitCommands:
                 self.hook.print(line.rstrip("\n"))
         if proc.returncode != 0:
             self.hook.print("Re-compile failed")
-            self.hook.print("child process exited abnormally")
-            return "true"
+            raise CommandFailed("child process exited abnormally")
         self.hook.print("Re-compile finished")
-        return "false"
+        return ""
 
     def vunit_restart(self, _args):
-        if self.vunit_compile("") != "false":
-            return ""
+        self.vunit_compile("")
         ok, _, error = self.hook.reload([])
         if not ok:
-            self.hook.print(error)
-            return "true"
+            raise CommandFailed(error)
         return self.vunit_run("")

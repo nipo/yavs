@@ -26,7 +26,9 @@ Choosing what is recorded
   ``?`` one character; a pattern that matches a scope covers everything below it. Signals left
   out cost nothing while simulating.
 * ``--wave-variables`` also records process variables (in a scope named after the process, such as
-  ``tb.main.count``) and shared variables. A variable shows its value at the end of each time step.
+  ``tb.main.count``) and shared variables. A variable shows its value at the end of each time step. A debug session
+  (``--dap``, ``--interactive``, ``--do``) that records a wave does this without the flag. A local of a subprogram is never
+  recorded: it exists only during a call. A variable that holds an access value or a protected object is not either.
 * ``--wave-max-array=N`` (default 65536) leaves out arrays with more elements, such as large
   memories, with warning ``W0802``.
 
@@ -70,8 +72,9 @@ down, or everything ``--wave-include`` chose, at most 200 of them on their own. 
 
 In a debug session (``--dap``, ``--interactive``, ``--do``) each stop syncs the file at once: the cursor moves to the stop, a
 breakpoint leaves a marker, and the signals of the stopped process are coloured. Surfer's "go to declaration" prints the
-file and line, and opens it in VS Code. At the console, ``wave add NAME...`` adds signals or scopes and ``wave cursor [TIME]``
-moves the cursor.
+file and line, and opens it in VS Code. At the console, ``wave add NAME...`` adds signals, variables of the stopped process
+or scopes, with their history since time 0, and ``wave cursor [TIME]`` moves the cursor. In VS Code, "Add to Wave" in the
+context menu of the Variables and Watch views, and of a selection or a word in a VHDL file, does the same.
 
 The simulation never waits for the viewer, and its output and exit status do not depend on it: losing Surfer during a run is
 warning ``W0131``, also under ``-W error``. Starting it or connecting to it is checked first (``E0130``).

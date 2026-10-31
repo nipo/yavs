@@ -21,7 +21,7 @@
 < {"body":{"allThreadsContinued":true,"threadId":1},"event":"continued","type":"event"}
 < {"body":{"allThreadsStopped":true,"description":"step at 15 ns, delta 0","reason":"step"},"event":"stopped","type":"event"}
 > evaluate {"expression":"tb.cnt"}
-< {"body":{"result":"4","type":"INTEGER","variablesReference":0},"command":"evaluate","request_seq":8,"success":true,"type":"response"}
+< {"body":{"evaluateName":"tb.cnt","result":"4","type":"INTEGER","variablesReference":0},"command":"evaluate","request_seq":8,"success":true,"type":"response"}
 > yavs/stepDelta {}
 < {"body":{},"command":"yavs/stepDelta","request_seq":9,"success":true,"type":"response"}
 < {"body":{"allThreadsContinued":true,"threadId":1},"event":"continued","type":"event"}

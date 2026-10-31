@@ -543,7 +543,14 @@ impl Design {
         found.sort();
         match found[..] {
             [f] => Ok(f.clone()),
-            [] => Err(format!("`{name}` is not a source file of this design")),
+            [] => {
+                let files = self.files();
+                let help = crate::console::similar(name, "source file", &files);
+                let help = help.map_or(String::new(), |h| format!(": {h}"));
+                Err(format!(
+                    "`{name}` is not a source file of this design{help}"
+                ))
+            }
             _ => Err(format!(
                 "`{name}` could be {}: write more of the path",
                 found

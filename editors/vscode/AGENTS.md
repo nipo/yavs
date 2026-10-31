@@ -38,6 +38,7 @@ VS Code).
 |---|---|
 | The extension starts yavs in stdio mode; `port` only attaches | VS Code owns the adapter's lifetime; no port to pick or leak |
 | `sources` analyzed before every session by the extension | One F5 from an edited file to a session; the library stays an implementation detail |
+| "Add to Wave" (`addToWave`) sends `evaluate` of `wave add NAME` with context `repl` and the selected frame, so one path with the console; its menus depend on the context key `yavs.viewer`, set from `yavsViewer` of the `initialize` response | `docs/decisions.md` |
 | `ExitTracker` shows a notification when the adapter ends before it answered anything (a refused command line, a crash); what the server can say itself is the failure of `launch` | VS Code shows nothing of an adapter's standard error, issue #934 |
 | The launch arguments are turned into the command line; `yavs-dap` reads only `stopOnEntry` | One contract for the design (the command line), `docs/decisions.md` "DAP server" |
 

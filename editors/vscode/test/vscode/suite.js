@@ -146,6 +146,7 @@ async function launchThatCannotStart(folder) {
  * opens at its line. */
 async function surferGoesToTheDeclaration(folder, tb, stoppedAgain) {
   let send;
+  const added = [];
   const server = net.createServer((sock) => {
     let buf = Buffer.alloc(0);
     send = (m) => sock.write(`${JSON.stringify(m)}\0`);
@@ -156,6 +157,7 @@ async function surferGoesToTheDeclaration(folder, tb, stoppedAgain) {
         if (m.type === 'greeting') {
           send({ type: 'greeting', version: '0', commands: [] });
         } else if (m.command === 'add_items' || m.command === 'add_markers') {
+          if (m.command === 'add_items') added.push(m.items);
           send({ type: 'response', command: m.command, ids: [] });
         } else {
           send({ type: 'response', command: 'ack' });
@@ -190,9 +192,18 @@ async function surferGoesToTheDeclaration(folder, tb, stoppedAgain) {
     assert.ok(Date.now() - t0 < 60000, 'the declaration did not open');
     await new Promise((r) => setTimeout(r, 100));
   }
+  // "Add to Wave" from a view, and from the word under the cursor.
+  await vscode.commands.executeCommand('yavs.addToWave', { variable: { name: 'cnt', evaluateName: 'tb.cnt' } });
+  const editor = await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(tb));
+  const at = new vscode.Position(6, 10); // `signal v : ...`
+  editor.selection = new vscode.Selection(at, at);
+  await vscode.commands.executeCommand('yavs.addToWave');
   const ended = waitFor('end of the Surfer session', 60000, (r) => vscode.debug.onDidTerminateDebugSession(r));
   await session.customRequest('continue', { threadId: 1 });
   await ended;
+  // Stopped before any value was written: what was asked for is added once there are values.
+  assert.ok(added.flat().includes('tb.cnt'), JSON.stringify(added));
+  assert.ok(added.flat().includes('tb.v'), JSON.stringify(added));
   server.close();
 }
 

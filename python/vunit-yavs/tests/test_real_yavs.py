@@ -567,8 +567,8 @@ class TestRealYavs(unittest.TestCase):
             frames = request(5, "stackTrace", threadId=stopped["body"]["threadId"])["body"]["stackFrames"]
             self.assertEqual((frames[0]["source"]["path"], frames[0]["line"]), (str(source), line))
             # A vunit_* command in the Debug Console
-            request(6, "evaluate", expression="vunit_user_init", context="repl")
-            until(lambda m: m.get("event") == "output" and m["body"]["output"] == "0\n")
+            request(6, "evaluate", expression="vunit_help", context="repl")
+            until(lambda m: m.get("event") == "output" and m["body"]["output"].startswith("List of VUnit commands"))
             request(7, "setBreakpoints", source={"path": str(source)}, breakpoints=[])
             request(8, "continue", threadId=stopped["body"]["threadId"])
             until(lambda m: m.get("event") == "terminated")
@@ -604,7 +604,7 @@ class TestRealYavs(unittest.TestCase):
         project = self._copy_project()
         code, out = self._session(project, project / "run.py", PASS, "vunit_run\nquit\n")
         self.assertIn(HELP, out, "the help after the load")
-        self.assertIn("false", out.split("STOP called")[1], out)
+        self.assertIn("Test Run Passed!", out.split("STOP called")[1], out)
         self.assertEqual(code, 0, out)
         self.assertEqual(report(self.xml), {PASS: "passed"}, out)
         # The console reaches the result of a batch run of the same test
@@ -615,7 +615,7 @@ class TestRealYavs(unittest.TestCase):
         self.assertEqual(code, batch.returncode, out)
         self.assertEqual(report(self.xml), {FAIL: "failed"}, out)
         self.assertIn("Test Run Failed!", out)
-        self.assertIn("\nTest Run Failed!\n\ntrue\n", out)
+        self.assertIn("error: Test Run Failed!\n", out)
 
     def test_interactive_refuses(self):
         for args in [("-p", "2"), ("--yavs-debug=0",), ("--elaborate",)]:
@@ -657,7 +657,7 @@ class TestRealYavs(unittest.TestCase):
         run_py = self._with_edit(project, "check_true(true);", 'report "new code";')
         lines = "break tb_yavs.vhd:19\nvunit_run\nbreak delete all\nrun\nedit\nvunit_restart\nquit\n"
         code, out = self._session(project, run_py, PASS, lines)
-        self.assertIn("\nTest Run Failed!\n\ntrue\n", out, "a breakpoint stops the run before the suite ends")
+        self.assertIn("error: Test Run Failed!\n", out, "a breakpoint stops the run before the suite ends")
         self.assertIn(f"Re-compiling using command {sys.executable} -u {run_py} --compile --no-color", out)
         self.assertIn("Re-compile finished\n", out)
         self.assertIn("new code", out, "the restart ran the edited source")
@@ -669,7 +669,8 @@ class TestRealYavs(unittest.TestCase):
         run_py = self._with_edit(project, "check_true(true);", "this does not parse")
         lines = "run 0 ns\nedit\nvunit_compile\nvunit_restart\nwhere\nvunit_run\nquit\n"
         code, out = self._session(project, run_py, PASS, lines)
-        self.assertIn("Re-compile failed\nchild process exited abnormally\ntrue\n", out)
+        self.assertIn("Re-compile failed\n", out)
+        self.assertIn("error: child process exited abnormally\n", out)
         # vunit_restart stops at the failed compile, and the old design runs to the end
         self.assertEqual(out.count("Re-compile failed"), 2, out)
         self.assertIn("STOP called", out)

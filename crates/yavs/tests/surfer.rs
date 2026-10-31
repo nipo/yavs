@@ -526,6 +526,101 @@ fn wave_commands_need_a_viewer() {
     assert!(stderr(&o).contains("run with `--surfer`"), "{}", stderr(&o));
 }
 
+/// A debug session records variables without the flag; a plain run does not (the maintainer's
+/// rule); `wave add` of one has its history, of a subprogram's local a clear refusal.
+#[test]
+fn variables_at_a_stop() {
+    let d = tempdir("surfer-vars");
+    std::fs::create_dir_all(d.join("build")).expect("mkdir");
+    std::fs::write(
+        d.join("tb.vhd"),
+        "entity tb is end;
+architecture a of tb is
+  signal s : integer := 0;
+  function f(x : integer) return integer is
+    variable loc : integer;
+  begin
+    loc := x + 1;
+    return loc;
+  end function;
+begin
+  main : process
+    variable count : integer := 0;
+    variable pair : bit_vector(1 downto 0) := \"01\";
+  begin
+    for i in 1 to 3 loop
+      count := f(count);
+      s <= count;
+      wait for 10 ns;
+    end loop;
+    wait;
+  end process;
+end;
+",
+    )
+    .expect("write");
+    analyze(&d, "tb.vhd");
+    let plain = run(&d, &["--wave=plain.fst"]);
+    assert_eq!(plain.status.code(), Some(0), "{}", stderr(&plain));
+    let session = run(&d, &["--wave=debug.fst", "--do=run; quit"]);
+    assert_eq!(session.status.code(), Some(0), "{}", stderr(&session));
+    let vars = |file: &str| {
+        let w = wellen::simple::read(d.join(file)).expect("readable");
+        let h = w.hierarchy();
+        h.lookup_var(&["tb", "main"], "count").is_some()
+    };
+    assert!(!vars("plain.fst"), "a plain run records no variables");
+    assert!(vars("debug.fst"), "a debug session does");
+
+    let fake = Fake::default();
+    let (addr, t) = fake.listen(vec![]);
+    let o = run(
+        &d,
+        &[
+            &format!("--surfer={addr}"),
+            "--do=break tb.vhd:7; run; wave add loc",
+        ],
+    );
+    t.join().expect("fake");
+    assert!(
+        stderr(&o).contains("`loc` is a local of a subprogram"),
+        "{}",
+        stderr(&o)
+    );
+
+    let fake = Fake::default();
+    let (addr, t) = fake.listen(vec![]);
+    let o = run(
+        &d,
+        &[
+            &format!("--surfer={addr}"),
+            "--do=break tb.vhd:17; run; wave add count; wave add s; wave add main; wave add tb.main.pair; wave add cnut",
+        ],
+    );
+    t.join().expect("fake");
+    let items: Vec<String> = fake
+        .all("add_items")
+        .iter()
+        .flat_map(|a| a["items"].as_array().cloned().unwrap_or_default())
+        .map(|i| i.to_string())
+        .collect();
+    assert!(
+        items.iter().any(|i| i.contains("tb.main.count")),
+        "{items:?}"
+    );
+    assert!(items.iter().any(|i| i.contains("tb.s")), "{items:?}");
+    assert!(
+        items.iter().any(|i| i.contains("tb.main.pair")),
+        "{items:?}"
+    );
+    assert_eq!(fake.first("add_scope")["scope"], "tb.main");
+    assert!(
+        stderr(&o).contains("is not in the waveform file"),
+        "{}",
+        stderr(&o)
+    );
+}
+
 /// Surfer's "go to declaration": the file and line on the console.
 #[test]
 fn go_to_declaration_shows_the_place() {

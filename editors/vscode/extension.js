@@ -80,14 +80,18 @@ class Factory {
  * line it refuses, a crash). A diagnostic the server could send is the failure of `launch`. */
 class ExitTracker {
   createDebugAdapterTracker(session) {
-    if (session.configuration.port) return undefined;
+    const attached = !!session.configuration.port;
     let answered = false;
     return {
       onDidSendMessage: (m) => {
         if (m.type === 'response') answered = true;
+        // The menus of "Add to Wave": this session shows its waves in a viewer.
+        if (m.type === 'response' && m.command === 'initialize') {
+          vscode.commands.executeCommand('setContext', 'yavs.viewer', m.body?.yavsViewer === true);
+        }
       },
       onExit: (code, signal) => {
-        if (answered || (code === 0 && !signal)) return;
+        if (attached || answered || (code === 0 && !signal)) return;
         const c = session.configuration;
         const how = signal ? `was ended by ${signal}` : `exited with status ${code}`;
         vscode.window.showErrorMessage(
@@ -146,6 +150,38 @@ async function sendValueBps(s, bps) {
       bps.splice(bad, 1);
     }
     valueBps.set(s.id, bps);
+  } catch (e) {
+    vscode.window.showErrorMessage(`yavs: ${e.message}`);
+  }
+}
+
+/** "Add to Wave": the variable of the Variables or Watch view's context menu, or the selection or
+ * the word at the cursor in the editor. The server resolves it in the selected frame, as the
+ * console's `wave add` does. */
+async function addToWave(ctx) {
+  const s = vscode.debug.activeDebugSession;
+  if (!s || s.type !== 'yavs') return;
+  let name = ctx?.variable?.evaluateName || ctx?.variable?.name || ctx?.expression;
+  if (!name) {
+    const e = vscode.window.activeTextEditor;
+    if (e) {
+      const word = e.selection.isEmpty
+        ? e.document.getWordRangeAtPosition(e.selection.active, /[A-Za-z][A-Za-z0-9_.]*/)
+        : e.selection;
+      name = word && e.document.getText(word).trim();
+    }
+  }
+  if (!name) {
+    vscode.window.showErrorMessage('yavs: select a signal or variable to add to the wave');
+    return;
+  }
+  try {
+    const r = await s.customRequest('evaluate', {
+      expression: `wave add ${name}`,
+      context: 'repl',
+      frameId: vscode.debug.activeStackItem?.frameId,
+    });
+    vscode.window.setStatusBarMessage(`yavs: ${name}: ${r.result}`, 5000);
   } catch (e) {
     vscode.window.showErrorMessage(`yavs: ${e.message}`);
   }
@@ -210,6 +246,7 @@ function activate(context) {
     reg('yavs.stepDelta', custom('yavs/stepDelta')),
     reg('yavs.stepTimestep', custom('yavs/stepTimestep')),
     reg('yavs.breakOnValue', breakOnValue),
+    reg('yavs.addToWave', addToWave),
     reg('yavs.force', signalOp('yavs/force', true)),
     reg('yavs.deposit', signalOp('yavs/deposit', true)),
     reg('yavs.release', signalOp('yavs/release', false)),
@@ -217,7 +254,10 @@ function activate(context) {
       const s = vscode.debug.activeDebugSession;
       if (s && s.type === 'yavs') return sendValueBps(s, []);
     }),
-    vscode.debug.onDidTerminateDebugSession((s) => valueBps.delete(s.id)));
+    vscode.debug.onDidTerminateDebugSession((s) => {
+      valueBps.delete(s.id);
+      if (s.type === 'yavs') vscode.commands.executeCommand('setContext', 'yavs.viewer', false);
+    }));
 }
 
 function deactivate() {}

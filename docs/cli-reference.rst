@@ -349,7 +349,7 @@ Arguments:
 
 .. option:: --wave-variables
 
-   With ``--wave``: also record the scalar variables of processes (sampled at the end of each time step); the include and exclude globs apply to ``top.proc.var``.
+   With ``--wave``: also record the variables of processes and shared variables (sampled at the end of each time step); the include and exclude globs apply to ``top.proc.var``. A debug session (``--dap``, ``--interactive``, ``--do``) that records a wave does this on its own.
 
 .. option:: --time-report
 

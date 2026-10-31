@@ -137,14 +137,14 @@ The test stops at time 0 at a `yavs>` prompt. All commands of the yavs console w
 which behave as in VUnit's other simulator interfaces. They are also in the Debug Console under
 `--yavs-debug`.
 
-| Command | What it does | Returns |
+| Command | What it does | Fails (an error at the console, the end of a script) when |
 |---|---|---|
 | `vunit_help` | Lists these commands | |
-| `vunit_load [flags]` | Loads the test at time 0, with extra `yavs run` flags if given, and sources `yavs.init_files.after_load` | `false`, `true` on failure |
-| `vunit_user_init` | Sources `yavs.init_file.gui` | `0`, `true` on failure |
-| `vunit_run` | Sources `yavs.init_files.before_run`, runs, and prints `Test Run Failed!` unless the test suite finished (so also when a breakpoint stops the run) | `false`, `true` on failure |
-| `vunit_compile` | Runs `run.py --compile` with your arguments, without `--clean` | `false`, `true` on failure |
-| `vunit_restart` | `vunit_compile`, and if that worked: the new design at time 0, breakpoints kept, and `vunit_run` | as `vunit_run` |
+| `vunit_load [flags]` | Loads the test at time 0, with extra `yavs run` flags if given, and sources `yavs.init_files.after_load` | The design does not elaborate, a flag is unknown or an init file fails |
+| `vunit_user_init` | Sources `yavs.init_file.gui` | The file fails |
+| `vunit_run` | Sources `yavs.init_files.before_run`, runs, and prints `Test Run Passed!` | The test suite did not finish, also when a breakpoint stops the run: `Test Run Failed!` |
+| `vunit_compile` | Runs `run.py --compile` with your arguments, without `--clean` | The compile fails |
+| `vunit_restart` | `vunit_compile`, and if that worked: the new design at time 0, breakpoints kept, and `vunit_run` | As `vunit_compile`, then `vunit_run` |
 
 The yavs `restart` goes back to time 0 with the design as loaded; `vunit_restart` compiles first. Init files are
 files of console commands; `$vunit_tb_path` and `$vunit_tb_name` are replaced as VUnit defines them. When you `quit`,

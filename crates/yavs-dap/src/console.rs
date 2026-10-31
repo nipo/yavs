@@ -17,7 +17,6 @@ use std::time::Duration;
 use serde_json::{Value as Json, json};
 use yavs_interp::Resume;
 use yavs_kernel::Time;
-use yavs_std::types::EnumLit;
 use yavs_std::value::LitType;
 
 use crate::{
@@ -470,14 +469,71 @@ fn examine(sh: &Shared, at: &At<'_, '_>, name: &str) -> Result<String, String> {
     Ok(j["result"].as_str().unwrap_or("?").to_string())
 }
 
-/// "A ... with a similar name exists" for a word that means nothing here: the commands first.
-pub(crate) fn did_you_mean(sh: &Shared, word: &str) -> Option<String> {
-    let commands = COMMANDS.iter().map(|(n, _)| *n);
-    let hook = sh.link.hook.get().into_iter().flat_map(|h| &h.commands);
-    let hook: Vec<&str> = hook.map(|(n, _)| n.as_str()).collect();
-    let all: Vec<&str> = commands.chain(hook).collect();
+/// "A `noun` with a similar name exists": the shared helper, over any list of names.
+pub(crate) fn similar(word: &str, noun: &'static str, names: &[String]) -> Option<String> {
+    let keys: Vec<(String, &str)> = names
+        .iter()
+        .map(|n| (n.to_ascii_lowercase(), n.as_str()))
+        .collect();
     let key = word.to_ascii_lowercase();
-    yavs_sem::suggest::suggest(&key, "command", all.iter().map(|&n| (n, n)))
+    yavs_sem::suggest::suggest(&key, noun, keys.iter().map(|(k, n)| (k.as_str(), *n)))
+}
+
+/// The help for a word that names no command.
+pub(crate) fn did_you_mean(sh: &Shared, word: &str) -> Option<String> {
+    let commands = COMMANDS.iter().map(|(n, _)| n.to_string());
+    let hook = sh.link.hook.get().into_iter().flat_map(|h| &h.commands);
+    let all: Vec<String> = commands.chain(hook.map(|(n, _)| n.clone())).collect();
+    similar(word, "command", &all)
+}
+
+/// The help for a word that names nothing at this stop.
+pub(crate) fn name_help(
+    sh: &Shared,
+    at: &At<'_, '_>,
+    tid: i64,
+    frame: usize,
+    word: &str,
+) -> Option<String> {
+    similar(word, "signal or variable", &names_here(sh, at, tid, frame))
+}
+
+/// The evaluator's error, with the help for the name it could not find.
+pub(crate) fn explain(sh: &Shared, at: &At<'_, '_>, tid: i64, frame: usize, e: String) -> String {
+    let word = e
+        .strip_prefix("no local or signal `")
+        .and_then(|r| r.split('`').next());
+    match word.and_then(|w| name_help(sh, at, tid, frame, w)) {
+        Some(h) => format!("{e}: {h}"),
+        None => e,
+    }
+}
+
+/// "No such signal", with the help from the signals in scope.
+pub(crate) fn no_signal(sh: &Shared, tid: i64, name: &str) -> String {
+    let in_scope = thread_proc(sh, tid).map_or_else(
+        || sh.design.sigs.iter().map(|s| s.name.clone()).collect(),
+        |p| {
+            let sigs = p.signals.iter();
+            sigs.map(|&k| sh.design.sigs[k].name.clone())
+                .collect::<Vec<_>>()
+        },
+    );
+    match similar(name, "signal", &in_scope) {
+        Some(h) => format!("no signal `{name}` here: {h}"),
+        None => format!("no signal `{name}` here"),
+    }
+}
+
+/// A subcommand that is none of `subs`.
+fn bad_sub(cmd: &str, sub: &str, subs: &[&str]) -> String {
+    let list: Vec<String> = subs.iter().map(|s| s.to_string()).collect();
+    let names = subs.iter().map(|s| format!("`{s}`")).collect::<Vec<_>>();
+    let mut m = format!("`{cmd} {sub}`: expected {}", names.join(" or "));
+    if let Some(h) = similar(sub, "subcommand", &list) {
+        m += &format!(": {h}");
+    }
+    m
 }
 
 /// The names `examine` and the like see at this stop: the frame's locals, the variables of its
@@ -783,7 +839,7 @@ fn break_delete(sh: &Shared, what: &str) -> Result<String, String> {
     let all = what == "all";
     let id = what.parse::<u64>().ok();
     if !all && id.is_none() {
-        return Err(format!("`break delete {what}`: expected a number or `all`"));
+        return Err(bad_sub("break delete", what, &["all"]) + ", or a breakpoint's number");
     }
     let gone = |b: &Json| all || b["yavsId"].as_u64() == id;
     let (files, sets, n) = {
@@ -886,6 +942,29 @@ fn restart(sh: &Shared) -> Result<Exec, String> {
     Ok(Exec::Next(Next::Restart))
 }
 
+/// `line` in lines of at most `width` columns (0: as it is), the later ones indented.
+fn wrapped(line: &str, width: usize) -> String {
+    const INDENT: &str = "    ";
+    if width == 0 {
+        return line.to_string();
+    }
+    let mut out = String::new();
+    let mut col = 0;
+    for word in line.split(' ') {
+        if col > 0 && col + 1 + word.len() > width {
+            out += "\n";
+            out += INDENT;
+            col = INDENT.len();
+        } else if col > 0 {
+            out.push(' ');
+            col += 1;
+        }
+        out += word;
+        col += word.len();
+    }
+    out
+}
+
 fn help(sh: &Shared) -> String {
     let core = COMMANDS.iter().map(|(_, h)| *h).filter(|h| !h.is_empty());
     let mut lines: Vec<String> = core.map(String::from).collect();
@@ -893,6 +972,8 @@ fn help(sh: &Shared) -> String {
         let shown = h.commands.iter().filter(|(_, help)| !help.is_empty());
         lines.extend(shown.map(|(n, help)| format!("{n}: {help}")));
     }
+    let width = sh.link.columns.load(Ordering::Relaxed);
+    let lines: Vec<String> = lines.iter().map(|l| wrapped(l, width)).collect();
     lines.join("\n")
 }
 
@@ -904,7 +985,7 @@ fn exec(sh: &Shared, at: &At<'_, '_>, line: &str) -> Result<Exec, String> {
             "" => step(sh, Next::Resume(Resume::StepIn)),
             "delta" => step(sh, Next::Run(Run::Delta)),
             "timestep" => step(sh, Next::Run(Run::Timestep)),
-            _ => Err(format!("`step {rest}`: expected `delta` or `timestep`")),
+            _ => Err(bad_sub("step", rest, &["delta", "timestep"])),
         },
         "next" => step(sh, Next::Resume(Resume::StepOver)),
         "stop" => Ok(Exec::Text("the simulation is stopped".into())),
@@ -966,44 +1047,55 @@ fn wave(sh: &Shared, at: &At<'_, '_>, rest: &str) -> Result<String, String> {
             v.cursor(t.as_fs());
             Ok(String::new())
         }
-        _ => Err(format!("`wave {sub}`: expected `add` or `cursor`")),
+        _ => Err(bad_sub("wave", sub, &["add", "cursor"])),
     }
 }
 
-/// A signal or scope name of the console as the viewer writes it (`top.u1.s`), and whether it is a
-/// scope in the file: a region, a record, an array other than a vector of a bit-like type.
-fn viewer_name(sh: &Shared, at: &At<'_, '_>, name: &str) -> Result<(String, bool), String> {
-    let bad = || format!("no signal or scope `{name}` here");
-    let proc = thread_proc(sh, thread_of(at));
-    if let Some(k) = sh.design.find(proc, &qualify(sh, at, name)) {
-        let s = &sh.design.sigs[k];
-        let scope = match &s.lit {
-            LitType::Record(_) => true,
-            LitType::Array { elem, .. } => {
-                !matches!(&**elem, LitType::Enum(e) if e.lits.contains(&EnumLit::Char(b'1')))
-            }
-            _ => false,
+/// What the console means by `name`, as a dotted path: a signal or a part of one, a variable of
+/// the stopped process, a scope, or a path. The viewer checks it against what the file holds.
+fn viewer_name(sh: &Shared, at: &At<'_, '_>, name: &str) -> Result<String, String> {
+    let tid = thread_of(at);
+    let proc = thread_proc(sh, tid);
+    if let At::Process(s) = at {
+        let end = name.find(['.', '(']).unwrap_or(name.len());
+        let (head, part) = name.split_at(end);
+        let named = |i: usize| {
+            s.frames
+                .locals(i)
+                .iter()
+                .any(|l| l.name.eq_ignore_ascii_case(head))
         };
-        return Ok((dotted(&s.path), scope));
+        let top = s.frames.depth().saturating_sub(1);
+        if top > 0
+            && (named(top)
+                || state_vars(sh, s, at, top)
+                    .iter()
+                    .any(|(n, ..)| n.eq_ignore_ascii_case(head)))
+        {
+            return Err(format!(
+                "`{head}` is a local of a subprogram, which exists only during a call: only signals, \
+                 process variables and shared variables are recorded"
+            ));
+        }
+        if named(0)
+            && let Some(p) = crate::proc_name(sh, tid)
+        {
+            return Ok(format!("{}.{head}{part}", dotted(&p)));
+        }
     }
-    let lower = name.to_ascii_lowercase().replace('.', ":");
-    let wanted = lower.trim_matches(':').to_string();
-    sh.design
-        .regions
-        .iter()
-        .find(|r| {
-            let p = r.path.trim_matches(':');
-            p == wanted
-                || sh.design.roots.iter().any(|&t| {
-                    p == format!("{}:{wanted}", sh.design.regions[t].path.trim_matches(':'))
-                })
-        })
-        .map(|r| (dotted(&r.path), true))
-        .ok_or_else(bad)
+    if let Some((k, part)) = split_part(sh, proc, &qualify(sh, at, name)) {
+        return Ok(format!("{}{part}", dotted(&sh.design.sigs[k].path)));
+    }
+    if !name.contains(['.', ':'])
+        && let Some(&t) = sh.design.roots.first()
+    {
+        return Ok(format!("{}.{name}", dotted(&sh.design.regions[t].path)));
+    }
+    Ok(name.trim_matches(':').replace(':', "."))
 }
 
 /// A design path (`:top:u1:s`) as the viewer writes it.
-fn dotted(path: &str) -> String {
+pub(crate) fn dotted(path: &str) -> String {
     path.trim_matches(':').replace(':', ".")
 }
 

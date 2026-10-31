@@ -42,6 +42,8 @@ pub struct Surfer {
     /// Where Surfer's "go to declaration" goes (`yavs_dap::Viewer::on_goto`).
     goto: Arc<OnceLock<yavs_dap::GotoFn>>,
     file: PathBuf,
+    /// What the file holds (`recorded`).
+    recorded: HashMap<String, (String, bool)>,
 }
 
 impl Surfer {
@@ -51,6 +53,7 @@ impl Surfer {
         addr: Option<&str>,
         file: &Path,
         names: Vec<String>,
+        recorded: HashMap<String, (String, bool)>,
         every: Option<Duration>,
     ) -> Result<Arc<Self>, Box<Diagnostic>> {
         let fail = |m: &str, note: String, help: &str| {
@@ -105,6 +108,7 @@ impl Surfer {
             thread: Mutex::new(Some(thread)),
             goto,
             file,
+            recorded,
         }))
     }
 
@@ -153,9 +157,24 @@ impl yavs_dap::Viewer for Surfer {
         self.send(Msg::Stop(s));
     }
 
-    fn add(&self, items: Vec<(String, bool)>) -> Result<usize, String> {
+    fn add(&self, items: Vec<String>) -> Result<usize, String> {
+        let mut found = Vec::with_capacity(items.len());
+        for item in &items {
+            found.push(self.recorded.get(&item.to_ascii_lowercase()).cloned().ok_or_else(|| {
+                let mut m = format!(
+                    "`{item}` is not in the waveform file: only signals, process variables and \
+                     shared variables are, without what `--wave-include`, `--wave-exclude` or \
+                     `--wave-max-array` leave out"
+                );
+                let keys = self.recorded.keys().map(|k| (k.as_str(), k.as_str()));
+                if let Some(h) = yavs_sem::suggest::suggest(item, "signal or variable", keys) {
+                    m += &format!(": {h}");
+                }
+                m
+            })?);
+        }
         let (tx, rx) = channel();
-        self.send(Msg::Add(items, tx));
+        self.send(Msg::Add(found, tx));
         rx.recv_timeout(WAIT + WAIT)
             .map_err(|_| "Surfer does not answer".to_string())?
     }
@@ -211,6 +230,56 @@ pub fn names(h: &Hierarchy, all: bool) -> (Vec<String>, usize) {
     let over = out.len().saturating_sub(MAX_SHOWN);
     out.truncate(MAX_SHOWN);
     (out, over)
+}
+
+/// Everything in the file by lower-case name: the name Surfer reads it under, and whether it is a
+/// scope. An element of an array has two names: `tb.m(0)` as VHDL writes it, `tb.m.(0)` as the
+/// viewer's file reader does (it takes the array's name off its elements).
+pub fn recorded(h: &Hierarchy) -> HashMap<String, (String, bool)> {
+    let mut out = HashMap::new();
+    // Per open scope: its name, the path Surfer knows, the path as VHDL writes it.
+    let mut open: Vec<(&str, String, String, bool)> = Vec::new();
+    let mut add = |exact: String, vhdl: String, scope: bool| {
+        out.insert(vhdl.to_ascii_lowercase(), (exact.clone(), scope));
+        out.insert(exact.to_ascii_lowercase(), (exact, scope));
+    };
+    for it in h.items() {
+        match it {
+            HierItem::Scope { name, kind, .. } => {
+                let (exact, vhdl) = match open.last() {
+                    None => (name.to_string(), name.to_string()),
+                    Some((p, e, v, array)) => {
+                        let tail = name.strip_prefix(*p).filter(|_| *array);
+                        (
+                            format!("{e}.{name}"),
+                            tail.map_or_else(|| format!("{v}.{name}"), |t| format!("{v}{t}")),
+                        )
+                    }
+                };
+                add(exact.clone(), vhdl.clone(), true);
+                let array = matches!(kind, ScopeKind::Array);
+                open.push((name, exact, vhdl, array));
+            }
+            HierItem::Up => {
+                open.pop();
+            }
+            HierItem::Signal { name, .. } => {
+                let Some((p, e, v, array)) = open.last() else {
+                    continue;
+                };
+                let name = match name.rfind('[') {
+                    Some(i) if name.ends_with(']') => &name[..i],
+                    _ => name,
+                };
+                let tail = name.strip_prefix(*p).filter(|_| *array);
+                match tail {
+                    Some(t) => add(format!("{e}.{t}"), format!("{v}{t}"), false),
+                    None => add(format!("{e}.{name}"), format!("{v}.{name}"), false),
+                }
+            }
+        }
+    }
+    out
 }
 
 fn connect(addr: &str) -> io::Result<TcpStream> {

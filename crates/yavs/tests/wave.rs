@@ -797,7 +797,8 @@ fn wave_under_dap() {
     let dir = scratch("dap");
     let src = repo().join("crates/yavs/tests/dap/tb.vhd");
     assert!(analyze(&dir, &src, "2008"));
-    let plain = run(&dir, &["--wave=plain.fst", "tb"]);
+    // A debug session records variables on its own.
+    let plain = run(&dir, &["--wave=plain.fst", "--wave-variables", "tb"]);
     assert!(plain.status.success(), "{plain:?}");
     let mut child = yavs()
         .current_dir(&dir)

@@ -23,7 +23,7 @@
 > yavs/deposit {"signal":"d(9)","value":"'1'"}
 < {"command":"yavs/deposit","message":"index 9 is out of range","request_seq":11,"success":false,"type":"response"}
 > yavs/deposit {"signal":"r.c","value":"1"}
-< {"command":"yavs/deposit","message":"no field `c`","request_seq":12,"success":false,"type":"response"}
+< {"command":"yavs/deposit","message":"no field `c`: similar names exist: `a` (field), `b` (field)","request_seq":12,"success":false,"type":"response"}
 > yavs/deposit {"signal":"r.a(1)","value":"1"}
 < {"command":"yavs/deposit","message":"`.a(1)` is not a field, element or slice of this signal","request_seq":13,"success":false,"type":"response"}
 > yavs/deposit {"signal":"d(x)","value":"'1'"}
@@ -40,11 +40,11 @@
 < {"body":{"category":"stdout","output":"** Note: 11000000fs+0: n=6 b=A d=06 q=A7 t=0 fs r.a=9\n    Process :vals:p\n"},"event":"output","type":"event"}
 < {"body":{"allThreadsStopped":true,"description":"step at 11 ns, delta 0","reason":"step"},"event":"stopped","type":"event"}
 > evaluate {"expression":":vals:q"}
-< {"body":{"indexedVariables":8,"result":"\"10100111\"","type":"STD_ULOGIC_VECTOR","variablesReference":4294967296},"command":"evaluate","request_seq":19,"success":true,"type":"response"}
+< {"body":{"evaluateName":"vals.q","indexedVariables":8,"result":"\"10100111\"","type":"STD_ULOGIC_VECTOR","variablesReference":4294967296},"command":"evaluate","request_seq":19,"success":true,"type":"response"}
 > evaluate {"expression":":vals:d"}
-< {"body":{"indexedVariables":8,"result":"\"00000110\"","type":"STD_ULOGIC_VECTOR","variablesReference":4294967297},"command":"evaluate","request_seq":20,"success":true,"type":"response"}
+< {"body":{"evaluateName":"vals.d","indexedVariables":8,"result":"\"00000110\"","type":"STD_ULOGIC_VECTOR","variablesReference":4294967297},"command":"evaluate","request_seq":20,"success":true,"type":"response"}
 > evaluate {"expression":":vals:r"}
-< {"body":{"namedVariables":2,"result":"(a => 9, b => \"00Z0\")","type":"rec_t","variablesReference":4294967298},"command":"evaluate","request_seq":21,"success":true,"type":"response"}
+< {"body":{"evaluateName":"vals.r","namedVariables":2,"result":"(a => 9, b => \"00Z0\")","type":"rec_t","variablesReference":4294967298},"command":"evaluate","request_seq":21,"success":true,"type":"response"}
 > yavs/release {"signal":":vals:q(7 downto 6)"}
 < {"body":{"signal":":vals:q(7 downto 6)"},"command":"yavs/release","request_seq":22,"success":true,"type":"response"}
 > yavs/release {"mode":"out","signal":":vals:q(0)"}
