@@ -1356,6 +1356,28 @@ impl Db {
         Ok(())
     }
 
+    /// `E1501`: a header with a generic map and no generic clause.
+    pub(crate) fn map_without_clause(
+        &mut self,
+        what: &str,
+        map: &[ast::AssocElem],
+        clause: &str,
+        span: Span,
+    ) -> Reported {
+        let at = map.first().map_or(span, |a| a.span);
+        self.error(
+            Diagnostic::error(
+                diag::NOT_GENERIC,
+                format!("{what} has a generic map but no generic clause"),
+            )
+            .with_primary(at, "nothing here for this map to associate with")
+            .with_note(format!(
+                "LRM {clause}: the header is a generic clause, then optionally a generic map aspect"
+            ))
+            .with_help("write `generic (...);` before `generic map (...);`"),
+        )
+    }
+
     /// The uninstantiated type behind `d` when `d` is the instance a protected type header
     /// with a generic map declared (`Db::protected_decl`).
     pub(crate) fn header_protected(&self, d: DeclId) -> Option<DeclId> {

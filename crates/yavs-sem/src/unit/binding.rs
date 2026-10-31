@@ -104,7 +104,6 @@ impl Db {
         generics.extend(self.take_hidden_types());
         let generics: Box<[DeclId]> = generics.into();
         self.decls_in(scope, &e.decls);
-        let _ = self.check_protected_bodies(scope, e.span);
         // Set before the statements: their analysis never needs it, but a
         // failed statement part must still leave the interface visible.
         self.units[unit].hir = UnitHir::Entity {
@@ -131,7 +130,6 @@ impl Db {
     ) -> UnitHir {
         let entity = self.units[unit].deps[0];
         self.decls_in(scope, &a.decls);
-        let _ = self.check_protected_bodies(scope, a.span);
         let stmts = self
             .analyze_conc_stmts(scope, &a.stmts, false)
             .unwrap_or_default();

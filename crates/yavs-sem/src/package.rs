@@ -65,6 +65,10 @@ impl Db {
         site: DeclId,
         p: &ast::PackageDecl,
     ) -> Result<InstId, Reported> {
+        if let (None, Some(m)) = (&p.generics, &p.generic_map) {
+            let what = format!("package `{}`", p.name.text);
+            return Err(self.map_without_clause(&what, m, "4.7", p.span));
+        }
         let d = self.new_decl(scope, Designator::Ident(p.name), DeclKind::Error, p.span);
         let s = self.add_scope(ScopeKind::Package, Some(scope), Some(d));
         let generics = p.generics.as_ref().map(|g| self.generic_list(s, g));

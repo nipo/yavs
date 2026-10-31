@@ -475,16 +475,8 @@ impl Db {
         span: Span,
     ) -> Result<(), Reported> {
         if let (None, Some(m)) = (&pt.generics, &pt.generic_map) {
-            let at = m.first().map_or(span, |a| a.span);
-            return Err(self.error(
-                Diagnostic::error(
-                    diag::NOT_GENERIC,
-                    format!("protected type `{}` has a generic map but no generic clause", name.text),
-                )
-                .with_primary(at, "nothing here for this map to associate with")
-                .with_note("LRM 5.6.2 (2019): the header is a generic clause, then optionally a generic map aspect")
-                .with_help("write `generic (...);` before `generic map (...);`"),
-            ));
+            let what = format!("protected type `{}`", name.text);
+            return Err(self.map_without_clause(&what, m, "5.6.2 (2019)", span));
         }
         let Some(assocs) = &pt.generic_map else {
             let (ty, pscope) = self.new_protected(scope, decl, name, span);

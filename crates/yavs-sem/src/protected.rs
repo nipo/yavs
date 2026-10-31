@@ -341,6 +341,21 @@ impl Db {
             && self.scopes[self.decls[d].scope].kind == ScopeKind::Protected
     }
 
+    /// Did `d`, a name of protected region `region`, come from the generic list? An instance's
+    /// formal subprogram or type names its actual, declared elsewhere.
+    fn is_protected_generic(&self, d: DeclId, region: ScopeId) -> bool {
+        let decl = &self.decls[d];
+        decl.scope != region
+            || decl.implicit
+            || matches!(
+                &decl.kind,
+                DeclKind::GenericType(_)
+                    | DeclKind::GenericSubprogram(_)
+                    | DeclKind::GenericPackage(_)
+            )
+            || matches!(&decl.kind, DeclKind::Object(o) if o.role == crate::decl::ObjRole::Generic)
+    }
+
     /// Is `inner` the region `outer` or nested in it?
     pub fn is_within(&self, inner: ScopeId, outer: ScopeId) -> bool {
         let mut s = Some(inner);
@@ -529,6 +544,33 @@ impl Db {
             ));
         }
         let inside = body.is_some_and(|b| self.is_within(from, b));
+        // Through an object only methods are visible, not what the generic list declares.
+        let found = if inside {
+            found
+        } else {
+            let methods: Vec<DeclId> = found
+                .iter()
+                .copied()
+                .filter(|&d| !self.is_protected_generic(d, decl_scope))
+                .collect();
+            if methods.is_empty() {
+                return Err(self.error(
+                    Diagnostic::error(
+                        diag::PRIVATE,
+                        format!(
+                            "`{}` is a generic of protected type `{}`, not a method",
+                            name.text,
+                            self.type_name(t)
+                        ),
+                    )
+                    .with_primary(name.span, "not visible through an object")
+                    .with_secondary(self.decls[self.types[t].decl].span, "type declared here")
+                    .with_note("LRM 5.6.2 (VHDL-2019): a generic is visible only in the protected type's declaration and body")
+                    .with_help("add a method that returns what you need"),
+                ));
+            }
+            methods
+        };
         if !inside && let Some(&p) = found.iter().find(|&&d| self.is_private_variable(d)) {
             return Err(self.error(
                 Diagnostic::error(
@@ -574,7 +616,10 @@ impl Db {
             .into_iter()
             .flatten()
             .copied()
-            .filter(|&d| self.decls[self.entity(d)].kind.subprogram().is_some())
+            .filter(|&d| {
+                self.decls[self.entity(d)].kind.subprogram().is_some()
+                    && !self.is_protected_generic(d, decl_scope)
+            })
             .collect()
     }
 }
