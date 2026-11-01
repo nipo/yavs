@@ -2397,13 +2397,14 @@ fn file_loaded_on_demand_is_one_file_however_spelled() {
     ] {
         std::fs::write(dir.join(name), text).unwrap();
     }
-    let mut spellings = vec!["sub/../cmd.vhd".to_string()];
     #[cfg(unix)]
-    {
-        std::os::unix::fs::symlink(dir, dir.join("link")).unwrap();
-        spellings.push("link/cmd.vhd".to_string());
-    }
-    for spelled in &spellings {
+    std::os::unix::fs::symlink(dir, dir.join("link")).unwrap();
+    let spellings: &[&str] = if cfg!(unix) {
+        &["sub/../cmd.vhd", "link/cmd.vhd"]
+    } else {
+        &["sub/../cmd.vhd"]
+    };
+    for &spelled in spellings {
         for extra in [&[][..], &["--no-cache"][..]] {
             let lib = format!("--work=work:w{}{}", spelled.len(), extra.len());
             let analyze = |files: &[&str]| {
