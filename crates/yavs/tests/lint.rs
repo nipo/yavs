@@ -490,6 +490,27 @@ fn waivers_of_directories_and_lists_of_rules() {
     assert_eq!(text.matches("W0132").count(), 1, "{text}");
 }
 
+/// One process driving two signals that others drive too: both are reported, in the same order
+/// every run.
+#[test]
+fn two_findings_of_a_rule_at_one_place() {
+    let dir = tempdir("lint");
+    let source = "library ieee;\nuse ieee.std_logic_1164.all;\nentity e is end entity;\narchitecture r of e is\n  signal a, b : std_logic;\nbegin\n  p : process begin a <= '1'; b <= '1'; wait; end process;\n  a <= '0';\n  b <= '0';\nend architecture;\n";
+    std::fs::write(dir.join("e.vhd"), source).unwrap();
+    std::fs::write(
+        dir.join("yavs-lint.yaml"),
+        "rule:\n  lint_601:\n    disable: false\n",
+    )
+    .unwrap();
+    let args = ["lint", "--message-format=short", "e.vhd"];
+    let first = stderr(&yavs(&dir, &args));
+    assert_eq!(first.matches("error[lint_601]").count(), 2, "{first}");
+    assert!(first.contains("`a`") && first.contains("`b`"), "{first}");
+    for _ in 0..5 {
+        assert_eq!(stderr(&yavs(&dir, &args)), first);
+    }
+}
+
 #[test]
 fn every_report_format() {
     let dir = tempdir("lint");

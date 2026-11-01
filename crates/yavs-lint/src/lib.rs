@@ -91,8 +91,12 @@ pub struct Finding {
 pub fn lint(db: &Db, units: &[UnitId], cfg: &Config, facts: bool) -> (Vec<Finding>, Value) {
     let (mut found, facts) = rules::check(db, units, cfg, facts);
     found.retain(|(id, _, _)| rule(id).is_some_and(|r| cfg.enabled(r)));
-    found.sort_by_key(|(id, span, _)| (span.file.0, span.start, span.end, *id));
-    found.dedup_by(|a, b| a.0 == b.0 && a.1 == b.1);
+    // The message too: one place can hold two findings of a rule, and a rule's order is not stable.
+    found.sort_by(|a, b| {
+        (a.1.file.0, a.1.start, a.1.end, a.0, &a.2)
+            .cmp(&(b.1.file.0, b.1.start, b.1.end, b.0, &b.2))
+    });
+    found.dedup();
     let found = found
         .into_iter()
         .map(|(id, span, message)| {
