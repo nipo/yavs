@@ -23,6 +23,7 @@ for an agent that tunes performance or measures a performance change on real tes
 | `run.py` | The runner: `--list`, `BIN --ref sim1 --cores 6,7 [--phases analyze,elab,codegen,run]`, `--compare A B`, `--report JSON`, `--self-test` |
 | `tests.toml` | One `[[test]]` per testbench: source, path, top, library, generics, why it is in the set, category (field list in its header) |
 | `programs.py` | Builds the program images of the CPU workloads (section 7) from pinned sources into `<cache>/images`; also a command: `programs.py PROGRAM key=value` |
+| `window.py` | Short-window A/B on Cranelift against sim1: minutes, not hours (section 8) |
 | `cpu/` | The harness's own VHDL and C for the CPU workloads: the Microwatt console, JTAG-socket and testbench replacements and its CoreMark port (source id `@harness` in `tests.toml`) |
 
 `YAVS_BENCH_TIERFLAGS` (extra arguments after `--tier=` of every yavs run cell, e.g. `--tier-heat=1,0,0` to compile every function at its first call) is not part of the cell name: set it for both binaries of a `--compare`.
@@ -151,3 +152,63 @@ worlds and prints the commands (the first `--prepare` also makes `<cache>/venv`)
 Licences of the programs (nothing is committed from them): NEORV32 BSD-3-Clause, the NEORV32 CoreMark port and EEMBC CoreMark Apache-2.0,
 Microwatt CC-BY-4.0 with IBM's additional-rights notice (its `fpga/` files BSD-3-Clause). `cpu/microwatt/coremark` is derived from the EEMBC
 barebones port (Apache-2.0, header says so).
+
+## 8. Short-window A/B (`window.py`): can this idea be killed in minutes?
+
+All performance work has Cranelift as the base (maintainer rule, tracker #1046). The tool builds a checkout with Cranelift only, runs `--tier=auto`, and compares against sim1. There is no LLVM cell unless you pass an LLVM binary by hand.
+
+Each test runs a fixed simulated-time window after start-up under `perf stat` (cycles, instructions, L1i, iTLB and branch misses), all cells of a test on one core of 9 to 15. A window is the counters of a run to T1 minus those of a run to T0, so start-up cancels. It needs no change to the simulator. Whole-run test checks do not apply at a window's stop: pass is an exit status of 0 or the test's own `exit_code`, and the console must equal the first variant's (against a reference: the same set of lines).
+
+```sh
+export YAVS_REALBENCH_CACHE=~/.cache/yavs-<tag>/rb YAVS_BENCH_VHDL_AI_TEST=~/git/vhdl-ai-test
+cp ~/.cache/yavs-agents/sims.local.conf tools/sims.local.conf                # untracked
+python3 -I tools/realbench/window.py ~/git/rsim-w-before ~/git/rsim-w-after --bar cycles:0.97   # two checkouts, built with Cranelift
+python3 -I tools/realbench/window.py A/yavs B/yavs:auto+YAVS_SOME_KNOB=1 --tests grlib_leon3mp   # two binaries (tools/build-bench.sh), a knob
+python3 -I tools/realbench/window.py A/yavs B/yavs --rounds 3                # rounds for a cycle verdict; medians
+python3 -I tools/realbench/window.py A/yavs B/yavs --full --tests microwatt_coremark   # the whole run
+python3 -I tools/realbench/window.py --self-test
+```
+
+With no variant it builds this checkout. A checkout's build stays in `~/.cache/yavs-window-build-<hash>`: delete it when your task ends. `--bar COUNTER:RATIO` is the largest passing ratio to the first variant, per test and on the geomean; repeat it for several counters. Ratios are to the first variant, plus `cyc/sim1` and `ins/sim1`. Counters are the simulation thread (`--no-inherit`, as in the baseline); compile threads are not in them, so a change that compiles more must also run with `--inherit` or wall. `--window T0,T1` replaces the window to calibrate. `--no-sim1` leaves out sim1.
+
+Total for two variants plus sim1, all nine tests, one round: **541 s** (setup 14 s, next to another timed job on CCD1, 2026-11-01). GRLIB and Microwatt are most of it (about 3.5 and 4.5 minutes); the other seven take about a minute. Each yavs variant runs two warm-ups to T1, then T1 and T0.
+
+### Validation, 2026-11-01, e8289fd1, Cranelift cells only
+
+Tolerances fixed before looking: instructions 3 percent, cycles 5, misses per 1000 instructions 25. Each cell: window, then whole run of the same binary. Baseline is `--tier=auto` of a95d9ad1 (whole-run instructions to sim1 within 5.4 percent of it on all nine; L1i per 1000 up to 45 percent off it on the small tests, where it moves between runs, GRLIB and Microwatt within 3). Whole-run L1i, iTLB and branch columns are auto.
+
+| test | window T0 to T1 | instr auto/interp | cycles auto/interp | instr auto/sim1, window : rest of run | L1i/k | iTLB/k | br/k | A/A: instr, cycles |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| grlib_leon3mp | 300 to 700 us | 0.943 : 0.951 | 1.160 : 1.195 | 2.59 : 2.65 | 1.63 : 1.76 | 0.477 : 0.387 | 4.48 : 4.42 | 1.002, 0.942 |
+| vai_window_gen_interlock | 64 to 512 us | 0.291 : 0.292 | 0.325 : 0.320 | 2.06 : 2.02 | 0.69 : 0.64 | 0.085 : 0.088 | 1.26 : 1.15 | 1.024, 0.983 |
+| fletcher_bufferwriter_512 | 8 to 256 us | 0.923 : 0.935 | 1.041 : 1.003 | 1.94 : 1.96 | 0.96 : 1.07 | 0.253 : 0.017 | 1.27 : 1.35 | 1.000, 1.033 |
+| sc5_fifo_repack | 20 to 400 us | 0.715 : 0.727 | 0.671 : 0.685 | 2.34 : 2.32 | 0.65 : 0.44 | 0.017 : 0.005 | 0.69 : 0.68 | 1.003, 1.014 |
+| sc5_timestamp | 100 to 2500 us | 0.998 : 1.004 | 1.004 : 1.006 | 1.61 : 1.63 | 0.42 : 0.32 | 0.000 : 0.000 | 0.12 : 0.19 | 1.008, 1.055 |
+| fletcher_bufferreader | 16 to 512 us | 0.998 : 0.996 | 0.996 : 1.024 | 1.30 : 1.33 | 1.16 : 1.70 | 0.023 : 0.006 | 1.22 : 1.32 | 0.997, 0.985 |
+| hdlm_lfsr | 128 us to 4 ms | 0.379 : 0.383 | 0.389 : 0.389 | 1.50 : 1.50 | 1.62 : 1.74 | 0.000 : 0.001 | 0.18 : 0.20 | **1.122**, 1.095 |
+| neorv32_single_cache | 40 to 280 us | 1.015 : 1.017 | 1.043 : 1.058 | 1.10 : 1.10 | 0.60 : 0.79 | 0.006 : 0.098 | 2.01 : 2.28 | 1.000, 1.020 |
+| microwatt_coremark | 300 to 800 us | 0.959 : 0.938 | 1.109 : 1.153 | 2.17 : 2.13 | 1.23 : 1.38 | 0.380 : 0.465 | 4.78 : 5.43 | 1.000, 1.029 |
+
+Verdict per test:
+
+| test | instructions | cycles | front-end misses |
+|---|---|---|---|
+| grlib_leon3mp | holds | holds; A/A 5.8 percent, needs rounds | L1i, iTLB, branch hold |
+| vai_window_gen_interlock | holds; A/A 2.4 percent | holds | L1i, branch hold; iTLB moves 0.05 to 0.2 between runs |
+| fletcher_bufferwriter_512 | holds | holds | L1i, branch hold; iTLB does not |
+| sc5_fifo_repack | holds | holds | branch holds; L1i and iTLB do not |
+| sc5_timestamp | holds | holds; A/A 5.5 percent, needs rounds | none: counts too small |
+| fletcher_bufferreader | holds | holds | branch holds; L1i is unstable (1.16 to 1.75 in windows); iTLB does not |
+| hdlm_lfsr | **does not hold**: identical runs differ by 12 percent (6 in another sitting), whole runs too, the compile outcome varies (#673) | same | L1i, branch hold; iTLB has no signal |
+| neorv32_single_cache | holds | holds | L1i (just), branch hold; iTLB does not |
+| microwatt_coremark | holds, near the tolerance | **does not hold reliably**: 1.07, 1.09, 1.11 against 1.153, under-reporting the loss; later windows (800 to 1300 us, 1500 to 2000 us) gave 1.08, 1.06 | L1i, iTLB, branch within tolerance, all below the whole run |
+
+Lengthened after failing: grlib_leon3mp from 100 to 300 us (instructions 0.995 against 0.951, cycles 1.30 against 1.20), vai_window_gen_interlock from 16 to 256 us (0.322 against 0.292), fletcher_bufferwriter_512 from 8 to 128 us (cycles), microwatt_coremark from 100 to 300 us (0.988 against 0.938). None dropped. Early windows read `auto` worse than its whole run; the likely reason is that tiering has not settled, not traced.
+
+What does not hold, and how to use it:
+
+- **Against sim1 a window gives the run rate, not the whole-run ratio.** sim1's start-up is in its whole run: `neorv32_single_cache` is 1.10 in the window and 0.54 whole, GRLIB 2.59 and 2.10. The window matches the rest of the run after T0 on instructions (within 2.3 percent on all nine). Cycles to sim1 match less well: GRLIB 4.40 against 4.96, neorv32_single_cache 1.29 against 1.17, 6 percent on two others. Publish whole-run ratios from `run.py`, never these.
+- **One round of cycles cannot decide a bar near noise.** A/A cycles moved up to 5.8 percent (9.5 on hdlm_lfsr), so a single-round 3 percent bar kills or passes at random: the A/A geomean here failed `cycles:0.97`. Instructions are good to under 1 percent on seven of nine. Decide on instructions in one run, then ask for `--rounds 3` or more for cycles on the tests near the bar.
+- **Microwatt cycles need `--full`** (about 4.5 minutes per variant, plus two warm-ups).
+- **iTLB ratios mean something only on GRLIB and Microwatt.** Elsewhere the counts are tiny and identical runs differ by up to 6.5 times.
+- Ratios of two cells are from one sitting on one core; the whole-run cells ran in another sitting, CCD1 not quiet. A warm-up reaches T1 only, so the cache holds what ran by then, not what a whole run would compile.

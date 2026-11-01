@@ -388,7 +388,7 @@ def quiet(t, w):
     return f"cd {shlex.quote(str(w))} && exec >{OUT} 2>{ERR}; " if t.get("quiet") else ""
 
 
-def yavs_script(Y, t, w, tier, sub="run", stop=None, extra=()):
+def yavs_script(Y, t, w, tier, sub="run", stop=None, extra=(), wrap=""):
     tier, *envs = tier.split("+")  # `tier+VAR=VALUE`: the tier with environment variables set (measurement knobs)
     tier, _, threads = tier.partition("@")  # `tier@N`: N worker threads (the cell is pinned to N cores)
     a = [Y, sub, f"--std={t['std']}"] + (["--relaxed"] if t["relaxed"] else []) + [f"--work={t['toplib']}:{w}/{t['toplib']}"]
@@ -400,7 +400,7 @@ def yavs_script(Y, t, w, tier, sub="run", stop=None, extra=()):
         a += [f"--exit-severity={t['severity']}"] if t.get("severity") else []
     a += list(extra) + [t["top"]] + gen_args(t, w)
     pre = "env " + " ".join(shlex.quote(e) for e in envs) + " " if envs else ""
-    return quiet(t, w) + f"cd {shlex.quote(str(w))} && " + pre + " ".join(shlex.quote(x) for x in a)
+    return quiet(t, w) + f"cd {shlex.quote(str(w))} && " + pre + wrap + " ".join(shlex.quote(x) for x in a)
 
 
 def ref_script(tool, t, w, what="both", extra=""):
