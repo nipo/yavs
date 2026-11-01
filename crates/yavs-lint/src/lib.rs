@@ -12,7 +12,9 @@ mod report;
 mod rules;
 mod testbench;
 
-pub use config::{Config, Waivers, expand, find_up, near_entry, unmatched};
+pub use config::{
+    Config, Unknown, Waivers, expand, find_up, near_entry, unknown_messages, unmatched,
+};
 pub use report::{Entry, Reports};
 
 use serde_json::Value;
@@ -61,12 +63,19 @@ pub fn rule(id: &str) -> Option<&'static Rule> {
 }
 
 /// The rule whose id `id` is a typo of, when exactly one is close. Rule ids are numbered
-/// densely: a well-formed one that does not exist (`lint_999`) is no typo of its neighbours.
+/// densely: a well-formed one that does not exist (`lint_999`) is no typo of its neighbours, and
+/// neither is an id with another stem (`length_001`).
 pub fn similar_rule(id: &str) -> Option<&'static str> {
     let key = id.to_ascii_lowercase();
     if key
         .strip_prefix("lint_")
         .is_some_and(|d| d.len() == 3 && d.bytes().all(|c| c.is_ascii_digit()))
+    {
+        return None;
+    }
+    if key
+        .split_once('_')
+        .is_some_and(|(stem, _)| stem.len().abs_diff(4) > 1)
     {
         return None;
     }

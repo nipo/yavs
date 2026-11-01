@@ -37,6 +37,7 @@ impl Env {
             .current_dir(&*self.0)
             .env("YAVS_STD_CACHE", self.0.join("std"))
             .env("NO_COLOR", "1")
+            .env("IP_ROOT", self.0.join("ip"))
             .env_remove("YAVS_TOKENS")
             .output()
             .expect("run yavs");
@@ -63,6 +64,139 @@ fn on_page(page: &str, out: &str) {
             "docs/{page} does not show this output line: `{line}`\nFix the page."
         );
     }
+}
+
+/// The `.. code-block:: yaml` blocks of a page, without their indent.
+fn yaml_blocks(page: &str) -> Vec<String> {
+    let text = std::fs::read_to_string(docs().join(page)).unwrap();
+    let mut blocks = Vec::new();
+    let mut lines = text.lines();
+    while let Some(l) = lines.next() {
+        if l.trim() == ".. code-block:: yaml" {
+            let mut block = String::new();
+            for l in lines.by_ref().skip(1) {
+                if !(l.starts_with("   ") || l.is_empty()) {
+                    break;
+                }
+                block += l.strip_prefix("   ").unwrap_or_default();
+                block += "\n";
+            }
+            blocks.push(block);
+        }
+    }
+    blocks
+}
+
+/// `docs/lint.rst`: its commands on files of those names, its configurations as printed.
+#[test]
+fn lint_page() {
+    let e = Env::new("docs_lint");
+    let write = |path: &str, text: &str| {
+        let to = e.0.join(path);
+        std::fs::create_dir_all(to.parent().unwrap()).unwrap();
+        std::fs::write(to, text).unwrap();
+    };
+    let lines = "\n".repeat(13);
+    write(
+        "src/pkg.vhd",
+        "package pkg is\n  constant width : natural := 8;\nend package;\n",
+    );
+    write(
+        "src/fifo.vhd",
+        &format!(
+            "entity fifo is\nend entity;\n\narchitecture rtl of fifo is\n\n{lines}  -- Why it falls through.\n\n  function depth (w : natural) return natural is\n  begin\n    if w > 4 then\n      return w;\n    end if;\n  end function;\n\nbegin\nend architecture;\n"
+        ),
+    );
+    let fails = |args: &[&str]| {
+        let (code, out, err) = e.yavs(args);
+        assert_eq!(code, 1, "yavs {args:?}\n{out}\n{err}");
+        assert!(err.contains("[lint_771]"), "{err}");
+        err
+    };
+    on_page("lint.rst", &format!("$ yavs {}", "lint src/fifo.vhd"));
+    on_page("lint.rst", &fails(&["lint", "src/fifo.vhd"]));
+
+    // What to check.
+    e.ok(&[
+        "analyze",
+        "--work=mylib:out/mylib",
+        "src/fifo.vhd",
+        "src/pkg.vhd",
+    ]);
+    fails(&["lint", "--work=mylib:out/mylib"]);
+    fails(&["lint", "--work=mylib:out/mylib", "src/fifo.vhd"]);
+    fails(&["lint", "src/pkg.vhd", "src/fifo.vhd"]);
+    fails(&["lint", "--recursive", "src"]);
+
+    // The warning about unknown keys, as the page prints it.
+    let mut cfg = "# Settings of another tool.\nrule:\n  lnt_771: {disable: true}\n".to_string();
+    for i in 1..=5 {
+        cfg += &format!("  style_{i}: {{disable: true}}\n");
+    }
+    write("yavs-lint.yaml", &(cfg + "indent: {}\n"));
+    let (code, _, err) = e.yavs(&["lint", "src/pkg.vhd"]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(err.matches("warning[W0139]").count(), 3, "{err}");
+    on_page("lint.rst", &err);
+    std::fs::remove_file(e.0.join("yavs-lint.yaml")).unwrap();
+
+    // Every configuration and waiver file on the page is read without a word.
+    for block in yaml_blocks("lint.rst") {
+        write("page.yaml", &block);
+        let file = if block.starts_with("waivers:") {
+            "--waivers=page.yaml"
+        } else {
+            "--config=page.yaml"
+        };
+        let (code, _, err) = e.yavs(&["lint", "--list-rules", file]);
+        assert_eq!((code, err.as_str()), (0, ""), "{block}");
+    }
+
+    // `file_list`, the block on the page, on a tree that fills each of its entries.
+    let block = yaml_blocks("lint.rst")
+        .into_iter()
+        .find(|b| b.starts_with("file_list:"))
+        .expect("the file_list example");
+    write("yavs-lint.yaml", &block);
+    let empty = |name: &str| format!("entity {name} is\nend entity;\n");
+    write(
+        "modules/fifo/src/fifo.vhd",
+        "use work.fifo_pkg.all;\nentity fifo is\nend entity;\narchitecture rtl of fifo is\n  constant w : natural := width;\nbegin\nend architecture;\n",
+    );
+    write(
+        "modules/fifo/src/fifo_pkg.vhd",
+        "package fifo_pkg is\n  constant width : natural := 8;\nend package;\n",
+    );
+    write("modules/fifo/test/tb_fifo.vhd", &empty("tb_fifo"));
+    write("ip/src/ip.vhd", &empty("ip"));
+    write("generated/made.vhd", &empty("made"));
+    // A file sorted before the package it uses: what the page says about it.
+    let (code, _, err) = e.yavs(&["lint"]);
+    assert_eq!(code, 2, "{err}");
+    assert!(err.contains("fifo_pkg"), "{err}");
+    for command in [
+        "$ yavs analyze --work=fifo:out/fifo modules/fifo/src/fifo_pkg.vhd modules/fifo/src/fifo.vhd",
+        "$ yavs lint --map=fifo:out/fifo",
+    ] {
+        on_page("lint.rst", command);
+        let args: Vec<&str> = command.split(' ').skip(2).collect();
+        let (code, out, err) = e.yavs(&args);
+        assert_eq!(code, 0, "{command}\n{out}\n{err}");
+        if command.contains("lint") {
+            assert!(err.contains("0 findings in 5 file(s)"), "{err}");
+        }
+    }
+    // A named entry that is not there stops the run.
+    write(
+        "yavs-lint.yaml",
+        "file_list:\n  - modules/fifo/src/fifo_pk.vhd\n",
+    );
+    let (code, _, err) = e.yavs(&["lint", "--map=fifo:out/fifo"]);
+    assert_eq!(code, 2, "{err}");
+    assert!(
+        err.contains("E0134") && err.contains("working directory"),
+        "{err}"
+    );
 }
 
 #[test]

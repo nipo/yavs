@@ -1,7 +1,8 @@
 Static analysis
 ===============
 
-``yavs lint`` (needs a release newer than 0.11.0) reports what can be proved wrong about a design before it is simulated. A default run
+``yavs lint`` (needs a release newer than 0.11.0) is a static analysis tool, not a style guide or formatter: it
+reports what can be proved wrong about a design before it is simulated, and it never looks at layout. A default run
 reports definite errors only: the program cannot do what it says, whatever anyone intended. It
 reports what it can derive and nothing it would have to guess, so an empty report means nothing
 provable was found, and a line in it is something to correct.
@@ -16,6 +17,8 @@ provable was found, and a line in it is something to correct.
       |            ^^^^^
       |
       = help: `yavs lint --explain lint_771` says what this rule reports
+
+   note: 1 finding in 1 file(s)
 
 :doc:`lint-rules` lists every rule; ``yavs lint --explain lint_771`` prints one and
 ``yavs lint --list-rules`` prints them with what this configuration runs.
@@ -85,8 +88,29 @@ which rules run and how a finding counts. A rule's own setting wins over its cla
 
 ``lint_602`` takes ``suffixes`` and ``lint_603`` takes ``prefixes``, lists in which ``*`` and ``?``
 are allowed, or a regular expression after ``re:`` (``re:_p[0-9]+``), matched without regard to case.
-With no list these two rules say nothing. An unknown key or rule is an error naming it, with status 2. ``-Wno-RULE``, ``-Werror`` and
+With no list these two rules say nothing. ``-Wno-RULE``, ``-Werror`` and
 ``-Werror=RULE`` do the same for one run; ``-Werror`` makes a finding of severity warning an error.
+
+Other keys are warned about and ignored: warning W0139, at any level of this file and of the waiver file, for
+a key, a rule id or a rule group yavs does not have. Settings for a formatter or a style guide mean
+nothing here, so a configuration shared with such a tool works as it is. The run goes on, ``-Werror``
+makes it fail, and ``-Wno-W0139`` silences it. A name close to a real one gets a suggestion, and many in
+one section are one warning that lists them all:
+
+.. code-block:: console
+
+   $ yavs lint src/pkg.vhd
+   warning[W0139]: `yavs-lint.yaml` line 3: unknown rule `lnt_771` in `rule` is ignored; a rule with a similar name exists: `lint_771`
+
+   warning[W0139]: `yavs-lint.yaml` lines 4 to 8: 5 unknown rules in `rule` are ignored:
+                   `style_1`, `style_2`, `style_3`, `style_4`, `style_5`
+
+   warning[W0139]: `yavs-lint.yaml` line 9: unknown key `indent` is ignored
+
+   note: 0 findings in 1 file(s)
+
+A misspelled key therefore changes nothing, so read these warnings. A bad value of a key yavs does read,
+such as ``severity: fatal``, a YAML error or a file that cannot be read still stops the run with E0134.
 
 To leave files out, list them under ``exclude``: paths or globs, relative to the configuration file,
 of files or directories. A pattern that starts with ``**`` also matches files outside that directory.
@@ -176,7 +200,9 @@ A waiver accepts a finding a project has decided about, with the reason. They li
        reason: kept until the block is replaced
 
 ``rule: '*'`` covers every rule, and a bare file name matches that file in any directory. A waived
-finding is in no report and changes no exit status.
+finding is in no report and changes no exit status. An unknown rule waives nothing and an unknown key is
+ignored, each with warning W0139: a misspelled ``files`` or ``lines`` leaves a waiver that covers more than
+it says, so run with ``-Werror`` where that matters.
 
 Turning rules off for a directory or file pattern
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -263,7 +289,7 @@ With VUnit
 ``python run.py --compile --yavs-lint`` checks every library the run compiled, after compiling, and
 fails the run with a finding of severity error (:doc:`vunit-yavs`). It reads ``yavs-lint.yaml`` from
 the directory you run in or an ancestor, so ``exclude`` applies. ``file_list`` does not: the project
-says which files a library has.
+says which files a library has. Warning W0139 is told for the first library only.
 
 In VS Code
 ----------

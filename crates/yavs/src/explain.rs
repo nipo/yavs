@@ -179,6 +179,10 @@ const EXPLAIN: &[(&str, &str)] = &[
         "A `files` pattern in a `yavs lint` waiver file covers no file of this run and no VHDL file under the waiver file: it is relative to that file. The run goes on, as a shared waiver file may name generated files that do not exist yet.",
     ),
     (
+        "W0139",
+        "`yavs-lint.yaml` or `yavs-lint-waivers.yaml` names a key, rule or rule group `yavs lint` does not know, which is ignored: it is a static analysis tool, not a style guide or formatter, so settings for those mean nothing to it. The run goes on; `-Werror` makes it fail. Check the spelling: a misspelled key has no effect, and a waiver without its `files` or `lines` covers more than it says.",
+    ),
+    (
         "W0131",
         "The connection to Surfer ended during the run, or Surfer did not answer at the end of the run. A connection that \
          ended means Surfer was closed or crashed: the viewer stops following, and the run must start again to show it. \
@@ -475,7 +479,7 @@ const EXPLAIN: &[(&str, &str)] = &[
     ),
     (
         "E0134",
-        "`yavs lint` cannot use its configuration or waiver file: it cannot be read, is not valid YAML, or names a key, class or rule that does not exist. The message names the line.",
+        "`yavs lint` cannot use its configuration or waiver file: it cannot be read, is not valid YAML, or a key it knows has a bad value. The message names the line. An unknown key is warning W0139.",
     ),
     (
         "E0135",

@@ -831,13 +831,14 @@ yavs lint [FILE|DIR ...] [--recursive] [--work=NAME:PATH] [--map=NAME:PATH ...] 
 - A file that fails analysis prints its errors (not its warnings, which are `yavs analyze`'s) and is not checked;
   the others are.
 - Exit status: 0 no finding of severity error; 1 a finding of severity error; 2 usage, a bad configuration or
-  waiver file (`E0134`), an unwritable report (`E0135`), nothing to check (`E0133`), a file that fails analysis; 3
+  waiver file (`E0134`: unreadable, not valid YAML, or a bad value of a key it reads; an unknown key is not one), an unwritable report (`E0135`), nothing to check (`E0133`), a file that fails analysis; 3
   internal error.
 - Findings are diagnostics with the rule id as their code on standard error, in `--message-format`; `-W` takes
   rule ids. Report files are written whatever the findings. A waived finding is in no report.
 - Configuration: `--config`, else `yavs-lint.yaml` in the working directory or an ancestor. Waivers: `--waivers`,
   else `yavs-lint-waivers.yaml` next to the configuration or in the working directory or an ancestor. Not a contract
   with test runners; `analyze`, `elab` and `run` never read them.
+- `yavs lint` is a static analysis tool, not a style guide or formatter. Every key, rule id or rule group of either file that it does not read, at any level, is warning `W0139` and ignored, with no list of what such names may be: the run goes on, `-Werror` makes it fail with status 1, `-Wno-W0139` silences it. One warning per name with the line (and a suggestion through the shared helper when one is close); more than three names without a suggestion in one section are one warning naming them all. Under `-Werror`, status 1 also holds when the rest of the run is clean. `--list-rules` prints the warnings too. In a waiver an unknown rule waives nothing, and a waiver with an unknown key still applies with the keys it has. Aliases in an ignored value are fine; in a key it reads they are a bad form (`E0134`). Settings for one `file_list` entry are not an unknown key: they stay `E0134`, as they would otherwise be dropped from a key that is read.
 - A waiver's `rule`, `files` and `files_exclude` are one word or a list. It applies to a file `files` matches (no `files`: every file) and `files_exclude` does not; `files_exclude` wins. A pattern is relative to the waiver file and covers a file or a directory above it, like `exclude`; it also matches the path as reported, and a bare name that file anywhere. A pattern that covers no file of the run and no VHDL file under the waiver file is warning `W0132`.
 
 ## 6. Waves and the runner's debug option

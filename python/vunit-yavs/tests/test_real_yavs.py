@@ -302,6 +302,21 @@ class TestRealYavs(unittest.TestCase):
         self.assertEqual(proc.returncode, 1, proc.stdout)
         self.assertIn("lint_770", proc.stdout)
         self.assertNotIn("no_such.vhd", proc.stdout)
+        # An unknown key is told once, however many libraries are checked; the run goes on.
+        (self.tempdir / "yavs-lint.yaml").write_text("indent: {}\nexclude: ['**/bad.vhd', '**/vunit/vhdl/**']\n")
+        proc = subprocess.run(
+            self._command("--compile", "--yavs-lint"),
+            env=env,
+            cwd=self.tempdir,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            encoding="utf-8",
+            errors="replace",
+            timeout=TIMEOUT,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout)
+        self.assertEqual(proc.stdout.count("W0139"), 1, proc.stdout)
 
     def test_coverage_directives_are_checked_when_compiling(self):
         design = self.tempdir / "dir.vhd"

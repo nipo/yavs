@@ -131,7 +131,7 @@ Syntax, command line, waveforms, coverage, debugger, plugins (E0 and W0)
    * - _`E0133`
      - ``yavs lint`` was given nothing to check, a path that does not exist, or a rule that does not exist: name files or directories, or give ``--work`` with an analyzed library.
    * - _`E0134`
-     - ``yavs lint`` cannot use its configuration or waiver file: it cannot be read, is not valid YAML, or names a key, class or rule that does not exist.
+     - ``yavs lint`` cannot use its configuration or waiver file: it cannot be read, is not valid YAML, or a key it knows has a bad value.
    * - _`E0135`
      - ``yavs lint`` cannot write a report file, named by ``--json``, ``--sarif``, ``--junit``, ``--quality-report`` or ``--sonarqube``.
    * - _`E0136`
@@ -140,6 +140,8 @@ Syntax, command line, waveforms, coverage, debugger, plugins (E0 and W0)
      - ``yavs cov merge`` or ``yavs cov report`` was given databases that disagree about an in-source coverage exclusion: a combination or a condition or expression row that a ``-- yavs coverage exclude`` directive waives in one run is a requirement in another (the other run was made from other sources, or with ``--coverage-directives=ignore``).
    * - _`E0138`
      - The file of ``yavs cov report --config`` or ``yavs cov rank --config`` cannot be read or is not a coverage configuration file.
+   * - _`W0139`
+     - ``yavs-lint.yaml`` or ``yavs-lint-waivers.yaml`` names a key, rule or rule group ``yavs lint`` does not know, which is ignored: it is a static analysis tool, not a style guide or formatter, so settings for those mean nothing to it.
    * - _`E0199`
      - A command option or combination is not implemented yet.
    * - _`E0701`

@@ -42,10 +42,10 @@ pub struct Args {
     /// Default: 2008 for such a file, and the newest standard among the files for the design.
     #[arg(long, value_enum)]
     std: Option<StdArg>,
-    /// The configuration file. Default: `yavs-lint.yaml` in the working directory or an ancestor. Fails with E0134.
+    /// The configuration file. Default: `yavs-lint.yaml` in the working directory or an ancestor. A bad value fails with E0134; an unknown key or rule is ignored with warning W0139.
     #[arg(long, value_name = "FILE")]
     config: Option<PathBuf>,
-    /// The waiver file. Default: `yavs-lint-waivers.yaml` next to the configuration, or in the working directory or an ancestor. Fails with E0134.
+    /// The waiver file. Default: `yavs-lint-waivers.yaml` next to the configuration, or in the working directory or an ancestor. A bad value fails with E0134; an unknown key or rule is ignored with warning W0139.
     #[arg(long, value_name = "FILE")]
     waivers: Option<PathBuf>,
     /// Do not check the files of `file_list` in the configuration.
@@ -278,8 +278,22 @@ fn read_file(path: &Path) -> Result<String, Box<Diagnostic>> {
     })
 }
 
-/// The configuration and waivers named or found, with their errors naming the file.
-fn load_settings(a: &Args) -> Result<(Config, Waivers, PathBuf, PathBuf), Box<Diagnostic>> {
+/// The configuration, the waivers, the directories their patterns are relative to, the warnings.
+type Settings = (Config, Waivers, PathBuf, PathBuf, Vec<Diagnostic>);
+
+/// W0139 for what a settings file names and nothing reads.
+fn unknown_keys(path: &Path, unknown: &[yavs_lint::Unknown], out: &mut Vec<Diagnostic>) {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let shown = path.strip_prefix(&cwd).unwrap_or(path);
+    for text in yavs_lint::unknown_messages(unknown) {
+        let message = format!("`{}` {text}", shown.display());
+        out.push(Diagnostic::new(Severity::Warning, "W0139", message));
+    }
+}
+
+/// The configuration and waivers named or found, with their errors naming the file, and the
+/// warnings about them.
+fn load_settings(a: &Args) -> Result<Settings, Box<Diagnostic>> {
     let cwd = std::env::current_dir().unwrap_or_default();
     // In the message: the short format, which CI reads, prints no notes.
     let bad = |p: &Path, e: String| {
@@ -293,6 +307,10 @@ fn load_settings(a: &Args) -> Result<(Config, Waivers, PathBuf, PathBuf), Box<Di
         Some(p) => Config::parse(&read_file(p)?).map_err(|e| bad(p, e))?,
         None => Config::default(),
     };
+    let mut warnings = Vec::new();
+    if let Some(p) = &config {
+        unknown_keys(p, cfg.unknown(), &mut warnings);
+    }
     let waivers = a.waivers.clone().or_else(|| {
         config
             .as_deref()
@@ -305,6 +323,9 @@ fn load_settings(a: &Args) -> Result<(Config, Waivers, PathBuf, PathBuf), Box<Di
         Some(p) => Waivers::parse(&read_file(p)?).map_err(|e| bad(p, e))?,
         None => Waivers::default(),
     };
+    if let Some(p) = &waivers {
+        unknown_keys(p, w.unknown(), &mut warnings);
+    }
     // Relative to the configuration file, and only ever used with its patterns.
     let base = config
         .as_deref()
@@ -317,7 +338,7 @@ fn load_settings(a: &Args) -> Result<(Config, Waivers, PathBuf, PathBuf), Box<Di
         .and_then(|p| std::path::absolute(p).ok())
         .and_then(|p| p.parent().map(Path::to_path_buf))
         .unwrap_or_else(|| base.clone());
-    Ok((cfg, w, base, waiver_base))
+    Ok((cfg, w, base, waiver_base, warnings))
 }
 
 /// W0132: a waiver pattern that covers no file of this run and no VHDL file under the waiver file.
@@ -386,7 +407,7 @@ pub fn run(a: Args, format: MessageFormat, color: bool, encoding: Encoding) -> E
             }
         };
     }
-    let (cfg, waivers, base, waiver_base) = match load_settings(&a) {
+    let (cfg, waivers, base, waiver_base, warnings) = match load_settings(&a) {
         Ok(s) => s,
         Err(d) => {
             out.emit(&none, &d);
@@ -394,6 +415,9 @@ pub fn run(a: Args, format: MessageFormat, color: bool, encoding: Encoding) -> E
         }
     };
     if a.list_rules {
+        for d in &warnings {
+            out.emit(&none, d);
+        }
         for r in yavs_lint::RULES {
             let on = if cfg.enabled(r) { "on" } else { "off" };
             println!("{} {:<14} {on:<3} {}", r.id, class(r.certainty), r.summary);
@@ -405,6 +429,10 @@ pub fn run(a: Args, format: MessageFormat, color: bool, encoding: Encoding) -> E
         out.emit(&none, &d);
         return out.finish(2);
     }
+    for d in &warnings {
+        out.emit(&none, d);
+    }
+    let settings_errors = out.errors;
     let mut libs = Libraries::new();
     let mut work = "work".to_string();
     for (i, spec) in a.work.iter().chain(&a.maps).enumerate() {
@@ -594,7 +622,7 @@ pub fn run(a: Args, format: MessageFormat, color: bool, encoding: Encoding) -> E
     }
     if failed {
         ExitCode::from(2)
-    } else if out.errors > analysis_errors {
+    } else if settings_errors > 0 || out.errors > analysis_errors {
         ExitCode::from(1)
     } else {
         ExitCode::SUCCESS
