@@ -36,6 +36,7 @@ fn counts(db: &Database) -> Vec<(String, String, u32, u64)> {
                 Kind::Condition(r) => format!("c{r}"),
                 Kind::Expression(r) => format!("e{r}"),
                 Kind::Combination(s) => format!("m{s}"),
+                Kind::Fsm(t) => format!("f{}", u8::from(t)),
             };
             assert!(e.file.ends_with("cov_run.vhd"), "{}", e.file);
             (kind, k.path.clone(), e.line, e.count)

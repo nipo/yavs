@@ -730,6 +730,7 @@ impl Db {
                 self.name_reads(*prefix, out)
             }
             ExprKind::Obj(_) | ExprKind::External(_) => {}
+            ExprKind::PrivateVar { object, .. } => self.name_reads(*object, out),
             _ => self.reads(e, out),
         }
     }

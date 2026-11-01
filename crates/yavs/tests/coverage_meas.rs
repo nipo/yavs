@@ -486,3 +486,44 @@ fn fsm_old_databases_and_no_items() {
     assert!(!old.legacy);
     assert!(Database::parse(&format!("yavs-coverage 99\n{rest}")).is_err());
 }
+
+/// A call through a method alias of a private variable (2019) is read by the walk of a process's
+/// reads: `yavs lint` and state machine detection walked it forever (#1024).
+#[test]
+fn walking_a_method_alias_of_a_private_variable_ends() {
+    let tmp = tempdir("meas_private");
+    let src = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/corpus/protected/private_variables.vhd");
+    let src = src.to_str().expect("utf-8");
+    let o = yavs(&tmp, &["analyze", "--std=2019", "--work=work:lib", src]);
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let o = yavs(
+        &tmp,
+        &[
+            "run",
+            "--std=2019",
+            "--work=work:lib",
+            "private_variables",
+            "--cov=a.ycov",
+            "--cov-kind=fsm",
+        ],
+    );
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let o = yavs(
+        &tmp,
+        &[
+            "lint",
+            "--std=2019",
+            "--work=work:lib",
+            "--facts=f.json",
+            src,
+        ],
+    );
+    assert_ne!(
+        o.status.code(),
+        None,
+        "{}",
+        String::from_utf8_lossy(&o.stderr)
+    );
+    assert!(tmp.join("f.json").is_file());
+}

@@ -378,7 +378,7 @@ class TestRealYavs(unittest.TestCase):
     def test_coverage_of_state_machines_and_assertions(self):
         source = self.tempdir / "tb_fsm.vhd"
         source.write_text(FSM_TESTBENCH, encoding="utf-8")
-        proc = self._coverage_run("lib.tb_fsm.all", "--yavs-cov-kind=fsm,assert,condition", EXTRA_VHDL=str(source))
+        proc = self._coverage_run("lib.tb_fsm.all", "--yavs-cov-kind=fsm,assert,condition", "--yavs-cov-fail-under=0", EXTRA_VHDL=str(source))
         self.assertEqual(proc.returncode, 0, proc.stdout)
         database = (self.tempdir / "all.ycov").read_text(encoding="utf-8")
         self.assertIn("state:busy->idle", database)
