@@ -16,7 +16,7 @@ What does it cost, and do I need a licence server?
 
 What do I have to install?
     One executable. The ``std`` and ``ieee`` libraries are built in. There is nothing else to set up, unless you
-    want VUnit (:doc:`vunit`) or the VS Code debugger (:doc:`debugging`).
+    want VUnit (:doc:`vunit`), the VS Code debugger (:doc:`debugging`) or the Surfer viewer (:doc:`waveforms`).
 
 Which platforms does it run on?
     Linux x86_64, Linux aarch64 and Windows x86_64. There is no macOS build and no 32-bit build.
@@ -83,9 +83,10 @@ Tools
 ~~~~~
 
 * A debugger session runs the interpreter on one thread, and it cannot be combined with ``--cov`` or ``--profile``.
-* Breakpoint conditions cannot call functions or use attributes.
-* VHPI is partial: :doc:`vhpi` has the table.
-* There is no graphical interface of its own: use VS Code for debugging and a waveform viewer for FST.
+* Breakpoint conditions cannot use attributes or call functions other than ``to_integer`` (:doc:`debugging`).
+* VHPI has gaps: :doc:`vhpi` has the table.
+* There is no graphical interface of its own: debug at the console or in VS Code (:doc:`interactive`, :doc:`debugging`) and
+  look at FST files in a waveform viewer (:doc:`waveforms`).
 
 See also
 --------

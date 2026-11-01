@@ -3,9 +3,8 @@ OSVVM, UVVM, VUnit and other libraries
 
 This page says how to use a verification library or any other library of VHDL sources with yavs.
 
-yavs is compliant with OSVVM, UVVM and VUnit: their own regression and test suites run with yavs,
-and so do the testbenches of other open-source VHDL libraries. The current numbers
-are in :doc:`conformance`.
+The regression and test suites of OSVVM, UVVM and VUnit run on yavs, and so do the testbenches of other
+open-source VHDL libraries. The results are in :doc:`conformance`.
 
 yavs has no precompiled libraries and no installer command. Using a library means analyzing its
 VHDL sources into a library of the name it expects.

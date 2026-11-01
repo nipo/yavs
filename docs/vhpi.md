@@ -3,7 +3,8 @@
 VHPI is the standard C interface (IEEE 1076-2019) that lets a plugin look into a running VHDL
 simulation, read and write signals, and react to simulation events. yavs implements it: plugins
 written in C, C++ or Rust can inspect the design hierarchy, read and drive values, register
-callbacks and supply foreign models. Support is partial: the table below says what is missing.
+callbacks and supply foreign models. Most of the standard is there; the table below says what is missing, and the
+open work is in [#978](https://github.com/ru551n/yavs/issues/978), [#979](https://github.com/ru551n/yavs/issues/979) and, for save and restart, [#832](https://github.com/ru551n/yavs/issues/832).
 For calling a plain C function from VHDL without a plugin, see "Calling C from VHDL" below.
 
 ```{contents} On this page
@@ -16,11 +17,11 @@ For calling a plain C function from VHDL without a plugin, see "Calling C from V
 |---|---|---|
 | Loading | `--vhpi=LIB[:ENTRY]`, several plugins, `+args` | |
 | Connectivity | drivers, contributors, loads, the simulated net, basic signals, pending transactions, resolution, signal kind, whether a signal is forced | processes that read a signal, as loads |
-| Hierarchy | instances, blocks, generates, processes, packages, generics, ports, signals, constants, variables, record fields, array elements, user attributes, aliases, files, implicit signals, components, subprograms, libraries, use clauses, equivalent processes of concurrent statements with their sensitivity, sequential statements | expressions, variables of subprograms, stack frames |
+| Hierarchy | instances, blocks, generates, processes, packages, generics, ports, signals, constants, variables, record fields, array elements, user attributes, aliases, files, implicit signals, components, subprograms, libraries, use clauses, equivalent processes of concurrent statements with their sensitivity, sequential statements | expressions, variables of subprograms, stack frames, `vhpiParent` of a sequential statement, configuration declarations |
 | Lookup | by name, by index, iterators, parent/prefix handles | |
-| Reading values | all formats, from callbacks, whole records and arrays of records as raw data | protected objects (they have no value) |
+| Reading values | all formats, from callbacks, whole records and arrays of records as raw data | protected objects (they have no value), an alias of part of an object, `vhpiPtrVal` of a variable of an access type |
 | Writing values | signals and ports (deposit or force with propagation), variables, driver transactions | forcing variables, constants, generics, non-propagating modes on signals |
-| Callbacks | start/end of simulation and initialization, time step, delta cycle, process and postponed phases, after delay, time-out, value change, sensitivity on a signal, transaction, force, release, start and end of the tool and of elaboration, errors, Ctrl-C, debugger stops, start and end of a reset | statements, subprogram calls, analysis (`yavs run` does not analyse), quiescence, save and restart |
+| Callbacks | start/end of simulation and initialization, time step, delta cycle, process and postponed phases, after delay, time-out, value change, sensitivity on a signal, transaction, force, release, start and end of the tool and of elaboration, errors, Ctrl-C, debugger stops, start and end of a reset | statements, subprogram calls, suspend and resume of a process, analysis (`yavs run` does not analyse), quiescence, save and restart |
 | Foreign models | functions, procedures, architectures, library and application hooks | file parameters |
 | Misc calls | `vhpi_control` stop, finish and reset, `vhpiPhaseP`, `vhpi_format_value`, `vhpi_get_next_time` (in the read-only phase), `vhpi_protected_call` | `vhpi_get_data`, `vhpi_put_data`: yavs cannot save a simulation (exported so plugins link; they return 0 with an error) |
 
@@ -98,7 +99,7 @@ yavs run --vhpi=LIB[:ENTRY] [--vhpi=...] TOP
   `vhpiCbStartOfElaboration`, then the foreign models, then `vhpiCbEndOfElaboration`. yavs has
   elaborated the design by then, so its hierarchy can already be read. `vhpiCbEndOfTool` is the
   last call of a run, whichever way it ended.
-- `vhpi_control(vhpiReset)` starts the design again from time 0 while the plugin stays loaded, see "Resetting a simulation" below.
+- `vhpi_control(vhpiReset)` starts the design again from time 0 while the plugin stays loaded, see "Resetting a simulation" above.
 - Without `ENTRY`, every routine in the library's NULL-terminated `vhpi_startup_routines` array
   runs. With `ENTRY`, that `void (*)(void)` function runs instead.
 - A name with a directory part must name an existing file; a bare name goes through the operating

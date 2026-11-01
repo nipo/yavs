@@ -35,8 +35,9 @@ one; a `cover` prints its `report` text each time it is hit. The subset below is
   are weak: an obligation still open at the end of the run is not a failure.
 - Sequences in braces: concatenation `;`, fusion `:`, `|`, `&&`, `&`, `within`, and the repetitions `[*]`, `[+]`,
   `[*n]`, `[*m to n]`, `[*m to inf]`, `[=n]` and `[->n]`, in `cover`, in `assert never`, and on either side of `|->`
-  and `|=>`. The operands of `&&` and `&` must each be written in braces, `{ {a; b} && {c; d} }`: with bare
-  operands, `&&` is skipped (`W0004`) and `&` is read as VHDL concatenation (`E1340`).
+  and `|=>`. `&&` between booleans runs (`{ a && b }`). Between sequences, `&&` and `&` go inside an outer pair of
+  braces, `{ {a; b} && {c; d} }`: written as `{a; b} && {c; d}`, the directive is skipped (`W0004`). `&` between
+  booleans (`{ a & b }`) is VHDL concatenation (`E1340`).
 - Built-in functions `prev`, `stable`, `rose`, `fell`, `isunknown`, `countones`, `onehot` and `onehot0`.
 - Named `sequence` and `property` declarations with `boolean`, `const`, `sequence` and `property` formals.
 
@@ -60,8 +61,6 @@ Skipped without a warning, as they have nothing to check in a simulation: `restr
 
 A PSL directive written inside a process is a syntax error (`E0002`). The 2019 `std.env` functions that report PSL
 state are not implemented (see LCS-050 in [Language support](language-support.md)).
-
-The warning text of `W0004` lists a smaller subset than the one above; this page is the more complete list.
 
 ## See also
 

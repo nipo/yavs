@@ -2,7 +2,7 @@
 
 This page gives the measured speed of yavs against other simulators, and how it was measured.
 
-**In short:** on 41 real third-party testbenches, yavs finishes a repeated (warm) run in about a fifth of the time of an established
+**In short**, as measured on 2026-10-28 at commit `1a8edb76` (later commits are not re-measured here): on 41 real third-party testbenches, yavs finishes a repeated (warm) run in about a fifth of the time of an established
 open-source VHDL simulator, roughly 5 times faster, and a first (cold) run in a little over half of it, roughly 1.7 times faster. Against an
 open-source simulator with its mcode code generator the figures are about 5.5 times (warm) and 2 times (cold), and against a commercial
 simulator about 6 times and 2.5 times, on the testbenches it can run. yavs is slower on a few long, compute-heavy testbenches (below).

@@ -6,7 +6,7 @@ This document holds the behaviour in detail and the measurements behind it, for 
 `yavs run --threads N` lets one simulation use N CPU threads (default 1, no thread pool). Only
 the evaluation of VHDL processes is spread over the threads, and only when many processes wake at
 the same moment. Large, flat RTL designs, where thousands of processes wake on the same clock edge,
-run up to about 2.5 times faster on 4 threads and 3.5 times on 8. Testbench-style designs and
+run up to about 2.4 times faster on 4 threads and 3.25 times on 8 (whole run, measured 2026-10-28). Testbench-style designs and
 processor models run as fast as on one thread: yavs then keeps the work on one thread. Leave it at
 1 for regressions that already run tests side by side, and measure before you rely on it. Under a
 token server named in `YAVS_TOKENS`, several simulations share one CPU budget (see "Thread budget
@@ -43,11 +43,7 @@ threads. The designs are small RTL benchmarks (`tools/bench`) and the testbench 
 Before 2026-10-28 the mid-size designs ran at 0.35x to 0.6x on several threads and the soft core at 0.6x to 0.75x;
 flat RTL gained at most 1.6x.
 
-## Planned
-
-* **Parallel signal update.** On flat RTL the main thread still spends about 15 percent of a
-  4-thread run committing and updating the signals the processes drove; splitting that work by
-  element range is the next candidate ([#481](https://github.com/ru551n/yavs/issues/481)).
+Further work on the signal kernel is tracked in [#884](https://github.com/ru551n/yavs/issues/884).
 
 ## Thread budget across parallel test runs
 

@@ -1,7 +1,7 @@
 # Language support
 
 **In short:** yavs runs VHDL-1993, VHDL-2008 and VHDL-2019 and lets files of different standards mix in one
-project. Of the approved VHDL-2019 language additions most work, three work in part and one was not checked
+project. Of the approved VHDL-2019 language additions most work, two work in part and one was not checked
 (see the table below). PSL (the property language used for assertions) is supported as a subset. Plain Verilog is
 planned ([#776](https://github.com/ru551n/yavs/issues/776)).
 
@@ -85,7 +85,7 @@ the files again.
   or `U`, `S`, `D` bases, matching operators, external names, `force` and `release`, protected types (analysed, probed). Some 2008 constructs are accepted, see below.
 - `numeric_std_unsigned`, `numeric_bit_unsigned`, `fixed_pkg`, `float_pkg`, the two contexts and `std.env` do not
   exist in 1993 mode. Naming one is an error that the unit is not found.
-- PSL in a 1993 file: a `-- psl` comment is a plain comment without `--psl`. With `--psl` it is read in part (probed by hand, no regression test): `-- psl assert always true @ (clk'event);` analyzes, an assert that uses `rising_edge` fails only with `E1100` because the function is not in 1993, and `-- psl default clock is clk'event;` is a syntax error (`E0002`). Do not rely on PSL in 1993 files.
+- PSL in a 1993 file: a `-- psl` comment is a plain comment without `--psl`, and with `--psl` it is read: `default clock is` analyzes and an `assert` with a `rising_edge` clock runs (probed 2026-11-01).
 
 The 1993 language suite that yavs is run against at `--std=93` passes for the large majority of its tests (see the
 conformance report); the failures are tracked as issues. One kind of failure matters when you rely on yavs to reject
@@ -97,7 +97,7 @@ are still missing.
 ## VHDL-2019
 
 Status per language change specification (LCS-2016) of the approved VHDL-2019 list, checked with a small design per
-feature on 2026-10-19 and, where the table says so, again on 2026-10-28. Use `--std=2019`. The list is the approved
+feature on 2026-10-19 and, where the table says so, again on 2026-10-28 or later. Use `--std=2019`. The list is the approved
 LCS set; it is not checked against every change of the published standard.
 
 | LCS | Feature | Status | Evidence | Limits |
@@ -120,7 +120,7 @@ LCS set; it is not checked against every change of the published standard.
 | 030 | Garbage collection | not applicable | | implementation property, no source syntax |
 | 032 | `PATH_NAME` and `INSTANCE_NAME` with protected types | supported | probed | the simulators differ on the path of a protected object |
 | 033 | Composition with protected types | supported | probed | a protected variable inside a protected body |
-| 034 | Protected types with a generic clause | partial | simulated | `type t is new p.box generic map (..)` works; a generic map in the protected type header is a syntax error (`E0002`) |
+| 034 | Protected types with a generic clause | supported | probed 2026-11-01 | `type t is new p.box generic map (..)` and a generic map in the protected type header; before VHDL-2019 a generic clause or generic map in a protected type is an error |
 | 036a | Conditional expressions in declarations | supported | simulated | |
 | 041 | Record introspection and type reflection (`std.reflection`, `'reflect`) | supported | simulated | |
 | 043 | Attributes for PSL | not tested | not tested | |
@@ -191,22 +191,17 @@ Mixed-language designs are not supported. Foreign subprograms (`VHPIDIRECT`) and
 Not implemented, so the run or the analysis stops with an error that names the construct (usually `E2001` or
 `E3009` at run time, or a "not implemented" message from analysis):
 
-- `'driving` and `'driving_value` of signal parameters and of record parts of a signal (`E2001`).
 - Attributes of a range attribute other than `'left`, `'right`, `'low`, `'high` and `'ascending`,
   such as `t'range'length` or any attribute of `t'reverse_range`. These are reported as not
   implemented (`E1999`), with a note that says it is a limitation of yavs.
 - `std.env` PSL state functions (see LCS-050). `SetVhdlAssertFormat` changes the message text of a report only: the `** Severity: time:` line around it stays.
-- A generic map in the header of a protected type (LCS-034) and range records known only at run time (LCS-099).
+- Range records known only at run time (LCS-099).
 - PSL outside [the subset](psl.md).
 
 Invalid code that is accepted, or reported with a misleading message, in some cases: a variable that is not
 shared in an entity, architecture or block declarative part, several subprogram, aggregate, deferred constant and
 type checks, and the 1993 restrictions that 2008 relaxed. These are tracked as bugs in the issue tracker of the
 [repository](https://github.com/ru551n/yavs/issues); the label `v2019` marks 2019 gaps.
-
-A file declared in a package with a file open clause (`file f : text open read_mode is "x.txt";` in a package) is
-not opened when the package is elaborated, and the first access fails with `E3009` "file is not open". Declare the
-file in an architecture, or open it with `file_open`. This is a bug.
 
 ## See also
 
