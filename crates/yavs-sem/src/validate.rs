@@ -174,13 +174,15 @@ impl<'a> Cx<'a> {
         }
         let span = self.db.exprs[child].span;
         if self.is_universal(got) && !self.is_universal(want) {
-            let (g, w) = (self.name(got).to_string(), self.name(want).to_string());
+            let n = self.db.type_names(&[got, want]);
+            let (g, w) = (&n[0], &n[1]);
             self.bad(
                 span,
                 format!("{ctx}: universal expression of type `{g}` where `{w}` is expected is not wrapped in ImplicitConv"),
             );
         } else {
-            let (g, w) = (self.name(got).to_string(), self.name(want).to_string());
+            let n = self.db.type_names(&[got, want]);
+            let (g, w) = (&n[0], &n[1]);
             self.bad(
                 span,
                 format!("{ctx}: expression has type `{g}` but its parent expects `{w}`"),
@@ -230,7 +232,8 @@ impl<'a> Cx<'a> {
             if got != base && !self.is_universal(got) && !self.is_error(got) && !self.is_error(base)
             {
                 let span = self.db.exprs[e].span;
-                let (g, b) = (self.name(got).to_string(), self.name(base).to_string());
+                let n = self.db.type_names(&[got, base]);
+                let (g, b) = (&n[0], &n[1]);
                 self.bad(
                     span,
                     format!("{side} bound of a range constraint has type `{g}`, not `{b}`"),

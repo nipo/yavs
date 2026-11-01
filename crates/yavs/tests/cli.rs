@@ -1981,6 +1981,271 @@ fn architecture_named_before_it_is_analyzed() {
     assert!(o.status.success() && out.contains("behavioral"), "{out}");
 }
 
+/// Two things of one name in a message print their full paths; different names stay short, and
+/// two paths that read alike keep the declaration labels (#1026).
+#[test]
+fn same_names_print_full_paths() {
+    let t = tempfile::tempdir().unwrap();
+    let yavs = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_yavs"))
+            .current_dir(t.path())
+            .args(["--color", "never"])
+            .args(args)
+            .output()
+            .expect("run")
+    };
+    std::fs::write(
+        t.path().join("pk.vhd"),
+        "package pkg_a is
+           type rc is record i : integer; end record;
+           type vec is array (natural range <>) of bit;
+           type num is range 0 to 3;
+           type ptr is access rc;
+           subtype s is integer range 0 to 1;
+           function h return integer;
+         end package;
+         package pkg_b is
+           type rc is record i : integer; end record;
+           type vec is array (natural range <>) of bit;
+           type num is range 0 to 3;
+           type other is record i : integer; end record;
+           subtype s is integer range 0 to 2;
+           function h return integer;
+         end package;
+         package over is
+           function f (x : work.pkg_a.rc) return integer;
+           function f (x : work.pkg_b.rc) return integer;
+           function f2 (x : work.pkg_a.rc) return integer;
+           function f2 (x : work.pkg_b.other) return integer;
+           alias h is work.pkg_a.h [return integer];
+         end package;
+         package gp is generic (n : integer); type gt is record i : integer; end record; end package;
+         package i1 is new work.gp generic map (1);
+         package i2 is new work.gp generic map (2);
+         package gs is generic (function h return bit); end package;",
+    )
+    .unwrap();
+    assert!(
+        yavs(&["analyze", "--work=work:lib", "pk.vhd"])
+            .status
+            .success()
+    );
+    // What is declared in the architecture, what it says: text that must be in the message and
+    // text that must not.
+    let arch = |body: &str| format!("entity top is end; architecture t of top is {body} end;");
+    let cases: &[(&str, &str, &[&str], &[&str])] = &[
+        // Expected and found.
+        (
+            "signal a : work.pkg_a.rc; signal b : work.pkg_b.rc; begin a <= b;",
+            "E1300",
+            &["expected `work.pkg_a.rc`, found `work.pkg_b.rc`"],
+            &["two different types"],
+        ),
+        (
+            "signal a : work.pkg_a.rc; signal b : work.pkg_b.other; begin a <= b;",
+            "E1300",
+            &["expected `rc`, found `other`"],
+            &["work."],
+        ),
+        // A type without a record, and a constrained subtype that has no name of its own.
+        (
+            "signal a : work.pkg_a.num; signal b : work.pkg_b.num; begin a <= b;",
+            "E1300",
+            &["expected `work.pkg_a.num`, found `work.pkg_b.num`"],
+            &[],
+        ),
+        (
+            "signal a : work.pkg_a.vec(1 downto 0); signal b : work.pkg_b.vec(1 downto 0);
+             begin a <= b;",
+            "E1300",
+            &[
+                "expected `work.pkg_a.vec`, found `work.pkg_b.vec`",
+                "use `work.pkg_a.vec(x)` to convert",
+            ],
+            &[],
+        ),
+        // Conversions.
+        (
+            "signal a : work.pkg_a.rc; signal b : work.pkg_b.rc; begin a <= work.pkg_a.rc(b);",
+            "E1350",
+            &["cannot convert `work.pkg_b.rc` to `work.pkg_a.rc`"],
+            &[],
+        ),
+        (
+            "signal a : work.pkg_a.rc; signal b : work.pkg_b.other; begin a <= work.pkg_a.rc(b);",
+            "E1350",
+            &["cannot convert `other` to `rc`"],
+            &["work."],
+        ),
+        // Local types: the enclosing path, a plain subprogram name, no mangled profile.
+        (
+            "type rc is record i : integer; end record;
+             signal a : rc; signal b : work.pkg_a.rc; begin a <= b;",
+            "E1300",
+            &["expected `work.top(t).rc`, found `work.pkg_a.rc`"],
+            &[],
+        ),
+        (
+            "signal a : work.pkg_a.rc;
+             begin lbl : process
+               type rc is record i : integer; end record;
+               variable x : rc;
+             begin x := a; wait; end process;",
+            "E1300",
+            &["expected `work.top(t).lbl.rc`, found `work.pkg_a.rc`"],
+            &[],
+        ),
+        (
+            "function f (c : integer) return integer is
+               type rc is record i : integer; end record;
+               variable x : rc; variable y : work.pkg_a.rc;
+             begin x := y; return 0; end;
+             begin",
+            "E1300",
+            &["expected `work.top(t).f.rc`, found `work.pkg_a.rc`"],
+            &["integer"],
+        ),
+        // A process without a label adds nothing to the path: only the labels tell these apart.
+        (
+            "type rc is record i : integer; end record;
+             signal a : rc;
+             begin process
+               type rc is record i : integer; end record;
+               variable x : rc;
+             begin x := a; wait; end process;",
+            "E1300",
+            &[
+                "expected `work.top(t).rc`, found `work.top(t).rc`",
+                "one `work.top(t).rc` is declared here",
+                "another `work.top(t).rc` is declared here",
+                "two different types",
+            ],
+            &[],
+        ),
+        // Generic package instances, allocators, alias subtypes.
+        (
+            "signal a : work.i1.gt; signal b : work.i2.gt; begin a <= b;",
+            "E1300",
+            &["expected `work.i1.gt`, found `work.i2.gt`"],
+            &[],
+        ),
+        (
+            "begin process variable v : work.pkg_a.ptr; begin v := new work.pkg_b.rc; wait; end process;",
+            "E1300",
+            &["expected an allocator of `work.pkg_a.rc`, found one of `work.pkg_b.rc`"],
+            &[],
+        ),
+        (
+            "signal a : work.pkg_a.rc; alias x : work.pkg_b.rc is a; begin",
+            "E1300",
+            &[
+                "alias subtype is of type `work.pkg_b.rc`, but the aliased object is of type `work.pkg_a.rc`",
+            ],
+            &[],
+        ),
+        // Subprogram profiles in labels and in help, overloads, signatures.
+        (
+            "use work.over.all; signal a : integer; begin a <= f(5);",
+            "E1301",
+            &[
+                "function f (x: work.pkg_a.rc) return INTEGER",
+                "function f (x: work.pkg_b.rc) return INTEGER",
+                "candidates: `f (x: work.pkg_a.rc) return integer`, `f (x: work.pkg_b.rc) return integer`",
+            ],
+            &[],
+        ),
+        (
+            "use work.over.all; signal a : integer; begin a <= f2(5);",
+            "E1301",
+            &[
+                "function f2 (x: rc) return INTEGER",
+                "function f2 (x: other) return INTEGER",
+            ],
+            &["function f2 (x: work."],
+        ),
+        (
+            "use work.pkg_a.all; use work.pkg_b.all; signal a : integer; begin a <= h;",
+            "E1302",
+            &[
+                "function work.pkg_a.h return",
+                "function work.pkg_b.h return",
+            ],
+            &[],
+        ),
+        (
+            "use work.over.all; alias x is f [bit return integer]; begin",
+            "E1630",
+            &[
+                "`f` [work.pkg_a.rc return INTEGER]",
+                "`f` [work.pkg_b.rc return INTEGER]",
+            ],
+            &[],
+        ),
+        (
+            "use work.over.all; alias x is f2 [bit return integer]; begin",
+            "E1630",
+            &["`f2` [rc return INTEGER]", "`f2` [other return INTEGER]"],
+            &["work.pkg_"],
+        ),
+        // Other named objects: an alias of its own name, a subprogram for a formal of its name.
+        (
+            "use work.over.all; alias x is h [bit]; begin",
+            "E1630",
+            &["`work.over.h` (alias of `work.pkg_a.h`)"],
+            &[],
+        ),
+        (
+            "package i is new work.gs generic map (h => work.pkg_a.h); begin",
+            "E1300",
+            &["profile of `work.pkg_a.h` does not match generic subprogram `work.gs.h`"],
+            &[],
+        ),
+    ];
+    for (i, (body, code, have, lack)) in cases.iter().enumerate() {
+        let file = format!("c{i}.vhd");
+        std::fs::write(t.path().join(&file), arch(body)).unwrap();
+        let o = yavs(&["analyze", "--work=work:lib", &file]);
+        let err = String::from_utf8_lossy(&o.stderr);
+        assert!(err.contains(&format!("error[{code}]")), "{body}\n{err}");
+        // The source line echoes the design's own text: look only at what yavs wrote.
+        let said: String = err
+            .lines()
+            .filter(|l| !l.trim_start().starts_with(|c: char| c.is_ascii_digit()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        for h in *have {
+            assert!(said.contains(h), "{body}\nwants {h}\n{err}");
+        }
+        for l in *lack {
+            assert!(!said.contains(l), "{body}\nnot {l}\n{err}");
+        }
+    }
+    // Named subtypes of one type: found through their declarations.
+    std::fs::write(
+        t.path().join("d.vhd"),
+        "package dp is constant c : work.pkg_a.s; end package;
+         package body dp is constant c : work.pkg_b.s := 0; end package body;",
+    )
+    .unwrap();
+    let o = yavs(&["analyze", "--work=work:lib", "d.vhd"]);
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(
+        err.contains("has subtype `work.pkg_b.s`, the deferred constant `work.pkg_a.s`"),
+        "{err}"
+    );
+}
+
+/// E2121 with two types of one name (#1026), and with two different names.
+#[test]
+fn external_same_type_name() {
+    run_snapshot("external_same_type_name", 2);
+}
+
+#[test]
+fn external_different_type_name() {
+    run_snapshot("external_different_type_name", 2);
+}
+
 /// A file of the closure that an earlier file loaded on demand (through an architecture the
 /// design does not use) is not analyzed again: a second copy of its package rejected the body of
 /// a package bound to the first (E1301, E1300) or, without the cache, found nothing to analyze

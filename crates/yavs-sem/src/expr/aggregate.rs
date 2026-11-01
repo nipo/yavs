@@ -351,11 +351,15 @@ fn mk_const(db: &mut Db, v: ConstValue, st: SubtypeId, span: Span) -> ExprId {
 }
 
 pub(crate) fn type_name(db: &Db, ty: TypeId) -> String {
-    let t = &db.types[ty];
-    if t.anonymous {
-        format!("the base type of `{}`", t.name.text)
+    quoted(db, ty, db.types[ty].name.text.as_str())
+}
+
+/// `name`, the name of type `ty` in one message, as that message prints it.
+fn quoted(db: &Db, ty: TypeId, name: &str) -> String {
+    if db.types[ty].anonymous {
+        format!("the base type of `{name}`")
     } else {
-        format!("`{}`", t.name.text)
+        format!("`{name}`")
     }
 }
 
@@ -497,14 +501,14 @@ pub fn resolve_choices(
                     if base != ty && !is_error(db, base) && !is_error(db, ty) {
                         Err(db.error(
                             Diagnostic::error(diag::TYPE_MISMATCH, "choice has the wrong type")
-                                .with_primary(
-                                    e.span,
+                                .with_primary(e.span, {
+                                    let n = db.type_names(&[ty, base]);
                                     format!(
                                         "expected a subtype of {}, found a subtype of {}",
-                                        type_name(db, ty),
-                                        type_name(db, base)
-                                    ),
-                                ),
+                                        quoted(db, ty, &n[0]),
+                                        quoted(db, base, &n[1])
+                                    )
+                                }),
                         ))
                     } else {
                         Ok(Choice::Range(RangeC::Attr {

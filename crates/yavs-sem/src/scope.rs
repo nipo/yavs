@@ -761,12 +761,17 @@ impl Db {
             ),
         )
         .with_primary(name.span, "used here");
-        for &x in &c.decls {
-            let scope = self.decls[x].scope;
-            let owner = self.scopes[scope]
-                .owner
-                .map(|o| self.decls[o].name.to_string())
-                .unwrap_or_default();
+        let owners: Vec<_> = c
+            .decls
+            .iter()
+            .filter_map(|&x| self.scopes[self.decls[x].scope].owner)
+            .collect();
+        let owners = if owners.len() == c.decls.len() {
+            self.decl_names(&owners)
+        } else {
+            vec![String::new(); c.decls.len()]
+        };
+        for (&x, owner) in c.decls.iter().zip(owners) {
             d = d.with_secondary(self.decls[x].span, format!("declared in `{owner}`"));
         }
         self.error(d.with_help("use a selected name such as `pkg.name`"))

@@ -992,6 +992,10 @@ Choices made while writing the M0 parser that the plan does not settle. Each is 
 - **Type names in messages** are qualified by their region (`work.i1.rec`) only when two names in
   one message collide.
 
+### Names that read alike in one message (maintainer, 2026-11-01, #1026)
+
+A message that names two different things spelled alike prints the full path of each: `work.pkg_a.rc` and `work.pkg_b.rc`. Short names otherwise, so a message with different names does not change. The path is written for readers, not the mangled form: `work.top(rtl)` for an architecture, a package and its body alike, the plain name of a nested region, nothing for a region without a name (an unlabeled process). Paths that read alike as well (a second analysis of a unit, an unlabeled process and its architecture) keep the labels at both declarations. Help lines show parameter types as the declaration wrote them unless two candidates then read alike. Every such message goes through `Db::type_names`, `subtype_names`, `decl_names` or `signatures`.
+
 ## VHDL-1993 mode (`--std=93`; yavs-syntax, yavs-sem, lib/, CLI; #629, user, 2026-10-23)
 
 The user decided to add a VHDL-93 mode so GRLIB (VHDL-93 code) runs unmodified. The design, with the references' verdicts per

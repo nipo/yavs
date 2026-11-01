@@ -573,7 +573,8 @@ impl Db {
                 _ => true,
             });
         if !same {
-            let (want, have) = (self.subtype_name(deferred), self.subtype_name(st));
+            let names = self.subtype_names(&[deferred, st]);
+            let (want, have) = (&names[0], &names[1]);
             self.report(
                 yavs_diag::Diagnostic::error(
                     crate::diag::DEFERRED_SUBTYPE,

@@ -152,16 +152,19 @@ impl Db {
         if want == Some(got) || got == self.poison.ty || want == Some(self.poison.ty) {
             return Ok(());
         }
-        let (gn, an) = (self.type_name(got), self.type_name(t));
-        let dn = want.map_or_else(String::new, |w| self.type_name(w));
-        Err(self.error(
-            Diagnostic::error(
-                diag::TYPE_MISMATCH,
-                format!("expected an allocator of `{dn}`, found one of `{gn}`"),
-            )
-            .with_primary(span, format!("`{an}` designates `{dn}`"))
-            .with_note("LRM 9.3.7: the type of the allocated object must be the designated type of the access type"),
-        ))
+        let mut ts = vec![got, t];
+        ts.extend(want);
+        let n = self.type_names(&ts);
+        let (gn, an) = (&n[0], &n[1]);
+        let dn = n.get(2).map_or("", String::as_str);
+        let d = Diagnostic::error(
+            diag::TYPE_MISMATCH,
+            format!("expected an allocator of `{dn}`, found one of `{gn}`"),
+        )
+        .with_primary(span, format!("`{an}` designates `{dn}`"))
+        .with_note("LRM 9.3.7: the type of the allocated object must be the designated type of the access type");
+        let d = self.same_name_note(d, &ts);
+        Err(self.error(d))
     }
 
     /// `E1221`: a 2008 access type designating a file or protected type

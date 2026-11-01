@@ -25,6 +25,10 @@
 
 A design with no process has no lowered program; the session runs with an empty one. `--interactive`, `--do` and `--dap` start, `run` ends at time 0, and the console commands work on the design's signals.
 
+### Names that read alike in one message (#1026, 2026-11-01)
+
+A message that names two different types, subtypes, subprograms or other declarations spelled alike prints the full path of each (`work.pkg_a.rc`, `work.top(rtl).rc`), through `Db::type_names`, `subtype_names`, `decl_names` and `signatures`; other messages keep the short names. Paths that read alike too (a type in an unlabeled process and one in its architecture) keep the labels of `same_name_note` (#991). Covered: expected and found, conversions, allocators, alias subtypes, generic classes, mode views, ranges, E2121, overload candidates and help, signatures, aliases, generic subprogram actuals, component specifications, use clause conflicts, deferred constants. The test is `same_names_print_full_paths` in `crates/yavs/tests/cli.rs`.
+
 ### One analysis per unit in a session (#991, 2026-11-01)
 
 A file of a closure analyzes all its units, so an unused architecture may load a package on demand before the closure reaches the package's own file. That file keeps the loaded units instead of analyzing them again. Types that print the same name now show where each is declared.

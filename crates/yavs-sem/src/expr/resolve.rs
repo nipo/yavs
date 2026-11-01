@@ -549,18 +549,18 @@ impl Db {
                     self.build_class(scope, e, t)
                 }
                 Expected::Type(t) => {
-                    let tn = self.type_name(t);
-                    let dn = self.type_name(d);
-                    self.report(
-                        Diagnostic::error(
-                            diag::TYPE_MISMATCH,
-                            format!("expected `{tn}`, found an allocator of `{dn}`"),
-                        )
-                        .with_primary(
-                            e.span,
-                            format!("an allocator of `{dn}` cannot be of type `{tn}`"),
-                        ),
+                    let n = self.type_names(&[t, d]);
+                    let (tn, dn) = (&n[0], &n[1]);
+                    let diag = Diagnostic::error(
+                        diag::TYPE_MISMATCH,
+                        format!("expected `{tn}`, found an allocator of `{dn}`"),
+                    )
+                    .with_primary(
+                        e.span,
+                        format!("an allocator of `{dn}` cannot be of type `{tn}`"),
                     );
+                    let diag = self.same_name_note(diag, &[t, d]);
+                    self.report(diag);
                     self.poison_expr()
                 }
                 _ => {
@@ -1139,9 +1139,9 @@ impl Db {
                     "several `??` operators apply to this condition",
                 )
                 .with_primary(e.span, "ambiguous condition");
-                for (op, _) in &found {
-                    let sig = self.signature(*op);
-                    d = d.with_secondary(self.decls[*op].span, sig);
+                let ops: Vec<DeclId> = found.iter().map(|f| f.0).collect();
+                for (&op, sig) in ops.iter().zip(self.signatures(&ops, &[])) {
+                    d = d.with_secondary(self.decls[op].span, sig);
                 }
                 self.report(d);
                 self.poison_expr()
@@ -1289,15 +1289,7 @@ impl Db {
                 }
                 if let Visible::Overloads(ds) = self.lookup(scope, operator_key(sym)) {
                     let n = ds.len();
-                    for &c in ds.iter().take(MAX_CANDIDATE_LABELS) {
-                        let sig = self.signature(c);
-                        let sp = self.decls[c].span;
-                        if sp != Span::default() {
-                            d = d.with_secondary(sp, sig);
-                        } else {
-                            d = d.with_note(format!("candidate: {sig}"));
-                        }
-                    }
+                    d = self.candidate_labels(d, &ds[..n.min(MAX_CANDIDATE_LABELS)], &[]);
                     if n > MAX_CANDIDATE_LABELS {
                         d = d.with_note(format!("and {} more", n - MAX_CANDIDATE_LABELS));
                     }
@@ -1425,16 +1417,14 @@ impl Db {
                 })
                 .collect::<Option<Vec<DeclId>>>()
         {
-            let tn = self.type_name(t);
+            let ts: Vec<TypeId> = std::iter::once(t).chain(is.iter().map(|i| i.ty)).collect();
+            let tn = self.type_names(&ts).swap_remove(0);
             let mut d = Diagnostic::error(
                 diag::NO_OVERLOAD,
                 format!("no function `{}` returns `{tn}`", self.decls[calls[0]].name),
             )
             .with_primary(e.span, format!("expected `{tn}`"));
-            for &c in calls.iter().take(MAX_CANDIDATE_LABELS) {
-                d = self.candidate_label(d, c);
-            }
-            let ts: Vec<TypeId> = std::iter::once(t).chain(is.iter().map(|i| i.ty)).collect();
+            d = self.candidate_labels(d, &calls[..calls.len().min(MAX_CANDIDATE_LABELS)], &[t]);
             d = self.same_name_note(d, &ts);
             self.report(d);
             return;
@@ -1469,9 +1459,9 @@ impl Db {
         self.report(d);
     }
 
-    /// Two types of `ts` that print the same: say what tells them apart, where each is declared
-    /// (`names` qualifies them as far as a name can).
-    pub(crate) fn same_name_note(&self, d: Diagnostic, ts: &[TypeId]) -> Diagnostic {
+    /// Two types of `ts` that still print the same in `type_names`, where a path cannot tell them
+    /// apart: say where each is declared.
+    pub fn same_name_note(&self, d: Diagnostic, ts: &[TypeId]) -> Diagnostic {
         let names = self.type_names(ts);
         let same = |i: usize, j: usize| ts[i] != ts[j] && names[i].eq_ignore_ascii_case(&names[j]);
         let Some((i, j)) = (0..ts.len())
@@ -1500,7 +1490,7 @@ impl Db {
     fn conversion_hint(&self, from: TypeId, to: TypeId) -> Option<String> {
         // ponytail: keyed on the numeric_std/numeric_bit names like `vector_integer_hint`;
         // `UNRESOLVED_UNSIGNED` is shown as the subtype `unsigned` users write.
-        let name = self.type_name(to);
+        let name = self.type_names(&[from, to]).swap_remove(1);
         let lower = name.to_ascii_lowercase();
         let mark = match lower.strip_prefix("unresolved_") {
             Some(m) => m.to_string(),
@@ -1543,10 +1533,24 @@ impl Db {
     fn ambiguous(&mut self, e: &ast::Expr, best: &[Interp]) {
         let mut d = Diagnostic::error(diag::AMBIGUOUS, "this expression is ambiguous")
             .with_primary(e.span, "several interpretations fit");
+        let callables: Vec<DeclId> = best
+            .iter()
+            .filter_map(|i| match i.via {
+                Via::Call(c) | Via::Method(c, _) | Via::EnumLit(c) => Some(c),
+                _ => None,
+            })
+            .collect();
+        let others: Vec<TypeId> = best
+            .iter()
+            .filter(|i| !matches!(i.via, Via::Call(_) | Via::Method(..) | Via::EnumLit(_)))
+            .map(|i| i.ty)
+            .collect();
+        let mut sigs = self.signatures(&callables, &others).into_iter();
+        let mut names = self.type_names(&others).into_iter();
         for i in best {
             match i.via {
                 Via::Call(c) | Via::Method(c, _) | Via::EnumLit(c) => {
-                    let sig = self.signature(c);
+                    let sig = sigs.next().expect("one per callable");
                     let sp = self.decls[c].span;
                     d = if sp != Span::default() {
                         d.with_secondary(sp, sig)
@@ -1554,7 +1558,10 @@ impl Db {
                         d.with_note(format!("candidate: {sig}"))
                     };
                 }
-                _ => d = d.with_note(format!("could be of type `{}`", self.type_name(i.ty))),
+                _ => {
+                    let n = names.next().expect("one per other");
+                    d = d.with_note(format!("could be of type `{n}`"));
+                }
             }
         }
         // A call whose candidates come from several packages: name the first one.
@@ -1599,62 +1606,163 @@ impl Db {
         }
     }
 
-    /// Names of `ts` for one message: types whose simple names collide (the
-    /// same type declared by two generic instances) are qualified by their region.
+    /// Names of `ts` for one message: the short names, but two different types that read alike
+    /// both print their full path, `work.pkg_a.rc` and `work.pkg_b.rc` (#1026).
+    /// [`Db::same_name_note`] covers two paths that still read alike.
     pub fn type_names(&self, ts: &[TypeId]) -> Vec<String> {
-        let simple: Vec<String> = ts.iter().map(|&t| self.type_name(t)).collect();
-        ts.iter()
-            .enumerate()
-            .map(|(i, &t)| {
-                let clash = ts
-                    .iter()
-                    .enumerate()
-                    .any(|(j, &u)| u != t && simple[j].eq_ignore_ascii_case(&simple[i]));
-                if !clash {
-                    return simple[i].clone();
-                }
-                let scope = self.decls[self.types[t].decl].scope;
-                let region = crate::mangle::region(self, scope);
-                if region.is_empty() {
-                    simple[i].clone()
-                } else {
-                    format!("{region}.{}", simple[i])
-                }
-            })
-            .collect()
+        let short = ts.iter().map(|&t| self.type_name(t)).collect();
+        names_apart(ts, short, |i| self.type_path(ts[i]))
+    }
+
+    /// [`Db::type_names`] for subtypes: the name each has in a message, compared by what it
+    /// names. Two anonymous subtypes of one type are one name, however they are constrained.
+    pub fn subtype_names(&self, sts: &[crate::ids::SubtypeId]) -> Vec<String> {
+        let keys: Vec<_> = sts.iter().map(|&st| self.subtype_key(st)).collect();
+        let short = sts.iter().map(|&st| self.subtype_name(st)).collect();
+        names_apart(&keys, short, |i| match keys[i].1 {
+            Some(st) => self
+                .decls
+                .iter()
+                .find(|(_, d)| matches!(d.kind, crate::decl::DeclKind::Subtype(s) if s == st))
+                .map_or_else(|| self.subtype_name(st), |(d, _)| self.decl_path(d)),
+            None => self.type_path(keys[i].0),
+        })
+    }
+
+    /// [`Db::type_names`] for declarations of other kinds: subprograms, components, packages.
+    pub fn decl_names(&self, ds: &[crate::ids::DeclId]) -> Vec<String> {
+        let short = ds.iter().map(|&d| self.decls[d].name.to_string()).collect();
+        names_apart(ds, short, |i| self.decl_path(ds[i]))
+    }
+
+    /// What a subtype's printed name stands for: its base type, and the subtype itself if it has
+    /// a name of its own.
+    fn subtype_key(&self, st: crate::ids::SubtypeId) -> (TypeId, Option<crate::ids::SubtypeId>) {
+        let base = self.base(st);
+        let own = self.subtypes[st]
+            .name
+            .is_some_and(|n| n.key != self.types[base].name.key);
+        (base, own.then_some(st))
+    }
+
+    /// `work.pkg.rc`: a type by the regions around its declaration; universal types have none.
+    fn type_path(&self, t: TypeId) -> String {
+        let td = &self.types[t];
+        match td.kind {
+            TypeKind::UniversalInteger | TypeKind::UniversalReal => self.type_name(t),
+            _ => join_path(
+                self.region_path(self.decls[td.decl].scope),
+                &self.type_name(t),
+            ),
+        }
+    }
+
+    fn decl_path(&self, d: crate::ids::DeclId) -> String {
+        let decl = &self.decls[d];
+        join_path(self.region_path(decl.scope), &decl.name.to_string())
+    }
+
+    /// The region of `scope` as a message writes it: `work.pkg` for a package and its body,
+    /// `work.top(rtl)` for an architecture, then the plain name of each nested region that has
+    /// one. Not [`crate::mangle::region`]: that one spells out subprogram profiles.
+    fn region_path(&self, scope: ScopeId) -> String {
+        let s = &self.scopes[scope];
+        let Some(owner) = s.owner else {
+            return s.parent.map_or_else(String::new, |p| self.region_path(p));
+        };
+        let d = &self.decls[owner];
+        let crate::decl::DeclKind::Unit(u) = &d.kind else {
+            return join_path(self.region_path(d.scope), &d.name.to_string());
+        };
+        if let Some(m) = self.generic.unit_names.get(u) {
+            return m.as_str().to_string();
+        }
+        let u = &self.units[*u];
+        let lib = self.libs[u.lib].name.key.as_str();
+        match u.key {
+            crate::loader::UnitKey::Primary(p) => format!("{lib}.{p}", p = p.as_str()),
+            crate::loader::UnitKey::Secondary(p, b) if b.as_str() == "body" => {
+                format!("{lib}.{p}", p = p.as_str())
+            }
+            crate::loader::UnitKey::Secondary(p, a) => {
+                format!("{lib}.{p}({a})", p = p.as_str(), a = a.as_str())
+            }
+        }
     }
 
     /// `function "+" (l: unsigned; r: natural) return unsigned` (8.3), original spelling.
     pub fn signature(&self, d: crate::ids::DeclId) -> String {
-        let e = self.entity(d);
-        let decl = &self.decls[e];
-        match decl.kind.subprogram() {
-            Some(s) => {
-                let params: Vec<String> = s
-                    .params
-                    .iter()
-                    .map(|p| format!("{}: {}", p.name.text, self.subtype_name(p.subtype)))
-                    .collect();
-                let head = match s.kind {
-                    crate::decl::SubprogramKind::Procedure => "procedure",
-                    crate::decl::SubprogramKind::Function { .. } => "function",
-                };
-                let mut out = format!("{head} {}", decl.name);
-                if !params.is_empty() {
-                    out += &format!(" ({})", params.join("; "));
-                }
-                if let Some(r) = s.ret {
-                    out += &format!(" return {}", self.subtype_name(r));
-                }
-                out
-            }
-            None => match decl.kind {
+        self.signatures(&[d], &[]).remove(0)
+    }
+
+    /// [`Db::signature`] of each of `ds` for one message that also names the types `others`:
+    /// marks that read alike but mean different types print their paths, and subprograms whose
+    /// whole text still reads alike print their own path (#1026).
+    pub(crate) fn signatures(&self, ds: &[crate::ids::DeclId], others: &[TypeId]) -> Vec<String> {
+        let mut marks: Vec<crate::ids::SubtypeId> = Vec::new();
+        for &d in ds {
+            let e = self.entity(d);
+            match &self.decls[e].kind {
                 crate::decl::DeclKind::EnumLit { ty, .. } => {
-                    format!("literal {} of `{}`", decl.name, self.type_name(ty))
+                    marks.push(self.types[*ty].first_subtype);
                 }
-                _ => decl.name.to_string(),
-            },
+                k => {
+                    if let Some(s) = k.subprogram() {
+                        marks.extend(s.params.iter().map(|p| p.subtype));
+                        marks.extend(s.ret);
+                    }
+                }
+            }
         }
+        marks.extend(others.iter().map(|&t| self.types[t].first_subtype));
+        let names = self.subtype_names(&marks);
+        let name_of = |st| {
+            let i = marks
+                .iter()
+                .position(|&m| m == st)
+                .expect("collected above");
+            names[i].as_str()
+        };
+        let text = |d: crate::ids::DeclId, path: bool| {
+            let e = self.entity(d);
+            let decl = &self.decls[e];
+            let name = if path {
+                self.decl_path(e)
+            } else {
+                decl.name.to_string()
+            };
+            match decl.kind.subprogram() {
+                Some(s) => {
+                    let params: Vec<String> = s
+                        .params
+                        .iter()
+                        .map(|p| format!("{}: {}", p.name.text, name_of(p.subtype)))
+                        .collect();
+                    let head = match s.kind {
+                        crate::decl::SubprogramKind::Procedure => "procedure",
+                        crate::decl::SubprogramKind::Function { .. } => "function",
+                    };
+                    let mut out = format!("{head} {name}");
+                    if !params.is_empty() {
+                        out += &format!(" ({})", params.join("; "));
+                    }
+                    if let Some(r) = s.ret {
+                        out += &format!(" return {}", name_of(r));
+                    }
+                    out
+                }
+                None => match decl.kind {
+                    crate::decl::DeclKind::EnumLit { ty, .. } => {
+                        let ty = name_of(self.types[ty].first_subtype);
+                        format!("literal {} of `{ty}`", decl.name)
+                    }
+                    _ => decl.name.to_string(),
+                },
+            }
+        };
+        let entities: Vec<_> = ds.iter().map(|&d| self.entity(d)).collect();
+        let short = ds.iter().map(|&d| text(d, false)).collect();
+        names_apart(&entities, short, |i| text(ds[i], true))
     }
 
     pub fn subtype_name(&self, st: crate::ids::SubtypeId) -> String {
@@ -1662,6 +1770,29 @@ impl Db {
             Some(n) => n.text.to_string(),
             None => self.type_name(self.base(st)),
         }
+    }
+}
+
+/// `short[i]`, or `full(i)` if another item with another key reads the same.
+fn names_apart<K: PartialEq>(
+    keys: &[K],
+    short: Vec<String>,
+    full: impl Fn(usize) -> String,
+) -> Vec<String> {
+    (0..keys.len())
+        .map(|i| {
+            let alike = (0..keys.len())
+                .any(|j| keys[j] != keys[i] && short[j].eq_ignore_ascii_case(&short[i]));
+            if alike { full(i) } else { short[i].clone() }
+        })
+        .collect()
+}
+
+fn join_path(region: String, name: &str) -> String {
+    if region.is_empty() {
+        name.to_string()
+    } else {
+        format!("{region}.{name}")
     }
 }
 
@@ -1915,15 +2046,7 @@ impl Db {
                     ),
                 )
                 .with_primary(callee_span, "no matching procedure");
-                for &c in procs.iter().take(MAX_CANDIDATE_LABELS) {
-                    let sig = self.signature(c);
-                    let sp = self.decls[c].span;
-                    d = if sp != Span::default() {
-                        d.with_secondary(sp, sig)
-                    } else {
-                        d.with_note(format!("candidate: {sig}"))
-                    };
-                }
+                d = self.candidate_labels(d, &procs[..procs.len().min(MAX_CANDIDATE_LABELS)], &[]);
                 return Err(self.error(d));
             };
             best.retain(|b| b.1 == min);
@@ -1947,8 +2070,7 @@ impl Db {
                             "use a selected name such as `pkg.proc`, or qualify an argument",
                         ),
                 };
-                for c in cands {
-                    let sig = self.signature(c);
+                for (&c, sig) in cands.iter().zip(self.signatures(&cands, &[])) {
                     d = d.with_secondary(self.decls[c].span, sig);
                 }
                 return Err(self.error(d));
@@ -2030,15 +2152,18 @@ impl Db {
 /// Overload diagnostics of calls (8.3): association errors of the only candidate, calls of
 /// procedures as functions, ambiguous actuals.
 impl Db {
-    /// A secondary label at candidate `c` with its signature (a note for implicit ones).
-    fn candidate_label(&self, d: Diagnostic, c: DeclId) -> Diagnostic {
-        let sig = self.signature(c);
-        let sp = self.decls[c].span;
-        if sp != Span::default() {
-            d.with_secondary(sp, sig)
-        } else {
-            d.with_note(format!("candidate: {sig}"))
+    /// A secondary label at each candidate with its signature (a note for implicit ones);
+    /// `others`: the types the message names besides them.
+    fn candidate_labels(&self, mut d: Diagnostic, cs: &[DeclId], others: &[TypeId]) -> Diagnostic {
+        for (&c, sig) in cs.iter().zip(self.signatures(cs, others)) {
+            let sp = self.decls[c].span;
+            d = if sp != Span::default() {
+                d.with_secondary(sp, sig)
+            } else {
+                d.with_note(format!("candidate: {sig}"))
+            };
         }
+        d
     }
 
     /// `pr` or `pr(..)` used as a value where every overload is a procedure: E1300.
@@ -2101,14 +2226,17 @@ impl Db {
             format!("no function `{name}` matches the call"),
         )
         .with_primary(prefix.span, "no matching function");
-        for &f in fns.iter().take(MAX_CANDIDATE_LABELS) {
-            d = self.candidate_label(d, f);
-        }
+        d = self.candidate_labels(d, &fns[..fns.len().min(MAX_CANDIDATE_LABELS)], &[]);
         if !fns.is_empty() && fns.len() <= MAX_CANDIDATE_LABELS {
-            let list: Vec<String> = fns
-                .iter()
-                .map(|&f| format!("`{}`", self.short_signature(f)))
-                .collect();
+            // As the declarations wrote them, unless that reads alike for different ones.
+            let mut list: Vec<String> = fns.iter().map(|&f| self.short_signature(f)).collect();
+            let alike = (0..list.len()).any(|i| {
+                (0..i).any(|j| fns[i] != fns[j] && list[i].eq_ignore_ascii_case(&list[j]))
+            });
+            if alike {
+                list = self.signatures(&fns, &[]);
+            }
+            let list: Vec<String> = list.iter().map(|s| format!("`{s}`")).collect();
             d = d.with_help(format!("candidates: {}", list.join(", ")));
         }
         self.report(d);
@@ -2231,7 +2359,7 @@ impl Db {
             }
             Err(AssocErr::Other) => return None,
         };
-        let d = self.candidate_label(d, e);
+        let d = self.candidate_labels(d, &[e], &[]);
         Some(self.error(d))
     }
 

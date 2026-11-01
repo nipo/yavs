@@ -855,15 +855,15 @@ impl Db {
         {
             return Ok(());
         }
-        let (from, to) = (self.type_name(from), self.type_name(to));
-        Err(self.error(
-            Diagnostic::error(
-                diag::BAD_CONVERSION,
-                format!("cannot convert `{from}` to `{to}`"),
-            )
-            .with_primary(span, "these types are not closely related")
-            .with_note("9.3.6: a type mark as formal part is a type conversion of the formal"),
-        ))
+        let n = self.type_names(&[from, to]);
+        let d = Diagnostic::error(
+            diag::BAD_CONVERSION,
+            format!("cannot convert `{}` to `{}`", n[0], n[1]),
+        )
+        .with_primary(span, "these types are not closely related")
+        .with_note("9.3.6: a type mark as formal part is a type conversion of the formal");
+        let d = self.same_name_note(d, &[from, to]);
+        Err(self.error(d))
     }
 
     /// Whether the actual `e` of an `inout` formal with a formal conversion is itself a
@@ -1269,15 +1269,17 @@ impl Db {
         if mode == Some(Mode::Inout) && formal_conv.is_some() && actual_conv.is_none() {
             let (ft, at) = (self.base(st), self.base(self.exprs[id].subtype));
             if ft != at {
-                let (name, ftn, atn) = (self.decls[f].name, self.type_name(ft), self.type_name(at));
-                return Err(self.error(
-                    Diagnostic::error(
-                        diag::NO_OVERLOAD,
-                        format!("`inout` port `{name}` of type `{ftn}` is converted the way out only, but the actual is of type `{atn}`"),
-                    )
-                    .with_primary(self.exprs[id].span, format!("expected type `{ftn}` to pass in unchanged"))
-                    .with_help("convert the actual too, `conv(formal) => conv(actual)`"),
-                ));
+                let name = self.decls[f].name;
+                let n = self.type_names(&[ft, at]);
+                let (ftn, atn) = (&n[0], &n[1]);
+                let d = Diagnostic::error(
+                    diag::NO_OVERLOAD,
+                    format!("`inout` port `{name}` of type `{ftn}` is converted the way out only, but the actual is of type `{atn}`"),
+                )
+                .with_primary(self.exprs[id].span, format!("expected type `{ftn}` to pass in unchanged"))
+                .with_help("convert the actual too, `conv(formal) => conv(actual)`");
+                let d = self.same_name_note(d, &[ft, at]);
+                return Err(self.error(d));
             }
         }
         if let Some((conv, x)) = actual_conv
@@ -2113,7 +2115,8 @@ impl Db {
                     if *c == comp {
                         out.push(s);
                     } else {
-                        let (cn, want) = (self.decls[*c].name, self.decls[comp].name);
+                        let n = self.decl_names(&[*c, comp]);
+                        let (cn, want) = (&n[0], &n[1]);
                         errs.keep::<()>(Err(self.error(
                             Diagnostic::error(
                                 diag::NOT_AN_INSTANCE,
@@ -2585,16 +2588,13 @@ impl Db {
                             && t != self.poison.ty
                         {
                             let n = self.type_names(&[w, t]);
-                            return Err(self.error(
-                                Diagnostic::error(
-                                    diag::TYPE_MISMATCH,
-                                    format!(
-                                        "expected a range of `{}`, found one of `{}`",
-                                        n[0], n[1]
-                                    ),
-                                )
-                                .with_primary(si.span, "wrong type for this generate parameter"),
-                            ));
+                            let d = Diagnostic::error(
+                                diag::TYPE_MISMATCH,
+                                format!("expected a range of `{}`, found one of `{}`", n[0], n[1]),
+                            )
+                            .with_primary(si.span, "wrong type for this generate parameter");
+                            let d = self.same_name_note(d, &[w, t]);
+                            return Err(self.error(d));
                         }
                         Some(GenSelect::Range(crate::types::RangeC::Attr {
                             prefix: crate::hir::AttrPrefix::Subtype(st),

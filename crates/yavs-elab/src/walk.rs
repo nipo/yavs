@@ -5249,11 +5249,9 @@ impl Model {
         };
         let fail = |why: String| external_mismatch(ext.span, class, &name, &why);
         if want != got {
-            return Err(fail(format!(
-                "its type is `{}`, the name says `{}`",
-                db.type_name(got),
-                db.type_name(want)
-            )));
+            let n = db.type_names(&[got, want]);
+            let d = *fail(format!("its type is `{}`, the name says `{}`", n[0], n[1]));
+            return Err(Box::new(db.same_name_note(d, &[got, want])));
         }
         let Some(o) = shape else { return Ok(()) };
         let Some(sub) = self.shape(db, ext.subtype, Some(scope), ext.span)? else {

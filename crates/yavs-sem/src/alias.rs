@@ -53,10 +53,8 @@ impl Db {
         if t == d {
             format!("`{}`", self.decls[d].name)
         } else {
-            format!(
-                "`{}` (alias of `{}`)",
-                self.decls[d].name, self.decls[t].name
-            )
+            let n = self.decl_names(&[d, t]);
+            format!("`{}` (alias of `{}`)", n[0], n[1])
         }
     }
 
@@ -87,22 +85,37 @@ impl Db {
 
     /// `[integer, bit return boolean]`
     pub fn display_signature(&self, sig: &Signature) -> String {
-        self.display_profile(&sig.params, sig.ret)
+        self.display_profile(&sig.params, sig.ret, &[])
     }
 
-    fn display_profile(&self, params: &[TypeId], ret: Option<TypeId>) -> String {
+    /// `others`: types the message names besides this profile, which it must be told apart from.
+    fn display_profile(&self, params: &[TypeId], ret: Option<TypeId>, others: &[TypeId]) -> String {
+        let mut all = params.to_vec();
+        all.extend(ret);
+        all.extend(others);
+        let names = self.type_names(&all);
         let mut s = String::from("[");
-        let names: Vec<String> = params.iter().map(|&t| self.type_name(t)).collect();
-        s.push_str(&names.join(", "));
-        if let Some(r) = ret {
+        s.push_str(&names[..params.len()].join(", "));
+        if ret.is_some() {
             if !params.is_empty() {
                 s.push(' ');
             }
             s.push_str("return ");
-            s.push_str(&self.type_name(r));
+            s.push_str(&names[params.len()]);
         }
         s.push(']');
         s
+    }
+
+    /// The types of `sig` and of the profiles of `cands`, for one message about them.
+    fn profile_types(&self, sig: &Signature, cands: &[DeclId]) -> Vec<TypeId> {
+        let mut all = sig.params.to_vec();
+        all.extend(sig.ret);
+        for p in cands.iter().filter_map(|&c| self.profile(c)) {
+            all.extend(p.params.iter());
+            all.extend(p.ret);
+        }
+        all
     }
 
     /// Pick the one candidate matching `sig` (6.4): `E1630` for none, `E1631`
@@ -133,11 +146,11 @@ impl Db {
                     diag::SIGNATURE_NONE,
                     format!(
                         "no subprogram or enumeration literal {name}matches signature {}",
-                        self.display_signature(sig)
+                        self.display_profile(&sig.params, sig.ret, &self.profile_types(sig, cands))
                     ),
                 )
                 .with_primary(sig.span, "no declaration has this profile");
-                d = self.label_candidates(d, cands);
+                d = self.label_candidates(d, cands, Some(sig));
                 Err(self.error(d))
             }
             _ => {
@@ -145,24 +158,37 @@ impl Db {
                     diag::AMBIGUOUS,
                     format!(
                         "signature {} matches more than one declaration of {name}",
-                        self.display_signature(sig)
+                        self.display_profile(&sig.params, sig.ret, &self.profile_types(sig, &hits))
                     ),
                 )
                 .with_primary(sig.span, "ambiguous signature");
-                let d = self.label_candidates(d, &hits);
+                let d = self.label_candidates(d, &hits, Some(sig));
                 Err(self.error(d))
             }
         }
     }
 
     /// One secondary label per candidate with its profile (8.3: at most 8).
-    fn label_candidates(&self, mut d: Diagnostic, cands: &[DeclId]) -> Diagnostic {
+    fn label_candidates(
+        &self,
+        mut d: Diagnostic,
+        cands: &[DeclId],
+        sig: Option<&Signature>,
+    ) -> Diagnostic {
+        let types = match sig {
+            Some(sig) => self.profile_types(sig, cands),
+            None => cands
+                .iter()
+                .filter_map(|&c| self.profile(c))
+                .flat_map(|p| p.params.into_iter().chain(p.ret))
+                .collect(),
+        };
         for &c in cands.iter().take(8) {
             let what = match self.profile(c) {
                 Some(p) => format!(
                     "{} {}",
                     self.describe_decl(c),
-                    self.display_profile(&p.params, p.ret)
+                    self.display_profile(&p.params, p.ret, &types)
                 ),
                 None => format!(
                     "{} is not a subprogram or enumeration literal",
@@ -229,7 +255,7 @@ impl Db {
                     )
                     .with_primary(ast.name.span, "names several declarations")
                     .with_help("add a signature, e.g. `alias a is f [integer return bit];`");
-                    let d = self.label_candidates(d, &distinct);
+                    let d = self.label_candidates(d, &distinct, None);
                     return Err(self.error(d));
                 }
                 first
@@ -411,26 +437,23 @@ impl Db {
             }
             let (want, have) = (self.base(st), self.base(self.exprs[target].subtype));
             if !self.same_base(want, have) {
-                return Err(self.error(
-                    Diagnostic::error(
-                        diag::TYPE_MISMATCH,
-                        format!(
-                            "alias subtype is of type `{}`, but the aliased object is of type `{}`",
-                            self.type_name(want),
-                            self.type_name(have)
-                        ),
-                    )
-                    // The written indication: a bare type mark's subtype span is its declaration.
-                    .with_primary(
-                        ast.subtype.as_ref().map_or(ast.span, |s| s.span),
-                        format!("type `{}`", self.type_name(want)),
-                    )
-                    .with_secondary(
-                        self.exprs[target].span,
-                        format!("type `{}`", self.type_name(have)),
-                    )
-                    .with_note("LRM 6.6.2: the base types must be the same"),
-                ));
+                let n = self.type_names(&[want, have]);
+                let d = Diagnostic::error(
+                    diag::TYPE_MISMATCH,
+                    format!(
+                        "alias subtype is of type `{}`, but the aliased object is of type `{}`",
+                        n[0], n[1]
+                    ),
+                )
+                // The written indication: a bare type mark's subtype span is its declaration.
+                .with_primary(
+                    ast.subtype.as_ref().map_or(ast.span, |s| s.span),
+                    format!("type `{}`", n[0]),
+                )
+                .with_secondary(self.exprs[target].span, format!("type `{}`", n[1]))
+                .with_note("LRM 6.6.2: the base types must be the same");
+                let d = self.same_name_note(d, &[want, have]);
+                return Err(self.error(d));
             }
             // 6.6.2: each element of the object has a matching element of the alias subtype.
             let have_st = self.exprs[target].subtype;

@@ -51,6 +51,7 @@ Full module table with owners: `CONTRIBUTING.md` "Module map". Entry points and 
 
 | Decision | Why | Source |
 |---|---|---|
+| A message naming two different things spelled alike prints the full path of each (`work.pkg_a.rc`, `work.top(rtl).rc`), and the short names otherwise: use `type_names`, `subtype_names`, `decl_names` or `signatures` for everything one message names, never `type_name` twice; add `same_name_note` where paths can read alike too. Help lines keep the marks as written unless two candidates read alike (maintainer, 2026-11-01) | All output is readable; #1026 | `docs/decisions.md` "Names that read alike in one message", `src/expr/resolve.rs` |
 | `analyze_file` keeps a unit this session already loaded on demand from that file (`analyzed_from`): a file analyzes all its units, so an architecture the design does not use may load a package whose own file the closure lists later, and a second analysis made a second copy of its types (#991) | One unit, one analysis per session | `loader.rs` `analyze_file_with` |
 | The parsed-file cache is keyed by (library, path): a file analyzed into several libraries is parsed once per library, because units are taken out of the cache when analyzed | #290 | `loader.rs` `parse_into_cache` |
 | LRM policy: clear LRM wins and fails early; unclear: permissive, accept what the reference simulators accept, warn only where they differ (user, 2026-10-18) | Most designs elaborate | `docs/design/sem.md` "LRM interpretation policy", `docs/design/lrm-checks.md` |

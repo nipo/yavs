@@ -1242,13 +1242,17 @@ impl Db {
                         && w != self.poison.ty
                         && t != self.poison.ty
                     {
-                        return Err(self.error(
-                            Diagnostic::error(diag::TYPE_MISMATCH, {
-                                let n = self.type_names(&[w, t]);
-                                format!("expected a range of `{}`, found one of `{}`", n[0], n[1])
-                            })
-                            .with_primary(n.span, "wrong index type"),
-                        ));
+                        let names = self.type_names(&[w, t]);
+                        let d = Diagnostic::error(
+                            diag::TYPE_MISMATCH,
+                            format!(
+                                "expected a range of `{}`, found one of `{}`",
+                                names[0], names[1]
+                            ),
+                        )
+                        .with_primary(n.span, "wrong index type");
+                        let d = self.same_name_note(d, &[w, t]);
+                        return Err(self.error(d));
                     }
                     return Ok((rc, t));
                 }
@@ -1808,10 +1812,10 @@ impl Db {
         let msg = if bad == t {
             format!("a {what} cannot be of {kind} type `{}`", self.type_name(t))
         } else {
+            let n = self.type_names(&[t, bad]);
             format!(
                 "a {what} cannot be of type `{}`, which contains {kind} type `{}`",
-                self.type_name(t),
-                self.type_name(bad)
+                n[0], n[1]
             )
         };
         Err(self.error(
@@ -1863,13 +1867,17 @@ impl Db {
             Some(r) => {
                 let (rc, t) = r?;
                 if t != base && t != self.poison.ty && base != self.poison.ty {
-                    return Err(self.error(
-                        Diagnostic::error(diag::TYPE_MISMATCH, {
-                            let n = self.type_names(&[base, t]);
-                            format!("expected a range of `{}`, found one of `{}`", n[0], n[1])
-                        })
-                        .with_primary(n.span, "wrong type"),
-                    ));
+                    let names = self.type_names(&[base, t]);
+                    let d = Diagnostic::error(
+                        diag::TYPE_MISMATCH,
+                        format!(
+                            "expected a range of `{}`, found one of `{}`",
+                            names[0], names[1]
+                        ),
+                    )
+                    .with_primary(n.span, "wrong type");
+                    let d = self.same_name_note(d, &[base, t]);
+                    return Err(self.error(d));
                 }
                 Ok(rc)
             }
@@ -1878,16 +1886,16 @@ impl Db {
                     let (rc, t) = r?;
                     if t != base && t != self.poison.ty && base != self.poison.ty {
                         let names = self.type_names(&[base, t]);
-                        return Err(self.error(
-                            Diagnostic::error(
-                                diag::TYPE_MISMATCH,
-                                format!(
-                                    "expected a range of `{}`, found one of `{}`",
-                                    names[0], names[1]
-                                ),
-                            )
-                            .with_primary(n.span, "wrong type"),
-                        ));
+                        let d = Diagnostic::error(
+                            diag::TYPE_MISMATCH,
+                            format!(
+                                "expected a range of `{}`, found one of `{}`",
+                                names[0], names[1]
+                            ),
+                        )
+                        .with_primary(n.span, "wrong type");
+                        let d = self.same_name_note(d, &[base, t]);
+                        return Err(self.error(d));
                     }
                     return Ok(rc);
                 }

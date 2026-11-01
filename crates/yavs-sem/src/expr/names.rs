@@ -2368,19 +2368,19 @@ impl Db {
         let from = self.base(self.exprs[operand].subtype);
         let to = self.base(st);
         if !self.is_poison_expr(operand) && !self.closely_related(from, to) {
-            let (f, t) = (self.type_name(from), self.type_name(to));
-            self.report(
-                Diagnostic::error(
-                    diag::BAD_CONVERSION,
-                    format!("cannot convert `{f}` to `{t}`"),
-                )
-                .with_primary(span, "these types are not closely related")
-                .with_note(
-                    "9.3.6: only abstract numeric types, array types with the same \
-                     dimensionality and closely related element types, and (2019) records with \
-                     the same element names convert to each other",
-                ),
+            let n = self.type_names(&[from, to]);
+            let d = Diagnostic::error(
+                diag::BAD_CONVERSION,
+                format!("cannot convert `{}` to `{}`", n[0], n[1]),
+            )
+            .with_primary(span, "these types are not closely related")
+            .with_note(
+                "9.3.6: only abstract numeric types, array types with the same \
+                 dimensionality and closely related element types, and (2019) records with \
+                 the same element names convert to each other",
             );
+            let d = self.same_name_note(d, &[from, to]);
+            self.report(d);
             return self.poison.expr;
         }
         if !self.is_poison_expr(operand) {

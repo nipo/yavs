@@ -2374,7 +2374,8 @@ impl Db {
                 let want = self.r_subtype(r, fi);
                 let (w, g) = (self.base(want), self.base(ai));
                 if w != g && !self.is_error_type(w) {
-                    let (wn, gn) = (self.type_name(w), self.type_name(g));
+                    let n = self.type_names(&[w, g]);
+                    let (wn, gn) = (&n[0], &n[1]);
                     return fail(
                         self,
                         format!("index type of `{an}` is `{gn}`, expected `{wn}`"),
@@ -2451,15 +2452,16 @@ impl Db {
         if w == g || self.is_error_type(w) || self.is_error_type(g) {
             return Ok(());
         }
-        let (wn, gn) = (self.type_name(w), self.type_name(g));
-        Err(self.error(
-            Diagnostic::error(
-                diag::GENERIC_CLASS,
-                format!("{what} type of `{an}` is `{gn}`, expected `{wn}`"),
-            )
-            .with_primary(span, "actual outside the class of the generic type")
-            .with_note("LRM 6.5.3: the actual of an interface type must belong to its class"),
-        ))
+        let n = self.type_names(&[w, g]);
+        let (wn, gn) = (&n[0], &n[1]);
+        let d = Diagnostic::error(
+            diag::GENERIC_CLASS,
+            format!("{what} type of `{an}` is `{gn}`, expected `{wn}`"),
+        )
+        .with_primary(span, "actual outside the class of the generic type")
+        .with_note("LRM 6.5.3: the actual of an interface type must belong to its class");
+        let d = self.same_name_note(d, &[w, g]);
+        Err(self.error(d))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -2572,11 +2574,19 @@ impl Db {
                         return Err(Reported);
                     }
                     [] => {
+                        // The actual's name, the formal's name: often one spelling (#1026).
+                        let actual = last_name(n).to_string();
+                        let (actual, formal) = match cands.first() {
+                            Some(&c) if actual.eq_ignore_ascii_case(&fname.to_string()) => {
+                                let n = self.decl_names(&[self.entity(c), f]);
+                                (n[0].clone(), n[1].clone())
+                            }
+                            _ => (actual, fname.to_string()),
+                        };
                         let mut d = Diagnostic::error(
                             diag::TYPE_MISMATCH,
                             format!(
-                                "profile of `{}` does not match generic subprogram `{fname}`",
-                                last_name(n)
+                                "profile of `{actual}` does not match generic subprogram `{formal}`"
                             ),
                         )
                         .with_primary(e.span, "profile does not conform")
@@ -2753,7 +2763,8 @@ impl Db {
         };
         let want = self.insts[fi].generic;
         let Some(i) = inst.filter(|&i| self.insts[i].generic == want) else {
-            let (an, gn) = (self.decls[d].name, self.decls[want].name);
+            let names = self.decl_names(&[d, want]);
+            let (an, gn) = (&names[0], &names[1]);
             return Err(self.error(
                 Diagnostic::error(
                     diag::GENERIC_CLASS,

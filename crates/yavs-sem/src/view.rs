@@ -335,19 +335,18 @@ impl Db {
             return Ok(());
         }
         let vname = self.decls[self.views[view].decl].name;
-        Err(self.error(
-            Diagnostic::error(
-                diag::VIEW_ELEMENT,
-                format!(
-                    "view `{vname}` is for `{}`, element `{}` has type `{}`",
-                    self.type_name(want),
-                    n.text,
-                    self.type_name(have)
-                ),
-            )
-            .with_primary(at, "view of another record type")
-            .with_secondary(n.span, "this element"),
-        ))
+        let names = self.type_names(&[want, have]);
+        let d = Diagnostic::error(
+            diag::VIEW_ELEMENT,
+            format!(
+                "view `{vname}` is for `{}`, element `{}` has type `{}`",
+                names[0], n.text, names[1]
+            ),
+        )
+        .with_primary(at, "view of another record type")
+        .with_secondary(n.span, "this element");
+        let d = self.same_name_note(d, &[want, have]);
+        Err(self.error(d))
     }
 
     /// The converse of view `v`, materialized once (2019 6.5.2, 16.2).
@@ -435,22 +434,19 @@ impl Db {
                 }
                 if have != want && !matches!(self.types[have].kind, TypeKind::Error) {
                     let msg = if array {
-                        format!(
-                            "`{}` is not an array of `{}`",
-                            self.type_name(self.base(st)),
-                            self.type_name(want)
-                        )
+                        let names = self.type_names(&[self.base(st), want]);
+                        format!("`{}` is not an array of `{}`", names[0], names[1])
                     } else {
+                        let names = self.type_names(&[want, have]);
                         format!(
                             "view is for `{}`, the port has type `{}`",
-                            self.type_name(want),
-                            self.type_name(have)
+                            names[0], names[1]
                         )
                     };
-                    return Err(self.error(
-                        Diagnostic::error(diag::TYPE_MISMATCH, msg)
-                            .with_primary(self.subtypes[st].span, "does not match the view"),
-                    ));
+                    let d = Diagnostic::error(diag::TYPE_MISMATCH, msg)
+                        .with_primary(self.subtypes[st].span, "does not match the view");
+                    let d = self.same_name_note(d, &[self.base(st), want, have]);
+                    return Err(self.error(d));
                 }
                 st
             }
