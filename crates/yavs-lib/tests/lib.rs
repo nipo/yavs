@@ -146,19 +146,19 @@ fn errors() {
 
     assert_eq!(
         e(UnitRef::new("nope", UnitKind::Entity, "x")),
-        "error[L0030]: unknown library `nope`\n  |\n  = note: mapped libraries: work, util\n  = help: map it with `nope:PATH`\n"
+        "error[L0030]: unknown library `nope`\n |\n = note: mapped libraries: work, util\n = help: map it with `nope:PATH`\n"
     );
     assert_eq!(
         e(UnitRef::new("wrk", UnitKind::Entity, "x")),
-        "error[L0030]: unknown library `wrk`\n  |\n  = note: mapped libraries: work, util\n  = help: a library with a similar name exists: `work`\n"
+        "error[L0030]: unknown library `wrk`\n |\n = note: mapped libraries: work, util\n = help: a library with a similar name exists: `work`\n"
     );
     assert_eq!(
         e(UnitRef::new("work", UnitKind::Package, "counter_pck")),
-        "error[L0031]: unknown package `counter_pck` in library `work`\n  |\n  = help: a package with a similar name exists: `Counter_Pkg`\n"
+        "error[L0031]: unknown package `counter_pck` in library `work`\n |\n = help: a package with a similar name exists: `Counter_Pkg`\n"
     );
     assert_eq!(
         e(UnitRef::new("work", UnitKind::Package, "zzzzzzzz")),
-        "error[L0031]: unknown package `zzzzzzzz` in library `work`\n  |\n  = help: library `work` has no package `zzzzzzzz`; analyze the file that defines it\n"
+        "error[L0031]: unknown package `zzzzzzzz` in library `work`\n |\n = help: library `work` has no package `zzzzzzzz`; analyze the file that defines it\n"
     );
     // A directory without an index is an empty library: the unit is not found in it, and the
     // help names the directory (cli-contract section 3).
@@ -169,7 +169,7 @@ fn errors() {
             &closure(&libs, &UnitRef::new("work", UnitKind::Entity, "top")).unwrap_err(),
             t.path()
         ),
-        "error[L0031]: unknown entity `top` in library `work`\n  |\n  = help: library `work` holds no design units (its directory `<tmp>/none` does not exist); analyze the files into it first or fix its `NAME:PATH` mapping\n"
+        "error[L0031]: unknown entity `top` in library `work`\n |\n = help: library `work` holds no design units (its directory `<tmp>/none` does not exist); analyze the files into it first or fix its `NAME:PATH` mapping\n"
     );
     std::fs::create_dir(t.path().join("none")).unwrap();
     assert!(
@@ -183,12 +183,12 @@ fn errors() {
     let missing = Library::new("work", t.path().join("none"));
     assert_eq!(
         snap(&missing.read().unwrap_err(), t.path()),
-        "error[L0001]: library `work` not found\n  |\n  = help: yavs looked for `<tmp>/none/yavs-lib.toml`; analyze a file into this library first or fix the NAME:PATH mapping\n"
+        "error[L0001]: library `work` not found\n |\n = help: yavs looked for `<tmp>/none/yavs-lib.toml`; analyze a file into this library first or fix the NAME:PATH mapping\n"
     );
     let mut l = Libraries::new();
     assert_eq!(
         snap(&l.add_spec("oops").unwrap_err(), t.path()),
-        "error[L0020]: invalid library mapping `oops`\n  |\n  = help: expected NAME:PATH, e.g. `work:build/work`\n"
+        "error[L0020]: invalid library mapping `oops`\n |\n = help: expected NAME:PATH, e.g. `work:build/work`\n"
     );
 }
 
@@ -208,7 +208,7 @@ fn missing_dependency_names_the_user() {
     );
     assert_eq!(
         s,
-        "error[L0031]: unknown package `gone` in library `work`\n  |\n  = note: needed by package `work.A`\n  = help: library `work` has no package `gone`; analyze the file that defines it\n"
+        "error[L0031]: unknown package `gone` in library `work`\n |\n = note: needed by package `work.A`\n = help: library `work` has no package `gone`; analyze the file that defines it\n"
     );
 }
 
@@ -223,7 +223,7 @@ fn stale_hash() {
     );
     assert_eq!(
         s,
-        "error[L0034]: `<tmp>/a.vhd` changed on disk since it was analyzed into library `work`\n  |\n  = help: re-analyze it: `yavs analyze --std=2008 --work=work:<tmp>/work <tmp>/a.vhd`\n"
+        "error[L0034]: `<tmp>/a.vhd` changed on disk since it was analyzed into library `work`\n |\n = help: re-analyze it: `yavs analyze --std=2008 --work=work:<tmp>/work <tmp>/a.vhd`\n"
     );
     std::fs::remove_file(&a).unwrap();
     let s = snap(
@@ -266,7 +266,7 @@ fn cycle() {
     );
     assert_eq!(
         s,
-        "error[L0032]: dependency cycle between design units\n  |\n  = note: package `work.A` in <tmp>/a.vhd needs package `work.B` in <tmp>/b.vhd\n  = note: package `work.B` in <tmp>/b.vhd needs package `work.C` in <tmp>/c.vhd\n  = note: package `work.C` in <tmp>/c.vhd needs package `work.A` in <tmp>/a.vhd\n  = help: break the cycle, for example by moving shared declarations into a separate package\n"
+        "error[L0032]: dependency cycle between design units\n |\n = note: package `work.A` in <tmp>/a.vhd needs package `work.B` in <tmp>/b.vhd\n = note: package `work.B` in <tmp>/b.vhd needs package `work.C` in <tmp>/c.vhd\n = note: package `work.C` in <tmp>/c.vhd needs package `work.A` in <tmp>/a.vhd\n = help: break the cycle, for example by moving shared declarations into a separate package\n"
     );
 }
 
@@ -464,7 +464,7 @@ fn old_name_manifest() {
     std::fs::create_dir_all(&work.dir).unwrap();
     std::fs::write(work.dir.join(old), "format = 2\nname = \"work\"\n").unwrap();
     let want = format!(
-        "error[L0004]: library manifest `<tmp>/work/{old}` was written before the rename to yavs\n  |\n  = help: delete the library directory and re-analyze its files\n"
+        "error[L0004]: library manifest `<tmp>/work/{old}` was written before the rename to yavs\n |\n = help: delete the library directory and re-analyze its files\n"
     );
     assert!(work.has_manifest());
     assert_eq!(snap(&work.read().unwrap_err(), t.path()), want);
@@ -484,7 +484,7 @@ fn old_format_manifest() {
     std::fs::write(work.dir.join("yavs-lib.toml"), old).unwrap();
     assert_eq!(
         snap(&work.read().unwrap_err(), t.path()),
-        "error[L0004]: library manifest `<tmp>/work/yavs-lib.toml` has format version 2, this yavs reads version 4\n  |\n  = help: delete the library directory `<tmp>/work` and analyze its files again (a library of another format version is not converted)\n"
+        "error[L0004]: library manifest `<tmp>/work/yavs-lib.toml` has format version 2, this yavs reads version 4\n |\n = help: delete the library directory `<tmp>/work` and analyze its files again (a library of another format version is not converted)\n"
     );
     // Closures fail the same way, and analyzing into it fails early rather than overwriting.
     let mut libs = Libraries::new();

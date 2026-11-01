@@ -354,7 +354,7 @@ fn main() -> ExitCode {
             None => {
                 eprintln!("error: no such diagnostic code `{code}`");
                 if let Some(h) = explain::suggest_code(code, explain::Codes::All, true) {
-                    eprintln!("  = help: {h}");
+                    eprintln!(" = help: {h}");
                 }
                 ExitCode::from(2)
             }

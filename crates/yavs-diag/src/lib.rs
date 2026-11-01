@@ -932,7 +932,7 @@ mod tests {
         let path = utf8.display().to_string();
         let human = render(&back, &d, MessageFormat::Human, false);
         let want = format!(
-            "error[E0001]: m\n --> {path}:2:3\n  = note: label at 2:3: here\n  = note: secondary label at 1:1: there\n  = note: source of {path} changed since it was analysed; snippet omitted\n\n"
+            "error[E0001]: m\n--> {path}:2:3\n = note: label at 2:3: here\n = note: secondary label at 1:1: there\n = note: source of {path} changed since it was analysed; snippet omitted\n\n"
         );
         assert_eq!(human, want);
         assert_eq!(

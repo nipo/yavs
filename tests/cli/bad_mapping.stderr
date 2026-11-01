@@ -1,6 +1,6 @@
 error[L0020]: invalid library mapping `work`
-  |
-  = help: expected NAME:PATH, e.g. `work:build/work`
+ |
+ = help: expected NAME:PATH, e.g. `work:build/work`
 
 error: aborting due to 1 previous error
 

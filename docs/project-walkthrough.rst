@@ -101,8 +101,8 @@ Rebuild after an edit
 
     $ yavs run --work=work:build/work --map=rtl:build/rtl counter_tb
     error[L0034]: `/home/me/project/rtl/counter_pkg.vhd` changed on disk since it was analyzed into library `rtl`
-      |
-      = help: re-analyze it: `yavs analyze --std=2008 --work=rtl:build/rtl /home/me/project/rtl/counter_pkg.vhd`
+     |
+     = help: re-analyze it: `yavs analyze --std=2008 --work=rtl:build/rtl /home/me/project/rtl/counter_pkg.vhd`
 
 There are two ways to rebuild:
 
