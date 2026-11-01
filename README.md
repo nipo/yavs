@@ -78,7 +78,7 @@ From the [conformance report](docs/conformance.md) of 2026-10-29, commit `a3e958
 
 ## Quickstart
 
-Download the archive for your platform from the [releases](https://github.com/ru551n/yavs/releases) page, unpack it and put the directory on `PATH`. Every platform has one archive, with the Cranelift compiled tier built in and nothing else to install. See [`docs/install.rst`](docs/install.rst) for checks, the build variants and building from source. In a GitHub Actions workflow, [yavs-action](https://github.com/ru551n/yavs-action) installs it.
+Download the archive for your platform from the [releases](https://github.com/ru551n/yavs/releases) page, unpack it and put the directory on `PATH`. Every platform has one archive, with the Cranelift compiled tier built in and nothing else to install. See [`docs/install.rst`](docs/install.rst) for checks, the build variants and building from source.
 
 Then analyze files into a library (a directory) and run a top level:
 
@@ -88,6 +88,16 @@ yavs run --work=work:build/work hello_tb
 ```
 
 The example files are in [`docs/examples/`](docs/examples); [Getting started](https://yavs.readthedocs.io/en/latest/getting-started.html) goes on from here.
+
+### In GitHub Actions
+
+[yavs-action](https://github.com/ru551n/yavs-action) installs a release, checks it against its checksums and puts it on `PATH`; [`docs/ci.rst`](docs/ci.rst) has a whole job:
+
+```yaml
+- uses: ru551n/yavs-action@main
+  with:
+    version: 0.11.0
+```
 
 ## With VUnit
 
