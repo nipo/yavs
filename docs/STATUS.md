@@ -455,7 +455,7 @@ suite's pass list).
 ## performance (`tools/bench`, #387)
 
 The shared benchmark harness (`tools/bench/AGENTS.md`) measures every performance change the same way:
-`python3 -I tools/bench/run.py --compare A B`. Phase times come from `yavs run --time-report`. Testbenches of real projects (41, against sim1 and between binaries): `tools/realbench`. Analysis cells are batched calls since #745 (section "Analysis in batched calls"; tables before it are one call per file and not comparable). Current comparison with sim1 (rule 23: `--tier=auto`, total wall incl. analysis, cold and warm): section "Real-world performance suite: yavs against sim1, sim2 and sim4, head-to-head 8, 2026-10-28" (0.20 warm, 0.58 cold with the LLVM build, 0.21 and 0.57 with the Cranelift build; head-to-head 7 and 6 below it are the earlier ones), on the batched-call analysis basis (#745, both tools analyse consecutive files of a library in one call; head-to-head 1 to 5 were one call per file and are not comparable): geomean of the 41 realbench totals (libraries analysed too) 0.22 warm, 0.64 cold (the same run on the old per-file basis 0.24 and 0.42; head-to-head 5 had 0.23 and 0.43); own files + elab + run 0.23 and 0.49, elab + run 0.23 and 0.47, executed instructions yavs / sim1 0.31 and 0.60, tiny-test corpus 0.11 and 0.25, the h2h designs 0.56 and 0.78. The tables below are older measurements on the earlier host.
+`python3 -I tools/bench/run.py --compare A B`. Phase times come from `yavs run --time-report`. Testbenches of real projects (41, against sim1 and between binaries): `tools/realbench`. Analysis cells are batched calls since #745 (section "Analysis in batched calls"; tables before it are one call per file and not comparable). Baseline of the long CPU tests and SoC models: section "Real-world performance suite: baseline for long CPU tests and large SoC models, 2026-11-01". Current comparison with sim1 (rule 23: `--tier=auto`, total wall incl. analysis, cold and warm): section "Real-world performance suite: yavs against sim1, sim2 and sim4, head-to-head 8, 2026-10-28" (0.20 warm, 0.58 cold with the LLVM build, 0.21 and 0.57 with the Cranelift build; head-to-head 7 and 6 below it are the earlier ones), on the batched-call analysis basis (#745, both tools analyse consecutive files of a library in one call; head-to-head 1 to 5 were one call per file and are not comparable): geomean of the 41 realbench totals (libraries analysed too) 0.22 warm, 0.64 cold (the same run on the old per-file basis 0.24 and 0.42; head-to-head 5 had 0.23 and 0.43); own files + elab + run 0.23 and 0.49, elab + run 0.23 and 0.47, executed instructions yavs / sim1 0.31 and 0.60, tiny-test corpus 0.11 and 0.25, the h2h designs 0.56 and 0.78. The tables below are older measurements on the earlier host.
 
 Baseline of main at the commit that added the harness (release build, Intel Core Ultra 9 275HX, 24 CPUs,
 host shared with other agents; median CPU seconds of 3 runs, phase CPU in 10 ms steps, `--threads 1`):
@@ -6253,6 +6253,37 @@ elab cold 0.98 (instructions 0.96; `vai_weight_buffer` 0.65, `vai_pe_array` 0.72
 Also found: entries of files analysed by relative path are never read by `elab`/`run` (#799); in `tools/realbench`
 the libraries' std/ieee entries live in the corpus tool's store, so a run of `--phases run` alone without the analysis
 cells misses std/ieee units the analysis cells would have stored (the full suite is not affected).
+
+## Real-world performance suite: baseline for long CPU tests and large SoC models, 2026-11-01 (`tools/realbench`, `tools/bench`)
+
+Commit `a95d9ad1`, bench builds with the `clift` feature (what users get) and the `llvm` feature (the yardstick until Cranelift matches it), `--tier=auto`, one thread. Comparison with sim1 by the fair rule; `interp` is only the tier's own floor. Timed on cores 9 to 15, one process per core, siblings idle; host load median 10, p90 18, other agents on the other CCD. A re-check at `cb1a1295` (with #1001, #1005, #1008) moved instructions by at most 0.6 percent and cycles by at most 3, with no direction. Console equal to sim1 in every CPU workload cell, on every tier. Raw data kept locally.
+
+Run cell, warm, wall ratio to sim1 (GRLIB and Microwatt from a sitting with the CCD quiet, the others from the harness with it busy; a busy CCD makes Microwatt on Cranelift up to 4.93 and LLVM 3.48):
+
+| test | Cranelift | LLVM | Cranelift against own `interp`, wall (cycles) | instructions / sim1 | IPC Cranelift, LLVM, sim1 |
+|---|---:|---:|---:|---:|---|
+| `grlib_leon3mp` | 3.41 | 2.61 | 1.26 (1.20) | 2.11 | 1.78, 2.32, 2.81 |
+| `microwatt_coremark` | 3.76 | 3.25 | 1.14 (1.15) | 2.09 | 1.66, 1.82, 2.95 |
+| `neorv32_coremark` | 1.45 | 1.38 | 1.01 (1.00) | 1.10 | 2.01, 2.05, 2.66 |
+| `fletcher_bufferwriter_512` | 1.91 | 1.83 | 1.06 (1.02) | 1.63 | 2.45, 2.52, 2.86 |
+| geometric mean, with / without `grlib_leon3mp` | 2.44 / 2.18 | 2.15 / 2.02 | | | |
+
+**What this says.** On Cranelift `--tier=auto` is slower than the interpreter on the two worst tests, at fewer instructions; on LLVM it is not. The condition of #898 (Cranelift matches LLVM) is not met: 1.31 on GRLIB, 1.16 on Microwatt, 1.05 on NEORV32 CoreMark, 1.04 on fletcher. The compiled share's front-end misses are not inherent: misses per 1000 instructions on Microwatt, L1 instruction, instruction TLB, branch: sim1 0.27, 0.003, 1.47; Cranelift 1.42, 0.534, 5.55; LLVM 1.05, 0.069, 3.82; interpreter 0.57, 0.005, 3.59. Microwatt on Cranelift also varies 271 to 413 s between runs, depending on load on the same CCD; instructions stay within 1 percent.
+
+All 42 tests of the suite, two passes merged by the best cell, Cranelift build, load median 11 and 14, geometric mean yavs / sim1 (head-to-head 8 in brackets):
+
+| basis | warm | cold |
+|---|---:|---:|
+| total with libraries, 41 without `grlib_leon3mp` | 0.213 (0.206) | 0.589 (0.571) |
+| same, with `grlib_leon3mp` (42) | 0.227 (0.219) | 0.614 (0.594) |
+| own files + elab + run, 41 | 0.209 (0.213) | 0.491 (0.473) |
+| elab + run, 41 | 0.209 (0.215) | 0.489 (0.468) |
+
+Run instructions yavs / sim1 0.294, peak RSS 0.38. Designs (10, `xor_sig` left out): 0.56; tiny corpus: 526 of 527 faster, 2.42 s against 23.48 s. The difference from head-to-head 8 is not explained: different load and about 60 commits, no quiet A/B between them.
+
+sim1 wins these tests, full total warm / cold: `grlib_leon3mp` 3.10 / 3.32, `fletcher_bufferwriter_512` 1.81 / 1.97, `vai_window_gen_interlock` 1.48 / 1.81, `sc5_fifo_repack` 1.26 / 1.76, `fletcher_bufferreader` 1.12 / 1.21; on the run cell or cold only `hdlm_lfsr` 0.75 / 0.97 (run 1.35 s against 1.11 s), `sc5_timestamp` 0.73 / 1.09 (run 0.41 s against 0.30 s). The run dominates all of them. CoreMark cells: NEORV32 228 s against 157 s warm, 236 s cold; Microwatt 371 s against 75 s warm, 346 s cold (busy CCD; 276 s against 73 s warm with it quiet), peak RSS 263 and 443 MB against 235. The short `neorv32_*` rows (0.42 to 0.66) are start-up, not rate: sim1 retires 41 G instructions at IPC 1.99 at 4 s, carrying its code generation, and the same CPU at 150 s is the 1.45 above. The reducer of #908, by hand: 2.5 times sim1 in cycles at 1.08 times the instructions, IPC 0.48: locality.
+
+Next: `docs/performance.md` keeps head-to-head 8 until the maintainer decides. Throwaway experiments on this commit: a huge-page arena for Cranelift takes instruction TLB misses down 81 to 97 percent, cycles -10 percent all compiled on GRLIB and level under `auto`; a profile-guided build gains 2 to 8 percent on held-out designs; padding interpreter ops to 48 bytes costs at most 2.9 percent, so op density is no lever; record gathers repeat 95 to 98 percent of their leaves and scatters 85 to 90 percent of their runs on Microwatt and GRLIB; compiling more gains 10 percent on NEORV32 CoreMark, loses 4 to 7 on Microwatt and GRLIB. No proposal so far reaches parity with sim1 on GRLIB or Microwatt: they run about twice the instructions.
 
 ## Real-world performance suite: yavs against sim1, sim2 and sim4, head-to-head 8, 2026-10-28 (`tools/realbench`)
 
