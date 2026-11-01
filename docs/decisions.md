@@ -2493,6 +2493,16 @@ scalars; the on-disk format is implementation-defined, so it is fixed here (yavs
   keys and matching of lint waivers, one helper for both (`yavs_diag::files`, moved out of `yavs-lint`). The
   older `file` row keeps its own loose glob, so existing files keep working, and also takes a plain directory.
   A pattern that covers nothing is `W0111`, not an error: exclusion files are shared between configurations.
+- **One file, however it is spelled (2026-11-01, #1036 to #1041, after #1016 and #1032):** a path compared as
+  `std::path::absolute` text leaves `..` and symlinks as they are, so two spellings of one file differ.
+  `yavs_diag::files::resolve` is the one resolver (symlinks and `..` as far as the path exists, the rest
+  cleaned, no `\\?\` prefix on Windows); the debugger's file key, the lint source list, the lock a process
+  holds on a library directory and the report root use it. A `files` / `exclude` / `testbench_files` pattern
+  is tried against the file as spelled and as resolved, and a pattern without wildcards also resolved; a
+  pattern with `*` or `?` is not resolved. A pattern never leaves its base with `..`. Checked and not
+  affected: the `yavs analyze` warning filter and the `-- yavs coverage exclude` directive check, which
+  compare the path they were given with the path analysis stored. Display only, unchanged: the activity
+  tables shorten a path relative to the current directory lexically.
 - **Requirement (user):** "it should be easy to exclude by reading the report". Choices of the
   user, in order: identify an item by its text hash, not its line ("if the line moves then it
   is still valid"); keep the line number optional ("we can have a line number optional, but

@@ -1750,3 +1750,53 @@ fn a_source_map_matches_a_file_spelled_through_a_symlink() {
         Some(("link/t.vhd", "o.vhd"))
     ));
 }
+
+/// #1036: breakpoints set under one spelling of a file are replaced by a later list under another
+/// (here an empty one), so the run does not stop. True when the run ends without stopping.
+fn cleared_through(first: &str, second: &str) -> bool {
+    let d = tempdir("dap-spelling-clear");
+    std::fs::create_dir(d.join("sub")).expect("sub");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&*d, d.join("link")).expect("symlink");
+    std::fs::write(
+        d.join("t.vhd"),
+        "entity t is end;\narchitecture a of t is\nbegin\n  process begin\n    report \"here\";\n    wait;\n  end process;\nend;\n",
+    )
+    .expect("write");
+    let ok = yavs()
+        .current_dir(&d)
+        .args(["analyze", "--work=work:lib", "t.vhd"])
+        .status()
+        .expect("yavs")
+        .success();
+    assert!(ok, "analyze failed");
+    let mut child = spawn(&d, "t", &["--dap=stdio"]);
+    let _w = Watchdog::new(child.id(), 30);
+    let mut c = stdio_client(&mut child);
+    c.request("initialize", json!({"adapterID": "yavs"}));
+    c.request("launch", json!({}));
+    let r = c.request(
+        "setBreakpoints",
+        json!({"source": {"path": d.join(first)}, "breakpoints": [{"line": 5}]}),
+    );
+    assert_eq!(r["body"]["breakpoints"][0]["verified"], true, "{r}");
+    c.request(
+        "setBreakpoints",
+        json!({"source": {"path": d.join(second)}, "breakpoints": []}),
+    );
+    c.request("configurationDone", json!({}));
+    let end = c.until(|m| m["event"] == "stopped" || m["event"] == "terminated");
+    let _ = child.kill();
+    end["event"] == "terminated"
+}
+
+#[test]
+fn a_later_list_replaces_the_breakpoints_of_another_spelling() {
+    assert!(cleared_through("t.vhd", "t.vhd"));
+    assert!(cleared_through("t.vhd", "sub/../t.vhd"));
+    #[cfg(unix)]
+    {
+        assert!(cleared_through("t.vhd", "link/t.vhd"));
+        assert!(cleared_through("link/t.vhd", "t.vhd"));
+    }
+}

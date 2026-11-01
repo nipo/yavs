@@ -2330,14 +2330,20 @@ fn hierarchy(sh: &Shared) -> Json {
 /// `setBreakpoints`: replace a file's breakpoints.
 fn set_breakpoints(sh: &Shared, req: &Json) {
     let a = &req["arguments"];
-    let key = design::absolute(a["source"]["path"].as_str().unwrap_or_default());
+    let path = design::absolute(a["source"]["path"].as_str().unwrap_or_default());
+    // One file is one entry however the client spells it, so that a later list replaces this one.
+    let key = design::file_key(&path);
     let list = a["breakpoints"].as_array().cloned().unwrap_or_default();
     sh.link
         .kept
         .lock()
         .unwrap_or_else(|p| p.into_inner())
         .set_lines(&key, list);
-    let out = apply_lines(sh, &key);
+    let mut out = apply_lines(sh, &key);
+    // The answer names the file as the client did.
+    for b in out.iter_mut().filter(|b| b["verified"] == true) {
+        b["source"] = source(&path);
+    }
     sh.respond(req, json!({"breakpoints": for_client(out)}));
 }
 

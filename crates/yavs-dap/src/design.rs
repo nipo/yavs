@@ -468,32 +468,13 @@ pub(crate) fn absolute(p: &str) -> String {
 }
 
 /// The key a breakpoint's file is matched by: one file is one key however its path is spelled
-/// (`..`, symlinks, `\\?\` on Windows), as `yavs-sem`'s `same_file` takes it. A path that does not
-/// exist (a source map's original, a moved build tree) is resolved as far as it exists, then
-/// cleaned of `.` and `..`. Clients differ in the case of Windows drive letters.
-fn file_key(p: &str) -> String {
-    let a = std::path::absolute(p).unwrap_or_else(|_| p.into());
-    let c: Vec<_> = a.components().collect();
-    let resolved = (1..=c.len()).rev().find_map(|n| {
-        let head = c[..n]
-            .iter()
-            .collect::<std::path::PathBuf>()
-            .canonicalize()
-            .ok()?;
-        Some(c[n..].iter().fold(head, |mut r, x| {
-            match x {
-                std::path::Component::ParentDir => drop(r.pop()),
-                std::path::Component::CurDir => {}
-                x => r.push(x),
-            }
-            r
-        }))
-    });
-    let s = resolved.unwrap_or(a).display().to_string();
-    let s = match s.strip_prefix(r"\\?\UNC\") {
-        Some(unc) => format!(r"\\{unc}"),
-        None => s.strip_prefix(r"\\?\").map_or(s.clone(), str::to_string),
-    };
+/// (`..`, symlinks, `\\?\` on Windows), see [`yavs_diag::files::resolve`]. A path that does not
+/// exist (a source map's original, a moved build tree) is resolved as far as it exists. Clients
+/// differ in the case of Windows drive letters.
+pub(crate) fn file_key(p: &str) -> String {
+    let s = yavs_diag::files::resolve(std::path::Path::new(p))
+        .display()
+        .to_string();
     if cfg!(windows) { s.to_lowercase() } else { s }
 }
 

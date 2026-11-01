@@ -122,7 +122,8 @@ and stops at the first of them. It compiles nothing: to run changed sources, sta
 
 A run compiled from rewritten copies of your files can show the originals: ``--source-map=COMPILED=ORIGINAL``
 (repeatable; the copy must keep the lines of the original). Paths are matched as files, so a breakpoint or a map entry
-spelled through ``..`` or a symlink still finds its file, whether or not it exists on disk.
+spelled through ``..`` or a symlink still finds its file, whether or not it exists on disk. The breakpoints of a file
+are one list however the client spells its path: a later ``setBreakpoints`` for the file replaces them.
 
 "Add to Wave" (context menu of the Variables and Watch views and of a selection or word in a VHDL file) adds a signal or a
 process variable to the waveforms of a session with ``--surfer``, with its history since time 0; the item appears only in

@@ -445,7 +445,9 @@ impl Config {
         self.testbench_files.iter().any(|p| {
             place.covered_by(p)
                 || (!p.contains('/') && glob(p.as_bytes(), name.as_bytes()))
-                || glob(format!("**/{p}").as_bytes(), place.absolute.as_bytes())
+                || place
+                    .absolutes()
+                    .any(|a| glob(format!("**/{p}").as_bytes(), a.as_bytes()))
         })
     }
 

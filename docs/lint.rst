@@ -112,6 +112,8 @@ cannot be read is E0134 too.
 
 To leave files out, list them under ``exclude``: paths or globs, relative to the configuration file,
 of files or directories. A pattern that starts with ``**`` also matches files outside that directory.
+A file is matched however it is reached: through ``..`` or a symlink, a pattern for its real path or for the
+path through the link both name it (a pattern with ``*`` or ``?`` is matched as written, and against the real path).
 An excluded file is still read when another file needs it:
 
 .. code-block:: yaml
@@ -197,7 +199,9 @@ A waiver accepts a finding a project has decided about, with the reason. They li
        lines: [12, 45]               # omit to waive the rule in the whole file
        reason: kept until the block is replaced
 
-``rule: '*'`` covers every rule, and a bare file name matches that file in any directory. A waived
+``rule: '*'`` covers every rule, and a bare file name matches that file in any directory. The files
+are matched as for ``exclude``. A file the work library records is read with the standard the library
+recorded, whether you name it by its recorded path, through ``..`` or through a symlink. A waived
 finding is in no report and changes no exit status. An unknown key or rule in a waiver is E0134 like
 those of the configuration: a misspelled ``files`` or ``lines`` would leave a waiver that covers more than
 it says, and a misspelled rule would waive nothing.

@@ -1577,3 +1577,48 @@ end architecture;
     let (ok, again) = fsm_check(&tmp, "k.vhd", other);
     assert!(!ok && again.contains("E2024"), "{again}");
 }
+
+/// #1037: an exclusion file reached through a symlink, and a database holding a file reached
+/// through one, still take the files their patterns name.
+#[cfg(unix)]
+#[test]
+fn a_file_pattern_matches_through_a_symlink() {
+    let tmp = database("symlink");
+    std::os::unix::fs::symlink(&*tmp, tmp.join("alias")).expect("symlink");
+    std::fs::create_dir_all(tmp.join("src")).expect("dir");
+    std::fs::rename(tmp.join("cov_report.vhd"), tmp.join("src/cov_report.vhd")).expect("move");
+    let lib = format!("--work=work:{}/lib2", tmp.display());
+    let seen = |ex: &str, db: &str| {
+        let o = yavs(&tmp, &["cov", "report", db, "--exclude", ex, "--uncovered"]);
+        assert!(o.status.success(), "{}", text(&o.stderr));
+        (text(&o.stdout), text(&o.stderr))
+    };
+    for (file, pattern) in [
+        ("src/cov_report.vhd", "src/*.vhd"),
+        ("alias/src/cov_report.vhd", "src/*.vhd"),
+        ("alias/src/cov_report.vhd", "alias/src/cov_report.vhd"),
+        ("src/cov_report.vhd", "alias/src/cov_report.vhd"),
+        ("src/cov_report.vhd", "alias/src"),
+    ] {
+        assert!(yavs(&tmp, &["analyze", &lib, file]).status.success());
+        let o = yavs(
+            &tmp,
+            &["run", &lib, "--cov=sbt", "--cov-file=b.ycov", "cov_report"],
+        );
+        assert!(o.status.success(), "{}", text(&o.stderr));
+        write(
+            &tmp,
+            "ex.yaml",
+            &format!("exclude:\n  - kind: file\n    files: \"{pattern}\"\n"),
+        );
+        // Through the plain name of the exclusion file and through the symlink.
+        for ex in ["ex.yaml", "alias/ex.yaml"] {
+            let (rows, warnings) = seen(ex, "b.ycov");
+            assert_eq!(rows, "", "{file} by {pattern} in {ex}");
+            assert!(
+                !warnings.contains("W0111"),
+                "{file} by {pattern} in {ex}: {warnings}"
+            );
+        }
+    }
+}

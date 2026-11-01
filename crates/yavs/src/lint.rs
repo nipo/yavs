@@ -238,22 +238,17 @@ fn sources(a: &Args, cfg: &Config, libs: &Libraries, work: &str) -> yavs_lib::Re
         }
     }
     files.extend(list);
+    // A file is one file however it is spelled: a recorded one keeps the library's standard.
+    let key = |p: &Path| yavs_diag::files::resolve(p);
     let mut seen = std::collections::HashSet::new();
-    files.retain(|f| {
-        let abs = std::path::absolute(f).unwrap_or_else(|_| f.clone());
-        seen.insert(yavs_diag::files::lexical(&abs))
-    });
-    let abs: Vec<PathBuf> = files
-        .iter()
-        .map(|f| std::path::absolute(f).unwrap_or_else(|_| f.clone()))
-        .collect();
+    files.retain(|f| seen.insert(key(f)));
     let mut out: Vec<Source> = recorded
         .into_iter()
-        .filter(|s| abs.contains(&s.path))
+        .filter(|s| seen.contains(&key(&s.path)))
         .collect();
-    let known: Vec<PathBuf> = out.iter().map(|s| s.path.clone()).collect();
-    for (f, abs) in files.into_iter().zip(&abs) {
-        if !known.contains(abs) && !out.iter().any(|s| s.path == f) {
+    let known: Vec<PathBuf> = out.iter().map(|s| key(&s.path)).collect();
+    for f in files {
+        if !known.contains(&key(&f)) && !out.iter().any(|s| s.path == f) {
             out.push(Source {
                 library: yavs_lib::fold(work),
                 path: f,

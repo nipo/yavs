@@ -1,6 +1,6 @@
 //! `yavs cov merge`, `yavs cov report` and `yavs cov rank` (docs/cli-contract.md section 5).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::Subcommand;
@@ -404,7 +404,6 @@ fn excluded(
 /// Split a path into (Windows style, components) with `.` and `..` collapsed lexically. A path
 /// is Windows style when it starts with a drive letter or `\\` / `//`: then both separators
 /// split, `\\?\` (verbatim) prefixes drop and the drive letter folds to lower case.
-// ponytail: lexical, symlinks are not resolved; canonicalize both sides if that ever matters.
 fn components(p: &str) -> (bool, Vec<String>) {
     let b = p.as_bytes();
     let win = (b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':')
@@ -439,6 +438,33 @@ fn components(p: &str) -> (bool, Vec<String>) {
 /// drive letter in any case, a `\\?\` prefix or `.`/`..` components. Windows paths compare
 /// case-insensitively and are shown with `/`.
 fn relative(file: &str, root: &str) -> String {
+    let lexical = relative_lexical(file, root);
+    if lexical != file || !Path::new(file).is_absolute() || !Path::new(root).is_absolute() {
+        return lexical;
+    }
+    // A symlink in the file or the root: compare what they resolve to. The shown path is the
+    // resolved one, as `--root` is not about how the file was reached.
+    match relative_lexical(&resolved(file), &resolved(root)) {
+        r if Path::new(&r).is_absolute() => file.to_string(),
+        r => r,
+    }
+}
+
+/// `p` resolved as [`yavs_diag::files::resolve`] does, remembered: a report asks per item.
+fn resolved(p: &str) -> String {
+    thread_local!(static MEMO: std::cell::RefCell<std::collections::HashMap<String, String>> = Default::default());
+    MEMO.with_borrow_mut(|m| {
+        m.entry(p.to_string())
+            .or_insert_with(|| {
+                yavs_diag::files::resolve(Path::new(p))
+                    .display()
+                    .to_string()
+            })
+            .clone()
+    })
+}
+
+fn relative_lexical(file: &str, root: &str) -> String {
     let ((fw, f), (rw, r)) = (components(file), components(root));
     let same = |a: &String, b: &String| {
         if fw {

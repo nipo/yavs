@@ -1453,3 +1453,72 @@ fn usage() {
     assert_eq!(status(&o), 2);
     assert!(stderr(&o).contains("`fatal`"), "{}", stderr(&o));
 }
+
+/// #1037: a waiver or `exclude` pattern names a file however the file, or the pattern, passes a
+/// symlink or `..`.
+#[cfg(unix)]
+#[test]
+fn patterns_match_a_file_spelled_through_a_symlink() {
+    let dir = tempdir("lint-symlink");
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    std::fs::create_dir_all(dir.join("sub")).unwrap();
+    std::os::unix::fs::symlink(dir.join("src"), dir.join("link")).unwrap();
+    std::fs::write(
+        dir.join("src/t.vhd"),
+        "entity t is end entity;\narchitecture r of t is\nbegin\n  p : process begin report \"x\"; end process;\nend architecture;\n",
+    )
+    .unwrap();
+    let reported = |file: &str| {
+        let o = yavs(&dir, &["lint", "--message-format=short", file]);
+        stderr(&o).contains("lint_770")
+    };
+    for file in ["src/t.vhd", "sub/../src/t.vhd", "link/t.vhd"] {
+        assert!(reported(file), "{file}");
+        for pattern in ["src/t.vhd", "link/t.vhd", "src", "link/", "sub/../link"] {
+            std::fs::write(
+                dir.join("yavs-lint.yaml"),
+                format!("exclude: ['{pattern}']\n"),
+            )
+            .unwrap();
+            assert!(!reported(file), "exclude {pattern} for {file}");
+            std::fs::remove_file(dir.join("yavs-lint.yaml")).unwrap();
+            std::fs::write(
+                dir.join("yavs-lint-waivers.yaml"),
+                format!("waivers:\n  - rule: lint_770\n    files: '{pattern}'\n"),
+            )
+            .unwrap();
+            assert!(!reported(file), "waiver {pattern} for {file}");
+            std::fs::remove_file(dir.join("yavs-lint-waivers.yaml")).unwrap();
+        }
+    }
+}
+
+/// #1041: a file the work library records keeps the library's standard however it is named. The
+/// file uses `context` as a name, which VHDL-2008 reserves.
+#[cfg(unix)]
+#[test]
+fn a_recorded_file_named_through_a_symlink_keeps_its_standard() {
+    let dir = tempdir("lint-recorded");
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    std::fs::create_dir_all(dir.join("sub")).unwrap();
+    std::os::unix::fs::symlink(dir.join("src"), dir.join("link")).unwrap();
+    std::fs::write(
+        dir.join("src/c.vhd"),
+        "entity c is end entity;\narchitecture r of c is\n  signal context : bit;\nbegin\n  p : process begin report \"x\"; end process;\nend architecture;\n",
+    )
+    .unwrap();
+    let o = yavs(
+        &dir,
+        &["analyze", "--std", "93", "--work=work:w", "src/c.vhd"],
+    );
+    assert_eq!(status(&o), 0, "{}", stderr(&o));
+    for file in ["src/c.vhd", "link/c.vhd", "sub/../src/c.vhd"] {
+        let o = yavs(
+            &dir,
+            &["lint", "--message-format=short", "--work=work:w", file],
+        );
+        let said = stderr(&o);
+        assert!(said.contains("lint_770"), "{file}: {said}");
+        assert!(!said.contains("E0002"), "{file}: {said}");
+    }
+}

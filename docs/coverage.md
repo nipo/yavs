@@ -155,7 +155,7 @@ is not underlined at the wrong place.
 it also gives the result an input decides alone.
 
 Source paths are relative to the current directory (`--root DIR` changes that; a file outside it keeps
-its full path). A branch is named by its arm in the source: `if cond`, `elsif cond`, `else`, `when
+its full path; a directory reached through a symlink or `..` is the same directory). A branch is named by its arm in the source: `if cond`, `elsif cond`, `else`, `when
 choice` for a `case` alternative or a `when` of an assignment, `(no arm taken)` for the implicit arm of
 an `if` or conditional assignment without `else`. Open
 `cov-html/index.html` to click through the missed lines. Edit `exclusions.yaml`, deleting the
@@ -660,7 +660,7 @@ exclude:
     reason: generated code
 ```
 
-`files` and `files_exclude` work as they do in a [lint waiver](lint.rst): one word or a list, each a
+`files` and `files_exclude` work as they do in a [lint waiver](lint.rst), also for a file or an exclusion file reached through a symlink: one word or a list, each a
 file, a plain directory or a pattern where `*` and `?` stop at `/` and `**` does not, relative to the
 directory of the exclusion file. `files_exclude` wins, and without `files` it means every file except
 those. A pattern reaches only below that directory (`..` does not leave it); for a file elsewhere, start it with

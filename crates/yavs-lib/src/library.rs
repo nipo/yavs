@@ -106,7 +106,10 @@ impl Library {
     /// lock, or the library cannot be locked) and whether this process holds the exclusive lock.
     fn lock_shared(&self) -> Result<(Option<File>, bool)> {
         let lock_path = self.dir.join(LOCK_FILE);
-        let held = std::path::absolute(&self.dir).is_ok_and(|k| HELD.lock().unwrap().contains(&k));
+        let held = HELD
+            .lock()
+            .unwrap()
+            .contains(&yavs_diag::files::resolve(&self.dir));
         let opened = if held {
             Ok(None)
         } else {
@@ -225,7 +228,7 @@ impl Library {
             })?;
         self.acquire(&lock, true)
             .map_err(|e| io("L0011", "lock", &lock_path, &e))?;
-        let key = std::path::absolute(&self.dir).unwrap_or_else(|_| self.dir.clone());
+        let key = yavs_diag::files::resolve(&self.dir);
         HELD.lock().unwrap().push(key.clone());
         // Parsed before the lock was ours: another process may have written since.
         *self.parsed.lock().unwrap() = None;

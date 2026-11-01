@@ -867,3 +867,38 @@ fn fail_under_in_json_messages() {
         "{err}"
     );
 }
+
+/// #1038: `--root` and the database name one directory through a symlink or `..`.
+#[cfg(unix)]
+#[test]
+fn root_strips_a_directory_however_it_is_reached() {
+    let tmp = database("root-link");
+    std::fs::create_dir_all(tmp.join("sub")).expect("dir");
+    std::os::unix::fs::symlink(&*tmp, tmp.join("link")).expect("symlink");
+    let stripped = |db: &str, root: &str| {
+        let o = yavs(&tmp, &["cov", "report", db, "--uncovered", "--root", root]);
+        assert!(o.status.success(), "{}", text(&o.stderr));
+        let rows = text(&o.stdout);
+        let row = rows.lines().next().expect("a row");
+        row.contains("cov_report.vhd:") && !row.contains("/cov_report.vhd")
+    };
+    // The database holds the file as `<tmp>/cov_report.vhd`.
+    for root in [".", "link", "sub/..", "link/sub/.."] {
+        assert!(stripped("a.ycov", root), "{root}");
+    }
+    // And as `<tmp>/link/cov_report.vhd`.
+    let lib = format!("--work=work:{}/lib2", tmp.display());
+    assert!(
+        yavs(&tmp, &["analyze", &lib, "link/cov_report.vhd"])
+            .status
+            .success()
+    );
+    let o = yavs(
+        &tmp,
+        &["run", &lib, "--cov=sbt", "--cov-file=l.ycov", "cov_report"],
+    );
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    for root in ["link", "link/sub/.."] {
+        assert!(stripped("l.ycov", root), "{root}");
+    }
+}

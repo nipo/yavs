@@ -1069,3 +1069,26 @@ fn readers_and_writers_in_two_processes() {
     assert!(n > 0);
     assert_eq!(record_files(&lib).len(), 2);
 }
+
+/// #1040: the directory of a library held by this process is the same under any spelling, so a
+/// read through a symlink does not wait for the process's own lock.
+#[cfg(unix)]
+#[test]
+fn a_symlinked_spelling_of_a_held_library_does_not_wait() {
+    let (t, _, work, _) = setup();
+    let link = t.path().join("link");
+    std::os::unix::fs::symlink(&work.dir, &link).unwrap();
+    let session = work.session().unwrap();
+    for dir in [link.clone(), t.path().join("sub/../work")] {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(Library::new("alias", dir).read().is_ok());
+        });
+        // A wait is for ever: the thread is left behind and the test fails.
+        assert!(
+            rx.recv_timeout(std::time::Duration::from_secs(10)).is_ok(),
+            "the read waits for the lock this process holds"
+        );
+    }
+    drop(session);
+}

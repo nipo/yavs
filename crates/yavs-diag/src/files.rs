@@ -41,15 +41,64 @@ pub fn lexical(path: &Path) -> PathBuf {
     out
 }
 
+/// The absolute path of the file `path` names: symlinks and `..` resolved as far as the path
+/// exists, the rest cleaned of `.` and `..`, and no `\\?\` prefix on Windows. Two spellings of one
+/// file give one path, which `std::path::absolute` does not (it leaves both as they are).
+pub fn resolve(path: &Path) -> PathBuf {
+    let a = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    let c: Vec<_> = a.components().collect();
+    let resolved = (1..=c.len()).rev().find_map(|n| {
+        let head = c[..n].iter().collect::<PathBuf>().canonicalize().ok()?;
+        Some(c[n..].iter().fold(head, |mut r, x| {
+            match x {
+                std::path::Component::ParentDir => drop(r.pop()),
+                std::path::Component::CurDir => {}
+                x => r.push(x),
+            }
+            r
+        }))
+    });
+    let r = resolved.unwrap_or(a);
+    let Some(s) = r.to_str() else { return r };
+    match s.strip_prefix(r"\\?\UNC\") {
+        Some(unc) => PathBuf::from(format!(r"\\{unc}")),
+        None => PathBuf::from(s.strip_prefix(r"\\?\").unwrap_or(s)),
+    }
+}
+
+/// [`resolve`], remembered: a pattern is asked about every file and finding.
+fn resolve_memo(path: &Path) -> PathBuf {
+    thread_local!(static MEMO: std::cell::RefCell<std::collections::HashMap<PathBuf, PathBuf>> = Default::default());
+    MEMO.with_borrow_mut(|m| {
+        m.entry(path.to_path_buf())
+            .or_insert_with(|| resolve(path))
+            .clone()
+    })
+}
+
 /// A file as a pattern sees it.
 pub struct Place {
     /// Relative to the directory of the file holding the pattern, when the file is under it.
     relative: Option<String>,
     pub absolute: String,
+    /// The same with symlinks resolved, when that differs: a pattern may name either.
+    resolved: Option<Box<Place>>,
+    /// The directory of the file holding the pattern.
+    base: PathBuf,
 }
 
 impl Place {
     pub fn new(file: &Path, base: &Path) -> Place {
+        let mut p = Place::lexical(file, base);
+        let (file, base) = (resolve(file), resolve(base));
+        let r = Place::lexical(&file, &base);
+        if r.absolute != p.absolute || r.relative != p.relative {
+            p.resolved = Some(Box::new(r));
+        }
+        p
+    }
+
+    fn lexical(file: &Path, base: &Path) -> Place {
         let (file, base) = (lexical(file), lexical(base));
         Place {
             relative: file
@@ -57,12 +106,59 @@ impl Place {
                 .ok()
                 .map(|p| p.to_string_lossy().replace('\\', "/")),
             absolute: file.to_string_lossy().replace('\\', "/"),
+            resolved: None,
+            base,
         }
+    }
+
+    /// The absolute path as spelled, then resolved when that differs.
+    pub fn absolutes(&self) -> impl Iterator<Item = &str> {
+        std::iter::once(self.absolute.as_str())
+            .chain(self.resolved.iter().map(|r| r.absolute.as_str()))
     }
 
     /// Whether the pattern names the file or a directory above it. A pattern is relative to the
     /// base; one that starts with `/` or `**` also matches the absolute path, for files outside.
     pub fn covered_by(&self, pattern: &str) -> bool {
+        self.covered_here(pattern)
+            || self
+                .resolved
+                .as_ref()
+                .is_some_and(|r| r.covered_here(pattern))
+            || self.literal(pattern)
+    }
+
+    /// A pattern without wildcards names a path that may itself pass a symlink: it covers the
+    /// file when both resolve to one path, or to a directory above it.
+    // ponytail: a wildcard pattern is not resolved, so `link/*.vhd` does not match a file recorded
+    // as `src/c.vhd`; resolve the literal head of a pattern if that is ever asked for.
+    fn literal(&self, pattern: &str) -> bool {
+        // A pattern reaches only below its base: `..` does not leave it.
+        let mut depth = 0_i32;
+        for c in Path::new(pattern).components() {
+            depth += match c {
+                std::path::Component::ParentDir => -1,
+                std::path::Component::Normal(_) => 1,
+                _ => 0,
+            };
+            if depth < 0 {
+                return false;
+            }
+        }
+        if pattern.contains(['*', '?']) {
+            return false;
+        }
+        let target = resolve_memo(&self.base.join(pattern.trim_end_matches('/')));
+        let target = target.to_string_lossy().replace('\\', "/");
+        let me = self
+            .resolved
+            .as_ref()
+            .map_or(&self.absolute, |r| &r.absolute);
+        me.strip_prefix(&target)
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+    }
+
+    fn covered_here(&self, pattern: &str) -> bool {
         let pattern = pattern.trim_end_matches('/');
         let covers = |path: &str| {
             let mut upto = path;
