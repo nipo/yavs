@@ -171,6 +171,10 @@ default, `llvm`, `clift`, `llvm,clift`; `cargo test --workspace` 1232 / 1355 / 1
 543/544 (`file_append_2019`, the same on main: #806). CI: the `clift` job (clippy, tests,
 gc-stress, difftest smoke) and the `auto3` step. Flaky once: #805.
 
+### CI scope (#1014, 2026-11-01)
+
+`tools/ci-plan.py` picks what `ci.yml` runs from the changed files: prose runs no build, user guide pages and the two packages run only the tests that read them, everything else runs all Linux jobs, and Windows joins for source and build files. `conformance.yml` has a path filter and finishes on every main commit it runs for (`docs/decisions.md` "CI scope").
+
 ### Conformance report (#780, 2026-10-26)
 
 `tools/conformance/run.py` generates `docs/conformance.md` (and `.json`): pass counts of the differential corpus per group and thread count, the reference simulators' own tests, the discrepancy catalogue, the analysis corpora against the recorded sim1 lists, the UVVM and OSVVM suites, neorv32 and GRLIB LEON3 runs, platforms and known limits. The `conformance` workflow regenerates the CI-capable parts on `main` and release tags and checks the committed copy (`tools/conformance/AGENTS.md`). Open: waveform equivalence on real designs (a slot in the report), a public page (maintainer's decision).

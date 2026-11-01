@@ -3,20 +3,50 @@
 # outside the repository. On main a stale committed report is a warning; on a release tag it fails the run.
 # It also runs cocotb's own regression over VHPI (tools/cocotb, a pinned cocotb from PyPI and its tests
 # from GitHub); a failing job there fails the run.
+# A commit that changes none of what the report reads has no run: its result is that of the last run
+# (docs/decisions.md "CI scope"). A manual run and a tag push ignore `paths`, and RELEASING.md uses that.
 name: conformance
 
 on:
   push:
     branches: [main]
     tags: ["v[0-9]*"]
+    # Later patterns win. Everything except what the report and its tools do not read.
+    paths:
+      - "**"
+      - "!**/*.md"
+      - "!docs/**"
+      - "!release_notes/**"
+      - "!editors/**"
+      - "!fuzz/**"
+      - "!LICENSE*"
+      - "!context7.json"
+      - "!.readthedocs.yaml"
+      - "!.github/dependabot.yml"
+      - "!.github/workflows/*.yml"
+      - "!tools/stepcount/**"
+      - "!tools/release/**"
+      - "!tools/claim"
+      - "!tools/build-bench.sh"
+      - "!tools/check-sim1.sh"
+      - "!tools/ci-plan.py"
+      - "docs/conformance*"
+      - "docs/design/simulator-discrepancies.md"
+      - "lib/**"
+      - "tests/**"
+      - "tools/waveq/**"
+      - ".github/workflows/conformance.yml"
+      - ".github/workflows/ci.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# On main and on tags every commit has a group of its own and finishes (as in ci.yml), so a commit
+# that changes results has a result and a newer push does not cancel a report being made.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+  group: ${{ github.workflow }}-${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
 
 env:
   CARGO_TERM_COLOR: always

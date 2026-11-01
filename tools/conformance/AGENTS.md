@@ -45,7 +45,7 @@ report generator or regenerate the report (#780).
 
 ## 5. How to work here
 
-The CI parts need no local run: download the `conformance-report` artifact of a green `conformance` run and run `run.py --report-only --out <dir>` on it to refresh the committed report (the local records stay).
+The CI parts need no local run: download the `conformance-report` artifact of a green `conformance` run and run `run.py --report-only --out <dir>` on it to refresh the committed report (the local records stay). A commit that changes nothing the report reads has no run (the `paths` list of `conformance.yml`; `gh workflow run conformance.yml --ref main` makes one); a new input of this tool outside `crates/`, `lib/`, `tests/` and the tools it calls goes on that list.
 
 ```sh
 tools/fetch-corpus.sh

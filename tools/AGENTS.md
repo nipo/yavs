@@ -22,6 +22,7 @@ Read the root `AGENTS.md` first. This file is for an agent about to change or ru
 | `update-ieee-libs.sh [--write]` | Re-fetch the pinned VASG commit, verify `lib/UPSTREAM.sha256`, derive, compare (default) or rewrite |
 | `gen_native_md.py` | Generate `lib/NATIVE.md` (`python3 -I tools/gen_native_md.py > lib/NATIVE.md`) |
 | `check-sim1.sh [2008|2019]` | Analyze `lib/` with the reference simulator in `lib/ORDER.md` order (scratch `~/.cache/rsim-libs/work`, `YAVS_LIBS_SCRATCH`) |
+| `ci-plan.py` | What `ci.yml` runs for the changed files (the `plan` job, `docs/decisions.md` "CI scope"); `--selftest` holds the rules |
 | `conformance/` | The conformance report generator: runs the evidence suites, writes `docs/conformance.md` and `.json` (`tools/conformance/AGENTS.md`) |
 | `release/bump.py X.Y.Z`, `release/bump.py --check [X.Y.Z]` | Set or check the one version of yavs, vunit-yavs and the VS Code extension in every spot (root `RELEASING.md`); `--check` is the `versions` job of `ci.yml` and `release.yml` |
 | `claim <take|release|list|stale|core|build>` | Issue claims on GitHub for multi-agent work, plus host-local core and build locks (root `AGENTS.md` section 3a; `claim selftest` checks the comment parser) |

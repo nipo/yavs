@@ -12770,7 +12770,8 @@ duplicate implementations without changing diagnostics (issue #894; implemented 
   pull request touches path, file or process sensitive code: `crates/yavs`, `yavs-cache`, `yavs-lib`,
   `yavs-ffi`, `yavs-vhpi`, `tools/`, `python/vunit-yavs/` (with the token server), `editors/vscode/`,
   `.github/` and `Cargo.lock` (the last four crate and file entries are the agent's reading of
-  "path, file or process sensitive"; trim the `sensitive` pattern there to change it).
+  "path, file or process sensitive"). Superseded by "CI scope": the pattern is `WINDOWS` in
+  `tools/ci-plan.py`.
 - `nightly.yml` runs `ci.yml` on main every night with every platform (Linux x86_64, Linux aarch64,
   Windows x86_64). A red run opens one issue labelled `nightly`, or comments on the open one.
 - A release tag or a release dry run (`release.yml` calls `ci.yml`) and a manual run of `ci.yml`
@@ -12780,6 +12781,15 @@ duplicate implementations without changing diagnostics (issue #894; implemented 
 - Job names stay `check (<os>)`, `clift (<os>)`, `corpus`, `vunit-yavs (<os>)`, `versions`. A skipped
   platform has no job, so only the `ubuntu-24.04` names can be required checks on main
   (maintainer, 2026-10-30; agent cc-host1/ci).
+
+## CI scope (#1014, 2026-11-01)
+
+- **Decisions (maintainer, 2026-11-01):** the goal is faster feedback per commit, with docs-only commits very quick and runner minutes secondary; no coverage is lost, only path filters, dedupe and caching; Windows and other non-Linux jobs run on source, build and platform files and skip docs, test data and tooling; the change applies to later commits only.
+- `tools/ci-plan.py` (the `plan` job) sets the scope from the changed files. **none:** files no job reads (prose, release note fragments, tools CI does not run): no build. **light:** user guide pages, `docs/examples`, `python/vunit-yavs`, `editors/vscode`: only the Rust and package tests that read them, or all package tests when the package changed. **full:** anything else, including a file on no list, and every schedule, manual and tag run. Rationale: tests read the pages (`docs_examples`, `docs_debugger`, `env_registry`, the `reference` unit tests, `test_docs.py`), so a page change is not simply skippable; a new test that reads a listed file changes the lists in the same commit.
+- `ci.yml` and `docs.yml` have no workflow path filter, so every commit has a CI run and a waiter never hangs. `check`, `clift`, `corpus` and `vunit-yavs` are required checks on main and a skipped matrix job does not report its expanded name, so the `skipped` job reports the left out names as passed.
+- Windows: every crate, `lib/`, and the build files (`Cargo.toml`, `Cargo.lock`, `.cargo/`, `ci.yml`). This replaces the crate list of "CI matrix": a Windows-only bug in `yavs-lint` (d0e8826a), a crate not on that list, is why a list is not safe. Off: `tools/`, `editors/vscode/`, other workflows, docs and test data under `crates/*/tests`. A `python/vunit-yavs` change runs only `vunit-yavs` on Windows. The nightly run covers the rest within a day. The pattern is `WINDOWS` in `tools/ci-plan.py`.
+- `conformance.yml` has a `paths` filter, and a push of a tag or a manual run ignores it. It no longer cancels on main: half of its runs were cancelled by a newer push, so a result-changing commit often had no result and a report needed a quiet main.
+- Audit evidence: the comments on issue #1014.
 
 ## Vendor libraries from the user's install (#119, 2026-10-31)
 

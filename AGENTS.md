@@ -127,9 +127,11 @@ ownership, commit identity, shared-host limits) do not apply to them.
 ### Git and collaboration
 17. **The maintainer's agents push straight to `main`** (no branches, no PRs); everyone else opens a
     pull request (`CONTRIBUTING.md`). CI
-    (`.github/workflows/ci.yml`) runs the rule 13 checks (plus the analysis corpus gate) on Linux x86_64 for every push,
-    and on Windows x86_64 too when the push touches path or process sensitive code; the nightly run and a release
-    run Linux aarch64 as well (`docs/decisions.md` "CI matrix"): watch your run (`gh run watch`) and fix a red one. Rebase on
+    (`.github/workflows/ci.yml`) runs the rule 13 checks (plus the analysis corpus gate) on Linux x86_64 for every push
+    that can change them, and on Windows x86_64 too when the push touches source or build files; the nightly run and a release run every job on Linux aarch64 as well (`docs/decisions.md` "CI matrix", "CI
+    scope"). Every commit has a CI run: a prose commit finishes in a minute with no build, and the `conformance`,
+    `VS Code extension` and `cocotb-windows` workflows have no run for a commit that changes nothing they read, which
+    is not a failure. Watch your CI run (`gh run watch`) and fix a red one. Rebase on
     `origin/main` first; push only with no rebase in progress and a clean tree. If the push is
     rejected, rebase again and re-run the checks. **Before every push run
     `git diff --stat origin/main..HEAD`** (or `git show --stat HEAD`) and confirm every path is

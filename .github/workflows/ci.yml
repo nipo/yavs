@@ -1,9 +1,13 @@
 # Root AGENTS.md rule 13 (#134, #888). The platform set follows the maintainer's matrix decision
-# (docs/decisions.md "CI matrix"): every push and pull request runs Linux x86_64 only; the `plan` job
-# adds the Windows jobs when the push touches path, file or process sensitive code; a nightly run
-# (nightly.yml), a manual run and a release tag (release.yml calls this file) run all three platforms.
+# (docs/decisions.md "CI matrix", "CI scope"): the `plan` job (tools/ci-plan.py) reads the changed
+# files. Every push and pull request runs Linux x86_64; Windows joins for source and build files;
+# prose runs no build, user guide pages only the tests that read
+# them. A nightly run (nightly.yml), a manual run and a release tag (release.yml calls this file) run
+# every job on all three platforms.
 # Job names are stable (`check (<os>)`, `clift (<os>)`, `corpus`, `vunit-yavs (<os>)`): a skipped
-# platform has no job, so only the Linux names can be required checks on main.
+# platform has no job, so only the Linux names can be required checks on main, and `skipped` reports
+# those names as passed when the scope leaves their job out. This workflow runs on every commit, so
+# each commit has a CI result.
 # The `check` job builds default features only; the `clift` job builds and tests the Cranelift tier
 # (`--features clift`, #481) and runs the difftest smoke. The LLVM tier (`--features llvm`) has no CI
 # job since 2026-10-30 (#898). The qemu/Wine ffi runs are not part of CI yet.
@@ -33,47 +37,41 @@ env:
   CARGO_PROFILE_DEV_DEBUG: 0
 
 jobs:
-  # Which platforms run. github.event_name and github.ref are the caller's in a called workflow, so a
-  # tag run of release.yml and a nightly.yml run are "full" without an input. full = every platform;
-  # otherwise Linux x86_64 plus Windows when a changed file matches `sensitive`.
+  # What runs. github.event_name and github.ref are the caller's in a called workflow, so a tag run
+  # of release.yml and a nightly.yml run are "full" on every platform without an input.
   plan:
     runs-on: ubuntu-24.04
     outputs:
+      scope: ${{ steps.p.outputs.scope }}
+      pkg: ${{ steps.p.outputs.pkg }}
       os: ${{ steps.p.outputs.os }}
       vunit_os: ${{ steps.p.outputs.vunit_os }}
+      stubs: ${{ steps.p.outputs.stubs }}
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+      - run: python3 -I tools/ci-plan.py --selftest
       - id: p
         env:
           EVENT: ${{ github.event_name }}
           REF: ${{ github.ref }}
           BEFORE: ${{ github.event.before }}
           BASE: ${{ github.event.pull_request.base.sha }}
-        run: |
-          # CLI, cache, library paths, FFI/VHPI loading, tools, vunit-yavs (with the token server), the
-          # VS Code extension, the workflows themselves and the lock file (new dependencies).
-          sensitive='^(crates/(yavs|yavs-cache|yavs-lib|yavs-ffi|yavs-vhpi)/|tools/|python/vunit-yavs/|editors/vscode/|\.github/|Cargo\.lock$)'
-          full=false; windows=false
-          case "$EVENT" in
-            push|pull_request)
-              [[ "$REF" == refs/tags/* ]] && full=true
-              if [[ $full == false ]]; then
-                if [[ "$EVENT" == pull_request ]]; then range="$BASE...HEAD"; else range="$BEFORE..HEAD"; fi
-                if [[ "$BEFORE" =~ ^0+$ ]] || ! files=$(git diff --name-only $range); then
-                  echo "::notice::no usable diff range ($range): Windows jobs on"; windows=true
-                elif grep -Eq "$sensitive" <<<"$files"; then
-                  echo "::notice::Windows jobs on: $(grep -E "$sensitive" <<<"$files" | head -n3 | paste -sd' ')"; windows=true
-                fi
-              fi ;;
-            *) full=true ;;  # schedule, workflow_dispatch
-          esac
-          os='["ubuntu-24.04"'; vunit=$os
-          if [[ $full == true ]]; then os="$os,\"ubuntu-24.04-arm\""; fi
-          if [[ $full == true || $windows == true ]]; then os="$os,\"windows-latest\""; vunit="$vunit,\"windows-latest\""; fi
-          echo "os=$os]" >> "$GITHUB_OUTPUT"; echo "vunit_os=$vunit]" >> "$GITHUB_OUTPUT"
-          echo "platforms: $os] (vunit-yavs $vunit])"
+        run: python3 -I tools/ci-plan.py
+
+  # The required check names of the jobs this change does not need. A skipped matrix job does not
+  # report its expanded name, so a required check would wait for it for ever.
+  skipped:
+    name: ${{ matrix.check }}
+    needs: plan
+    if: needs.plan.outputs.stubs != '[]'
+    strategy:
+      matrix:
+        check: ${{ fromJSON(needs.plan.outputs.stubs) }}
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo "Nothing this job reads changed (tools/ci-plan.py, scope ${{ needs.plan.outputs.scope }})."
 
   # yavs, vunit-yavs and the VS Code extension carry one version (RELEASING.md)
   versions:
@@ -85,6 +83,7 @@ jobs:
   check:
     name: check (${{ matrix.os }})
     needs: plan
+    if: needs.plan.outputs.scope != 'none'
     strategy:
       fail-fast: false
       matrix:
@@ -97,13 +96,21 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
+        if: needs.plan.outputs.scope == 'full'
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+        if: needs.plan.outputs.scope == 'full'
       - run: cargo test --workspace --locked --no-fail-fast
+        if: needs.plan.outputs.scope == 'full'
+      # Every Rust test that reads docs/, python/vunit-yavs/ or editors/vscode/.
+      - name: Tests that read the changed pages and packages
+        if: needs.plan.outputs.scope == 'light'
+        run: cargo test -p yavs --locked --no-fail-fast --bin yavs --test docs_examples --test docs_debugger --test env_registry --test lint
 
   # The Cranelift tier (`--features clift`, no external dependency) on the same platforms.
   clift:
     name: clift (${{ matrix.os }})
     needs: plan
+    if: needs.plan.outputs.scope == 'full'
     strategy:
       fail-fast: false
       matrix:
@@ -137,6 +144,8 @@ jobs:
   # part of the repository. Fails on any difference from the checked-in expected lists, in
   # both directions: a regression and an unexpected pass (bless it and review the diff).
   corpus:
+    needs: plan
+    if: needs.plan.outputs.scope == 'full'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
@@ -186,6 +195,7 @@ jobs:
   vunit-yavs:
     name: vunit-yavs (${{ matrix.os }})
     needs: plan
+    if: needs.plan.outputs.scope != 'none'
     strategy:
       fail-fast: false
       matrix:
@@ -202,6 +212,9 @@ jobs:
       - run: cargo build --locked -p yavs
       - name: Package tests
         shell: bash
+        env:
+          # Light scope without a package change: only the package tests that read docs/.
+          ONLY: ${{ needs.plan.outputs.scope == 'light' && needs.plan.outputs.pkg == 'false' && 'test_docs or test_guide_example or test_debugger_tutorial_demo' || '' }}
         run: |
           python -m pip install -e python/vunit-yavs pytest
-          VUNIT_YAVS_PATH="$PWD/target/debug" YAVS_STD_CACHE="$RUNNER_TEMP/std" python -m pytest -v python/vunit-yavs/tests
+          VUNIT_YAVS_PATH="$PWD/target/debug" YAVS_STD_CACHE="$RUNNER_TEMP/std" python -m pytest -v python/vunit-yavs/tests ${ONLY:+-k "$ONLY"}
