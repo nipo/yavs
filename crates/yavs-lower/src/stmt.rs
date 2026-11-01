@@ -573,54 +573,64 @@ impl Fx<'_, '_> {
             _ => false,
         });
         if guarded_target {
-            let [lsp] = &target.lsps[..] else {
-                return Err(self.cx.unsupported(span, "aggregate signal targets"));
-            };
-            let slot = self.driver_of(lsp)?;
             let mode = match delay {
                 Delay::Transport => DriveMode::Transport,
                 _ => DriveMode::Inertial,
             };
-            // A record target: each leaf's driver, as `drive_record` addresses them.
-            if let Some((d, steps)) = self.comp_steps(target.expr) {
-                let path: Vec<u32> = steps
-                    .iter()
-                    .filter_map(|s| match *s {
-                        crate::expr::Step::Field(n) => Some(n),
-                        _ => None,
-                    })
-                    .collect();
-                if !matches!(self.leaves_under(d, &path).as_slice(), [l] if l.path == path) {
-                    let covered = self.leaves_under(d, &crate::func::lsp_fields(lsp));
-                    let p = self.comp_select(d, &steps, span)?;
-                    for (leaf, sref, _) in &p.leaves {
-                        let Some(k) = covered.iter().position(|l| l.path == leaf.path) else {
-                            return Err(self.cx.ice(span, "signal target outside its driver"));
-                        };
-                        self.emit(Inst::Disconnect {
-                            driver: slot + k as u32,
-                            target: Some(*sref),
-                            after: None,
-                            mode,
-                        });
-                    }
-                    self.jump(j);
-                    self.at(j);
-                    return Ok(());
-                }
-            }
-            let (_, sref, _) = self.sig_name(target.expr)?;
             // `after: None`: the kernel signal's disconnection time (set by elab from the
             // disconnection specification, 0 without one).
-            self.emit(Inst::Disconnect {
-                driver: slot,
-                target: Some(sref),
-                after: None,
-                mode,
-            });
+            let mut elems = Vec::with_capacity(target.lsps.len());
+            self.agg_leaf_names(target.expr, &mut elems);
+            if elems.len() != target.lsps.len() {
+                return Err(self
+                    .cx
+                    .unsupported(span, "aggregate targets with choice lists"));
+            }
+            for (&x, lsp) in elems.iter().zip(&target.lsps) {
+                self.disconnect_guarded(lsp, x, mode, span)?;
+            }
         }
         self.jump(j);
         self.at(j);
+        Ok(())
+    }
+
+    /// The target `x` of a guarded assignment (the signal of `lsp`) when its guard is false: each
+    /// leaf disconnected at its own disconnection time, a record target leaf by leaf.
+    fn disconnect_guarded(&mut self, lsp: &Lsp, x: ExprId, mode: DriveMode, span: Span) -> R<()> {
+        let slot = self.driver_of(lsp)?;
+        if let Some((d, steps)) = self.comp_steps(x) {
+            let path: Vec<u32> = steps
+                .iter()
+                .filter_map(|s| match *s {
+                    crate::expr::Step::Field(n) => Some(n),
+                    _ => None,
+                })
+                .collect();
+            if !matches!(self.leaves_under(d, &path).as_slice(), [l] if l.path == path) {
+                let covered = self.leaves_under(d, &crate::func::lsp_fields(lsp));
+                let p = self.comp_select(d, &steps, span)?;
+                for (leaf, sref, _) in &p.leaves {
+                    let Some(k) = covered.iter().position(|l| l.path == leaf.path) else {
+                        return Err(self.cx.ice(span, "signal target outside its driver"));
+                    };
+                    self.emit(Inst::Disconnect {
+                        driver: slot + k as u32,
+                        target: Some(*sref),
+                        after: None,
+                        mode,
+                    });
+                }
+                return Ok(());
+            }
+        }
+        let (_, sref, _) = self.sig_name(x)?;
+        self.emit(Inst::Disconnect {
+            driver: slot,
+            target: Some(sref),
+            after: None,
+            mode,
+        });
         Ok(())
     }
 
@@ -1090,35 +1100,22 @@ impl Fx<'_, '_> {
         if dims == 1 && !general {
             return cb(self, Hit::Flat(agg, t), vals, elem);
         }
-        let ttid = self.ty(t, span)?;
-        if general && self.is_logic(ttid) {
-            if dims > 1 {
-                return Err(self
-                    .cx
-                    .unsupported(span, "aggregate targets of matrices of logic arrays"));
-            }
-            return self.walk_logic_rows(assocs, t, ttid, elem, vals, span, cb);
-        }
         if dims > 1 {
-            if general {
-                return Err(self
-                    .cx
-                    .unsupported(span, "aggregate targets of matrices of composites"));
-            }
             return self.walk_matrix(agg, t, elem, vals, span, cb);
         }
-        // An array of composites: element `pos` of each value is the sub-value.
-        let tid = self.ty(t, span)?;
-        if assocs.iter().any(|a| a.slice_piece) {
-            return Err(self.cx.ice(span, "slice piece of an array of composites"));
+        let ttid = self.ty(t, span)?;
+        if general && self.is_logic(ttid) {
+            return self.walk_logic_rows(assocs, t, ttid, elem, vals, span, cb);
         }
+        // An array of composites: element `pos` of each value is the sub-value.
+        let tid = ttid;
         let named = self.named_target_positions(assocs, t, 0, span)?;
         let mut parts = Vec::with_capacity(vals.len());
         for &v in vals {
             parts.push(self.arr(v, span)?);
         }
         // The aggregate must cover every value exactly, checked first.
-        if let Some(want) = self.cover_dope(assocs, named.as_deref(), false, span)? {
+        if let Some(want) = self.composite_cover(assocs, named.as_deref(), span)? {
             for &(_, dope) in &parts {
                 let what = self.msg("target", Dir::To);
                 self.emit(Inst::SubtypeCheck {
@@ -1129,11 +1126,18 @@ impl Fx<'_, '_> {
                 });
             }
         }
+        let mut k = self.int(0);
         for (i, a) in assocs.iter().enumerate() {
-            let pos = match a.choices.first() {
-                None => self.int(i as i64),
-                Some(Choice::Expr(_)) if let Some(ps) = &named => self.int(ps[i].0),
-                Some(&Choice::Expr(c)) => {
+            let piece = if a.slice_piece {
+                Some(self.dope_of(a.value)?)
+            } else {
+                None
+            };
+            let pos = match (piece, a.choices.first()) {
+                (Some(pd), _) if let Some(ps) = &named => self.named_piece(ps[i], pd),
+                (_, None) | (Some(_), _) => k,
+                (None, Some(Choice::Expr(_))) if let Some(ps) = &named => self.int(ps[i].0),
+                (None, Some(&Choice::Expr(c))) => {
                     let dopes: Vec<Reg> = parts.iter().map(|p| p.1).collect();
                     self.lone_choice(c, t, &dopes, span)?;
                     self.int(0)
@@ -1142,13 +1146,58 @@ impl Fx<'_, '_> {
             };
             let mut subs = Vec::with_capacity(vals.len());
             for &(data, dope) in &parts {
-                let (_, ed) = self.elem_desc(tid, dope)?;
+                let (etid, ed) = self.elem_desc(tid, dope)?;
                 let addr = self.elem_addr(tid, data, dope, pos);
-                subs.push(self.elem_value_at(elem, addr, ed, span)?);
+                subs.push(match piece {
+                    Some(pd) => {
+                        // A piece is read with its target's bounds: the elements must match.
+                        if Ty::needs_desc(self.fb.program().types(), etid) {
+                            let (_, pe) = self.elem_desc(tid, pd)?;
+                            self.check_value_desc(db.base(elem), etid, ed, pe, "target", span)?;
+                        }
+                        crate::expr::V::A(addr, pd)
+                    }
+                    None => self.elem_value_at(elem, addr, ed, span)?,
+                });
             }
-            self.walk_elem(a.value, elem, &subs, span, cb)?;
+            let rows = match piece {
+                Some(pd) => self.dope_len(pd),
+                None => self.int(1),
+            };
+            if piece.is_some() {
+                cb(self, Hit::Leaf(a.value), &subs, db.exprs[a.value].subtype)?;
+            } else {
+                self.walk_elem(a.value, elem, &subs, span, cb)?;
+            }
+            k = self.bin(IntOp::Add, pos, rows);
         }
         Ok(())
+    }
+
+    /// The bounds `0 to n - 1` an aggregate target of an array of composites covers, 2008 pieces
+    /// counted by the bounds of their target names (signal or variable).
+    fn composite_cover(
+        &mut self,
+        assocs: &[yavs_sem::hir::AggAssoc],
+        named: Option<&[(i64, i64)]>,
+        span: Span,
+    ) -> R<Option<Reg>> {
+        if named.is_some() || !assocs.iter().any(|a| a.slice_piece) {
+            return self.cover_dope(assocs, named, false, span);
+        }
+        let mut n = self.int(0);
+        for a in assocs {
+            let len = if a.slice_piece {
+                let d = self.dope_of(a.value)?;
+                self.dope_len(d)
+            } else {
+                self.int(1)
+            };
+            n = self.bin(IntOp::Add, n, len);
+        }
+        let (z, one) = (self.int(0), self.int(1));
+        let last = self.bin(IntOp::Sub, n, one);
+        Ok(Some(self.one_dope(z, last, z)))
     }
 
     /// An aggregate target of an array of logic arrays (#618): the rows of a value are bit
@@ -1175,23 +1224,7 @@ impl Fx<'_, '_> {
             parts.push((data, dope, etid, ed, count, row));
         }
         // The aggregate must cover every value exactly, checked first.
-        let want = if named.is_none() && assocs.iter().any(|a| a.slice_piece) {
-            let mut n = self.int(0);
-            for a in assocs {
-                let len = if a.slice_piece {
-                    let d = self.dope_of(a.value)?;
-                    self.dope_len(d)
-                } else {
-                    self.int(1)
-                };
-                n = self.bin(IntOp::Add, n, len);
-            }
-            let (z, one) = (self.int(0), self.int(1));
-            let last = self.bin(IntOp::Sub, n, one);
-            Some(self.one_dope(z, last, z))
-        } else {
-            self.cover_dope(assocs, named.as_deref(), false, span)?
-        };
+        let want = self.composite_cover(assocs, named.as_deref(), span)?;
         if let Some(want) = want {
             for &(_, dope, ..) in &parts {
                 let what = self.msg("target", Dir::To);
@@ -1287,7 +1320,8 @@ impl Fx<'_, '_> {
 
     /// A matrix target (a multi-dimensional array of scalars): the aggregate of dimension `d`
     /// holds the aggregates of dimension `d + 1`, the last one the scalar elements (LRM
-    /// 9.3.3.3). Positions are static (positional or constant choices).
+    /// 9.3.3.3). Positions are static (positional or constant choices). A composite element is
+    /// walked on, or handed to `cb` by reference; a logic array element as a copy of its row.
     fn walk_matrix(
         &mut self,
         agg: ExprId,
@@ -1299,7 +1333,7 @@ impl Fx<'_, '_> {
     ) -> R<()> {
         let db = self.db;
         let tid = self.ty(t, span)?;
-        let (_, rt, w) = self.elem_scalar(elem, span)?;
+        let general = self.is_general(t, span)?;
         let logic = self.is_logic(tid);
         let bias = self.code_bias(tid);
         let ndims = ty::array_of(db, t).map_or(0, |x| x.1);
@@ -1339,29 +1373,54 @@ impl Fx<'_, '_> {
         let mut path = Vec::new();
         let mut leaf = |fx: &mut Self, x: ExprId, path: &[i64]| -> R<()> {
             let mut subs = Vec::with_capacity(parts.len());
-            for (data, _, count, lens) in &parts {
+            for (data, dope, count, lens) in &parts {
                 let mut flat = fx.int(path[0]);
                 for (k, &p) in path.iter().enumerate().skip(1) {
                     let m = fx.bin(IntOp::Mul, flat, lens[k]);
                     let pk = fx.int(p);
                     flat = fx.bin(IntOp::Add, m, pk);
                 }
-                let v = if logic {
-                    let code = fx.elem_at(*data, flat, *count, true, w);
-                    fx.dec(code, bias)
-                } else {
-                    let a = fx.reg(RegTy::Ptr);
-                    fx.emit(Inst::Index {
-                        dst: a,
-                        base: *data,
-                        pos: flat,
-                        stride: w.bytes(),
+                subs.push(if general && logic {
+                    let (etid, ed) = fx.elem_desc(tid, *dope)?;
+                    let row = fx.layout_count(etid, ed);
+                    let size = fx.size_of(etid, ed);
+                    let buf = fx.alloc(size);
+                    // Planes hold the leftmost element last.
+                    let one = fx.int(1);
+                    let end = fx.bin(IntOp::Add, flat, one);
+                    let before = fx.bin(IntOp::Mul, end, row);
+                    let src_off = fx.bin(IntOp::Sub, *count, before);
+                    let z = fx.int(0);
+                    fx.emit(Inst::LCopy {
+                        dst: buf,
+                        dst_off: z,
+                        src: *data,
+                        src_off,
+                        n: row,
                     });
-                    fx.load(a, w, rt)
-                };
-                subs.push(crate::expr::V::S(v));
+                    crate::expr::V::A(buf, ed)
+                } else if general {
+                    let (_, ed) = fx.elem_desc(tid, *dope)?;
+                    let addr = fx.elem_addr(tid, *data, *dope, flat);
+                    fx.elem_value_at(elem, addr, ed, span)?
+                } else {
+                    let (_, rt, w) = fx.elem_scalar(elem, span)?;
+                    crate::expr::V::S(if logic {
+                        let code = fx.elem_at(*data, flat, *count, true, w);
+                        fx.dec(code, bias)
+                    } else {
+                        let a = fx.reg(RegTy::Ptr);
+                        fx.emit(Inst::Index {
+                            dst: a,
+                            base: *data,
+                            pos: flat,
+                            stride: w.bytes(),
+                        });
+                        fx.load(a, w, rt)
+                    })
+                });
             }
-            cb(fx, Hit::Leaf(x), &subs, elem)
+            fx.walk_elem(x, elem, &subs, span, &mut *cb)
         };
         self.matrix_level(agg, 0, ndims, t, &mut path, &mut leaf, span)
     }
@@ -1785,44 +1844,11 @@ impl Fx<'_, '_> {
                 delay,
                 span,
                 |fx, one, dl| fx.drive_record(d, steps, base, covered, target, dl, one, span),
-                |fx, after, mode| {
-                    let p = fx.comp_select(d, steps, span)?;
-                    for (leaf, sref, _) in &p.leaves {
-                        let drv = match base {
-                            Ok(b) => {
-                                let Some(k) = covered.iter().position(|l| l.path == leaf.path)
-                                else {
-                                    return Err(fx
-                                        .cx
-                                        .ice(span, "signal target outside its driver"));
-                                };
-                                Ok(b + k as u32)
-                            }
-                            Err(b) => {
-                                let k = fx.int(i64::from(leaf.sig));
-                                Err(fx.bin(IntOp::Add, b, k))
-                            }
-                        };
-                        fx.emit_disconnect(drv, *sref, after, mode);
-                    }
-                    Ok(())
-                },
+                |fx, after, mode| fx.disconnect_part(d, steps, base, covered, after, mode, span),
             );
         }
-        // A record signal, or a part of one that is a record or an array of records (a field, an
-        // element, a slice), driven by one waveform element through its own drivers, one per
-        // leaf in leaf order: one `SigScatter` instead of a drive per leaf (#677).
-        let whole = match base {
-            Ok(drv) if elems.len() == 1 && !covered.is_empty() => {
-                self.scatter_table(d, steps, drv, covered, target.expr, span)?
-            }
-            _ => None,
-        };
-        let p = if whole.is_some() {
-            self.comp_head(d, steps, span)?
-        } else {
-            self.comp_select(d, steps, span)?
-        };
+        let (whole, p) =
+            self.target_part(d, steps, base, covered, elems.len(), target.expr, span)?;
         let what = self.target_name(target.expr);
         let dims = ty::array_of(db, p.t).map(|x| x.1);
         let mut vals = Vec::new();
@@ -1859,7 +1885,54 @@ impl Fx<'_, '_> {
                 (DriveMode::Inertial, r)
             }
         };
-        if let (Some((tab, driver)), [(after, (src, _))]) = (whole, vals.as_slice()) {
+        self.drive_part(&p, whole, base, covered, &vals, mode, reject, span)
+    }
+
+    /// The part `steps` of composite signal `d` as a target of `n` waveform elements, and the
+    /// leaf table and driver when one `SigScatter` drives it.
+    #[allow(clippy::too_many_arguments)]
+    fn target_part(
+        &mut self,
+        d: yavs_sem::DeclId,
+        steps: &[crate::expr::Step<'_>],
+        base: Result<u32, Reg>,
+        covered: &[crate::RecLeaf],
+        n: usize,
+        target: ExprId,
+        span: Span,
+    ) -> R<(Option<(yavs_ir::ConstId, u32)>, crate::expr::SigPart)> {
+        // A record signal, or a part of one that is a record or an array of records (a field, an
+        // element, a slice), driven by one waveform element through its own drivers, one per
+        // leaf in leaf order: one `SigScatter` instead of a drive per leaf (#677).
+        let whole = match base {
+            Ok(drv) if n == 1 && !covered.is_empty() => {
+                self.scatter_table(d, steps, drv, covered, target, span)?
+            }
+            _ => None,
+        };
+        let p = if whole.is_some() {
+            self.comp_head(d, steps, span)?
+        } else {
+            self.comp_select(d, steps, span)?
+        };
+        Ok((whole, p))
+    }
+
+    /// Every leaf of `p`, a part of a composite signal, driven with its elements of `vals` (a time
+    /// and a value each, already checked against `p`).
+    #[allow(clippy::too_many_arguments)]
+    fn drive_part(
+        &mut self,
+        p: &crate::expr::SigPart,
+        whole: Option<(yavs_ir::ConstId, u32)>,
+        base: Result<u32, Reg>,
+        covered: &[crate::RecLeaf],
+        vals: &[(Reg, (Reg, Reg))],
+        mode: DriveMode,
+        reject: Option<Reg>,
+        span: Span,
+    ) -> R<()> {
+        if let (Some((tab, driver)), [(after, (src, _))]) = (whole, vals) {
             let mut ops = vec![*after];
             let mut has = 0;
             if let Some(r) = reject {
@@ -1942,6 +2015,37 @@ impl Fx<'_, '_> {
         Ok(())
     }
 
+    /// Every leaf of the part `steps` of composite signal `d` disconnected through its driver.
+    #[allow(clippy::too_many_arguments)]
+    fn disconnect_part(
+        &mut self,
+        d: yavs_sem::DeclId,
+        steps: &[crate::expr::Step<'_>],
+        base: Result<u32, Reg>,
+        covered: &[crate::RecLeaf],
+        after: Reg,
+        mode: DriveMode,
+        span: Span,
+    ) -> R<()> {
+        let p = self.comp_select(d, steps, span)?;
+        for (leaf, sref, _) in &p.leaves {
+            let drv = match base {
+                Ok(b) => {
+                    let Some(k) = covered.iter().position(|l| l.path == leaf.path) else {
+                        return Err(self.cx.ice(span, "signal target outside its driver"));
+                    };
+                    Ok(b + k as u32)
+                }
+                Err(b) => {
+                    let k = self.int(i64::from(leaf.sig));
+                    Err(self.bin(IntOp::Add, b, k))
+                }
+            };
+            self.emit_disconnect(drv, *sref, after, mode);
+        }
+        Ok(())
+    }
+
     /// `(a, b) <= v after t, ...` (LRM 10.5.2.1): each scalar element of the aggregate target is
     /// driven with the matching element of every waveform value (#350: through `walk_agg`, so
     /// records, nested aggregates and matrices too).
@@ -1968,19 +2072,9 @@ impl Fx<'_, '_> {
                     let mut leaves = Vec::with_capacity(target.lsps.len());
                     fx.agg_leaf_names(target.expr, &mut leaves);
                     for (&x, lsp) in leaves.iter().zip(&target.lsps) {
-                        if fx.comp_steps(x).is_some_and(|(d, s)| {
-                            let path: Vec<u32> = s
-                                .iter()
-                                .filter_map(|s| match *s {
-                                    crate::expr::Step::Field(n) => Some(n),
-                                    _ => None,
-                                })
-                                .collect();
-                            fx.leaves_under(d, &path).len() != 1
-                        }) {
-                            return Err(fx
-                                .cx
-                                .unsupported(span, "record elements of aggregate signal targets"));
+                        if let Some((d, steps, base, covered)) = fx.record_elem(lsp, x, span)? {
+                            fx.disconnect_part(d, &steps, base, &covered, after, mode, span)?;
+                            continue;
                         }
                         let drv = fx.leaf_driver(lsp, x, span)?;
                         let (_, sref, _) = fx.sig_name(x)?;
@@ -2076,23 +2170,23 @@ impl Fx<'_, '_> {
         let db = self.db;
         let st = db.exprs[x].subtype;
         let t = db.base(st);
-        if matches!(db.types[t].kind, TypeKind::Record { .. }) {
-            return Err(self
-                .cx
-                .unsupported(span, "record elements of aggregate signal targets"));
+        if let Some((d, steps, base, covered)) = self.record_elem(lsp, x, span)? {
+            let (whole, p) = self.target_part(d, &steps, base, &covered, subs.len(), x, span)?;
+            let what = self.target_name(x);
+            let mut vals = Vec::with_capacity(subs.len());
+            for (&at, &v) in ats.iter().zip(subs) {
+                let (data, vd) = self.arr(v, span)?;
+                if Ty::needs_desc(self.fb.program().types(), p.tid) {
+                    self.check_value_desc(p.t, p.tid, vd, p.desc, &what, span)?;
+                }
+                vals.push((at, (data, vd)));
+            }
+            return self.drive_part(&p, whole, base, &covered, &vals, mode, reject, span);
         }
         if let Some((elem, _)) = ty::array_of(db, t) {
             let vtid = self.ty(t, span)?;
-            let logic_rows = self.is_logic(vtid);
-            if (self.is_general(t, span)? && !logic_rows)
-                || ty::array_of(db, t).is_some_and(|x| x.1 != 1)
-            {
-                return Err(self
-                    .cx
-                    .unsupported(span, "composite array elements of aggregate signal targets"));
-            }
-            // The width is that of a scalar element; a logic value is copied by planes.
-            let vw = if logic_rows {
+            // Whole values are copied as they are; only a scalar element gives a stride.
+            let vw = if self.is_general(t, span)? {
                 Width::B1
             } else {
                 self.elem_scalar(elem, span)?.2
@@ -2250,15 +2344,10 @@ impl Fx<'_, '_> {
             Some((_, Some(named))) => self.named_piece(named, td),
             Some((k, None)) => k,
             None => {
-                // A whole value for the whole signal: the lengths must agree.
+                // A whole value for the whole signal: the lengths must agree, at every level.
+                let t = self.db.base(self.db.exprs[x].subtype);
                 for &(_, (_, dope)) in vals {
-                    let what = self.msg("target", Dir::To);
-                    self.emit(Inst::SubtypeCheck {
-                        dope,
-                        want: td,
-                        dims: 1,
-                        what,
-                    });
+                    self.check_value_desc(t, vtid, dope, td, "target", span)?;
                 }
                 self.int(0)
             }
@@ -3061,5 +3150,48 @@ impl Fx<'_, '_> {
                 res
             }
         }
+    }
+}
+
+impl<'a> Fx<'a, '_> {
+    /// Target element `x` of an aggregate when it names a part of a composite signal with records
+    /// (not one leaf): the signal, the steps, the first driver and the leaves `lsp` covers.
+    #[allow(clippy::type_complexity)]
+    fn record_elem(
+        &mut self,
+        lsp: &Lsp,
+        x: ExprId,
+        span: Span,
+    ) -> R<
+        Option<(
+            yavs_sem::DeclId,
+            Vec<crate::expr::Step<'a>>,
+            Result<u32, Reg>,
+            Vec<crate::RecLeaf>,
+        )>,
+    > {
+        let Some((d, steps)) = self.comp_steps(x) else {
+            return Ok(None);
+        };
+        let path: Vec<u32> = steps
+            .iter()
+            .filter_map(|s| match *s {
+                crate::expr::Step::Field(n) => Some(n),
+                _ => None,
+            })
+            .collect();
+        if matches!(self.leaves_under(d, &path).as_slice(), [l] if l.path == path) {
+            return Ok(None);
+        }
+        let slot = match self.cx.root_decl(self.db, lsp.root) {
+            Some(root) => self.param_slot(lsp, root, span)?,
+            None => None,
+        };
+        let base = match slot {
+            Some(b) => Err(b),
+            None => Ok(self.driver_of(lsp)?),
+        };
+        let covered = self.leaves_under(d, &crate::func::lsp_fields(lsp));
+        Ok(Some((d, steps, base, covered)))
     }
 }

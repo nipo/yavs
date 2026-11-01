@@ -1,0 +1,8 @@
+exit	0
+diag	note	1000000	0	:aggregate_target_records_sub:_p0	1 10 01
+diag	note	3000000	0	:aggregate_target_records_sub:_p0	2 1101201
+diag	note	4000000	0	:aggregate_target_records_sub:_p0	3 43
+diag	note	5000000	0	:aggregate_target_records_sub:_p0	4 11 00
+diag	note	6000000	0	:aggregate_target_records_sub:_p0	5 10 01
+diag	note	7000000	0	:aggregate_target_records_sub:_p0	6 01 11
+diag	note	8000000	0	:aggregate_target_records_sub:_p0	7 1110 0011

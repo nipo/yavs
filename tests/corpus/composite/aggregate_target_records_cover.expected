@@ -1,0 +1,3 @@
+exit	1
+diag	note	1000000	0	:aggregate_target_records_cover:_p0	10 01
+diag	fatal	1000000	0	-	value length 3 does not match signal B length 2

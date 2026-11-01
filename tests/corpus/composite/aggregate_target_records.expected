@@ -1,0 +1,15 @@
+exit	0
+diag	note	1000000	0	:aggregate_target_records:_p0	1 10 01
+diag	note	2000000	0	:aggregate_target_records:_p2	c 01 10
+diag	note	2000000	0	:aggregate_target_records:_p0	2 1 7 01 9
+diag	note	3000000	0	:aggregate_target_records:_p0	3 101 210
+diag	note	4000000	0	:aggregate_target_records:_p0	4 101 210
+diag	note	5000000	0	:aggregate_target_records:_p0	5 34 5
+diag	note	6000000	0	:aggregate_target_records:_p0	6 34 5
+diag	note	7000000	0	:aggregate_target_records:_p0	8 11 01
+diag	note	8000000	0	:aggregate_target_records:_p0	9 10 01
+diag	note	9000000	0	:aggregate_target_records:_p0	10 10 01
+diag	note	10000000	0	:aggregate_target_records:_p0	11 00 11
+diag	note	11000000	0	:aggregate_target_records:_p0	12 11 00
+diag	note	13000000	0	:aggregate_target_records:_p0	13 10 01
+diag	note	16000000	0	:aggregate_target_records:_p0	14 11 11

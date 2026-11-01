@@ -1,0 +1,20 @@
+exit	0
+diag	note	0	0	:aggregate_target_records_hand:_p0	named v 2 1
+diag	note	1000000	0	:aggregate_target_records_hand:_p0	named s 2 1
+diag	note	1000000	0	:aggregate_target_records_hand:_p0	piece v 3412
+diag	note	2000000	0	:aggregate_target_records_hand:_p0	piece s 3412
+diag	note	2000000	0	:aggregate_target_records_hand:_p0	range v 4123
+diag	note	3000000	0	:aggregate_target_records_hand:_p0	range s 4123
+diag	note	3000000	0	:aggregate_target_records_hand:_p0	mat v 1234
+diag	note	4000000	0	:aggregate_target_records_hand:_p0	mat s 123411
+diag	note	5000000	0	:aggregate_target_records_hand:_p0	mat u 00011011
+diag	note	5000000	0	:aggregate_target_records_hand:_p0	mat l v 00011011
+diag	note	6000000	0	:aggregate_target_records_hand:_p0	mat l s 00011011
+diag	note	7000000	0	:aggregate_target_records_hand:_p0	par f 978
+diag	note	8000000	0	:aggregate_target_records_hand:_p0	par g 3412
+diag	note	9000000	0	:aggregate_target_records_hand:_p0	par h 435
+diag	note	10000000	0	:aggregate_target_records_hand:_p0	guard on 11
+diag	note	11000000	0	:aggregate_target_records_hand:_p0	guard off, 1 ns 11
+diag	note	13000000	0	:aggregate_target_records_hand:_p0	guard off, 3 ns ZZ
+diag	note	13000000	1	:aggregate_target_records_hand:_p0	null 0 11
+diag	note	15000000	0	:aggregate_target_records_hand:_p0	null 2 ZZ

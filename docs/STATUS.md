@@ -2897,7 +2897,7 @@ composite 6/6, force 8/8, protected 6/6, resolution 4/5, textio 2/3 at 1 and 4 t
 
 - Aggregate variable targets of a record value, `(x, y) := f;`, positional elements (#302; difftest `composite/record_aggregate_target`).
 
-- Aggregate targets of records with named fields, nested aggregate targets (records of records, arrays of arrays, records holding arrays) and matrix targets, for variables and signals (#350, L98; difftests `composite/aggregate_target_{logic_fields,named_record,nested_record,nested_array,matrix,matrix_cover}`, discrepancies `aggregate-target-{record-names,nested-record,nested-array,matrix}`). Still `E2001`: record signals, arrays of composites and arrays of logic arrays as elements of signal targets; arrays of logic arrays and matrices of composites as targets; non-static choices and pieces in matrix targets.
+- Aggregate targets of records with named fields, nested aggregate targets (records of records, arrays of arrays, records holding arrays) and matrix targets, for variables and signals (#350, L98; difftests `composite/aggregate_target_{logic_fields,named_record,nested_record,nested_array,matrix,matrix_cover}`, discrepancies `aggregate-target-{record-names,nested-record,nested-array,matrix}`). Composite elements of signal targets, matrices of records and of logic arrays, and 2008 pieces of arrays of records since #1011. Still `E2001`: non-static choices and pieces in matrix targets.
 
 - Aggregate targets naming one object more than once (several choices in an association, or the same static name twice) are `E1335` (#307, L96; `tests/diag/sem/expr/agg_target_*`, discrepancies `aggregate-target-*`).
 
@@ -10641,3 +10641,7 @@ then searched per leaf, so a signal array took work and memory per element, seve
 (`eval::leaf_values`). It was linear, not quadratic, in array size, at a high constant, and it multiplied by the number of leaves. (2) `Opt::drop_statements` walked the
 whole function once per block that a dirty state crossed, so a chain of `n` branches took `n` walks: quadratic. It is a worklist now, and `forward_hits` sweeps backwards.
 The optimised code is the same. No work counter covers elaboration or the optimiser, so no bound guards these two; `composite/init_leaves` guards the values.
+
+## Composite elements of aggregate targets (#1011, 2026-11-01)
+
+A record signal, an array of records or an array of arrays is an element of an aggregate signal target through the path of a whole target (`record_elem`, `target_part`, `drive_part` in `stmt.rs`), with every length checked first. Matrices of records and of logic arrays, and 2008 pieces of arrays of records, work for variables and signals; guarded assignments through any aggregate target disconnect per element. Non-static choices and pieces in matrix targets stay `E2001`. References: the first differs on named fields, matrices and pieces (known and catalogued), the second crashes on most of these forms; the hand-checked results are in `composite/aggregate_target_records_hand`.
