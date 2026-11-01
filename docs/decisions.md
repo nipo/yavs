@@ -13031,3 +13031,15 @@ index (machine written; a damaged index says to re-analyze).
 
 - **Compiler and simulation bugs come first** (user): a bug that affects the direct result of a simulation is fixed as soon as possible, ahead of everything; the order is wrong results, then compiler bugs (valid code rejected, invalid accepted, internal errors, crashes), then the rest. A simulator's users rely on its results above all else. `AGENTS.md` rule 26.
 - **Documentation is a required gate, like tests** (user): a user-facing feature or change is not done or closed until the user guide covers it, the docs build passes and its examples were run, and the report names the pages changed or why none applies. A feature nobody can find or follow is not finished. `AGENTS.md` rule 27.
+
+## Outside contributions (maintainer, 2026-11-01)
+
+`CONTRIBUTING.md` holds the rules for people outside the project. Maintainer decisions unless marked:
+
+- **Pull requests are welcome, issue first:** small fixes go straight to a pull request; anything larger opens an issue, so nobody builds something that gets declined.
+- **Inbound = outbound:** contributions are under MIT OR Apache-2.0, at the user's option, in the standard Rust wording. No DCO, no CLA.
+- **AI tools are allowed,** and agents read `AGENTS.md`. The person who submits has run the checks and can explain the change. No disclosure required.
+- **Contributors run open-source checks only;** CI covers the rest. A maintainer runs reference simulator comparisons on request and checks new expected outputs then.
+- **Usage questions go to GitHub Discussions;** issues are for bugs and planned work. Security problems are ordinary issues: no `SECURITY.md`, no email address.
+- **Outside pull requests are squash merged;** the maintainer edits the final message.
+- **Agent-only rules such as claims do not apply to human contributors.** Which rules count (agent): pushing to `main`, claims and module ownership, commit identity, host limits, as `AGENTS.md` now says.

@@ -6,6 +6,10 @@ server (with a VS Code extension). The name stands for "Yet Another VHDL Simulat
 fully before your first edit. It is short on purpose: the details live in the documents it points
 to, and those documents win over your memory.
 
+Outside contributors, and agents working for them, start with `CONTRIBUTING.md`: they open pull
+requests, and the rules here for the maintainer's own agents (pushing to `main`, claims and module
+ownership, commit identity, shared-host limits) do not apply to them.
+
 ## 1. Read before you work
 
 | Always | Why |
@@ -121,7 +125,8 @@ to, and those documents win over your memory.
 16. **No testbench may run longer than 5 minutes.** Shrink the scenario, never weaken assertions.
 
 ### Git and collaboration
-17. **Current phase: push straight to `main`** (no branches, no PRs). CI
+17. **The maintainer's agents push straight to `main`** (no branches, no PRs); everyone else opens a
+    pull request (`CONTRIBUTING.md`). CI
     (`.github/workflows/ci.yml`) runs the rule 13 checks (plus the analysis corpus gate) on Linux x86_64 for every push,
     and on Windows x86_64 too when the push touches path or process sensitive code; the nightly run and a release
     run Linux aarch64 as well (`docs/decisions.md` "CI matrix"): watch your run (`gh run watch`) and fix a red one. Rebase on
@@ -198,6 +203,8 @@ to, and those documents win over your memory.
     applies.
 
 ## 3a. Working alongside other agents
+
+This section is for the maintainer's agents; outside contributors skip it.
 
 Several agents, possibly from different tools or machines, work on this repo at once. GitHub is
 the shared source of truth; `tools/claim` (needs `gh`) is the only protocol. `who` is

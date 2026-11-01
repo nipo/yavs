@@ -114,6 +114,10 @@ The [user guide](https://yavs.readthedocs.io), with [the command-line reference]
 
 yavs is a pre-release: expect gaps, and please [report](https://github.com/ru551n/yavs/issues) what breaks.
 
+## Contributing
+
+Pull requests and bug reports are welcome: see [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
 ## License
 
 yavs is licensed under either of [Apache-2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT), at your

@@ -119,4 +119,5 @@ the :doc:`release_notes`, and pages say when a feature needs a release newer tha
    performance
    release_notes
    faq
+   Contributing <https://github.com/ru551n/yavs/blob/main/CONTRIBUTING.md>
    GitHub <https://github.com/ru551n/yavs>
