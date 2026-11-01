@@ -776,7 +776,11 @@ pub fn collect(
                 }
                 _ => display(text),
             },
-            skip: rg.iter().any(|&(a, b)| a <= line && line <= b),
+            // A branch arm stands where its choice or body does, not on its statement's line.
+            skip: {
+                let at = c.pos.map_or(line, |p| f.line_col(p.start).0 as u32);
+                rg.iter().any(|&(a, b)| a <= at && at <= b)
+            },
             unit,
             kind: match c.kind {
                 yavs_ir::CovKind::Statement => Kind::Statement,

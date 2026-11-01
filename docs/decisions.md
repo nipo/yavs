@@ -2525,6 +2525,8 @@ scalars; the on-disk format is implementation-defined, so it is fixed here (yavs
   the database when it is written (the counters still run); an `off` never closed is `W0112`,
   an `on` without `off` `W0113`. `translate_off` regions only with `--cov-exclude-translate-off`.
   ponytail: the pragma scan treats a `--` inside a string literal as a comment start.
+  A branch arm is placed by `CovInfo::pos` (its condition, its choices, else the first statement of
+  its body), not by its statement's line; arms with no source of their own keep that line (#1042).
 - **Applied when reporting:** the database keeps raw counts (so one database serves different
   exclusion files); excluded items are out of the totals and the Cobertura report and are listed
   with their reasons. `cov merge` does not take exclusions. `unit` names packages only:

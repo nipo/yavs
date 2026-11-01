@@ -658,6 +658,7 @@ impl Cx {
             arm: None,
             cond,
             under,
+            pos: None,
         })
     }
 
@@ -667,7 +668,7 @@ impl Cx {
         stmt: yavs_ir::StmtId,
         span: Span,
         kind: CovKind,
-        arm: Option<yavs_ir::CovArm>,
+        arm: Option<(yavs_ir::CovArm, Option<Span>)>,
         under: Option<CovItem>,
     ) -> Option<CovItem> {
         (self.opts.coverage && !self.cov_skip.contains(&span.file)).then(|| {
@@ -675,9 +676,10 @@ impl Cx {
                 stmt,
                 kind,
                 row: None,
-                arm,
+                arm: arm.map(|a| a.0),
                 cond: None,
                 under,
+                pos: arm.and_then(|a| a.1),
             })
         })
     }

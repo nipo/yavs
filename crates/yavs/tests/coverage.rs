@@ -263,6 +263,10 @@ end architecture;
 
 /// Analyze and run `src`, leaving the database in `a.ycov`; returns stderr of the run.
 fn cov_run(tmp: &Path, src: &str) -> String {
+    cov_run_with(tmp, src, "sbt", &[])
+}
+
+fn cov_run_with(tmp: &Path, src: &str, kinds: &str, extra: &[&str]) -> String {
     std::fs::write(tmp.join("excl.vhd"), src).expect("write");
     assert!(
         yavs(tmp, &["analyze", "--work=work:lib", "excl.vhd"])
@@ -275,9 +279,12 @@ fn cov_run(tmp: &Path, src: &str) -> String {
             "run",
             "--work=work:lib",
             "cov_excl",
-            "--cov=sbt",
+            &format!("--cov={kinds}"),
             "--cov-file=a.ycov",
-        ],
+        ]
+        .into_iter()
+        .chain(extra.iter().copied())
+        .collect::<Vec<_>>(),
     );
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
     String::from_utf8_lossy(&o.stderr).into_owned()
@@ -1095,4 +1102,110 @@ fn copies_count_alike() {
         );
     }
     let _ = std::fs::remove_dir_all(&tmp);
+}
+
+/// A branch arm and the rows of its condition are left out by where its own choice or body
+/// stands, not by the line of the statement around it (#1042).
+const ARMS: &str = "entity cov_excl is end entity;
+architecture sim of cov_excl is
+  signal s, a, b, c, d, e, f : integer := 0;
+begin
+  p : process
+  begin
+    case s is
+      when 0 => a <= 1;
+      -- coverage off
+      when 1 => a <= 2;
+      -- coverage on
+      when 2 => a <= 3;
+      -- coverage off
+      when others => a <= 4;
+      -- coverage on
+    end case;
+    if s = 5 then b <= 1;
+    -- coverage off
+    elsif s = 6 and a = 9 then b <= 2;
+    -- coverage on
+    elsif s = 7 and a = 8 then b <= 3;
+    elsif s = 8 then b <= 5; -- coverage off-line
+    -- coverage off
+    else b <= 4;
+    -- coverage on
+    end if;
+    c <= 1 when s = 9 else
+         -- coverage off
+         2 when s = 10 else
+         -- coverage on
+         3 when s = 11 else
+         -- coverage off
+         4;
+    -- coverage on
+    with s select d <= 1 when 0,
+      -- coverage off
+      2 when 1,
+      -- coverage on
+      3 when 2,
+      -- coverage off
+      4 when others;
+    -- coverage on
+    case s is
+      when 0 =>
+        e <= 1;
+      -- pragma translate_off
+      when 1 =>
+        e <= 2;
+      -- pragma translate_on
+      when others =>
+        e <= 3;
+    end case;
+    wait;
+  end process;
+end architecture;
+";
+
+fn arms(db: &Database) -> Vec<String> {
+    let mut v: Vec<_> = db
+        .items
+        .iter()
+        .filter(|(k, _)| matches!(k.kind, Kind::Branch(_)))
+        .map(|(_, e)| format!("{}: {}", e.line, e.text))
+        .collect();
+    v.sort();
+    v
+}
+
+#[test]
+fn a_region_excludes_the_arm_where_its_choice_or_body_stands() {
+    let tmp = tempdir("excl_arms");
+    let err = cov_run_with(&tmp, ARMS, "sbc", &["--cov-exclude-translate-off"]);
+    assert!(!err.contains("W01"), "{err}");
+    let db = read(&tmp.join("a.ycov"));
+    let rows: Vec<String> = db
+        .items
+        .iter()
+        .filter(|(k, _)| matches!(k.kind, Kind::Condition(_)))
+        .map(|(_, e)| e.text.clone())
+        .collect();
+    assert!(
+        !rows
+            .iter()
+            .any(|t| t.contains("s = 6") || t.contains("a = 9")),
+        "{rows:?}"
+    );
+    assert!(rows.iter().any(|t| t.contains("s = 7")), "{rows:?}");
+    let got = arms(&db);
+    // The line is the statement's: case, if, conditional and selected assignment, case.
+    let want = [
+        "17: elsif s = 7 and a = 8",
+        "17: if s = 5",
+        "27: when s = 11",
+        "27: when s = 9",
+        "35: when 0",
+        "35: when 2",
+        "43: when 0",
+        "43: when others",
+        "7: when 0",
+        "7: when 2",
+    ];
+    assert_eq!(got, want, "{got:#?}");
 }

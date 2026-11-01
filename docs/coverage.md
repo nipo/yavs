@@ -621,6 +621,10 @@ x <= y; -- coverage off-line
 `coverage off` (reason optional) starts a region whose statements are left out, `coverage on`
 ends it, and `coverage off-line` leaves out the statements starting on its line. For state machines,
 see State machines. Toggles are not affected.
+A branch arm is left out when its own condition, choices or body start inside a region, not when
+the `if` or `case` it belongs to does: a region around one `when`, `elsif` or `else` leaves out
+that arm only. An arm is placed by its condition or choices (`when others` and `else` by their
+first statement), so `(no arm taken)` and loop bodies stay on the line of their statement.
 `-- yavs coverage ...` is accepted as a synonym.
 
 Outside the source, give `yavs cov report` or `yavs cov rank` an `--exclude FILE`, as many as you

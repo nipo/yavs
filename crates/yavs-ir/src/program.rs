@@ -1180,6 +1180,9 @@ pub struct CovInfo {
     pub cond: Option<u32>,
     /// The branch arm around it: a report groups what never ran under the arm that never did.
     pub under: Option<CovItem>,
+    /// A branch arm: where its choice or body starts, which a `coverage off` region is tested
+    /// against; `None` where the arm has no source of its own (it stays on its statement's line).
+    pub pos: Option<Span>,
 }
 
 /// What names a branch arm in a report (`if rst = '1'`, `else`, `when IDLE`).

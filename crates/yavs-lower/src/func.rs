@@ -548,6 +548,7 @@ impl<'a, 'b> Fx<'a, 'b> {
         stmt: Option<(yavs_ir::StmtId, Span)>,
         arm: u32,
         label: yavs_ir::CovArm,
+        pos: Option<Span>,
     ) {
         let Some((stmt, span)) = stmt else {
             return;
@@ -558,7 +559,14 @@ impl<'a, 'b> Fx<'a, 'b> {
                 stmt,
                 span,
                 yavs_ir::CovKind::Branch(arm),
-                Some(label),
+                // A condition or choice is its own place; an arm without one says where its body is.
+                Some((
+                    label,
+                    match label {
+                        yavs_ir::CovArm::Cond(sp) | yavs_ir::CovArm::Choice(Some(sp)) => Some(sp),
+                        _ => pos,
+                    },
+                )),
                 self.cov_parent,
             )
         {

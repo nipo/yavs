@@ -49,6 +49,19 @@ fn ir_kind(k: &H) -> StmtKind {
 }
 
 impl Fx<'_, '_> {
+    /// Where an arm's body starts: its first statement.
+    fn body_pos(&self, body: &[StmtId]) -> Option<Span> {
+        body.first().map(|&s| self.db.stmts[s].span)
+    }
+
+    /// Where the waveform of a conditional or selected assignment arm starts.
+    fn wave_pos(&self, w: &Waveform) -> Option<Span> {
+        match w {
+            Waveform::Elements(e) => e.first()?.value.map(|v| self.db.exprs[v].span),
+            Waveform::Unaffected => None,
+        }
+    }
+
     /// What names the arm of a `case` alternative or selected assignment in coverage reports:
     /// its choices from the first to the last in the source.
     fn choice_arm(&self, set: &ChoiceSet) -> CovArm {
@@ -169,7 +182,7 @@ impl Fx<'_, '_> {
                     let (t, f) = (self.block(), self.block());
                     self.branch(c, t, f);
                     self.at(t);
-                    self.cover_branch(at, k as u32, label);
+                    self.cover_branch(at, k as u32, label, None);
                     let r = self.stmts(body);
                     if self.live {
                         self.jump(j);
@@ -183,7 +196,8 @@ impl Fx<'_, '_> {
                 } else {
                     CovArm::Implicit
                 };
-                self.cover_branch(at, branches.len() as u32, label);
+                let pos = else_.as_deref().and_then(|b| self.body_pos(b));
+                self.cover_branch(at, branches.len() as u32, label, pos);
                 if let Some(body) = else_ {
                     self.stmts(body)?;
                 }
@@ -206,7 +220,8 @@ impl Fx<'_, '_> {
                 for (k, ((set, body), b)) in alts.iter().zip(blocks).enumerate() {
                     self.at(b);
                     let label = self.choice_arm(set);
-                    self.cover_branch(at, k as u32, label);
+                    let pos = self.body_pos(body);
+                    self.cover_branch(at, k as u32, label, pos);
                     ok &= self.stmts(body).is_ok();
                     if self.live {
                         self.jump(j);
@@ -870,14 +885,14 @@ impl Fx<'_, '_> {
                         self.branch(c, t, next);
                         self.at(t);
                     }
-                    self.cover_branch(self.cur, k as u32, label);
+                    self.cover_branch(self.cur, k as u32, label, Some(self.db.exprs[e].span));
                     self.assign(target.expr, e, &what, span)?;
                     self.jump(j);
                     self.at(next);
                 }
                 // No final `else`: the arm where no condition holds.
                 if alts.last().is_some_and(|a| a.1.is_some()) {
-                    self.cover_branch(self.cur, alts.len() as u32, CovArm::Implicit);
+                    self.cover_branch(self.cur, alts.len() as u32, CovArm::Implicit, None);
                 }
                 self.jump(j);
                 self.at(j);
@@ -894,7 +909,7 @@ impl Fx<'_, '_> {
                 for (k, (&(e, ref set), b)) in alts.iter().zip(blocks).enumerate() {
                     self.at(b);
                     let label = self.choice_arm(set);
-                    self.cover_branch(self.cur, k as u32, label);
+                    self.cover_branch(self.cur, k as u32, label, Some(self.db.exprs[e].span));
                     self.assign(target.expr, e, &what, span)?;
                     self.jump(j);
                 }
@@ -1707,14 +1722,15 @@ impl Fx<'_, '_> {
                         self.branch(c, t, next);
                         self.at(t);
                     }
-                    self.cover_branch(self.cur, k as u32, label);
+                    let pos = self.wave_pos(w);
+                    self.cover_branch(self.cur, k as u32, label, pos);
                     self.drive(target, delay, w, span)?;
                     self.jump(j);
                     self.at(next);
                 }
                 // No final `else`: the arm where no condition holds.
                 if alts.last().is_some_and(|a| a.1.is_some()) {
-                    self.cover_branch(self.cur, alts.len() as u32, CovArm::Implicit);
+                    self.cover_branch(self.cur, alts.len() as u32, CovArm::Implicit, None);
                 }
                 self.jump(j);
                 self.at(j);
@@ -1731,7 +1747,8 @@ impl Fx<'_, '_> {
                 for (k, ((w, set), b)) in alts.iter().zip(blocks).enumerate() {
                     self.at(b);
                     let label = self.choice_arm(set);
-                    self.cover_branch(self.cur, k as u32, label);
+                    let pos = self.wave_pos(w);
+                    self.cover_branch(self.cur, k as u32, label, pos);
                     self.drive(target, delay, w, span)?;
                     self.jump(j);
                 }
@@ -3049,7 +3066,7 @@ impl Fx<'_, '_> {
                 let c = self.cond_expr(*c)?;
                 self.branch(c, b, exit);
                 self.at(b);
-                self.cover_branch(self.cur, 0, CovArm::Body);
+                self.cover_branch(self.cur, 0, CovArm::Body, None);
                 self.loops.push((id, head, exit));
                 let r = self.stmts(body);
                 self.loops.pop();
@@ -3115,7 +3132,7 @@ impl Fx<'_, '_> {
                 let (b, next, inc, exit) = (self.block(), self.block(), self.block(), self.block());
                 self.branch(null, exit, b);
                 self.at(b);
-                self.cover_branch(self.cur, 0, CovArm::Body);
+                self.cover_branch(self.cur, 0, CovArm::Body, None);
                 self.loops.push((id, next, exit));
                 let res = self.stmts(body);
                 self.loops.pop();
