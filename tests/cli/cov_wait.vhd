@@ -42,10 +42,10 @@ begin
     report "woke on f at " & time'image(now);
   end process;
 
-  -- Two inputs, the edge first.
+  -- Two inputs and an edge first, which has no rows.
   process
   begin
-    wait until rising_edge(clk) and en = '1';
+    wait until rising_edge(clk) and en = '1' and ok = '1';
     report "woke on en at " & time'image(now);
   end process;
 

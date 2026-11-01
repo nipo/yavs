@@ -55,7 +55,8 @@ tells you whether one of the two tests adds nothing the other lacks.
 | `statement` | every sequential and concurrent statement, each time it runs (declarations are not counted) |
 | `branch` | each arm of `if`/`elsif`/`else` (an `if` without `else` has a "no condition held" arm), each `case` alternative, each choice of a conditional or selected assignment, and the body of a `for`/`while` loop per iteration |
 | `toggle` | for every `bit` and `std_ulogic`/`std_logic` scalar of every signal and port, the 0 to 1 and 1 to 0 changes |
-| `condition` | for every `if`/`elsif`, conditional assignment, `while`, `exit when` or `next when` with two or more inputs, one row per input and value |
+| `condition` | for every `if`/`elsif`, conditional assignment, `while`, `exit when`, `next when` or `wait until` with two or more inputs, one row per input and value |
+| `assert` | the same rows for the condition of every `assert`, sequential or concurrent; opt in with `--cov-kind`, because half of these rows need a failing run (see Conditions of `wait until` and `assert`). They report as `condition` |
 | `expression` | the same for the logic expression assigned to a signal or variable |
 | `combination` | for the same conditions and logic expressions, each combination of the values of the inputs that can occur (see Combinations); opt in with `--cov-kind` |
 
@@ -420,9 +421,26 @@ through `'Z'` or `'X'` counts nothing.
 **Condition and expression coverage.** An input is covered at value `v` when some evaluation
 flipped it alone and the result changed. In `if a and (b or c)` with `a` true, `b` false and `c`
 true, flipping `a` or `c` alone changes the result and flipping `b` does not: that evaluation covers
-`a = 1` and `c = 1`. Short-circuited inputs count as masked. Not measured: `assert` and `wait until`
-conditions, vector operands, and trees of more than 31 inputs. These two kinds cost time in every
-evaluation of a multi-input condition, so ask for them only when you need them.
+`a = 1` and `c = 1`. Short-circuited inputs count as masked. Not measured: vector operands and trees of more than 31
+inputs. These kinds cost time in every evaluation of a multi-input condition, so ask for them only
+when you need them.
+
+**Conditions of `wait until` and `assert`.** The condition of a `wait until` has `condition` rows. It
+is evaluated when it would be without coverage, at each event of its signals, and only the counting is
+added: no evaluation more and no resumption at another time. A wait that ends by its timeout counts
+nothing for that end. An edge test in the condition has no rows: it is what resumes the wait, and a
+clocked process then runs only at its edge, so its false row could not be hit. In
+`wait until rising_edge(clk) and en = '1'` that leaves one input, so no rows at all, as for any
+condition with one input.
+
+The condition of an `assert` has the same rows under its own kind, `--cov-kind=assert`, and they report
+as `condition`. It is not part of `condition`, for two reasons. An assertion that holds never takes
+its false result, so in `assert a or b` the rows `a = 0` and `b = 0` are hit only by a failing run: on a
+passing regression at most half of these rows can be hit, and a gate on `condition` would drop for code
+that is fine. And testbench assertions are often the most evaluated conditions of a run, each with the
+cost of any condition. Exclude the rows of the failing result, or read them as a list of what no test
+provoked. Neither form has `combination` items, and a `-- yavs cov exclude` comment does not apply to
+them.
 
 **Clocked processes.** A process that does nothing unless a clock edge happens runs only at
 that edge, with or without `--cov`. Its edge test therefore counts one run at initialisation

@@ -36,7 +36,7 @@ as ``--name=value``.
        ``elab``. A ``--threads`` in ``yavs.sim_flags`` comes after it and wins.
    * - ``yavs.cov_kind``
      - ``yavs run --cov-kind=LIST``: the kinds of coverage to count (``statement``, ``branch``,
-       ``toggle``, ``condition``, ``expression``, ``combination``). Used with VUnit's own ``enable_coverage``
+       ``toggle``, ``condition``, ``assert``, ``expression``, ``combination``). Used with VUnit's own ``enable_coverage``
        sim option, which makes every run write a coverage database (:ref:`vunit-coverage`).
    * - ``yavs.init_files.after_load``
      - Files of console commands sourced after each ``vunit_load`` (:doc:`interactive`).

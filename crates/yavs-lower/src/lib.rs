@@ -55,6 +55,8 @@ pub struct LowerOptions {
     pub coverage: bool,
     /// Emit condition coverage (`Inst::CoverIn`, `Inst::CoverCond`).
     pub cov_condition: bool,
+    /// Emit condition rows for the conditions of `assert` (`--cov-kind=assert`).
+    pub cov_assert: bool,
     /// Emit expression coverage of the values of assignments.
     pub cov_expression: bool,
     /// Emit the combinations of the inputs of decisions and logic expressions.
@@ -68,7 +70,11 @@ pub struct LowerOptions {
 impl LowerOptions {
     /// Any counters at all: code lowered for a run without them is not the code to reuse.
     pub fn any_coverage(&self) -> bool {
-        self.coverage || self.cov_condition || self.cov_expression || self.cov_combination
+        self.coverage
+            || self.cov_condition
+            || self.cov_assert
+            || self.cov_expression
+            || self.cov_combination
     }
 }
 
@@ -79,6 +85,7 @@ impl Default for LowerOptions {
         Self {
             coverage: false,
             cov_condition: false,
+            cov_assert: false,
             cov_expression: false,
             cov_combination: false,
             cov_directives: true,
@@ -603,6 +610,11 @@ impl Cx {
             self.opts.cov_condition
         };
         on && !self.cov_skip.contains(&file)
+    }
+
+    /// Whether the rows of an `assert` in file `file` are measured.
+    pub fn cov_assert_on(&self, file: yavs_diag::FileId) -> bool {
+        self.opts.cov_assert && !self.cov_skip.contains(&file)
     }
 
     /// Whether the combinations of a decision in file `file` are measured.

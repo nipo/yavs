@@ -465,8 +465,11 @@ pub enum CovKindArg {
     Branch,
     /// The 0 to 1 and 1 to 0 changes of every `bit` and `std_ulogic` scalar of signals and ports.
     Toggle,
-    /// Each input and value of conditions with two or more inputs.
+    /// Each input and value of conditions with two or more inputs, `wait until` included.
     Condition,
+    /// The same for the conditions of `assert`. A row that fails the assertion is hit only by a
+    /// failing run, so these rows are asked for apart; they report as conditions.
+    Assert,
     /// The same for the logic expression assigned to a signal or variable.
     Expression,
     /// Each combination of the inputs of conditions and logic expressions that can occur
@@ -1457,11 +1460,13 @@ fn prepare(
     let lowering_counters = kind(CovKindArg::Statement)
         || kind(CovKindArg::Branch)
         || kind(CovKindArg::Condition)
+        || kind(CovKindArg::Assert)
         || kind(CovKindArg::Expression)
         || kind(CovKindArg::Combination);
     let lowering = yavs_elab::LowerOptions {
         coverage: kind(CovKindArg::Statement) || kind(CovKindArg::Branch),
         cov_condition: kind(CovKindArg::Condition),
+        cov_assert: kind(CovKindArg::Assert),
         cov_expression: kind(CovKindArg::Expression),
         cov_combination: kind(CovKindArg::Combination),
         cov_directives: a.common.coverage_directives == DirectivesArg::Apply,
@@ -2364,7 +2369,9 @@ fn run_design(
             yavs_cov::Kind::Statement => kind(CovKindArg::Statement),
             yavs_cov::Kind::Branch(_) => kind(CovKindArg::Branch),
             yavs_cov::Kind::Toggle(_) => false,
-            yavs_cov::Kind::Condition(_) => kind(CovKindArg::Condition),
+            yavs_cov::Kind::Condition(_) => {
+                kind(CovKindArg::Condition) || kind(CovKindArg::Assert)
+            }
             yavs_cov::Kind::Expression(_) => kind(CovKindArg::Expression),
             yavs_cov::Kind::Combination(_) => kind(CovKindArg::Combination),
         });

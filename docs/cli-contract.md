@@ -757,7 +757,7 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   without them is `E0112`. `--uncovered` adds `[process LABEL]` to the comment of an item in a labelled process.
   Exclusions apply when reporting; databases keep raw counts. `--cov-exclude-translate-off`
   (`run`) also leaves `translate_off`/`translate_on` regions out; unbalanced `-- coverage`
-  pragmas are `W0112`/`W0113`. `--cov-kind=statement,branch,toggle,condition,expression` (`run`, default `statement,branch,toggle`)
+  pragmas are `W0112`/`W0113`. `--cov-kind=statement,branch,toggle,condition,assert,expression,combination` (`run`, default `statement,branch,toggle`)
   chooses what is counted (`condition` and `expression` are focused expression coverage, #688:
   one row per input and value of a boolean condition or logic expression with 2 or more inputs;
   `docs/decisions.md` "Condition and expression coverage"); `--cov-toggle-max=N` (default 65536) leaves signals with more

@@ -2633,7 +2633,8 @@ scalars; the on-disk format is implementation-defined, so it is fixed here (yavs
   (the predefined ones, and the `std_logic_1164` gates on `std_ulogic`) with 2 to 31 inputs
   counts; every operand that is not such an operator (relation, name, function call, edge idiom
   such as `rising_edge(clk)` or `clk'event and clk = '1'`, literal) is one input (a constant one has no rows, see below). An inserted
-  `??` is looked through. Vector operands, conditions of `assert`, `wait until`, 2019
+  `??` is looked through. The conditions of `wait until` and, under `--cov-kind=assert`, `assert`
+  count too (see "Conditions of `wait until` and `assert`", #1020). Vector operands, 2019
   conditional expressions and logic expressions nested in other expressions (arguments, indices)
   are not measured.
 - **Constant inputs (user, 2026-10-24):** an input that is constant after elaboration (a
@@ -13124,3 +13125,18 @@ index (machine written; a damaged index says to re-analyze).
 - **Usage questions go to GitHub Discussions;** issues are for bugs and planned work. Security problems are ordinary issues: no `SECURITY.md`, no email address.
 - **Outside pull requests are squash merged;** the maintainer edits the final message.
 - **Agent-only rules such as claims do not apply to human contributors.** Which rules count (agent): pushing to `main`, claims and module ownership, commit identity, host limits, as `AGENTS.md` now says.
+
+## Conditions of `wait until` and `assert` (yavs-lower, CLI, #1020, 2026-11-01)
+
+- `wait until` is a `condition` site (`Fx::wait_cond`): it costs what an `if` costs, and nothing about
+  when it is evaluated changes, since `wait_edge` is already off under coverage. `wait_level` stays:
+  it only takes one input, which has no rows.
+- `assert` has its own kind, `--cov-kind=assert` (`LowerOptions::cov_assert`, `Fx::assert_cond`), with
+  ordinary `Kind::Condition` rows. Why apart: rows of the false result are hit only by a failing run, so
+  at most half can be hit on a passing regression and a `condition` gate would drop on working code;
+  testbench assertions are also the most evaluated conditions, so the cost is the user's choice.
+- An edge test in a `wait until` has no rows (`CovCond::consts` marks it, as a constant input): edge
+  triggers stay on under coverage, so a clocked process never evaluates it false.
+- No combinations at either: the directives bind to the decisions they know, which are unchanged.
+- Identical text in one unit shares its occurrence numbers across sites, so a `wait until` or `assert`
+  with the text of a later `if` moves that `if`'s occurrence, and an exclusion row of it reports `W0111`.

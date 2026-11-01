@@ -32,7 +32,7 @@ or later (`pip install vunit-yavs` installs it, a pre-release) and yavs 0.11.0 o
 | `yavs.sim_flags` | `yavs run`, such as `--assert-summary`, `--activity`, `--hang-report`, `--wave-include`: they pass through to the run |
 | `yavs.max_threads` (integer, at least 1) | `yavs run --threads=N`, the most threads of one simulation |
 | `enable_coverage` (VUnit's option) | `yavs run --cov=<test output>/yavs/coverage.ycov --cov-test=<test name>` (coverage, below) |
-| `yavs.cov_kind` (list of strings) | `yavs run --cov-kind=LIST`: `statement`, `branch`, `toggle`, `condition`, `expression`, `combination` |
+| `yavs.cov_kind` (list of strings) | `yavs run --cov-kind=LIST`: `statement`, `branch`, `toggle`, `condition`, `assert`, `expression`, `combination` |
 | `yavs.init_files.after_load` | Console command files sourced after each `vunit_load` |
 | `yavs.init_files.before_run` | Console command files sourced before each `vunit_run` |
 | `yavs.init_file.gui` | A console command file sourced by `vunit_user_init` and at the start of `--yavs-interactive` |

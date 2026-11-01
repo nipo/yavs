@@ -463,7 +463,8 @@ Arguments:
    * ``statement``: Each statement executed
    * ``branch``: Each arm of ``if``, ``case``, conditional and selected assignments, and loop bodies
    * ``toggle``: The 0 to 1 and 1 to 0 changes of every ``bit`` and ``std_ulogic`` scalar of signals and ports
-   * ``condition``: Each input and value of conditions with two or more inputs
+   * ``condition``: Each input and value of conditions with two or more inputs, ``wait until`` included
+   * ``assert``: The same for the conditions of ``assert``. A row that fails the assertion is hit only by a failing run, so these rows are asked for apart; they report as conditions
    * ``expression``: The same for the logic expression assigned to a signal or variable
    * ``combination``: Each combination of the inputs of conditions and logic expressions that can occur (an input a short-circuit operator skips counts as not evaluated, not as false)
 

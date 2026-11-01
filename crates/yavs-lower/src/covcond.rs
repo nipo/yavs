@@ -305,11 +305,24 @@ impl Decision {
     }
 }
 
+/// Where a measured expression stands: what turns its rows on, and whether it has combinations.
+#[derive(Clone, Copy, PartialEq)]
+enum Site {
+    /// `if`, `elsif`, `when`, `while`, `exit`, `next`.
+    Condition,
+    /// The value of an assignment.
+    Value,
+    /// A `wait until`: condition rows, no combinations.
+    Wait,
+    /// An `assert`: condition rows of their own option (`--cov-kind=assert`), no combinations.
+    Assert,
+}
+
 impl Fx<'_, '_> {
-    /// Start the coverage of `e`, a condition or (`expr`) the value of an assignment: `None`
-    /// when nothing about it is measured (coverage is off for it, or it has fewer than two
-    /// inputs).
-    fn cov_begin(&mut self, e: ExprId, expr: bool) -> Option<Active> {
+    /// Start the coverage of `e`: `None` when nothing about it is measured (coverage is off for
+    /// it, or it has fewer than two inputs).
+    fn cov_begin(&mut self, e: ExprId, site: Site) -> Option<Active> {
+        let expr = site == Site::Value;
         if !self.cov {
             return None;
         }
@@ -317,7 +330,12 @@ impl Fx<'_, '_> {
         let whole = db.exprs[e].span;
         let (stmt, _) = self.cur?;
         let file = whole.file;
-        let (fec_on, comb_on) = (self.cx.cov_cond_on(expr, file), self.cx.cov_comb_on(file));
+        let fec_on = if site == Site::Assert {
+            self.cx.cov_assert_on(file)
+        } else {
+            self.cx.cov_cond_on(expr, file)
+        };
+        let comb_on = matches!(site, Site::Condition | Site::Value) && self.cx.cov_comb_on(file);
         if !fec_on && !comb_on {
             return None;
         }
@@ -326,7 +344,16 @@ impl Fx<'_, '_> {
         let leaves = &d.leaves;
         // Inputs that are constant after elaboration (generics, constants, folded values) are
         // evaluated but get no rows; fewer than two others leave nothing to measure.
-        let consts = d.consts();
+        let mut consts = d.consts();
+        // An edge test of a wait is what resumes it: an edge trigger leaves no evaluation where
+        // it is false, so its rows could never all be hit. It is evaluated and has none.
+        if site == Site::Wait {
+            for (i, l) in leaves.iter().enumerate() {
+                if db.edge_shape(l.expr).is_some() {
+                    consts |= 1 << i;
+                }
+            }
+        }
         let fec = fec_on && leaves.len() - (consts.count_ones() as usize) >= 2;
         let states = if comb_on {
             d.combinations(db).ok()
@@ -444,7 +471,21 @@ impl Fx<'_, '_> {
 
     /// The value of condition `e`, with condition coverage when it is on.
     pub fn cond_expr(&mut self, e: ExprId) -> R<yavs_ir::Reg> {
-        let a = self.cov_begin(e, false);
+        self.measured(e, Site::Condition)
+    }
+
+    /// The value of the condition of a `wait until`, with condition rows when they are on.
+    pub fn wait_cond(&mut self, e: ExprId) -> R<yavs_ir::Reg> {
+        self.measured(e, Site::Wait)
+    }
+
+    /// The value of the condition of an `assert`, with its rows when they are on.
+    pub fn assert_cond(&mut self, e: ExprId) -> R<yavs_ir::Reg> {
+        self.measured(e, Site::Assert)
+    }
+
+    fn measured(&mut self, e: ExprId, site: Site) -> R<yavs_ir::Reg> {
+        let a = self.cov_begin(e, site);
         let r = self.scalar_expr(e);
         self.cov_end(a);
         r
@@ -452,7 +493,7 @@ impl Fx<'_, '_> {
 
     /// [`Fx::expr`] of the value of an assignment, with expression coverage when it is on.
     pub fn value_expr(&mut self, e: ExprId) -> R<V> {
-        let a = self.cov_begin(e, true);
+        let a = self.cov_begin(e, Site::Value);
         let r = self.expr(e);
         self.cov_end(a);
         r
@@ -460,7 +501,7 @@ impl Fx<'_, '_> {
 
     /// [`Fx::scalar_expr`] of the value of an assignment, with expression coverage.
     pub fn value_scalar(&mut self, e: ExprId) -> R<yavs_ir::Reg> {
-        let a = self.cov_begin(e, true);
+        let a = self.cov_begin(e, Site::Value);
         let r = self.scalar_expr(e);
         self.cov_end(a);
         r

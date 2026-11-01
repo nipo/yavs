@@ -117,7 +117,7 @@ impl Fx<'_, '_> {
                 severity,
                 ..
             } => {
-                let c = self.scalar_expr(*cond)?;
+                let c = self.assert_cond(*cond)?;
                 let (fail, ok) = (self.block(), self.block());
                 self.branch(c, ok, fail);
                 self.at(fail);
@@ -2940,7 +2940,7 @@ impl Fx<'_, '_> {
         }
         let c = match self.wait_level(until, &sens, timeout.is_some())? {
             Some(c) => c,
-            None => self.scalar_expr(until)?,
+            None => self.wait_cond(until)?,
         };
         self.branch(c, exit, top);
         self.at(exit);
