@@ -42,13 +42,11 @@ YAVS_LLVM = YAVS.replace("--threads=", "--tier=llvm --threads=")
 # yavs compiling hot functions in the background (`--tier=auto`): identical output whenever
 # compilation finishes.
 YAVS_AUTO = YAVS.replace("--threads=", "--tier=auto --threads=")
-# `--tier=auto` after a first run whose output is dropped: the run compared links what the first
-# one compiled, by the pre-keys of the compilation cache (with YAVS_LLVM_PREKEY_CHECK set it
-# generates the code anyway and checks it, #785).
-_RUN = YAVS_AUTO.index('"$R" run')
-# The first run is in a directory of its own, so files a test writes (file_append) are not seen by the second.
-YAVS_AUTO_WARM = ("mkdir w1; (cd w1 && " + YAVS_AUTO + ") >/dev/null 2>&1; s=$?; if [ $s = 97 ] || [ $s = 98 ]; then exit $s; fi; "
-                  "R=${{YAVS_BIN:-yavs}}; " + YAVS_AUTO[_RUN:])
+# `--tier=auto` after a dropped first pass (in its own directory: file_append, #806), comparing a second `elab` and
+# `run`: `.expected` holds both stages (#1030). The run links what the first compiled by pre-keys of the compilation
+# cache (with YAVS_LLVM_PREKEY_CHECK set it generates the code anyway and checks it, #785).
+_ELAB = YAVS_AUTO.index('"$R" elab')
+YAVS_AUTO_WARM = (YAVS_AUTO[:_ELAB] + "mkdir w1; (cd w1 && " + YAVS_AUTO[_ELAB:] + ") >/dev/null 2>&1; " + YAVS_AUTO[_ELAB:])
 # yavs with the Cranelift tier (needs a yavs built with `--features clift`): every function
 # compiled before time 0, and hot functions compiled in the background.
 YAVS_CLIFT = YAVS.replace("--threads=", "--tier=clift --threads=")
