@@ -21,8 +21,8 @@ from packaging.version import Version
 ROOT = Path(__file__).parent.parent
 
 project = "yavs"
-copyright = "2026, the yavs authors"  # pylint: disable=redefined-builtin
-author = "the yavs authors"
+copyright = "2026, Sebastian Abrahamsson"  # pylint: disable=redefined-builtin
+author = "Sebastian Abrahamsson"
 with (ROOT / "Cargo.toml").open("rb") as fptr:
     release = tomllib.load(fptr)["workspace"]["package"]["version"]
 

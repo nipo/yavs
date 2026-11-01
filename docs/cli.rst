@@ -36,7 +36,7 @@ Commands
    * - ``yavs --explain CODE``
      - Explain a diagnostic code (:doc:`error-codes`).
    * - ``yavs --version``
-     - Print the version and whether a compiled tier is built in.
+     - Print the version, whether a compiled tier is built in, and the copyright notice.
 
 Write options as ``--name=value``. They go before or after the positional arguments.
 

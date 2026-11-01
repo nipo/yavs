@@ -1,4 +1,4 @@
--- Copyright 2026 yavs authors. Licensed under the Apache License, Version 2.0
+-- Copyright 2026 Sebastian Abrahamsson. Licensed under the Apache License, Version 2.0
 -- (http://www.apache.org/licenses/LICENSE-2.0). Content as specified by
 -- IEEE Std 1076-2008 (original text, written for yavs).
 

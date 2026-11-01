@@ -43,7 +43,7 @@ Commands
    * - ``yavs --explain CODE``
      - Print the explanation of a diagnostic code.
    * - ``yavs --version``
-     - Print the version and whether a compiled tier is built in.
+     - Print the version, whether a compiled tier is built in, and the copyright notice.
 
 Options of every command
 ------------------------
@@ -78,7 +78,7 @@ Options of every command
 
 .. option:: -V, --version
 
-   Print the version and exit.
+   Print the version and the copyright notice, and exit.
 
 ``--color``, ``--message-format`` and ``--encoding`` are accepted before and after the subcommand; ``--explain`` stands alone.
 

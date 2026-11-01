@@ -27,21 +27,26 @@ use yavs_syntax::{Encoding, Options, Std};
 
 /// What `yavs --version` prints after the name: the first line of its output is
 /// `yavs MAJOR.MINOR.PATCH (details)` (docs/cli-contract.md section 1); the details say whether
-/// the compiled tier is built in (release archives with and without it, #780).
+/// the compiled tier is built in (release archives with and without it, #780). A second line
+/// carries the copyright notice.
+macro_rules! version {
+    ($details:literal) => {
+        concat!(
+            env!("CARGO_PKG_VERSION"),
+            $details,
+            "\nCopyright (c) 2026 Sebastian Abrahamsson"
+        )
+    };
+}
+
 const VERSION: &str = if cfg!(all(feature = "llvm", feature = "clift")) {
-    concat!(
-        env!("CARGO_PKG_VERSION"),
-        " (compiled tier: llvm, cranelift)"
-    )
+    version!(" (compiled tier: llvm, cranelift)")
 } else if cfg!(feature = "llvm") {
-    concat!(env!("CARGO_PKG_VERSION"), " (compiled tier: llvm)")
+    version!(" (compiled tier: llvm)")
 } else if cfg!(feature = "clift") {
-    concat!(env!("CARGO_PKG_VERSION"), " (compiled tier: cranelift)")
+    version!(" (compiled tier: cranelift)")
 } else {
-    concat!(
-        env!("CARGO_PKG_VERSION"),
-        " (interpreter only, no compiled tier)"
-    )
+    version!(" (interpreter only, no compiled tier)")
 };
 
 #[cfg_attr(test, derive(Debug))]
@@ -614,6 +619,9 @@ mod tests {
             "{v}"
         );
         assert_eq!(v.contains("cranelift"), cfg!(feature = "clift"), "{v}");
+        let (first, rest) = v.trim_end().split_once('\n').expect("two lines");
+        assert!(first.ends_with(')'), "{v}");
+        assert_eq!(rest, "Copyright (c) 2026 Sebastian Abrahamsson", "{v}");
     }
 
     /// The default tier (#125): `auto` with a compiled tier (`llvm` or `clift`), also under

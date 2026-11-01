@@ -175,8 +175,8 @@ Other facts the consumer must know:
 | `ieee/2008/float_generic_pkg-body.vhdl` | `ieee/float_generic_pkg-body.vhdl` | 093b095a30ca3019 | verbatim | Apache-2.0 |
 | `ieee/2008/float_generic_pkg.vhdl` | `ieee/float_generic_pkg.vhdl` | f6bdde6dcd120358 | verbatim | Apache-2.0 |
 | `ieee/2008/float_pkg.vhdl` | `ieee/float_pkg.vhdl` | 46e9f26610bd4571 | verbatim | Apache-2.0 |
-| `ieee/2008/ieee_bit_context.vhdl` | (written for yavs) | 010eff42f7097bde | original | Apache-2.0 (yavs authors) |
-| `ieee/2008/ieee_std_context.vhdl` | (written for yavs) | 1702ddb86dd75c70 | original | Apache-2.0 (yavs authors) |
+| `ieee/2008/ieee_bit_context.vhdl` | (written for yavs) | 07ba7e15efd70d72 | original | Apache-2.0 (Sebastian Abrahamsson) |
+| `ieee/2008/ieee_std_context.vhdl` | (written for yavs) | 091a88a7d7f6be80 | original | Apache-2.0 (Sebastian Abrahamsson) |
 | `ieee/2008/math_complex-body.vhdl` | `ieee/math_complex-body.vhdl` | 4f2f523002822b27 | verbatim | Apache-2.0 |
 | `ieee/2008/math_complex.vhdl` | `ieee/math_complex.vhdl` | deddee8078c0c85f | verbatim | Apache-2.0 |
 | `ieee/2008/math_real-body.vhdl` | `ieee/math_real-body.vhdl` | ed057e95cd908b54 | verbatim | Apache-2.0 |
@@ -199,8 +199,8 @@ Other facts the consumer must know:
 | `ieee/2019/float_generic_pkg-body.vhdl` | `ieee/float_generic_pkg-body.vhdl` | 093b095a30ca3019 | verbatim | Apache-2.0 |
 | `ieee/2019/float_generic_pkg.vhdl` | `ieee/float_generic_pkg.vhdl` | f6bdde6dcd120358 | verbatim | Apache-2.0 |
 | `ieee/2019/float_pkg.vhdl` | `ieee/float_pkg.vhdl` | 46e9f26610bd4571 | verbatim | Apache-2.0 |
-| `ieee/2019/ieee_bit_context.vhdl` | (written for yavs) | 010eff42f7097bde | original | Apache-2.0 (yavs authors) |
-| `ieee/2019/ieee_std_context.vhdl` | (written for yavs) | 1702ddb86dd75c70 | original | Apache-2.0 (yavs authors) |
+| `ieee/2019/ieee_bit_context.vhdl` | (written for yavs) | 07ba7e15efd70d72 | original | Apache-2.0 (Sebastian Abrahamsson) |
+| `ieee/2019/ieee_std_context.vhdl` | (written for yavs) | 091a88a7d7f6be80 | original | Apache-2.0 (Sebastian Abrahamsson) |
 | `ieee/2019/math_complex-body.vhdl` | `ieee/math_complex-body.vhdl` | 4f2f523002822b27 | verbatim | Apache-2.0 |
 | `ieee/2019/math_complex.vhdl` | `ieee/math_complex.vhdl` | deddee8078c0c85f | verbatim | Apache-2.0 |
 | `ieee/2019/math_real-body.vhdl` | `ieee/math_real-body.vhdl` | ed057e95cd908b54 | verbatim | Apache-2.0 |

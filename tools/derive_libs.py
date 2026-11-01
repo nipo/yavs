@@ -313,7 +313,7 @@ for pkg, scalar, el in (("std", "STD_ULOGIC", "STD_LOGIC"), ("bit", "BIT", "BIT"
     assert len(gone) == {"std": 224, "bit": 208}[pkg], len(gone)  # declarations plus bodies
 
 # ---- ieee: identical files for both revisions + two tiny contexts --------------
-CTX = """-- Copyright 2026 yavs authors. Licensed under the Apache License, Version 2.0
+CTX = """-- Copyright 2026 Sebastian Abrahamsson. Licensed under the Apache License, Version 2.0
 -- (http://www.apache.org/licenses/LICENSE-2.0). Content as specified by
 -- IEEE Std 1076-2008 (original text, written for yavs).
 

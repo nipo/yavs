@@ -71,7 +71,8 @@ Conventions:
   tier)` (a build with neither `llvm` nor `clift` fails `--tier=auto` and `--tier=llvm` with E0120;
   a build with the `clift` feature says `compiled tier: cranelift`, or `llvm, cranelift` with
   both, and runs `--tier=auto` with Cranelift when `llvm` is not built in). The release archives are built with `clift` only: one archive per platform, `compiled tier: cranelift` (#780).
-  The test runner takes the first
+  A second line carries the copyright notice, `Copyright (c) 2026 Sebastian Abrahamsson`; a
+  consumer that embeds the version takes the first line only. The test runner takes the first
   `MAJOR.MINOR[.PATCH]` it finds; the prerelease tag is ignored for ordering.
   The version is available to the test runner packages as the `yavs_version` marker.
 

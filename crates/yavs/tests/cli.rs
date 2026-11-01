@@ -650,6 +650,26 @@ fn image_text() {
     run_stdout("image_text", 0);
 }
 
+/// `--version` and `-V` print the version line, then the copyright notice (#1039).
+#[test]
+fn version_has_copyright_line() {
+    for flag in ["--version", "-V"] {
+        let out = Command::new(env!("CARGO_BIN_EXE_yavs"))
+            .arg(flag)
+            .output()
+            .expect("run yavs");
+        assert!(out.status.success(), "{flag}");
+        let text = String::from_utf8(out.stdout).expect("utf-8");
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines.len(), 2, "{flag}: {text}");
+        assert!(lines[0].starts_with("yavs "), "{flag}: {text}");
+        assert_eq!(
+            lines[1], "Copyright (c) 2026 Sebastian Abrahamsson",
+            "{flag}"
+        );
+    }
+}
+
 /// READ and WRITE edit a line in place, but an access value copied before the edit is stale
 /// afterwards: using it is a runtime error (#428).
 #[test]

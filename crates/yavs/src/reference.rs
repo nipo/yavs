@@ -343,7 +343,7 @@ pub fn render() -> String {
     out.push_str(
         "   * - ``yavs --explain CODE``\n     - Print the explanation of a diagnostic code.\n",
     );
-    out.push_str("   * - ``yavs --version``\n     - Print the version and whether a compiled tier is built in.\n\n");
+    out.push_str("   * - ``yavs --version``\n     - Print the version, whether a compiled tier is built in, and the copyright notice.\n\n");
 
     let mut codes = BTreeSet::new();
     out.push_str("Options of every command\n------------------------\n\n.. program:: yavs\n\n");
@@ -355,7 +355,9 @@ pub fn render() -> String {
         codes_in(&help(a), &mut codes);
     }
     out.push_str(".. option:: -h, --help\n\n   Print the help of the command and exit.\n\n");
-    out.push_str(".. option:: -V, --version\n\n   Print the version and exit.\n\n");
+    out.push_str(
+        ".. option:: -V, --version\n\n   Print the version and the copyright notice, and exit.\n\n",
+    );
     out.push_str(
         "``--color``, ``--message-format`` and ``--encoding`` are accepted before and after the \
          subcommand; ``--explain`` stands alone.\n\n",

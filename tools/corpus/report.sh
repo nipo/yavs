@@ -15,7 +15,7 @@ mkdir -p "$work/bin" && ln -s "$(readlink -f "$bin")" "$work/bin/yavs"
 export PATH=$work/bin:$PATH
 for m in "$here"/*.toml; do basename "$m" .toml; done |
     xargs -P 4 -I{} sh -c "python3 '$here/run.py' {} --tool yavs --expected none --keep-going --out '$work/out-{}' --log '$work/{}.log' > '$work/{}.out' 2>&1 || true"
-python3 -I - "$work" "$("$bin" --version)" <<'PY' > "$here/RESULTS.md"
+python3 -I - "$work" "$("$bin" --version | head -n 1)" <<'PY' > "$here/RESULTS.md"
 import re, sys, collections
 from pathlib import Path
 work, ver = Path(sys.argv[1]), sys.argv[2]
