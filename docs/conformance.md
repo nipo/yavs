@@ -1,18 +1,18 @@
 # yavs conformance report
 
-Generated: yavs 0.11.0 at commit `a3e95822df` (2026-10-29) by `tools/conformance/run.py`; do not edit by hand.
+Generated: yavs 0.11.0 at commit `dcf6ff7061` (2026-11-01) by `tools/conformance/run.py`; do not edit by hand.
 
 yavs is checked by running the test suites of VHDL libraries, a VHDL language test suite and real designs on it, and by comparing its output
-with two established open-source VHDL simulators, called sim1 and sim2 here. Each suite judges its own tests. Over the suites below, 14902 of 15029
+with two established open-source VHDL simulators, called sim1 and sim2 here. Each suite judges its own tests. Over the suites below, 14980 of 15081
 tests pass; every failure is tracked as an issue. This is evidence, not a proof of correctness.
 
 | Project or suite | What it is | Passed / total |
 | --- | --- | ---: |
-| Differential testbenches | small testbenches of this repository; output must equal sim1's, at 1 and 4 threads | 554/554 |
-| Known simulator differences | one reproducer per case where simulators disagree | 218/218 |
-| sim1's regression tests | a reference simulator's own self-checking tests (runnable ones) | 1002/1070 |
-| sim2's regression tests | a reference simulator's own self-checking tests (runnable ones) | 458/504 |
-| VESTs | VHDL-1993 language test suite | 3687/3694 |
+| Differential testbenches | small testbenches of this repository; output must equal sim1's, at 1 and 4 threads | 606/606 |
+| Known simulator differences | one reproducer per case where simulators disagree | 237/237 |
+| sim1's regression tests | a reference simulator's own self-checking tests (runnable ones) | 1016/1070 |
+| sim2's regression tests | a reference simulator's own self-checking tests (runnable ones) | 463/504 |
+| VESTs | VHDL-1993 language test suite | 3694/3694 |
 | UVVM | verification library: its own testbenches | 131/137 |
 | OSVVM, VHDL-2008 | verification library: its own regression | 314/314 |
 | OSVVM, VHDL-2019 | verification library: its own regression | 314/314 |
@@ -40,29 +40,29 @@ Every testbench of `tests/corpus` runs on yavs and its normalised output is comp
 | --- | --- | --- | --- |
 | access | 8/8 | 8/8 | 8/8 |
 | arith | 8/8 | 8/8 | 8/8 |
-| composite | 118/118 | 118/118 | 118/118 |
+| composite | 136/136 | 136/136 | 136/136 |
 | delta | 13/13 | 13/13 | 13/13 |
-| env | 14/14 | 14/14 | 14/14 |
+| env | 16/16 | 16/16 | 16/16 |
 | force | 12/12 | 12/12 | 12/12 |
-| generics | 52/52 | 52/52 | 52/52 |
-| hierarchy | 84/84 | 84/84 | 84/84 |
+| generics | 57/57 | 57/57 | 57/57 |
+| hierarchy | 90/90 | 90/90 | 90/90 |
 | ieee | 21/21 | 21/21 | 21/21 |
 | implicit | 6/6 | 6/6 | 6/6 |
 | postponed | 2/2 | 2/2 | 2/2 |
-| process | 39/39 | 39/39 | 39/39 |
-| protected | 22/22 | 22/22 | 22/22 |
-| psl | 13/13 | 13/13 | 13/13 |
+| process | 40/40 | 40/40 | 40/40 |
+| protected | 27/27 | 27/27 | 27/27 |
+| psl | 16/16 | 16/16 | 16/16 |
 | reflect | 14/14 | 14/14 | 14/14 |
 | report | 10/10 | 10/10 | 10/10 |
-| resolution | 22/22 | 22/22 | 22/22 |
+| resolution | 24/24 | 24/24 | 24/24 |
 | rtl | 4/4 | 4/4 | 4/4 |
 | scalar | 20/20 | 20/20 | 20/20 |
 | shared | 4/4 | 4/4 | 4/4 |
-| sigassign | 27/27 | 27/27 | 27/27 |
+| sigassign | 33/33 | 33/33 | 33/33 |
 | std93 | 6/6 | 6/6 | 6/6 |
 | synopsys | 20/20 | 20/20 | 20/20 |
-| textio | 15/15 | 15/15 | 15/15 |
-| total | 554/554 | 554/554 | 554/554 |
+| textio | 19/19 | 19/19 | 19/19 |
+| total | 606/606 | 606/606 | 606/606 |
 
 Failing: none.
 
@@ -76,16 +76,16 @@ Each reference simulator ships a suite of self-checking tests. They run in place
 
 | suite | tests | pass | gated pass list | regressions |
 | --- | ---: | ---: | ---: | ---: |
-| sim1 | 1473 | 1002 | 990 | 0 |
-| sim2 | 1151 | 458 | 455 | 0 |
+| sim1 | 1473 | 1016 | 995 | 0 |
+| sim2 | 1151 | 463 | 455 | 0 |
 
-Not passing: sim1: 68; sim2: 46 (the classes of each are in `docs/conformance.json`; a timeout under load moves a test between them, so the report does not).
+Not passing: sim1: 54; sim2: 41 (the classes of each are in `docs/conformance.json`; a timeout under load moves a test between them, so the report does not).
 
 ### Known simulator differences
 
 [`docs/design/simulator-discrepancies.md`](https://github.com/ru551n/yavs/blob/main/docs/design/simulator-discrepancies.md) lists every case where the references disagree with each other, with the language reference or with yavs:
-218 catalogued behaviours, each with a reproducer under `tests/discrepancies/<case>/`. CI runs every reproducer on yavs and fails when yavs's output
-differs from the recorded one (matches). Kinds: LRM clear 135, LRM ambiguity 77, reference bug 5, library availability 1.
+237 catalogued behaviours, each with a reproducer under `tests/discrepancies/<case>/`. CI runs every reproducer on yavs and fails when yavs's output
+differs from the recorded one (matches). Kinds: LRM clear 150, LRM ambiguity 80, reference bug 5, library availability 1, other 1.
 
 Policy (`docs/plan.md`): where the language reference is clear, yavs follows it even against all references; where it is unclear yavs is permissive
 and follows the majority of the references that run the construct. The verdicts of each reference are in the catalogue; the table gives the clause, the kind,
@@ -103,6 +103,7 @@ and yavs's verdict.
 | [`anonymous-operator`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/anonymous-operator) | 6.5.2, 9.2 (2019) | LRM ambiguity | OK |
 | [`psl-sere-alternative`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/psl-sere-alternative) | PSL (IEEE 1850) 6.1.1.2.1 | LRM clear | OK |
 | [`psl-sere-equal-repeat`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/psl-sere-equal-repeat) | PSL (IEEE 1850) 6.1.2.2 | LRM clear | OK |
+| [`psl-sere-and-three`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/psl-sere-and-three) | PSL (IEEE 1850) 6.1.1.2.3 | LRM clear | OK |
 | [`psl-sere-within-and`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/psl-sere-within-and) | PSL (IEEE 1850) 6.1.1.2.2, 6.1.1.2.4 | LRM clear | OK |
 | [`psl-named-sequence`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/psl-named-sequence) | PSL (IEEE 1850) 6.5 | LRM clear | OK |
 | [`psl-temporal-operators`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/psl-temporal-operators) | PSL (IEEE 1850) 6.2.1.3 to 6.2.1.7 | LRM clear | OK |
@@ -185,6 +186,7 @@ and yavs's verdict.
 | [`positional-generic-after-type`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/positional-generic-after-type) | 6.5.3, 6.5.7.2 | LRM ambiguity | OK |
 | [`protected-composite-shared`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/protected-composite-shared) | 6.4.2.4, LCS-2016-014 (2019) | LRM ambiguity | OK |
 | [`protected-composites`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/protected-composites) | 5.3, 5.4, LCS-2016-014, 014a (2019) | LRM clear | OK |
+| [`protected-header-generic-map`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/protected-header-generic-map) | 5.6.2, LCS-2016-034 (2019) | LRM clear | OK |
 | [`protected-record-mixed`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/protected-record-mixed) | 5.3.1 (2019) | LRM clear | REJECT |
 | [`protected-method-access-parameter`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/protected-method-access-parameter) | 5.6.2 | LRM ambiguity | 08: REJECT / 19: OK |
 | [`protected-method-access-result`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/protected-method-access-result) | 5.6.2 | LRM ambiguity | 08: REJECT / 19: OK |
@@ -204,10 +206,13 @@ and yavs's verdict.
 | [`unaffected-force`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/unaffected-force) | 10.5.2.1 (2019) | LRM clear | 08: REJECT / 19: OK |
 | [`unaffected-variable`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/unaffected-variable) | 10.5.2.1 (2019) | LRM clear | 08: REJECT / 19: OK |
 | [`use-clause-constant-vs-literal`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/use-clause-constant-vs-literal) | 12.4 | LRM clear | REJECT |
+| [`aggregate-range-impure-composite`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/aggregate-range-impure-composite) | 9.3.3 | LRM clear | OK |
+| [`nonstatic-port-actual-name`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/nonstatic-port-actual-name) | 6.5.6.3 | other | OK |
+| [`null-record-signal`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/null-record-signal) | 10.5.2.2, 6.4.2.3 | LRM clear | OK |
 | [`variable-port`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/variable-port) | 6.5.2, 6.5.7.1 (2019), LCS-2016-047 | LRM clear | OK |
 | [`view-individual-driven-elements`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/view-individual-driven-elements) | 6.5.2, 14.7.2 | LRM clear | OK |
 | [`force-resolved-composite-member`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/force-resolved-composite-member) | 10.5.2.1 | LRM clear | REJECT |
-| [`force-twice`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/force-twice) | 10.5.2.1, 14.7.3 (when a force is an event is not stated) | LRM ambiguity | as sim1 |
+| [`force-twice`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/force-twice) | 10.5.2.1, 14.7.3 (when a force is an event is not stated) | LRM ambiguity | as NVC |
 | [`allocator-overload`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/allocator-overload) | 9.3.7, 12.5 | LRM clear | OK |
 | [`static-intermediate-outside-integer`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/static-intermediate-outside-integer) | 9.3.6, 5.2.3.1 | LRM clear | OK |
 | [`static-intermediate-generate-parameter`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/static-intermediate-generate-parameter) | 9.4.3, 5.2.3.1 | LRM clear | FATAL |
@@ -256,6 +261,10 @@ and yavs's verdict.
 | [`aggregate-target-nested-record`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/aggregate-target-nested-record) | 10.5.2.1, 10.6.2.1 | LRM ambiguity | OK |
 | [`aggregate-target-nested-array`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/aggregate-target-nested-array) | 10.5.2.1, 10.6.2.1 | LRM ambiguity | OK |
 | [`aggregate-target-matrix`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/aggregate-target-matrix) | 10.5.2.1, 10.6.2.1, 9.3.3.3 | LRM ambiguity | OK |
+| [`aggregate-target-record-elements`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/aggregate-target-record-elements) | 10.5.2.1 | LRM clear | OK |
+| [`aggregate-target-piece-of-records`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/aggregate-target-piece-of-records) | 10.5.2.1, 10.6.2.1, 9.3.3.3 | LRM clear | OK |
+| [`aggregate-target-disconnection`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/aggregate-target-disconnection) | 7.4, 11.6 | LRM clear | OK |
+| [`aggregate-target-element-lengths`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/aggregate-target-element-lengths) | 10.5.2.1 | LRM clear | FATAL |
 | [`assert-count-cycles`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/assert-count-cycles) | std.env (2019) | LRM ambiguity | OK |
 | [`concat-null-operands`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/concat-null-operands) | 9.2.5 | LRM clear | OK |
 | [`concat-null-operands-three`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/concat-null-operands-three) | 9.2.5 | LRM clear | OK |
@@ -306,6 +315,8 @@ and yavs's verdict.
 | [`record-aggregate-field-range`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/record-aggregate-field-range) | 9.3.3.2, 5.2.1 | LRM clear | FATAL |
 | [`aggregate-target-self-value`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/aggregate-target-self-value) | 10.6.2.1 | LRM clear | OK |
 | [`package-instance-path-name`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/package-instance-path-name) | 16.2.5 | LRM clear | OK |
+| [`generic-package-own-name`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/generic-package-own-name) | 16.2.5, 4.9 | LRM ambiguity | OK |
+| [`package-name-as-prefix`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/package-name-as-prefix) | 16.2.5 | LRM clear | OK |
 | [`subprogram-signature-instance-name`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/subprogram-signature-instance-name) | 16.2.5 | LRM ambiguity | OK: `show[string, std_logic, natural]` ( |
 | [`psl-edge-unknown-value`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/psl-edge-unknown-value) | PSL (IEEE 1850) 5.2.3.4, 5.2.3.5 | LRM ambiguity | OK |
 | [`short-circuit-constant-false-effect`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/short-circuit-constant-false-effect) | 9.2.2 | LRM clear | OK |
@@ -313,6 +324,14 @@ and yavs's verdict.
 | [`subtype-range-bound-variable`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/subtype-range-bound-variable) | 14.4.2.1 | LRM clear | OK |
 | [`subtype-of-subtype-bound-once`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/subtype-of-subtype-bound-once) | 14.4.2.1 | LRM clear | OK |
 | [`unused-constant-index-constraint`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/unused-constant-index-constraint) | 5.3.2.2, 14.4.2.1 | LRM clear | REJECT |
+| [`assert-format-get`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/assert-format-get) | std.env (2019) | LRM ambiguity | not run |
+| [`record-out-param-length`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/record-out-param-length) | 6.5.7.1, 10.6.2.1 | LRM clear | FATAL |
+| [`record-constrained-formal-length`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/record-constrained-formal-length) | 5.3.2.2, 6.5.7.1 | LRM clear | FATAL |
+| [`array-of-arrays-element-length-assign`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/array-of-arrays-element-length-assign) | 10.6.2.1 | LRM clear | FATAL |
+| [`external-constant-length`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/external-constant-length) | 8.7 | LRM clear | REJECT |
+| [`aggregate-declared-operator-direction`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/aggregate-declared-operator-direction) | 9.3.3.3 | LRM ambiguity | OK |
+| [`record-static-default-length`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/record-static-default-length) | 5.3.2.2, 6.5.2 | LRM clear | REJECT |
+| [`qualified-record-own-bounds`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/qualified-record-own-bounds) | 9.3.5 | LRM clear | OK |
 
 </details>
 
@@ -375,22 +394,18 @@ VESTs, the VHDL test suite for IEEE 1076-1993 (University of Cincinnati; the bil
 
 | group | pass | not counted |
 | --- | ---: | ---: |
-| billowitch/compliant | **1608/1612** | 0 |
+| billowitch/compliant | 1612/1612 | 0 |
 | billowitch/analyzer_failure | 1490/1490 | 0 |
 | billowitch/simulator_failure | 38/38 | 0 |
-| ashenden/compliant | **448/451** | 30 |
+| ashenden/compliant | 451/451 | 30 |
 | ashenden/non_compliant | 7/7 | 1 |
 | clifton-labs/compliant | 96/96 | 13 |
-| total | **3687/3694** | 44 |
+| total | 3694/3694 | 44 |
 
 Of the 1490 `analyzer_failure` passes, 1466 fail at analysis and 24 are stopped by a yavs error at elaboration or run time before the test's own verdict, each checked to be the error the test is about (values out of range, lengths, delays, non-static actuals: the language reference leaves open when such errors are detected). As in the suite's own runner, an analysis failure counts without a check that it is the error the test is about. In every group that must fail, a first error that is E1999 (not analysed yet), E2001 (not lowered yet), E2199 (not elaborated yet), E0199 (command limitation), E9999 or a crash is a failure.
 
 Failures by the issue that tracks their cause:
 
-- [#816](https://github.com/ru551n/yavs/issues/816): `tc1781.vhd`
-- [#817](https://github.com/ru551n/yavs/issues/817): `tc3153.vhd`, `tc3156.vhd`, `tc3159.vhd`
-- [#819](https://github.com/ru551n/yavs/issues/819): `ch_11_fg_11_09.vhd`, `ch_11_fg_11_10.vhd`
-- [#820](https://github.com/ru551n/yavs/issues/820): `ch_13_fg_13_24.vhd`
 
 
 ### VHPI
@@ -494,10 +509,10 @@ Differences explained:
 | job | runs on |
 | --- | --- |
 | `check` | ubuntu-24.04, ubuntu-24.04-arm, windows-latest |
-| `llvm` | ubuntu-24.04, ubuntu-24.04-arm, windows-latest |
 | `clift` | ubuntu-24.04, ubuntu-24.04-arm, windows-latest |
+| `vunit-yavs` | ubuntu-24.04, windows-latest |
 
-The `check` job is `cargo fmt`, `clippy -D warnings` and the whole test suite of the workspace; the `clift` job the same for the Cranelift tier plus a simulation smoke run. The `corpus` and `conformance` jobs run on Linux x86_64 only.
+The table is a full run: nightly, by hand and on a release tag. A push runs Linux x86_64, and Windows too when source or build files changed. The `check` job is `cargo fmt`, `clippy -D warnings` and the whole test suite of the workspace; the `clift` job the same for the Cranelift tier plus a simulation smoke run; the `vunit-yavs` job the tests of the test runner package. The `corpus` and `conformance` jobs run on Linux x86_64 only.
 
 ### Where and when each result was produced
 
@@ -541,6 +556,6 @@ The local results need the reference simulators, configured in the untracked `to
 | PSL | a subset; the rest is skipped with warning W0004 or listed in the tracking issue [#445](https://github.com/ru551n/yavs/issues/445) |
 | SDF and VITAL timing, SystemC, macOS | out of scope (docs/plan.md, "Out of scope") |
 | Platforms | Linux x86_64, Linux aarch64 and Windows x86_64 only |
-| LLVM tier | the release archives use the Cranelift compiled tier (`--tier=auto` default); the LLVM tier exists only in a build from source with the `llvm` feature. CI runs a slice of the corpus under the LLVM tier on the three platforms |
+| LLVM tier | the release archives use the Cranelift compiled tier (`--tier=auto` default); the LLVM tier exists only in a build from source with the `llvm` feature. CI has not built or tested it since 2026-10-30 ([#898](https://github.com/ru551n/yavs/issues/898)) |
 | Reference simulators | the comparison is against two established open-source VHDL simulators (sim3 and sim4, two commercial simulators, vote in part of the discrepancy catalogue); where the language reference is unclear yavs is permissive and the choice is recorded below |
 | What a pass means | a pass is agreement with a recorded reference output or with a suite's own verdict. It is evidence, not a proof of correctness; each known disagreement is listed in the catalogue |
