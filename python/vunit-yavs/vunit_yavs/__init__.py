@@ -552,17 +552,23 @@ class YavsInterface(SimulatorInterface):
         super().compile_project(project, printer, continue_on_error, target_files)
         if not self._lint:
             return
+        # An external library is not this project's, and a library without files has nothing to check
+        libraries = [
+            library
+            for library in project.get_libraries()
+            if not library.is_external and (Path(library.directory) / "yavs-lib.toml").exists()
+        ]
+        if not libraries:
+            return
+        # Every run reads the same configuration: a bad one is told once, before any run
+        settings = [str(Path(self._prefix) / self.executable), "lint", "--list-rules"]
+        if subprocess.run(settings, stdout=subprocess.DEVNULL, check=False).returncode != 0:
+            raise CompileError
         failed = False
-        quiet = []
-        for library in project.get_libraries():
-            # An external library is not this project's, and a library without files has nothing to check
-            if library.is_external or not (Path(library.directory) / "yavs-lib.toml").exists():
-                continue
+        for library in libraries:
             # The project says which files a library has, not file_list in the configuration
-            cmd = self._get_command("lint", library.name, library.directory) + ["--no-file-list"] + quiet
+            cmd = self._get_command("lint", library.name, library.directory) + ["--no-file-list"]
             failed |= subprocess.run(cmd, check=False).returncode != 0
-            # Every run reads the same configuration: its unknown keys are told once
-            quiet = ["-Wno-W0139"]
         if failed:
             raise CompileError
 

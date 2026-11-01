@@ -746,11 +746,11 @@ Arguments:
 
 .. option:: --config=FILE
 
-   The configuration file. Default: ``yavs-lint.yaml`` in the working directory or an ancestor. A bad value fails with E0134; an unknown key or rule is ignored with warning W0139.
+   The configuration file. Default: ``yavs-lint.yaml`` in the working directory or an ancestor. A bad value, an unknown key or an unknown rule fails with E0134, all of them listed.
 
 .. option:: --waivers=FILE
 
-   The waiver file. Default: ``yavs-lint-waivers.yaml`` next to the configuration, or in the working directory or an ancestor. A bad value fails with E0134; an unknown key or rule is ignored with warning W0139.
+   The waiver file. Default: ``yavs-lint-waivers.yaml`` next to the configuration, or in the working directory or an ancestor. A bad value, an unknown key or an unknown rule fails with E0134, all of them listed.
 
 .. option:: --no-file-list
 
@@ -816,7 +816,7 @@ Arguments:
 
    Directory of the std/ieee units shared by all libraries, or ``off`` (default: ``$YAVS_STD_CACHE``, else ``yavs/std`` in the user's cache directory).
 
-Diagnostics named above: ``E0134``, ``E0135``, ``W0139``; ``yavs --explain CODE`` explains each.
+Diagnostics named above: ``E0134``, ``E0135``; ``yavs --explain CODE`` explains each.
 
 ``yavs cache clean``
 --------------------

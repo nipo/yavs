@@ -128,15 +128,14 @@ fn lint_page() {
     fails(&["lint", "src/pkg.vhd", "src/fifo.vhd"]);
     fails(&["lint", "--recursive", "src"]);
 
-    // The warning about unknown keys, as the page prints it.
-    let mut cfg = "# Settings of another tool.\nrule:\n  lnt_771: {disable: true}\n".to_string();
-    for i in 1..=5 {
-        cfg += &format!("  style_{i}: {{disable: true}}\n");
-    }
-    write("yavs-lint.yaml", &(cfg + "indent: {}\n"));
+    // The error about unknown keys, as the page prints it.
+    write(
+        "yavs-lint.yaml",
+        "# Settings of another tool.\nrule:\n  lnt_771: {disable: true}\n  style_1: {disable: true}\nindent: {}\n",
+    );
     let (code, _, err) = e.yavs(&["lint", "src/pkg.vhd"]);
-    assert_eq!(code, 0, "{err}");
-    assert_eq!(err.matches("warning[W0139]").count(), 3, "{err}");
+    assert_eq!(code, 2, "{err}");
+    assert_eq!(err.matches("error[E0134]").count(), 1, "{err}");
     on_page("lint.rst", &err);
     std::fs::remove_file(e.0.join("yavs-lint.yaml")).unwrap();
 

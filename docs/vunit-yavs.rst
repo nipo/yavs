@@ -81,8 +81,8 @@ out stops the run script with one ``error:`` line that says why and what to drop
        external; a finding of severity error fails the compile step. VUnit's own libraries are among
        them: to leave them out, put ``exclude: ['**/vunit/vhdl/**']`` in ``yavs-lint.yaml`` in the
        directory you run in or an ancestor. ``file_list`` in that file is not read: the project says
-       which files a library has. Unknown keys in that file get warning W0139 once, for the first
-       library.
+       which files a library has. The configuration is read once before any library is checked: an
+       unknown key, rule or rule group in it or in the waiver file is error E0134 and fails the compile step.
    * - ``--yavs-cov``
      - Collects coverage in every simulation, as ``enable_coverage`` does for the tests it is set
        for. Not with ``--yavs-debug`` or ``--yavs-interactive``.

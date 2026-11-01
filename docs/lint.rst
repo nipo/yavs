@@ -91,26 +91,24 @@ are allowed, or a regular expression after ``re:`` (``re:_p[0-9]+``), matched wi
 With no list these two rules say nothing. ``-Wno-RULE``, ``-Werror`` and
 ``-Werror=RULE`` do the same for one run; ``-Werror`` makes a finding of severity warning an error.
 
-Other keys are warned about and ignored: warning W0139, at any level of this file and of the waiver file, for
-a key, a rule id or a rule group yavs does not have. Settings for a formatter or a style guide mean
-nothing here, so a configuration shared with such a tool works as it is. The run goes on, ``-Werror``
-makes it fail, and ``-Wno-W0139`` silences it. A name close to a real one gets a suggestion, and many in
-one section are one warning that lists them all:
+A key, a rule id or a rule group that ``yavs lint`` does not have is an error, E0134, at any level of
+this file and of the waiver file. ``yavs lint`` is a static analysis tool, not a style guide or formatter,
+so settings for those are not accepted: a file written for such a tool must have them removed. Every
+such name is listed with its line in one run, so one pass fixes the file, and a name close to a real one
+gets a suggestion. Nothing is checked until the file is right, and ``-W`` options do not change that:
 
 .. code-block:: console
 
    $ yavs lint src/pkg.vhd
-   warning[W0139]: `yavs-lint.yaml` line 3: unknown rule `lnt_771` in `rule` is ignored; a rule with a similar name exists: `lint_771`
+   error[E0134]: invalid file `yavs-lint.yaml`:
+                   line 3: unknown rule `lnt_771` in `rule`; a rule with a similar name exists: `lint_771`
+                   line 4: unknown rule `style_1` in `rule`
+                   line 5: unknown key `indent`
 
-   warning[W0139]: `yavs-lint.yaml` lines 4 to 8: 5 unknown rules in `rule` are ignored:
-                   `style_1`, `style_2`, `style_3`, `style_4`, `style_5`
+   error: aborting due to 1 previous error
 
-   warning[W0139]: `yavs-lint.yaml` line 9: unknown key `indent` is ignored
-
-   note: 0 findings in 1 file(s)
-
-A misspelled key therefore changes nothing, so read these warnings. A bad value of a key yavs does read,
-such as ``severity: fatal``, a YAML error or a file that cannot be read still stops the run with E0134.
+A bad value of a key ``yavs lint`` does read, such as ``severity: fatal``, a YAML error or a file that
+cannot be read is E0134 too.
 
 To leave files out, list them under ``exclude``: paths or globs, relative to the configuration file,
 of files or directories. A pattern that starts with ``**`` also matches files outside that directory.
@@ -200,9 +198,9 @@ A waiver accepts a finding a project has decided about, with the reason. They li
        reason: kept until the block is replaced
 
 ``rule: '*'`` covers every rule, and a bare file name matches that file in any directory. A waived
-finding is in no report and changes no exit status. An unknown rule waives nothing and an unknown key is
-ignored, each with warning W0139: a misspelled ``files`` or ``lines`` leaves a waiver that covers more than
-it says, so run with ``-Werror`` where that matters.
+finding is in no report and changes no exit status. An unknown key or rule in a waiver is E0134 like
+those of the configuration: a misspelled ``files`` or ``lines`` would leave a waiver that covers more than
+it says, and a misspelled rule would waive nothing.
 
 Turning rules off for a directory or file pattern
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -296,7 +294,7 @@ With VUnit
 ``python run.py --compile --yavs-lint`` checks every library the run compiled, after compiling, and
 fails the run with a finding of severity error (:doc:`vunit-yavs`). It reads ``yavs-lint.yaml`` from
 the directory you run in or an ancestor, so ``exclude`` applies. ``file_list`` does not: the project
-says which files a library has. Warning W0139 is told for the first library only.
+says which files a library has. A bad configuration is told once, before any library is checked.
 
 In VS Code
 ----------

@@ -184,7 +184,7 @@ fn register_names_from_the_configuration() {
     .unwrap();
     let o = yavs(&dir, &["lint", "r.vhd"]);
     assert!(
-        stderr(&o).contains("W0139") && stderr(&o).contains("`suffixes`"),
+        status(&o) == 2 && stderr(&o).contains("E0134") && stderr(&o).contains("`suffixes`"),
         "`suffixes` belongs to lint_602 alone: {}",
         stderr(&o)
     );
@@ -418,9 +418,9 @@ fn testbench_and_rtl_blocks() {
     // A wrong key names itself.
     std::fs::write(dir.join("yavs-lint.yaml"), "testbench:\n  rules: {}\n").unwrap();
     let o = yavs(&dir, &["lint", "adder.vhd"]);
-    assert_eq!(status(&o), 0);
+    assert_eq!(status(&o), 2);
     assert!(
-        stderr(&o).contains("W0139") && stderr(&o).contains("`rules`"),
+        stderr(&o).contains("E0134") && stderr(&o).contains("`rules`"),
         "{}",
         stderr(&o)
     );
@@ -885,10 +885,10 @@ fn waivers_next_to_the_configuration_drop_findings() {
     assert!(stderr(&o).contains("E0134"), "{}", stderr(&o));
 }
 
-/// An unknown key at any level of either file is W0139 and the run goes on; `-Werror` fails it; a
-/// bad value of a known key is still E0134, status 2. What is read is still applied.
+/// An unknown key, rule or rule group at any level of either file is E0134, status 2, with the
+/// line and a suggestion; every one of them is listed in one run, whatever `-W` says.
 #[test]
-fn unknown_keys_warn_and_the_run_goes_on() {
+fn unknown_keys_are_errors_listing_all_of_them() {
     let dir = tempdir("lint");
     two(&dir);
     let cfg = dir.join("yavs-lint.yaml");
@@ -915,31 +915,20 @@ fn unknown_keys_warn_and_the_run_goes_on() {
         std::fs::write(&cfg, text).unwrap();
         let o = yavs(&dir, &["lint", SHORT, "two.vhd"]);
         let said = stderr(&o);
-        assert_eq!(status(&o), 1, "the findings of two.vhd decide: {said}");
-        assert_eq!(findings(&said).len(), 2, "{said}");
-        assert_eq!(said.matches("warning[W0139]").count(), 1, "{said}");
-        assert!(said.contains(name) && said.contains("is ignored"), "{said}");
-        assert!(said.contains("`yavs-lint.yaml` line"), "{said}");
+        assert_eq!(status(&o), 2, "{said}");
+        assert_eq!(findings(&said).len(), 0, "nothing is checked: {said}");
+        assert_eq!(said.matches("error[E0134]").count(), 1, "{said}");
+        assert!(said.contains(name) && said.contains("unknown"), "{said}");
+        assert!(
+            said.contains("yavs-lint.yaml") && said.contains("line "),
+            "{said}"
+        );
+        assert!(!said.contains("W0139"), "{said}");
     }
-
-    // Nothing to report but the warning: 0, and 1 under `-Werror` or `-Werror=W0139`.
-    std::fs::write(
-        &cfg,
-        "rule:\n  group:\n    definite:\n      disable: true\nindent: {}\n",
-    )
-    .unwrap();
-    assert_eq!(status(&yavs(&dir, &["lint", "two.vhd"])), 0);
-    for flag in ["-Werror", "-Werror=W0139"] {
+    for flag in ["-Werror", "--list-rules"] {
         let o = yavs(&dir, &["lint", flag, "two.vhd"]);
-        assert_eq!(status(&o), 1, "{flag}: {}", stderr(&o));
-        assert!(stderr(&o).contains("W0139"), "{}", stderr(&o));
+        assert_eq!(status(&o), 2, "{flag}: {}", stderr(&o));
     }
-    let o = yavs(&dir, &["lint", "-Wno-W0139", "-Werror", "two.vhd"]);
-    assert_eq!(status(&o), 0, "{}", stderr(&o));
-    assert!(!stderr(&o).contains("W0139"), "{}", stderr(&o));
-    let o = yavs(&dir, &["lint", "--list-rules"]);
-    assert_eq!(status(&o), 0);
-    assert!(stderr(&o).contains("`indent`"), "{}", stderr(&o));
 
     // A name close to a real one gets a suggestion.
     std::fs::write(&cfg, "rule:\n  lnt_771:\n    disable: true\n").unwrap();
@@ -950,17 +939,19 @@ fn unknown_keys_warn_and_the_run_goes_on() {
         stderr(&o)
     );
 
-    // Many in one section: one warning that names them all, in every format.
+    // Many in one file: every name on its own line in the human format, and in the short one all
+    // on the one line of the diagnostic.
     let mut many = "rule:\n".to_string();
     for i in 0..90 {
         many += &format!("  style_{i:03}: {{disable: true}}\n");
     }
+    many += "indent: {}\n";
     std::fs::write(&cfg, many).unwrap();
     for format in [SHORT, "--message-format=human"] {
         let o = yavs(&dir, &["lint", format, "two.vhd"]);
         let said = stderr(&o);
-        assert_eq!(said.matches("[W0139]").count(), 1, "{said}");
-        assert!(said.contains("90 unknown rules in `rule`"), "{said}");
+        assert_eq!(status(&o), 2, "{said}");
+        assert_eq!(said.matches("[E0134]").count(), 1, "{said}");
         if format == SHORT {
             let lines = said.lines().filter(|l| !l.contains("[lint_")).count();
             assert_eq!(lines, 1, "one line per diagnostic: {said}");
@@ -968,6 +959,7 @@ fn unknown_keys_warn_and_the_run_goes_on() {
         for i in 0..90 {
             assert!(said.contains(&format!("`style_{i:03}`")), "{said}");
         }
+        assert!(said.contains("`indent`"), "{said}");
     }
 
     // A bad value of a key it knows stops the run.
@@ -984,7 +976,7 @@ fn unknown_keys_warn_and_the_run_goes_on() {
     }
     std::fs::remove_file(&cfg).unwrap();
 
-    // The waiver file. An unknown rule there waives nothing; the waiver's other rules still apply.
+    // The waiver file: unknown keys and rules are errors too, all listed, none applied.
     let waivers = dir.join("yavs-lint-waivers.yaml");
     std::fs::write(
         &waivers,
@@ -993,14 +985,26 @@ fn unknown_keys_warn_and_the_run_goes_on() {
     .unwrap();
     let o = yavs(&dir, &["lint", SHORT, "two.vhd"]);
     let said = stderr(&o);
-    assert_eq!(status(&o), 1, "{said}");
-    assert_eq!(findings(&said), vec![(5, "lint_770".to_string())], "{said}");
-    assert_eq!(said.matches("warning[W0139]").count(), 4, "{said}");
+    assert_eq!(status(&o), 2, "{said}");
+    assert_eq!(findings(&said).len(), 0, "{said}");
+    assert_eq!(said.matches("error[E0134]").count(), 1, "{said}");
+    for name in ["`waive`", "`length_001`", "`reson`", "`port_007`"] {
+        assert!(said.contains(name), "{name}: {said}");
+    }
     assert!(
         said.contains("a key with a similar name exists: `reason`"),
         "{said}"
     );
-    assert!(said.contains("`yavs-lint-waivers.yaml` line"), "{said}");
+    assert!(said.contains("yavs-lint-waivers.yaml"), "{said}");
+    // A misspelled `files` must not leave a waiver that covers every file.
+    std::fs::write(&waivers, "waivers:\n  - rule: lint_770\n    fils: x.vhd\n").unwrap();
+    let o = yavs(&dir, &["lint", SHORT, "two.vhd"]);
+    assert_eq!(status(&o), 2, "{}", stderr(&o));
+    assert!(
+        stderr(&o).contains("a key with a similar name exists: `files`"),
+        "{}",
+        stderr(&o)
+    );
     std::fs::write(&waivers, "waivers:\n  - rule: lint_770\n    lines: three\n").unwrap();
     let o = yavs(&dir, &["lint", "two.vhd"]);
     assert_eq!(status(&o), 2);

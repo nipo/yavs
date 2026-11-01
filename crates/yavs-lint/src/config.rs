@@ -1,5 +1,6 @@
-//! `yavs-lint.yaml` (`rule`, `exclude`, `file_list`) and `yavs-lint-waivers.yaml`. Unknown keys and
-//! rule ids are collected for warning W0139 and ignored; a bad value of a known key is an error.
+//! `yavs-lint.yaml` (`rule`, `exclude`, `file_list`) and `yavs-lint-waivers.yaml`. A key, rule id or
+//! rule group the file names and nothing reads is an error, all of them reported together; so is a
+//! bad value of a known key.
 //! Values are read as the text they were written as.
 
 use crate::{Certainty, Rule};
@@ -17,8 +18,8 @@ enum Node {
     Alias,
 }
 
-/// A key, rule or rule group the file names and nothing here reads.
-pub struct Unknown {
+/// A key, rule or rule group the file names and nothing here reads: an error (E0134).
+struct Unknown {
     line: usize,
     /// `key`, `rule` or `rule group`.
     what: &'static str,
@@ -29,76 +30,28 @@ pub struct Unknown {
     near: String,
 }
 
-/// More unknown names than this in one section print as one list.
-const LISTED_ONE_BY_ONE: usize = 3;
-/// The width of that list; the renderer indents it.
-const LIST_WIDTH: usize = 72;
-
-/// The text of each W0139 for these names: one line per name when few, else all the names of a
-/// section in one wrapped list. A name with a suggestion always gets its own line.
-pub fn unknown_messages(unknown: &[Unknown]) -> Vec<String> {
-    let mut sections: Vec<(&str, &str, Vec<&Unknown>)> = Vec::new();
-    for u in unknown.iter().filter(|u| u.near.is_empty()) {
-        match sections
-            .iter_mut()
-            .find(|(s, w, _)| *s == u.section && *w == u.what)
-        {
-            Some((.., names)) => names.push(u),
-            None => sections.push((&u.section, u.what, vec![u])),
-        }
-    }
-    let inside = |section: &str| {
-        if section.is_empty() {
+impl Unknown {
+    /// `line 3: unknown rule `lnt_771` in `rule`; a rule with a similar name exists: `lint_771``.
+    fn message(&self) -> String {
+        let inside = if self.section.is_empty() {
             String::new()
         } else {
-            format!(" in `{section}`")
-        }
-    };
-    let one = |u: &Unknown| {
+            format!(" in `{}`", self.section)
+        };
         format!(
-            "line {}: unknown {} `{}`{} is ignored{}",
-            u.line,
-            u.what,
-            u.name,
-            inside(&u.section),
-            u.near
+            "line {}: unknown {} `{}`{inside}{}",
+            self.line, self.what, self.name, self.near
         )
-    };
-    let mut out: Vec<String> = unknown
-        .iter()
-        .filter(|u| !u.near.is_empty())
-        .map(one)
-        .collect();
-    for (section, what, names) in sections {
-        if names.len() <= LISTED_ONE_BY_ONE {
-            out.extend(names.into_iter().map(one));
-            continue;
-        }
-        let lines = names.iter().map(|u| u.line);
-        let (first, last) = (lines.clone().min(), lines.max());
-        let mut text = format!(
-            "lines {} to {}: {} unknown {what}s{} are ignored:",
-            first.unwrap_or_default(),
-            last.unwrap_or_default(),
-            names.len(),
-            inside(section)
-        );
-        let mut width = LIST_WIDTH;
-        for (i, u) in names.iter().enumerate() {
-            let comma = if i + 1 < names.len() { "," } else { "" };
-            let word = format!("`{}`{comma}", u.name);
-            if width + 1 + word.len() > LIST_WIDTH {
-                text += "\n";
-                width = 0;
-            } else {
-                text += " ";
-            }
-            text += &word;
-            width += 1 + word.len();
-        }
-        out.push(text);
     }
-    out
+}
+
+/// Every unknown name of a file as one error, one line each, so that one run shows them all.
+fn unknown_error(unknown: &[Unknown]) -> Result<(), String> {
+    if unknown.is_empty() {
+        return Ok(());
+    }
+    let lines: Vec<String> = unknown.iter().map(Unknown::message).collect();
+    Err(lines.join("\n"))
 }
 
 type Events<'a> = Parser<'a, saphyr_parser::StrInput<'a>>;
@@ -264,7 +217,7 @@ pub struct Config {
     kinds: [Option<Box<Config>>; 2],
     /// `file_list`: the path or glob of each entry, as written.
     file_list: Vec<String>,
-    /// What the file names and nothing reads, in the order of the file.
+    /// What the file names and nothing reads, in the order of the file; `parse` fails on any.
     unknown: Vec<Unknown>,
 }
 
@@ -292,7 +245,7 @@ fn words(l: usize, key: &str, v: Node) -> Result<Vec<String>, String> {
 }
 
 impl Config {
-    /// Read a `yavs-lint.yaml`; the error names the line. Unknown names go to [`Config::unknown`].
+    /// Read a `yavs-lint.yaml`; the error names the line of each unknown name or bad value.
     pub fn parse(text: &str) -> Result<Config, String> {
         let mut cfg = Config::default();
         for (l, key, v) in top(text)? {
@@ -367,12 +320,8 @@ impl Config {
                 }
             }
         }
+        unknown_error(&cfg.unknown)?;
         Ok(cfg)
-    }
-
-    /// What the file names and nothing reads.
-    pub fn unknown(&self) -> &[Unknown] {
-        &self.unknown
     }
 
     /// One `rule:` section, at the top level or of a kind of file; `section` says which.
@@ -697,7 +646,7 @@ struct Waiver {
 
 /// Findings a project has decided to accept, with a reason.
 #[derive(Default)]
-pub struct Waivers(Vec<Waiver>, Vec<Unknown>);
+pub struct Waivers(Vec<Waiver>);
 
 /// The tail of an error about the unknown rule `id`.
 fn near_rule(id: &str) -> String {
@@ -707,8 +656,8 @@ fn near_rule(id: &str) -> String {
 }
 
 impl Waivers {
-    /// Read a `yavs-lint-waivers.yaml`; the error names the line. Unknown names go to
-    /// [`Waivers::unknown`]: a waiver of only unknown rules waives nothing.
+    /// Read a `yavs-lint-waivers.yaml`; the error names the line of each unknown name or bad value.
+    /// A misspelled `files` or `lines` would widen a waiver, so unknown keys are errors.
     pub fn parse(text: &str) -> Result<Waivers, String> {
         let mut out = Vec::new();
         let mut unknown = Vec::new();
@@ -804,12 +753,8 @@ impl Waivers {
                 out.push(w);
             }
         }
-        Ok(Waivers(out, unknown))
-    }
-
-    /// What the file names and nothing reads.
-    pub fn unknown(&self) -> &[Unknown] {
-        &self.1
+        unknown_error(&unknown)?;
+        Ok(Waivers(out))
     }
 
     /// Whether a waiver covers this finding. A pattern is relative to `base`, the directory of the
@@ -970,56 +915,66 @@ mod tests {
         );
     }
 
-    /// The names each file level leaves unread, as `section/name`.
-    fn unread(u: &[Unknown]) -> Vec<String> {
-        u.iter()
-            .map(|u| format!("{}/{}", u.section, u.name))
-            .collect()
+    #[test]
+    fn unknown_names_at_every_level_are_one_error_naming_all() {
+        let e = Config::parse(
+            "indent: &a {tokens: [a]}\nno_such_key: *a\nrule:\n  length_001: {length: 120}\n  lint_100:\n    disable: false\n  global:\n    fixable: true\n  group:\n    alignment:\n      disable: true\n    definite:\n      fix: [a]\n  lint_770:\n    disable: true\n    synchronizers: [a, b]\n  lint_700:\n    suffixes: [a]\nrtl:\n  other: 1\n  rule:\n    port_007: {}\n",
+        )
+        .err()
+        .unwrap();
+        let lines: Vec<&str> = e.lines().collect();
+        let expect = [
+            "line 1: unknown key `indent`",
+            "line 2: unknown key `no_such_key`",
+            "line 4: unknown rule `length_001` in `rule`",
+            "line 5: unknown rule `lint_100` in `rule`",
+            "line 8: unknown key `fixable` in `rule.global`",
+            "line 10: unknown rule group `alignment` in `rule.group`",
+            "line 13: unknown key `fix` in `rule.group.definite`",
+            "line 16: unknown key `synchronizers` in `rule.lint_770`",
+            "line 18: unknown key `suffixes` in `rule.lint_700`",
+            "line 20: unknown key `other` in `rtl`",
+            "line 22: unknown rule `port_007` in `rtl.rule`",
+        ];
+        assert_eq!(lines.len(), expect.len(), "{e}");
+        for (said, want) in lines.iter().zip(expect) {
+            assert!(said.starts_with(want), "{said} / {want}");
+        }
+        let cfg = Config::parse("rule:\n  lint_770:\n    disable: true\n").unwrap();
+        assert!(!cfg.enabled(crate::rule("lint_770").unwrap()));
+        let e = Waivers::parse(
+            "waiver: 1\nwaivers:\n  - rule: [length_001, lint_770]\n    line: 3\n  - rule: port_007\n",
+        )
+        .err()
+        .unwrap();
+        for want in [
+            "line 1: unknown key `waiver`",
+            "unknown rule `length_001` in `waivers`",
+            "unknown key `line` in `waivers`",
+            "unknown rule `port_007` in `waivers`",
+        ] {
+            assert!(e.contains(want), "{e} / {want}");
+        }
+        assert_eq!(e.lines().count(), 4, "{e}");
     }
 
     #[test]
-    fn unknown_names_at_every_level_are_collected_and_ignored() {
-        let cfg = Config::parse(
-            "indent: &a {tokens: [a]}\nno_such_key: *a\nrule:\n  length_001: {length: 120}\n  lint_100:\n    disable: false\n  global:\n    fixable: true\n  group:\n    alignment:\n      disable: true\n    definite:\n      fix: [a]\n  lint_770:\n    disable: true\n    synchronizers: [a, b]\n  lint_700:\n    suffixes: [a]\nrtl:\n  other: 1\n  rule:\n    port_007: {}\n",
-        )
-        .unwrap();
-        assert_eq!(
-            unread(cfg.unknown()),
-            [
-                "/indent",
-                "/no_such_key",
-                "rule/length_001",
-                "rule/lint_100",
-                "rule.global/fixable",
-                "rule.group/alignment",
-                "rule.group.definite/fix",
-                "rule.lint_770/synchronizers",
-                "rule.lint_700/suffixes",
-                "rtl/other",
-                "rtl.rule/port_007",
-            ]
+    fn a_misspelled_waiver_key_is_an_error_not_a_wider_waiver() {
+        let e = Waivers::parse("waivers:\n  - rule: lint_770\n    fils: a.vhd\n    lins: [3]\n")
+            .err()
+            .unwrap();
+        assert!(
+            e.contains(
+                "line 3: unknown key `fils` in `waivers`; a key with a similar name exists: `files`"
+            ),
+            "{e}"
         );
         assert!(
-            !cfg.enabled(crate::rule("lint_770").unwrap()),
-            "known key read"
+            e.contains(
+                "line 4: unknown key `lins` in `waivers`; a key with a similar name exists: `lines`"
+            ),
+            "{e}"
         );
-        let w = Waivers::parse(
-            "waiver: 1\nwaivers:\n  - rule: [length_001, lint_770]\n    line: 3\n  - rule: port_007\n",
-        )
-        .unwrap();
-        assert_eq!(
-            unread(w.unknown()),
-            [
-                "/waiver",
-                "waivers/length_001",
-                "waivers/line",
-                "waivers/port_007"
-            ]
-        );
-        let at = Path::new("/p");
-        assert!(w.waives("a.vhd", at, "lint_770", 1));
-        assert!(!w.waives("a.vhd", at, "port_007", 1), "no such rule");
-        assert!(!w.waives("a.vhd", at, "lint_771", 1), "only unknown rules");
     }
 
     #[test]
@@ -1047,10 +1002,7 @@ mod tests {
 
     #[test]
     fn unknown_names_suggest_a_near_one() {
-        let said = |t: &str| {
-            let cfg = Config::parse(t).unwrap();
-            unknown_messages(cfg.unknown()).join("\n")
-        };
+        let said = |t: &str| Config::parse(t).err().unwrap();
         assert!(said("exclud:\n").contains("a key with a similar name exists: `exclude`"));
         assert!(
             said("rule:\n  lint_770:\n    disabel: true\n")
@@ -1076,48 +1028,13 @@ mod tests {
             bad.unwrap()
                 .contains("a severity with a similar name exists: `error`")
         );
-        let w = |t: &str| unknown_messages(Waivers::parse(t).unwrap().unknown()).join("\n");
+        let w = |t: &str| Waivers::parse(t).err().unwrap();
         assert!(w("waivers:\n  - rule: lint_0770\n").contains("a rule with a similar name exists"));
         assert!(
             w("waivers:\n  - rule: lint_770\n    reson: x\n")
                 .contains("a key with a similar name exists: `reason`")
         );
         assert!(w("waiver:\n").contains("a key with a similar name exists: `waivers`"));
-    }
-
-    #[test]
-    fn many_unknown_names_are_one_wrapped_list_naming_them_all() {
-        let few = Config::parse("rule:\n  a_1: {}\n  a_2: {}\n  a_3: {}\n").unwrap();
-        assert_eq!(
-            unknown_messages(few.unknown()),
-            [
-                "line 2: unknown rule `a_1` in `rule` is ignored",
-                "line 3: unknown rule `a_2` in `rule` is ignored",
-                "line 4: unknown rule `a_3` in `rule` is ignored",
-            ]
-        );
-        let mut text = "rule:\n  lint_0771: {}\n".to_string();
-        for i in 0..90 {
-            text += &format!("  style_{i:03}: {{}}\n");
-        }
-        let cfg = Config::parse(&(text + "indent: {}\n")).unwrap();
-        let said = unknown_messages(cfg.unknown());
-        assert_eq!(said.len(), 3, "{said:?}");
-        assert!(said[0].contains("`lint_0771`") && said[0].contains("`lint_771`"));
-        assert!(
-            said[1].starts_with("lines 3 to 92: 90 unknown rules in `rule` are ignored:\n"),
-            "{}",
-            said[1]
-        );
-        for i in 0..90 {
-            assert!(said[1].contains(&format!("`style_{i:03}`")), "{}", said[1]);
-        }
-        assert!(
-            said[1].lines().skip(1).all(|l| l.len() <= LIST_WIDTH),
-            "{}",
-            said[1]
-        );
-        assert_eq!(said[2], "line 93: unknown key `indent` is ignored");
     }
 
     #[test]

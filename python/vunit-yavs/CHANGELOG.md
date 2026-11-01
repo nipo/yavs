@@ -2,8 +2,9 @@
 
 ## Unreleased
 
-- `--yavs-lint` shows warning W0139, about unknown keys in `yavs-lint.yaml`, for the first library only. Needs a yavs
-  with that warning.
+- `--yavs-lint` checks the configuration once before any library: an unknown key, rule or rule group in
+  `yavs-lint.yaml` or the waiver file is error E0134, told once, and fails the compile step. Needs a yavs
+  that rejects unknown keys.
 - `--yavs-cov-exclude FILE` (repeatable) and `--yavs-cov-config FILE` apply exclusion files and a coverage configuration to
   the report; a run script passes the same through `results.merge_coverage(file, args=["--exclude", f, "--config", g])`. Needs a yavs with repeatable `--exclude` and `--config`.
 - `--yavs-cov-cobertura`, `--yavs-cov-json`, `--yavs-cov-lcov` and `--yavs-cov-sonarqube` write the coverage exports. Needs a yavs with those exports.
