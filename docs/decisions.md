@@ -13026,3 +13026,8 @@ index (machine written; a damaged index says to re-analyze).
 - **`latest` is the highest release tagged `vX.Y.Z`** (agent): every yavs release carries GitHub's pre-release mark and the repository's "Latest" release is another product's, so neither GitHub mark can say what is stable.
 - **No cache** (agent; the issue's plan had one): an archive downloads in seconds, and restoring from a cache would skip the checksum and leave CI testing only the restored path.
 - **Levels** (rule 32): the action only installs a release. The CLI, the VS Code extension and the Python scripting API have nothing to add; `vunit-yavs` finds `yavs` on `PATH` as before, and the action's CI runs it.
+
+## Bug priority and the documentation gate (user, 2026-11-01)
+
+- **Compiler and simulation bugs come first** (user): a bug that affects the direct result of a simulation is fixed as soon as possible, ahead of everything; the order is wrong results, then compiler bugs (valid code rejected, invalid accepted, internal errors, crashes), then the rest. A simulator's users rely on its results above all else. `AGENTS.md` rule 26.
+- **Documentation is a required gate, like tests** (user): a user-facing feature or change is not done or closed until the user guide covers it, the docs build passes and its examples were run, and the report names the pages changed or why none applies. A feature nobody can find or follow is not finished. `AGENTS.md` rule 27.

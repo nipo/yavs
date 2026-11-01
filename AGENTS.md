@@ -186,6 +186,17 @@ to, and those documents win over your memory.
     are recorded once answered. A decision that exists only in a commit message, an agent report
     or a chat is not recorded.
 
+### Priorities and required gates
+
+26. **Compiler and simulation bugs come first** (user, 2026-11-01). A bug that affects the direct
+    result of a simulation is fixed as soon as possible, ahead of everything else. The order: wrong
+    results, then compiler bugs (valid code rejected, invalid code accepted, internal errors,
+    crashes), then the rest.
+27. **Documentation is a required gate, like tests** (user, 2026-11-01). A user-facing feature or
+    change is not done, and its issue not closed, until the user guide covers it, the docs build
+    passes and the examples it shows were run. The report names the pages changed, or says why none
+    applies.
+
 ## 3a. Working alongside other agents
 
 Several agents, possibly from different tools or machines, work on this repo at once. GitHub is
