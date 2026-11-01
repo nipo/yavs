@@ -6,7 +6,8 @@
 
 A variant is CHECKOUT_OR_BINARY[:TIER] (default tier auto; TIER takes `+VAR=VALUE`). A checkout is built with Cranelift only; with no
 variant, this checkout. sim1 is always added unless --no-sim1. Ratios are against the first variant and against sim1. A window is the
-counters of a run to T1 minus those of a run to T0. See AGENTS.md section 8."""
+counters of a run to T1 minus those of a run to T0. Ratios to the first variant are paired per round, with a 95 percent band; a bar inside the
+band is `undecidable`. See AGENTS.md section 8."""
 import argparse, fcntl, hashlib, importlib.util, json, math, os, re, shlex, shutil, subprocess, sys, time
 from pathlib import Path
 
@@ -73,10 +74,42 @@ def parse_bars(specs):
     return bars
 
 
+# Two-sided 95 percent t quantiles by degrees of freedom: a handful of rounds gives a band that is honest about how little it knows.
+T95 = {1: 12.71, 2: 4.30, 3: 3.18, 4: 2.78, 5: 2.57, 6: 2.45, 7: 2.36, 8: 2.31, 9: 2.26, 10: 2.23, 11: 2.20, 12: 2.18, 13: 2.16, 14: 2.14, 15: 2.13}
+MIN_ROUNDS = 3  # fewest rounds that decide a counter other than instructions (AGENTS.md section 8: instructions are good to under 1 percent)
+
+
+def paired(qs):
+    """(ratio, low, high, n) from per-round ratios to the first variant: the geomean, and its 95 percent band from the spread of the
+    rounds' logs. Rounds are paired (both variants ran seconds apart, so the host's drift cancels); one round has no band."""
+    qs = [q for q in qs if q and q > 0]
+    if not qs:
+        return None
+    logs = list(map(math.log, qs))
+    mu = sum(logs) / len(logs)
+    if len(logs) < 2:
+        return (math.exp(mu), math.exp(mu), math.exp(mu), 1)
+    sd = math.sqrt(sum((x - mu) ** 2 for x in logs) / (len(logs) - 1))
+    half = T95.get(len(logs) - 1, 1.96) * sd / math.sqrt(len(logs))
+    return (math.exp(mu), math.exp(mu - half), math.exp(mu + half), len(logs))
+
+
 def verdict(ratios, bars):
-    """`pass`, or `KILL` with the counters over their bar; a bar is the largest ratio to the first variant that passes."""
-    over = [m for m, v in bars.items() if ratios.get(m) is None or ratios[m] > v]
-    return "pass" if not over else "KILL " + ",".join(over)
+    """`pass`, `KILL counters` or `undecidable counters`. ratios: counter -> (ratio, low, high, rounds) or None; a bar is the largest ratio to the
+    first variant that passes. Pass needs the top of the band at or under the bar, KILL the bottom over it; a bar inside the band cannot be
+    decided, and neither can a counter other than instructions from fewer than MIN_ROUNDS rounds."""
+    kill, unsure = [], []
+    for m, bar in bars.items():
+        r = ratios.get(m)
+        if r is None:
+            kill.append(m)  # a counter that was not counted cannot pass
+        elif m != "instructions" and r[3] < MIN_ROUNDS:
+            unsure.append(m)
+        elif r[1] > bar:
+            kill.append(m)
+        elif r[2] > bar:
+            unsure.append(m)
+    return "KILL " + ",".join(kill) if kill else "undecidable " + ",".join(unsure) if unsure else "pass"
 
 
 def parse_perf(text):
@@ -128,7 +161,9 @@ def run_once(v, t, world, stop, core, inherit, timeout, count=True):
 
 
 def measure(variants, t, stops, core, a, scratch):
-    """Worlds, warm-ups, then rounds (order swapped every round). stops: (T0, T1), or (None, None) for the whole run."""
+    """Worlds, warm-ups, then rounds (order swapped every round). stops: (T0, T1), or (None, None) for the whole run.
+    Ratios to the first variant are taken per round (`pairs`), never from medians over rounds: host noise is slow, so the two variants of
+    one round share it and it cancels, while the median of each variant over a few rounds takes a different slice of it (issue #1055)."""
     full = stops[0] is None
     t0, t1 = stops
     for i, v in enumerate(variants):
@@ -158,6 +193,8 @@ def measure(variants, t, stops, core, a, scratch):
     for i, _ in enumerate(variants):
         row = {k: R.med([s.get(k) for s in samples[i]]) for k in METRICS + ("wall",)}
         row["t0"] = samples[i][-1].get("t0")
+        row["rounds"] = [{k: x.get(k) for k in METRICS} for x in samples[i]]  # one entry per round, in round order
+        row["pairs"] = None if i == 0 else {m: [x[m] / b[m] if x[m] is not None and b[m] else None for x, b in zip(samples[i], samples[0])] for m in METRICS}
         row["console"] = None if i == 0 else console_differs(consoles[0], consoles[i], "yavs" != variants[i]["tool"])
         out.append(row)
     return out
@@ -191,9 +228,14 @@ def fmt(x, spec=".3f"):
     return "-" if x is None else format(x, spec)
 
 
+def band(r):
+    """The half-width of a ratio's 95 percent band, for the table; `1 round` when there is no band."""
+    return "-" if r is None else "1 round" if r[3] < 2 else f"+-{50 * (r[2] - r[1]) / r[0]:.1f}%"
+
+
 def table(names, results, bars):
     """The aligned table: one line per test and variant (ratios to the first variant and to sim1), then the geomean of each variant's ratios."""
-    head = ["test", "variant", "cycles G", "instr G", "IPC", "L1i/k", "iTLB/k", "br/k", "wall s", "cycles", "instr", "L1i", "iTLB", "branch", "cyc/sim1", "ins/sim1", "bar"]
+    head = ["test", "variant", "cycles G", "instr G", "IPC", "L1i/k", "iTLB/k", "br/k", "wall s", "cycles", "instr", "L1i", "iTLB", "branch", "cyc band", "cyc/sim1", "ins/sim1", "bar"]
     rows = [head]
     ratios = {n: [] for n in names[1:]}
     to_sim1 = {n: {"cycles": [], "instructions": []} for n in names if n != REF}
@@ -207,29 +249,33 @@ def table(names, results, bars):
         ref = r["rows"][names.index(REF)] if REF in names else None
         for n, row in zip(names, r["rows"]):
             rr = rates(row)
-            q = {m: (row[m] / base[m]) if row[m] is not None and base[m] else None for m in METRICS}
+            pr = row.get("pairs") or {m: [row[m] / base[m] if row[m] is not None and base[m] else None] for m in METRICS}  # no rounds recorded: one pair
+            q = {m: paired(pr[m]) for m in METRICS}
             is_base = n == names[0]
             sr = {m: row[m] / ref[m] if ref and row[m] is not None and ref[m] else None for m in ("cycles", "instructions")} if n != REF else {}
             for m, x in sr.items():
                 to_sim1[n][m].append(x)
             if not is_base:
-                ratios[n].append(q)
+                ratios[n].append(pr)
                 if row["console"]:
                     notes.append(f"{test}, {n}: CONSOLE DIFFERS from {names[0]}, {row['console']}. Check this first (wrong-result rule)")
             if row.get("t0") and row["instructions"] and row["instructions"] < row["t0"]["instructions"]:
                 notes.append(f"{test}, {n}: the window is smaller than the run to its start, so subtraction noise is large; check that T1 is before the end of the test")
             rows.append([test, n, fmt(row["cycles"] and row["cycles"] / 1e9, ".2f"), fmt(row["instructions"] and row["instructions"] / 1e9, ".2f"), fmt(rr.get("ipc"), ".2f"),
                          fmt(rr.get("l1i"), ".2f"), fmt(rr.get("itlb")), fmt(rr.get("branch"), ".2f"), fmt(row["wall"], ".1f")]
-                        + (["base"] + [""] * 4 if is_base else [fmt(q[m]) for m in METRICS])
+                        + (["base"] + [""] * 5 if is_base else [fmt(q[m] and q[m][0]) for m in METRICS] + [band(q["cycles"])])
                         + [fmt(sr.get("cycles")), fmt(sr.get("instructions")), verdict(q, bars) if bars and not is_base and n != REF else ""])
     for n in names[1:]:
-        g = {m: geomean([q[m] for q in ratios[n]]) for m in METRICS}
+        g = {m: paired([geomean(c) for c in zip(*[q[m] for q in ratios[n]])]) if ratios[n] else None for m in METRICS}  # per round across tests, then the band
         ts = to_sim1.get(n, {})
-        rows.append(["geomean", n] + [""] * 7 + [fmt(g[m]) for m in METRICS] + [fmt(geomean(ts.get(m, []))) for m in ("cycles", "instructions")] + [verdict(g, bars) if bars and n != REF else ""])
+        rows.append(["geomean", n] + [""] * 7 + [fmt(g[m] and g[m][0]) for m in METRICS] + [band(g["cycles"])] + [fmt(geomean(ts.get(m, []))) for m in ("cycles", "instructions")] + [verdict(g, bars) if bars and n != REF else ""])
     if REF in names and names[0] != REF:
-        rows.append(["geomean", names[0]] + [""] * 12 + [fmt(geomean(to_sim1[names[0]]["cycles"])), fmt(geomean(to_sim1[names[0]]["instructions"])), ""])
+        rows.append(["geomean", names[0]] + [""] * 13 + [fmt(geomean(to_sim1[names[0]]["cycles"])), fmt(geomean(to_sim1[names[0]]["instructions"])), ""])
     widths = [max(len(r[i]) for r in rows) for i in range(len(head))]
     text = "\n".join("  ".join(c.ljust(w) if i < 2 or i == len(head) - 1 else c.rjust(w) for i, (c, w) in enumerate(zip(r, widths))).rstrip() for r in rows)
+    if "undecidable" in text:
+        notes.append("undecidable: the bar lies inside the 95 percent band of the paired per-round ratios, or a counter other than instructions has fewer than "
+                     f"{MIN_ROUNDS} rounds. The band narrows with the square root of the rounds; two copies of one binary (A A) show the band of a difference of nothing")
     return text + ("\n\n" + "\n".join(notes) if notes else "")
 
 
@@ -256,8 +302,17 @@ def self_test():
     assert p["cycles"] == 100 and p["instructions"] == 50 and p["itlb"] is None and p["l1i"] is None
     d = subtract(dict(p, wall=3.0), dict(p, cycles=40, wall=1.0))
     assert d["cycles"] == 60 and d["wall"] == 2.0 and d["itlb"] is None
-    assert verdict({"cycles": 0.96}, parse_bars(["cycles:0.97"])) == "pass" and verdict({"cycles": 0.98, "itlb": 0.1}, parse_bars(["cycles:0.97", "itlb:0.2"])) == "KILL cycles"
+    one = {"cycles": paired([0.96]), "instructions": paired([0.96])}
+    assert verdict(one, parse_bars(["instructions:0.97"])) == "pass" and verdict(one, parse_bars(["instructions:0.95"])) == "KILL instructions"  # instructions decide in one round
+    assert verdict(one, parse_bars(["cycles:0.97"])) == "undecidable cycles"  # one round of cycles never passes a bar
     assert verdict({}, {"cycles": 1.0}).startswith("KILL")  # a counter that was not counted cannot pass
+    assert verdict({"cycles": paired([0.5] * 4)}, parse_bars(["cycles:0.9"])) == "pass" and verdict({"cycles": paired([1.2, 1.21, 1.19])}, parse_bars(["cycles:0.9"])) == "KILL cycles"
+    # same binary twice on GRLIB, six rounds, ratios of the window cycles of the second to the first (tools/realbench/AGENTS.md section 8): the
+    # old median ratio read 0.82 on the first three rounds; the paired band holds 1.0 and cannot pass a 3 percent bar
+    aa = [196 / 183, 183 / 236, 190 / 232, 225 / 218, 236 / 209, 169 / 160]
+    r = paired(aa)
+    assert abs(r[0] - 0.97) < 0.01 and r[1] < 1.0 < r[2], r
+    assert verdict({"cycles": r}, parse_bars(["cycles:0.97"])) == "undecidable cycles"
     try:
         parse_bars(["cycle:0.9"])
         raise AssertionError("a bad bar passed")
@@ -265,8 +320,8 @@ def self_test():
         assert "cycle" in str(e)
     assert abs(geomean([2, 8]) - 4) < 1e-9
     row = dict(cycles=2e9, instructions=4e9, l1i=4e6, itlb=None, branch=8e6, wall=1.0, t0=dict(instructions=1e9), console=None)
-    txt = table(["a", "b", REF], {"t": {"rows": [row, dict(row, cycles=1e9, console="line 1: x"), dict(row, cycles=4e9)]}}, {"cycles": 0.9})
-    assert "0.500" in txt and "0.250" in txt and "pass" in txt and "CONSOLE DIFFERS" in txt, txt
+    txt = table(["a", "b", REF], {"t": {"rows": [row, dict(row, cycles=1e9, instructions=3e9, console="line 1: x"), dict(row, cycles=4e9)]}}, {"instructions": 0.9})
+    assert "0.500" in txt and "0.750" in txt and "pass" in txt and "CONSOLE DIFFERS" in txt and "1 round" in txt, txt
     assert sum("KILL" in l for l in txt.splitlines() if REF + " " in l) == 0, txt  # a bar judges a variant, never the reference
     print("window self-test: ok")
 
@@ -276,7 +331,7 @@ def main():
     ap.add_argument("variants", nargs="*", help="CHECKOUT_OR_BINARY[:TIER], default this checkout's Cranelift build at tier auto; ratios are against the first and against sim1")
     ap.add_argument("--bar", action="append", default=[], help="kill bar, COUNTER:RATIO, largest passing ratio to the first variant; counters " + ", ".join(METRICS))
     ap.add_argument("--tests", default="", help="comma separated; default all of WINDOWS")
-    ap.add_argument("--rounds", type=int, default=1, help="rounds per variant, medians; 1 is right for instructions, more only for a cycle verdict")
+    ap.add_argument("--rounds", type=int, default=1, help="rounds per variant; ratios are paired per round, geomean with a 95 percent band. 1 decides instructions, cycles and misses need " + str(MIN_ROUNDS) + " or more and are `undecidable` when the bar is inside the band")
     ap.add_argument("--window", default="", help="T0,T1: replace the window of every selected test (calibration)")
     ap.add_argument("--full", action="store_true", help="the whole run of each test instead of its window (how windows are validated)")
     ap.add_argument("--inherit", action="store_true", help="count all threads of yavs (compile threads too), not the simulation thread")
