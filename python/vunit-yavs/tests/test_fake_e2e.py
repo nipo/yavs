@@ -169,6 +169,31 @@ class TestFakeYavs(unittest.TestCase):
         self.assertIn("--yavs-debug and coverage cannot be combined", output)
         self.assertFalse(self._runs(calls))
 
+    def test_wrong_combinations_say_why_without_a_traceback(self):
+        for args, message in [
+            (["--yavs-debug=5000", "--yavs-interactive"], "--yavs-interactive and --yavs-debug cannot be combined"),
+            (["--yavs-debug=5000", "--yavs-cov"], "--yavs-debug and coverage cannot be combined"),
+            (["--yavs-debug=5000", "--elaborate"], "--yavs-debug and --elaborate cannot be combined"),
+            (["--yavs-debug=5000", "-p", "2"], "--yavs-debug runs one test"),
+            (["--yavs-interactive", "--yavs-cov"], "--yavs-interactive and coverage cannot be combined"),
+            (["--yavs-interactive", "--elaborate"], "--yavs-interactive and --elaborate cannot be combined"),
+            (["--yavs-interactive", "-p", "2"], "--yavs-interactive runs one test"),
+            (["--yavs-surfer", "--elaborate"], "--yavs-surfer and --elaborate cannot be combined"),
+            (["--yavs-surfer", "-p", "2"], "--yavs-surfer shows one test"),
+            (["-g"], "yavs has no graphical debugger"),
+        ]:
+            with self.subTest(args=args):
+                exit_code, output, _, calls = self._run(*args, PASS)
+                self.assertEqual(exit_code, 1, output)
+                self.assertIn(f"error: {message}", output)
+                self.assertNotIn("Traceback", output)
+                self.assertFalse(self._runs(calls))
+
+    def test_a_second_test_under_the_debugger_fails_without_a_traceback(self):
+        _, output, _, _ = self._run("--yavs-debug=5000", PASS, COMMA)
+        self.assertIn("error: --yavs-debug runs one simulation", output)
+        self.assertNotIn("Traceback", output)
+
     def test_debug_one_test(self):
         exit_code, output, results, calls = self._run("--yavs-debug=5000", "--yavs-max-threads=3", PASS)
         self.assertEqual(exit_code, 0, output)

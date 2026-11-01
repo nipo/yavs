@@ -78,6 +78,15 @@ def _max_threads(text):
     return int(text)
 
 
+def refuse(message):
+    """
+    Stop the run script with `message` alone: a wrong command line or setup needs its cause and fix, not a traceback.
+    VUnit's main turns this exit into status 1.
+    """
+    print(f"error: {message}", file=sys.stderr, flush=True)
+    sys.exit(1)
+
+
 def _max_threads_from_environment():
     """VUNIT_YAVS_MAX_THREADS, for a run script that parses its own command line and so has no --yavs-max-threads"""
     text = environ.get("VUNIT_YAVS_MAX_THREADS")
@@ -86,7 +95,7 @@ def _max_threads_from_environment():
     try:
         return _max_threads(text)
     except argparse.ArgumentTypeError as exc:
-        raise RuntimeError(f"VUNIT_YAVS_MAX_THREADS: {exc}") from exc
+        return refuse(f"VUNIT_YAVS_MAX_THREADS: {exc}")
 
 
 def _exit_with_failure():
@@ -270,7 +279,7 @@ class YavsInterface(SimulatorInterface):
         Create instance from args namespace
         """
         if getattr(args, "gui", False):
-            raise RuntimeError(
+            refuse(
                 "yavs has no graphical debugger, so -g/--gui is not supported. Drop it; to debug a test, "
                 "use --yavs-debug and attach a DAP client such as VS Code."
             )
@@ -369,18 +378,18 @@ class YavsInterface(SimulatorInterface):
     @classmethod
     def check_version(cls, prefix):
         """
-        Raise an error unless 'yavs --version' works and reports a version implementing the CLI contract
+        Refuse a yavs unless 'yavs --version' works and reports a version implementing the CLI contract
         """
         try:
             version = cls.determine_version(prefix)
         except (OSError, subprocess.CalledProcessError) as exc:
-            raise RuntimeError(f"Running '{Path(prefix) / cls.executable} --version' failed: {exc}") from exc
+            refuse(f"Running '{Path(prefix) / cls.executable} --version' failed: {exc}")
 
         if not version.is_valid:
-            raise RuntimeError(f"Cannot parse the yavs version from {version.version_string!r}")
+            refuse(f"Cannot parse the yavs version from {version.version_string!r}")
 
         if version < YAVS_MIN_VERSION:
-            raise RuntimeError(
+            refuse(
                 f"yavs {version} at {Path(prefix) / cls.executable} is too old for vunit-yavs, which needs yavs "
                 f"{YAVS_MIN_VERSION} or later. Install a newer yavs, or point VUNIT_YAVS_PATH at one."
             )
@@ -428,7 +437,7 @@ class YavsInterface(SimulatorInterface):
         # yavs records the standard of each file, so 2008 and 2019 files can be mixed
         for source_file in project.get_source_files_in_order():
             if source_file.is_vhdl and source_file.get_vhdl_standard() not in (VHDL.STD_2008, VHDL.STD_2019):
-                raise RuntimeError(
+                refuse(
                     f"yavs supports VHDL-2008 and VHDL-2019 only, found VHDL-{source_file.get_vhdl_standard()}"
                     f" for {source_file.name}"
                 )
@@ -538,7 +547,8 @@ class YavsInterface(SimulatorInterface):
         debug = (self._debug_port is not None or interactive) and not elaborate_only
         surfer = self._surfer is not None and not elaborate_only
         if debug or surfer:
-            self._take_debug_session(test_suite_name)
+            if not self._take_debug_session(test_suite_name):
+                return False
 
         libdir = self._project.get_library(config.library_name).directory
         # No --std: yavs elaborates with the newest standard recorded in the design closure
@@ -559,11 +569,12 @@ class YavsInterface(SimulatorInterface):
 
         if not elaborate_only and (self._coverage.enabled or config.sim_options.get("enable_coverage", False)):
             if debug:
-                raise RuntimeError(
-                    f"{'--yavs-interactive' if interactive else '--yavs-debug'} and coverage cannot be combined: "
-                    "yavs does not collect coverage under the debugger. "
+                print(
+                    f"error: {'--yavs-interactive' if interactive else '--yavs-debug'} and coverage cannot be "
+                    "combined: yavs does not collect coverage under the debugger. "
                     "Drop --yavs-cov and the enable_coverage option, or the debug flag."
                 )
+                return False
             database = script_path / "coverage.ycov"
             cmd += [f"--cov={database}", f"--cov-test={test_suite_name}"]
             kinds = config.sim_options.get("yavs.cov_kind", [])
@@ -656,7 +667,7 @@ class YavsInterface(SimulatorInterface):
             else:
                 LOGGER.warning("Missing coverage database: %s", database)
         if not databases:
-            raise RuntimeError(
+            refuse(
                 "There is no coverage database to merge: no simulation ran with coverage. "
                 "Set the sim option enable_coverage or pass --yavs-cov."
             )
@@ -680,23 +691,25 @@ class YavsInterface(SimulatorInterface):
 
     def _take_debug_session(self, test_suite_name):
         """
-        Give the debug session to the first simulation; every later one is an error before yavs starts
+        Give the debug session to the first simulation; every later one fails with the reason before yavs starts.
+        Whether this simulation may run.
         """
         with self._debug_lock:
             if self._debugged is None:
                 self._debugged = test_suite_name
-                return
+                return True
             first = self._debugged
         flag = "--yavs-interactive" if self._interactive else "--yavs-debug"
         if self._surfer is not None and not self._interactive and self._debug_port is None:
             flag = "--yavs-surfer"
         example = "--yavs-debug=PORT" if flag == "--yavs-debug" else flag
-        raise RuntimeError(
-            f"{flag} runs one simulation, but {test_suite_name} would start after {first}.\n"
+        print(
+            f"error: {flag} runs one simulation, but {test_suite_name} would start after {first}.\n"
             "Cause: the test patterns select more than one test (or one test in several configurations).\n"
             f"Fix: name exactly one test, for example 'python run.py {example} lib.tb.test_name' "
             "(see 'python run.py --list')."
         )
+        return False
 
     @staticmethod
     def _debug_output(test_suite_name):
@@ -728,15 +741,20 @@ def source_map_flags(project):
 
 def check_debug_args(args):
     """
-    Raise an error for arguments that cannot be combined with --yavs-debug
+    Refuse arguments that cannot be combined with --yavs-debug
     """
+    if getattr(args, "yavs_cov", False):
+        refuse(
+            "--yavs-debug and coverage cannot be combined: yavs does not collect coverage under the debugger. "
+            "Drop --yavs-cov or --yavs-debug."
+        )
     if getattr(args, "elaborate", False):
-        raise RuntimeError(
+        refuse(
             "--yavs-debug and --elaborate cannot be combined: --elaborate only elaborates, so there is no run to debug. "
             "Drop one of them."
         )
     if getattr(args, "num_threads", 1) != 1:
-        raise RuntimeError(
+        refuse(
             f"--yavs-debug runs one test, but -p {args.num_threads} asks for parallel simulations. "
             "Drop -p (or use -p 1) and name one test."
         )
@@ -744,20 +762,25 @@ def check_debug_args(args):
 
 def check_interactive_args(args, debug_port):
     """
-    Raise an error for arguments that cannot be combined with --yavs-interactive
+    Refuse arguments that cannot be combined with --yavs-interactive
     """
+    if getattr(args, "yavs_cov", False):
+        refuse(
+            "--yavs-interactive and coverage cannot be combined: yavs does not collect coverage under the debugger. "
+            "Drop --yavs-cov or --yavs-interactive."
+        )
     if debug_port is not None:
-        raise RuntimeError(
+        refuse(
             "--yavs-interactive and --yavs-debug cannot be combined: the terminal or a debug client drives the run. "
             "Drop one of them."
         )
     if getattr(args, "elaborate", False):
-        raise RuntimeError(
+        refuse(
             "--yavs-interactive and --elaborate cannot be combined: --elaborate only elaborates, so there is no run. "
             "Drop one of them."
         )
     if getattr(args, "num_threads", 1) != 1:
-        raise RuntimeError(
+        refuse(
             f"--yavs-interactive runs one test, but -p {args.num_threads} asks for parallel simulations. "
             "Drop -p (or use -p 1) and name one test."
         )
@@ -791,10 +814,15 @@ def _batches(source_files):
 
 def check_surfer_args(args):
     """
-    Raise an error for arguments that cannot be combined with --yavs-surfer
+    Refuse arguments that cannot be combined with --yavs-surfer
     """
+    if getattr(args, "elaborate", False):
+        refuse(
+            "--yavs-surfer and --elaborate cannot be combined: --elaborate only elaborates, so there are no waves "
+            "to show. Drop one of them."
+        )
     if getattr(args, "num_threads", 1) != 1:
-        raise RuntimeError(
+        refuse(
             f"--yavs-surfer shows one test, but -p {args.num_threads} asks for parallel simulations. "
             "Drop -p (or use -p 1) and name one test."
         )

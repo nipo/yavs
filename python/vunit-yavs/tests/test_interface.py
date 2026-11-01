@@ -8,6 +8,7 @@
 Unit tests of the yavs interface
 """
 
+import contextlib
 import importlib
 import io
 import os
@@ -37,6 +38,16 @@ from vunit_yavs.tokens import TokenServer
 FAKE_BIN = Path(__file__).parent / "fake_bin"
 # The fake yavs runs as a script; Windows finds and starts only yavs.exe
 NEEDS_FAKE_BIN = unittest.skipIf(sys.platform == "win32", "The fake yavs is a Python script without an .exe wrapper")
+
+
+@contextlib.contextmanager
+def refused(case, message):
+    """The block stops the run script with status 1 and `message` on stderr, and no traceback"""
+    stderr = io.StringIO()
+    with case.assertRaises(SystemExit) as caught, contextlib.redirect_stderr(stderr):
+        yield
+    case.assertEqual(caught.exception.code, 1)
+    case.assertRegex(stderr.getvalue(), f"^error: .*{message}")
 
 
 def make_config(**kwargs):
@@ -304,7 +315,7 @@ class TestYavsInterface(unittest.TestCase):
             self.simif.compile_project(self._project("2008"))
 
     def test_rejects_unsupported_standards(self):
-        with self.assertRaisesRegex(RuntimeError, "VHDL-2008 and VHDL-2019 only, found VHDL-2002 for file1.vhd"):
+        with refused(self, "VHDL-2008 and VHDL-2019 only, found VHDL-2002 for file1.vhd"):
             self.simif.setup_library_mapping(self._project("2008", "2002"))
 
     @mock.patch("vunit.sim_if.check_output", autospec=True, return_value="")
@@ -459,14 +470,13 @@ class TestYavsInterface(unittest.TestCase):
         self.assertFalse(any(arg.startswith("--cov-kind") for arg in cmd))
 
     def test_coverage_refuses_the_debugger(self):
-        with (
-            mock.patch("vunit_yavs.Process", autospec=True) as process,
-            self.assertRaisesRegex(RuntimeError, "--yavs-debug and coverage cannot be combined"),
-        ):
+        with mock.patch("vunit_yavs.Process", autospec=True) as process, mock.patch("sys.stdout", new=io.StringIO()) as out:
             self.simif = YavsInterface(prefix="prefix", output_path=self.output_path, debug_port=4711)
             self.simif.setup_library_mapping(self._project("2008"))
-            self.simif.simulate(self.output_path, "lib.tb", make_config(sim_options={"enable_coverage": True}), False)
+            config = make_config(sim_options={"enable_coverage": True})
+            self.assertFalse(self.simif.simulate(self.output_path, "lib.tb", config, False))
         process.assert_not_called()
+        self.assertIn("--yavs-debug and coverage cannot be combined", out.getvalue())
 
     def _simulate_with_coverage(self, **kwargs):
         """Run a simulation with coverage; yavs would write its database at yavs/coverage.ycov"""
@@ -509,10 +519,10 @@ class TestYavsInterface(unittest.TestCase):
         exit_.assert_called_once_with(1)
 
     def test_merge_coverage_needs_a_database(self):
-        with self.assertRaisesRegex(RuntimeError, "no simulation ran with coverage"):
+        with refused(self, "no simulation ran with coverage"):
             self.simif.merge_coverage("all")
         self._simulate_with_coverage()  # Their databases were never written
-        with self.assertLogs("vunit_yavs", "WARNING"), self.assertRaisesRegex(RuntimeError, "no coverage database"):
+        with self.assertLogs("vunit_yavs", "WARNING"), refused(self, "no coverage database"):
             self.simif.merge_coverage("all")
 
     def test_simulate_configuration_and_stop_level(self):
@@ -572,7 +582,7 @@ class TestYavsInterface(unittest.TestCase):
         self.assertFalse(status)
 
     def test_gui_is_refused(self):
-        with self.assertRaisesRegex(RuntimeError, "no graphical debugger.*--yavs-debug"):
+        with refused(self, "no graphical debugger.*--yavs-debug"):
             YavsInterface.from_args(SimpleNamespace(gui=True), self.output_path)
 
     def test_max_threads_from_the_command_line(self):
@@ -615,15 +625,11 @@ class TestYavsInterface(unittest.TestCase):
 
     def test_debug_refuses_a_second_simulation_before_starting_yavs(self):
         self._simulate(make_config(), mode_flags=["--dap=4711"], debug_port=4711, suite="lib.tb.first")
-        with (
-            mock.patch("vunit_yavs.Process", autospec=True) as process,
-            self.assertRaisesRegex(
-                RuntimeError, r"--yavs-debug runs one simulation, but lib.tb.second would start after lib.tb.first"
-            ) as ctx,
-        ):
-            self.simif.simulate(self.output_path, "lib.tb.second", make_config(), False)
+        with mock.patch("vunit_yavs.Process", autospec=True) as process, mock.patch("sys.stdout", new=io.StringIO()) as out:
+            self.assertFalse(self.simif.simulate(self.output_path, "lib.tb.second", make_config(), False))
         process.assert_not_called()
-        self.assertIn("python run.py --list", str(ctx.exception))
+        self.assertIn("--yavs-debug runs one simulation, but lib.tb.second would start after lib.tb.first", out.getvalue())
+        self.assertIn("python run.py --list", out.getvalue())
 
     def test_debug_shows_where_to_attach(self):
         callback = YavsInterface._debug_output("lib.tb.t")  # pylint: disable=protected-access
@@ -639,7 +645,7 @@ class TestYavsInterface(unittest.TestCase):
             ({"elaborate": True}, "--yavs-debug and --elaborate cannot be combined"),
             ({"num_threads": 4}, "-p 4 asks for parallel simulations"),
         ]:
-            with self.assertRaisesRegex(RuntimeError, message):
+            with refused(self, message):
                 check_debug_args(SimpleNamespace(**dict(base, **change)))
 
     def test_response_file_keeps_arguments_verbatim(self):
@@ -665,21 +671,21 @@ class TestYavsInterface(unittest.TestCase):
         with (
             mock.patch.object(YavsInterface, "_get_version_output", return_value="garbage"),
             self.assertWarns(RuntimeWarning),
-            self.assertRaisesRegex(RuntimeError, "Cannot parse the yavs version from 'garbage'"),
+            refused(self, "Cannot parse the yavs version from 'garbage'"),
         ):
             YavsInterface.check_version("prefix")
 
         with (
             mock.patch.object(YavsInterface, "_get_version_output", side_effect=OSError("boom")),
-            self.assertRaisesRegex(RuntimeError, "--version' failed: boom"),
+            refused(self, "--version' failed: boom"),
         ):
             YavsInterface.check_version("prefix")
 
         with (
             mock.patch("vunit_yavs.YAVS_MIN_VERSION", YavsVersion("1.0")),
             mock.patch.object(YavsInterface, "_get_version_output", return_value="yavs 0.10.0"),
-            self.assertRaisesRegex(
-                RuntimeError,
+            refused(
+                self,
                 r"yavs 0.10.0 at prefix.yavs is too old for vunit-yavs, which needs yavs 1.0.0 or later\. Install",
             ),
         ):
@@ -712,7 +718,7 @@ class TestYavsInterface(unittest.TestCase):
             # The flag wins
             self.assertEqual(self._from_args(yavs_max_threads=5)._max_threads, 5)  # pylint: disable=protected-access
         with mock.patch.dict("os.environ", {"VUNIT_YAVS_MAX_THREADS": "0"}):
-            with self.assertRaisesRegex(RuntimeError, "VUNIT_YAVS_MAX_THREADS: expected an integer of at least 1"):
+            with refused(self, "VUNIT_YAVS_MAX_THREADS: expected an integer of at least 1"):
                 self._from_args()
 
     @NEEDS_FAKE_BIN
@@ -779,6 +785,6 @@ class TestYavsInterface(unittest.TestCase):
         args = SimpleNamespace(gui=False, elaborate=True, num_threads=1, yavs_debug=4711)
         with (
             mock.patch.object(YavsInterface, "find_prefix", side_effect=AssertionError("not reached")),
-            self.assertRaisesRegex(RuntimeError, "--yavs-debug and --elaborate"),
+            refused(self, "--yavs-debug and --elaborate"),
         ):
             YavsInterface.from_args(args, self.output_path)

@@ -49,7 +49,8 @@ as ``--name=value``.
 Command-line flags
 ------------------
 
-Flags of the run script (``python run.py ...``), next to VUnit's own:
+Flags of the run script (``python run.py ...``), next to VUnit's own. A combination the table rules
+out stops the run script with one ``error:`` line that says why and what to drop, and status 1:
 
 .. list-table::
    :header-rows: 1
@@ -61,15 +62,15 @@ Flags of the run script (``python run.py ...``), next to VUnit's own:
      - Runs the one selected test under ``yavs run --dap=PORT`` and waits for a debugger on
        ``127.0.0.1:PORT`` (default ``4711``, ``0`` picks a free port). Write the port as
        ``--yavs-debug=PORT``: a test name after a bare ``--yavs-debug`` is read as the port.
-       Not with ``--elaborate``, ``-p`` above 1 or more than one simulation.
+       Not with ``--yavs-cov``, ``--elaborate``, ``-p`` above 1 or more than one simulation.
    * - ``--yavs-interactive``
      - Runs the one selected test at the yavs console (``yavs run --interactive``, :doc:`interactive`),
-       with the ``vunit_*`` commands. Not with ``--yavs-debug``, ``--elaborate``, ``-p`` above 1
-       or more than one simulation.
+       with the ``vunit_*`` commands. Not with ``--yavs-debug``, ``--yavs-cov``, ``--elaborate``,
+       ``-p`` above 1 or more than one simulation.
    * - ``--yavs-surfer[=HOST:PORT]``
      - Shows the waves of the one selected test in Surfer while it runs (``yavs run --surfer``,
        :doc:`waveforms`). Combines with ``--yavs-debug`` and ``--yavs-interactive``, where the cursor follows the stops.
-       Not with ``-p`` above 1 or more than one simulation.
+       Not with ``--elaborate``, ``-p`` above 1 or more than one simulation.
    * - ``--yavs-max-threads N``
      - ``yavs.max_threads`` for every test that does not set it.
    * - ``--yavs-lint``
@@ -79,7 +80,7 @@ Flags of the run script (``python run.py ...``), next to VUnit's own:
        directory you run in or an ancestor.
    * - ``--yavs-cov``
      - Collects coverage in every simulation, as ``enable_coverage`` does for the tests it is set
-       for. Not with ``--yavs-debug``.
+       for. Not with ``--yavs-debug`` or ``--yavs-interactive``.
    * - ``--yavs-cov-directives MODE``
      - ``apply`` or ``ignore``: what ``yavs analyze``, ``elab`` and ``run`` do with the
        ``-- yavs coverage exclude`` comments in the sources (``--coverage-directives``, :doc:`coverage`).
