@@ -748,6 +748,8 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   `--config FILE` reads YAML with `exclude` (a word or list of exclusion files, added before those of
   `--exclude`), `root` (both relative to the file) and `kind`; `--root` and `--kind` win; no file is
   read without the option; a bad or unreadable file is `E0138`.
+  In-source `-- yavs cov exclude row -0-` and `row INPUT = VALUE` (0, 1, false, true) waive one condition or expression row; a
+  pattern without `row` always means combinations. Both forms are stored in the database, and both follow `E0137`.
   `cov merge` and `cov report` warn `W0119` when merged databases hold one positional in-source exclusion (same file,
   line and rule) with other operands, compared without formatting.
   Rows `library GLOB`, `entity GLOB` (`NAME` or `LIB.NAME`) and `process INSTANCE LABEL` (YAML: `kind` with the
@@ -769,7 +771,7 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   ...`) and per test its items and the items no other test hit. `yavs cov` exits 0, or 1 with `E0111` (a database cannot be
   read), `E0114`, `E0115`, `E0112` (an exclusion file cannot be read or has a malformed row), `E0138` (`--config`) or `E0110` (a file
   cannot be written), or when `-Werror` makes a warning an error; `run` exits at least 1 when the database cannot be written (`E0110`). The
-  database format (a `yavs-coverage 8` line, a tests section of `test`, id, name lines with
+  database format (a `yavs-coverage 9` line, a tests section of `test`, id, name lines with
   ids numbering the names in sorted order, then one tab-separated item per line: kind `s` or
   `bN`, path, statement text hash, occurrence, count, tests, line, file, statement text for
   display; conditions and expressions: kind `cN` or `eN` (N = 2 * input + value), the same fields with the

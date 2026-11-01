@@ -2446,6 +2446,12 @@ scalars; the on-disk format is implementation-defined, so it is fixed here (yavs
 
 ## Coverage exclusions (yavs-cov, CLI, #351, user, 2026-10-19)
 
+- **Row waivers in the source (maintainer, 2026-11-01, #1020):** `-- yavs cov exclude row -0-` (the short form a
+  report suggests) and `row INPUT = VALUE` waive one condition or expression row. A keyword, not a marker symbol: a
+  pattern with one symbol set is a valid combination waiver, and `row` also carries the long form. The kind words
+  keep their meaning (`condition (a=false)` is combinations), since existing sources rely on it. Waivers live on the
+  row (`CovRow::waivers`), its number of inputs too, so the report can print the short form without the source
+  (format 9). `exclude::directive` is the one place that writes the text.
 - **Operand text of waivers (maintainer, 2026-11-01, #1020):** a named input is any operand's text, compared
   by `yavs_diag::operand::key` (no comments, blanks or outer parentheses, lower case outside literals). A positional
   waiver stores its operands in the `.ycov` (version 8). A directive is re-resolved at every run and within a run

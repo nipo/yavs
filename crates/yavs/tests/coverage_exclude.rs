@@ -517,6 +517,10 @@ fn names_do_not_change_with_threads() {
 
 /// A design with one decision under a directive, analysed and run into `name.ycov`.
 fn decision(tmp: &Path, name: &str, cond: &str, directive: &str) -> Output {
+    decision_of(tmp, name, cond, directive, "combination")
+}
+
+fn decision_of(tmp: &Path, name: &str, cond: &str, directive: &str, kinds: &str) -> Output {
     write(
         tmp,
         "d.vhd",
@@ -536,7 +540,7 @@ fn decision(tmp: &Path, name: &str, cond: &str, directive: &str) -> Output {
             "run",
             "--work=work:lib",
             &format!("--cov={name}.ycov"),
-            "--cov-kind=combination",
+            &format!("--cov-kind={kinds}"),
             "d",
         ],
     )
@@ -667,5 +671,311 @@ fn e0137_is_unchanged_by_the_operand_text() {
         text(&o.stderr).contains("error[E0137]"),
         "{}",
         text(&o.stderr)
+    );
+}
+
+/// What a run of `x > 3 or r = '1'` (x is 0, r is '1') holds under a directive.
+fn rows_after(tmp: &Path, directive: &str, kinds: &str) -> (String, String) {
+    let o = decision_of(tmp, "r", "x > 3 or r = '1'", directive, kinds);
+    assert!(o.status.success(), "{directive}: {}", text(&o.stderr));
+    let total = yavs(
+        tmp,
+        &["cov", "report", "r.ycov", "--kind=condition", "--uncovered"],
+    );
+    assert!(total.status.success(), "{}", text(&total.stderr));
+    let ex = yavs(tmp, &["cov", "report", "r.ycov", "--exclusions"]);
+    (text(&total.stdout), text(&ex.stdout))
+}
+
+#[test]
+fn a_row_directive_waives_one_row() {
+    let tmp = tempdir("rowdir");
+    let (all, _) = rows_after(&tmp, "(r = '1' = true)", "condition");
+    let count = |t: &str| t.lines().filter(|l| l.starts_with("condition ")).count();
+    let before = count(&all);
+    assert!(before >= 2, "{all}");
+    // Whichever row never ran: the waived row leaves, the others of the decision stay.
+    for (dir, row) in [
+        ("row 0-: never low", "x > 3 is 0"),
+        ("row x > 3 = 0: never low", "x > 3 is 0"),
+        ("condition row X>3 = false", "x > 3 is 0"),
+        ("row 1-", "x > 3 is 1"),
+        ("row r = '1' = 0", "r = '1' is 0"),
+    ] {
+        let (rows, report) = rows_after(&tmp, dir, "condition");
+        let missed = all.contains(row);
+        assert!(!rows.contains(row), "{dir}: {rows}");
+        assert_eq!(count(&rows), before - usize::from(missed), "{dir}: {rows}");
+        assert!(
+            report.contains("(in the source)  applied"),
+            "{dir}: {report}"
+        );
+        assert!(
+            report.contains("0 of them ran") || !missed,
+            "{dir}: {report}"
+        );
+    }
+    let (_, report) = rows_after(&tmp, "row 0-: never low", "condition");
+    assert!(
+        report.contains("rule:    row 0-") && report.contains("reason:  never low"),
+        "{report}"
+    );
+    // The totals drop it: four rows, three after the waiver.
+    let o = decision_of(&tmp, "w", "x > 3 or r = '1'", "row 0-", "condition");
+    assert!(o.status.success());
+    let plain = decision_of(
+        &tmp,
+        "p",
+        "x > 3 or r = '1'",
+        "(r = '1' = true)",
+        "condition",
+    );
+    assert!(plain.status.success());
+    let total = |db: &str| {
+        let o = yavs(&tmp, &["cov", "report", db, "--kind=condition"]);
+        let out = text(&o.stdout);
+        out.lines()
+            .find(|l| l.starts_with("conditions"))
+            .unwrap_or("")
+            .to_string()
+    };
+    assert_eq!(
+        total("p.ycov")
+            .split_whitespace()
+            .nth(1)
+            .map(|t| t.split('/').nth(1).map(str::to_string)),
+        Some(Some("4".to_string()))
+    );
+    assert_eq!(
+        total("w.ycov")
+            .split_whitespace()
+            .nth(1)
+            .map(|t| t.split('/').nth(1).map(str::to_string)),
+        Some(Some("3".to_string()))
+    );
+}
+
+/// A row that ran: it leaves the total and the exclusion report shows that it ran.
+#[test]
+fn a_waived_row_that_ran_is_shown() {
+    let tmp = tempdir("rowran");
+    // `r = '1'` true with x > 3 false decides the result, so this row runs.
+    let (_, report) = rows_after(&tmp, "row -1", "condition");
+    assert!(report.contains("1 of them ran"), "{report}");
+    assert!(!report.contains("[0 hits]"), "{report}");
+    let o = yavs(&tmp, &["cov", "report", "r.ycov", "--exclusions=json"]);
+    assert!(
+        text(&o.stdout).contains("\"kind\": \"condition\""),
+        "{}",
+        text(&o.stdout)
+    );
+}
+
+/// `row` and a combination pattern on one decision are different requirements.
+#[test]
+fn a_row_is_not_a_combination() {
+    let tmp = tempdir("rowcomb");
+    let kinds = "condition,combination";
+    let o = decision_of(&tmp, "a", "x > 3 or r = '1'", "row 0-", kinds);
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    let db = yavs_cov::Database::parse(&std::fs::read_to_string(tmp.join("a.ycov")).expect("read"))
+        .expect("parse");
+    let waived = |name: &str| {
+        db.items
+            .iter()
+            .filter(|(k, e)| k.kind.name() == name && !e.waivers.is_empty())
+            .count()
+    };
+    assert_eq!((waived("condition"), waived("combination")), (1, 0));
+    // And the same pattern without `row` is the combination it was.
+    let o = decision_of(&tmp, "b", "x > 3 or r = '1'", "0-", kinds);
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    let db = yavs_cov::Database::parse(&std::fs::read_to_string(tmp.join("b.ycov")).expect("read"))
+        .expect("parse");
+    let waived = |name: &str| {
+        db.items
+            .iter()
+            .filter(|(k, e)| k.kind.name() == name && !e.waivers.is_empty())
+            .count()
+    };
+    assert_eq!(waived("condition"), 0);
+    assert!(waived("combination") >= 1);
+}
+
+#[test]
+fn row_directive_errors() {
+    let tmp = tempdir("rowerr");
+    for (dir, code, want) in [
+        ("row", "E2020", "`row` needs"),
+        ("row 01", "E2021", "exactly one"),
+        ("row -0-", "E2021", "3 positions"),
+        ("row y > 3 = 0", "E2022", "not an input"),
+        ("row x > 4 = 0", "E2022", "`x>3`"),
+        ("row x > 3 = 2", "E2023", "invalid row value"),
+        ("expression row 0-", "E2024", "does not fit"),
+        ("rwo 0-", "E2020", "`row`"),
+    ] {
+        let o = decision_of(&tmp, "e", "x > 3 or r = '1'", dir, "condition");
+        assert_eq!(o.status.code(), Some(1), "{dir}");
+        let e = text(&o.stderr);
+        assert!(
+            e.contains(&format!("error[{code}]")) && e.contains(want),
+            "{dir}: {e}"
+        );
+    }
+    let o = decision_of(&tmp, "d", "x > 3 or r = '1'", "row 0-", "condition");
+    assert!(o.status.success());
+    // Repeated: W2020.
+    write(
+        &tmp,
+        "d2.vhd",
+        "entity d2 is end entity;\narchitecture a of d2 is\n  signal x : integer := 0;\n  signal r : bit := '1';\nbegin\n  process begin\n    -- yavs cov exclude row 0-\n    -- yavs cov exclude row x > 3 = 0\n    if x > 3 or r = '1' then null; end if;\n    wait;\n  end process;\nend architecture;\n",
+    );
+    let o = yavs(&tmp, &["analyze", "--work=work:lib", "d2.vhd"]);
+    assert!(
+        text(&o.stderr).contains("warning[W2020]"),
+        "{}",
+        text(&o.stderr)
+    );
+}
+
+/// E0137 and W0119 hold for rows as for combinations.
+#[test]
+fn rows_follow_the_merge_rules() {
+    let tmp = tempdir("rowmerge");
+    assert!(
+        decision_of(&tmp, "a", "x > 3 or r = '1'", "row 0-", "condition")
+            .status
+            .success()
+    );
+    let o = yavs(
+        &tmp,
+        &[
+            "run",
+            "--work=work:lib",
+            "--cov=b.ycov",
+            "--cov-kind=condition",
+            "--coverage-directives=ignore",
+            "d",
+        ],
+    );
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    let o = yavs(&tmp, &["cov", "merge", "a.ycov", "b.ycov", "-o", "m.ycov"]);
+    assert_eq!(o.status.code(), Some(1));
+    let e = text(&o.stderr);
+    assert!(
+        e.contains("error[E0137]") && e.contains("condition x > 3 = 0 of d"),
+        "{e}"
+    );
+    // Reordered under a positional row.
+    assert!(
+        decision_of(&tmp, "c", "r = '1' or x > 3", "row 0-", "condition")
+            .status
+            .success()
+    );
+    let o = yavs(&tmp, &["cov", "merge", "a.ycov", "c.ycov", "-o", "m.ycov"]);
+    assert!(
+        text(&o.stderr).contains("warning[W0119]"),
+        "{}",
+        text(&o.stderr)
+    );
+    // Not under one named by its text.
+    assert!(
+        decision_of(&tmp, "e", "x > 3 or r = '1'", "row x > 3 = 0", "condition")
+            .status
+            .success()
+    );
+    assert!(
+        decision_of(&tmp, "f", "r = '1' or x > 3", "row x > 3 = 0", "condition")
+            .status
+            .success()
+    );
+    let o = yavs(&tmp, &["cov", "merge", "e.ycov", "f.ycov", "-o", "m.ycov"]);
+    assert!(!text(&o.stderr).contains("W0119"), "{}", text(&o.stderr));
+}
+
+/// Waivers change no counts: the counters of a run are the same with and without the directive.
+#[test]
+fn a_row_waiver_changes_no_count() {
+    let tmp = tempdir("rowcount");
+    assert!(
+        decision_of(&tmp, "a", "x > 3 or r = '1'", "row 0-", "condition")
+            .status
+            .success()
+    );
+    let o = yavs(
+        &tmp,
+        &[
+            "run",
+            "--work=work:lib",
+            "--cov=b.ycov",
+            "--cov-kind=condition",
+            "--threads=4",
+            "--coverage-directives=ignore",
+            "d",
+        ],
+    );
+    assert!(o.status.success());
+    let read = |n: &str| {
+        yavs_cov::Database::parse(&std::fs::read_to_string(tmp.join(n)).expect("read"))
+            .expect("parse")
+    };
+    let (a, b) = (read("a.ycov"), read("b.ycov"));
+    let counts = |d: &yavs_cov::Database| {
+        d.items
+            .iter()
+            .map(|(k, e)| (k.clone(), e.count))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(counts(&a), counts(&b));
+    // The report's line of what to write is what the source takes.
+    let (k, e) = a
+        .items
+        .iter()
+        .find(|(k, _)| k.kind.name() == "condition")
+        .expect("row");
+    assert!(
+        yavs_cov::exclude::directive(k, e)
+            .expect("text")
+            .starts_with("-- yavs cov exclude row ")
+    );
+}
+
+/// The value of an assignment has expression rows, and the kind word must fit it.
+#[test]
+fn a_row_directive_waives_an_expression_row() {
+    let tmp = tempdir("rowexpr");
+    let design = |directive: &str| {
+        format!(
+            "entity d is end entity;\narchitecture a of d is\n  signal a, b, y : bit;\nbegin\n  process begin\n    -- yavs cov exclude {directive}\n    y <= a and b;\n    wait;\n  end process;\nend architecture;\n"
+        )
+    };
+    let run = |directive: &str| {
+        write(&tmp, "d.vhd", &design(directive));
+        let o = yavs(&tmp, &["analyze", "--work=work:lib", "d.vhd"]);
+        if !o.status.success() {
+            return o;
+        }
+        yavs(
+            &tmp,
+            &[
+                "run",
+                "--work=work:lib",
+                "--cov=a.ycov",
+                "--cov-kind=expression",
+                "d",
+            ],
+        )
+    };
+    let o = run("expression row -1: b is never high");
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    let r = yavs(&tmp, &["cov", "report", "a.ycov", "--exclusions"]);
+    let r = text(&r.stdout);
+    assert!(r.contains("rule:    expression row -1"), "{r}");
+    assert!(r.contains("expression  ") && r.contains("1 (0 ran)"), "{r}");
+    let e = text(&run("condition row -1").stderr);
+    assert!(
+        e.contains("error[E2024]") && e.contains("does not fit"),
+        "{e}"
     );
 }

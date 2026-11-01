@@ -107,7 +107,8 @@ pub struct Entry {
     pub text: String,
     /// The tests that hit it: indices into [`Database::tests`], sorted.
     pub tests: Vec<u32>,
-    /// The in-source `-- yavs coverage exclude` directives that waive it (combinations only).
+    /// The in-source `-- yavs coverage exclude` directives that waive it (combinations and
+    /// condition and expression rows).
     /// The count stays the raw one.
     pub waivers: Vec<Waiver>,
     /// `library.unit` of what it belongs to: the entity of its instance, or the package. Empty in
@@ -115,6 +116,9 @@ pub struct Entry {
     pub unit: String,
     /// The label of the process it is in; empty when it is in none or the process has no label.
     pub process: String,
+    /// A condition or expression row: how many inputs its decision has, the positions of a `row`
+    /// directive. 0 elsewhere, and in a database that does not record it.
+    pub inputs: u8,
 }
 
 /// An in-source exclusion of a requirement.
@@ -157,15 +161,16 @@ pub struct Database {
     pub no_units: bool,
 }
 
-const MAGIC: &str = "yavs-coverage 8";
+const MAGIC: &str = "yavs-coverage 9";
 /// Older versions [`Database::parse`] still reads: 2 has no toggles, 2 and 3 no tests, 4 no
 /// conditions, 5 no combinations and no in-source exclusions, 6 no units and process labels, 7 no
-/// operand texts of its waivers.
+/// operand texts of its waivers, 8 no waivers and input counts of condition and expression rows.
 const OLD: &[&str] = &["yavs-coverage 2", "yavs-coverage 3"];
 const V4: &str = "yavs-coverage 4";
 const V5: &str = "yavs-coverage 5";
 const V6: &str = "yavs-coverage 6";
 const V7: &str = "yavs-coverage 7";
+const V8: &str = "yavs-coverage 8";
 
 /// `line` without its `--` comment (a `--` inside a string literal is text).
 fn uncommented(line: &str) -> &str {
@@ -211,6 +216,8 @@ struct Item {
     waivers: Vec<Waiver>,
     /// The label of the process around it.
     process: String,
+    /// A condition or expression row: how many inputs its decision has.
+    inputs_of_row: u8,
 }
 
 /// Between the texts of the inputs of a combination in `Key::sig`.
@@ -447,17 +454,22 @@ pub fn collect(
             yavs_ir::CovKind::Combination(s) => s,
             _ => 0,
         };
-        let waivers = comb
-            .map(|k| {
-                k.waivers
-                    .iter()
+        // The directives of a combination, or of a condition or expression row, and the inputs of
+        // its decision.
+        let directives = comb
+            .map(|k| (&k.waivers, &k.inputs))
+            .or(c.row.as_ref().map(|r| (&r.waivers, &r.inputs)));
+        let inputs_of_row = comb.map_or(c.row.as_ref().map_or(0, |r| r.inputs.len()), |_| 0);
+        let waivers = directives
+            .map(|(all, spans)| {
+                all.iter()
                     .filter(|w| state & w.care == w.want)
                     .map(|w| Waiver {
                         // A named directive says what it means whatever the order of the inputs.
-                        operands: if w.rule.contains('(') {
+                        operands: if !w.positional {
                             Vec::new()
                         } else {
-                            k.inputs
+                            spans
                                 .iter()
                                 .map(|s| {
                                     let t = at(*s);
@@ -478,6 +490,7 @@ pub fn collect(
             })
             .unwrap_or_default();
         items.push(Item {
+            inputs_of_row: inputs_of_row as u8,
             process: process_at(span).unwrap_or_default(),
             waivers,
             input: match (comb, &c.row) {
@@ -577,6 +590,7 @@ pub fn collect(
         let e = out.items.entry(k).or_insert_with(|| Entry {
             unit: unit.to_string(),
             process: items[i].process.clone(),
+            inputs: items[i].inputs_of_row,
             file: items[i].file.clone(),
             line: items[i].line,
             count: 0,
@@ -623,6 +637,28 @@ pub fn collect(
         }
     }
     (out, warns)
+}
+
+/// The waivers of an item as one field of a database line; `-` for none.
+fn waiver_field(waivers: &[Waiver]) -> String {
+    let w: Vec<String> = waivers
+        .iter()
+        .map(|w| {
+            format!(
+                "{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}",
+                w.rule,
+                w.reason,
+                w.file,
+                w.line,
+                w.operands.join("\u{1d}")
+            )
+        })
+        .collect();
+    if w.is_empty() {
+        "-".to_string()
+    } else {
+        w.join("\u{1e}")
+    }
 }
 
 /// A field that may be empty, as a database line writes it.
@@ -724,7 +760,7 @@ impl Database {
                     };
                     let _ = writeln!(
                         s,
-                        "{c}{r}\t{}\t{:016x}\t{}\t{}\t{t}\t{}\t{}\t{}\t{}\t{}\t{}",
+                        "{c}{r}\t{}\t{:016x}\t{}\t{}\t{t}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
                         k.path,
                         k.hash,
                         k.occ,
@@ -733,34 +769,17 @@ impl Database {
                         e.file,
                         k.sig,
                         e.text,
+                        waiver_field(&e.waivers),
+                        e.inputs,
                         dash(&e.unit),
                         dash(&e.process)
                     );
                     continue;
                 }
                 Kind::Combination(st) => {
-                    let w: Vec<String> = e
-                        .waivers
-                        .iter()
-                        .map(|w| {
-                            format!(
-                                "{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}",
-                                w.rule,
-                                w.reason,
-                                w.file,
-                                w.line,
-                                w.operands.join("\u{1d}")
-                            )
-                        })
-                        .collect();
-                    let w = if w.is_empty() {
-                        "-".to_string()
-                    } else {
-                        w.join("\u{1e}")
-                    };
                     let _ = writeln!(
                         s,
-                        "m{st}\t{}\t{:016x}\t{}\t{}\t{t}\t{}\t{}\t{}\t{}\t{w}\t{}\t{}",
+                        "m{st}\t{}\t{:016x}\t{}\t{}\t{t}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
                         k.path,
                         k.hash,
                         k.occ,
@@ -769,6 +788,7 @@ impl Database {
                         e.file,
                         k.sig,
                         e.text,
+                        waiver_field(&e.waivers),
                         dash(&e.unit),
                         dash(&e.process)
                     );
@@ -799,11 +819,12 @@ impl Database {
         let mut lines = text.lines();
         let head = lines.next();
         let old = head.is_some_and(|h| OLD.contains(&h));
-        let known = [MAGIC, V7, V6, V5, V4].iter().any(|v| head == Some(*v));
+        let known = [MAGIC, V8, V7, V6, V5, V4].iter().any(|v| head == Some(*v));
         if !known && !old {
             return Err(format!("not a yavs coverage database (no `{MAGIC}` line)"));
         }
-        let with_units = head == Some(MAGIC) || head == Some(V7);
+        let with_units = [MAGIC, V8, V7].iter().any(|v| head == Some(*v));
+        let row_waivers = head == Some(MAGIC);
         let mut db = Database {
             legacy: !with_units && head != Some(V6),
             no_units: !with_units,
@@ -874,13 +895,18 @@ impl Database {
                     waivers: Vec::new(),
                     unit,
                     process,
+                    inputs: 0,
                 };
                 (key, entry)
             } else {
                 let fec = l.starts_with('c') || l.starts_with('e');
                 let comb = l.starts_with('m');
                 let mut waivers = Vec::new();
-                if comb {
+                let mut inputs = 0;
+                if fec && row_waivers {
+                    inputs = f.pop().ok_or_else(bad)?.parse().map_err(|_| bad())?;
+                }
+                if comb || (fec && row_waivers) {
                     let Some(w) = f.pop() else {
                         return Err(bad());
                     };
@@ -943,6 +969,7 @@ impl Database {
                     waivers,
                     unit,
                     process,
+                    inputs,
                 };
                 (key, entry)
             };
@@ -984,10 +1011,13 @@ impl Database {
                         } else {
                             &x.waivers
                         };
+                        let what = match k.kind.row() {
+                            Some((_, v)) => format!("{} = {}", k.sig, u8::from(v)),
+                            None => pattern(&k),
+                        };
                         conflicts.push(format!(
-                            "{} {} of {} ({}:{}) is excluded at {}:{} in one database and required in the other",
+                            "{} {what} of {} ({}:{}) is excluded at {}:{} in one database and required in the other",
                             k.kind.name(),
-                            pattern(&k),
                             k.shown(),
                             x.file,
                             x.line,
@@ -1484,6 +1514,7 @@ mod tests {
                 waivers: Vec::new(),
                 unit: "work.e".into(),
                 process: String::new(),
+                inputs: 0,
             },
         )
     }
@@ -1595,6 +1626,7 @@ mod tests {
             waivers,
             unit: "work.e".into(),
             process: String::new(),
+            inputs: 0,
         };
         let waiver = Waiver {
             rule: "01".into(),
@@ -1606,7 +1638,7 @@ mod tests {
         let mut d = Database::default();
         d.items.insert(key.clone(), entry(2, vec![waiver.clone()]));
         let text = d.write();
-        assert!(text.starts_with("yavs-coverage 8\n"));
+        assert!(text.starts_with("yavs-coverage 9\n"));
         let back = Database::parse(&text).unwrap();
         assert_eq!(back, d);
         assert_eq!(pattern(&key), "01");
@@ -1673,6 +1705,42 @@ mod tests {
         let mut m = a.clone();
         assert!(m.merge(db(1, waiver(&[]))).is_empty());
         assert_eq!(m.items.values().next().unwrap().waivers.len(), 1);
+    }
+
+    /// A row with its waivers and input count survives write and parse, and follows the merge rule.
+    #[test]
+    fn rows_keep_their_waivers() {
+        let (k, mut e) = item(":t", Kind::Condition(3), 1, 5, 2);
+        let k = Key {
+            sig: "count > 3".into(),
+            ..k
+        };
+        e.inputs = 3;
+        let plain = e.clone();
+        e.waivers = vec![Waiver {
+            rule: "row -1-".into(),
+            reason: "why".into(),
+            file: "a.vhd".into(),
+            line: 4,
+            operands: vec!["a".into(), "count > 3".into(), "b".into()],
+        }];
+        let db = |e: Entry| {
+            let mut d = Database::default();
+            d.items.insert(k.clone(), e);
+            d
+        };
+        let d = db(e.clone());
+        assert_eq!(Database::parse(&d.write()).unwrap(), d);
+        // One side waives it: the conflict names the row.
+        let mut m = db(plain);
+        let c = m.merge(db(e));
+        assert_eq!(c.len(), 1);
+        assert!(c[0].contains("condition count > 3 = 1 of t "), "{}", c[0]);
+        // A row line of version 8 has neither field.
+        let v8 = "yavs-coverage 8\nc3\t:t\t0000000000000001\t0\t2\t-\t5\ta.vhd\tcount > 3\t? a\twork.e\t-\n";
+        let back = Database::parse(v8).unwrap();
+        let (_, e) = back.items.iter().next().unwrap();
+        assert!(e.waivers.is_empty() && e.inputs == 0 && e.unit == "work.e");
     }
 
     #[test]

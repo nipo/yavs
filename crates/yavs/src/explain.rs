@@ -243,7 +243,7 @@ const EXPLAIN: &[(&str, &str)] = &[
     ),
     (
         "E2022",
-        "A named exclusion (`(valid=false, ready=true)`) names something that is not exactly one input of the expression: an unknown name, a name that is several inputs, or an input given twice. An input is named by its text in the source, in any formatting: `(valid=false)`, `(count > 3 = false)`, `(f(a, b) = true)`. The note lists the inputs; an operand that appears twice can only be addressed by its position.",
+        "A named exclusion (`(valid=false, ready=true)`) names something that is not exactly one input of the expression: an unknown name, a name that is several inputs, or an input given twice. An input is named by its text in the source, in any formatting: `(valid=false)`, `(count > 3 = false)`, `(f(a, b) = true)`, and so is the input of `row count > 3 = 0`. The note lists the inputs; an operand that appears twice can only be addressed by its position.",
     ),
     (
         "E2023",

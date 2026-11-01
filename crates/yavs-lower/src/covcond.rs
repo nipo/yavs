@@ -339,6 +339,12 @@ impl Fx<'_, '_> {
         let mut nodes = Vec::new();
         let mut parity: Vec<Option<bool>> = vec![None; leaves.len()];
         flatten(&d.tree, Some(false), &mut nodes, &mut parity);
+        let (row_waivers, comb_waivers): (Vec<_>, Vec<_>) = self
+            .cx
+            .cov_waivers(db, d.whole)
+            .into_iter()
+            .partition(|w| w.row.is_some());
+        let inputs: Vec<_> = leaves.iter().map(|l| db.exprs[l.expr].span).collect();
         let mut first = None;
         for (i, l) in leaves.iter().enumerate().filter(|_| fec) {
             if consts >> i & 1 == 1 {
@@ -359,6 +365,12 @@ impl Fx<'_, '_> {
                     whole,
                     input: db.exprs[l.expr].span,
                     result,
+                    inputs: inputs.clone(),
+                    waivers: row_waivers
+                        .iter()
+                        .filter(|w| w.row == Some(row))
+                        .cloned()
+                        .collect(),
                 };
                 let item = self
                     .cx
@@ -375,6 +387,8 @@ impl Fx<'_, '_> {
                         whole,
                         input: whole,
                         result: '?',
+                        inputs: Vec::new(),
+                        waivers: Vec::new(),
                     };
                     let item = self.cx.cover_cond(
                         self.fb.program(),
@@ -389,8 +403,8 @@ impl Fx<'_, '_> {
                 Some(yavs_ir::CovComb {
                     first: first?,
                     states,
-                    inputs: leaves.iter().map(|l| db.exprs[l.expr].span).collect(),
-                    waivers: self.cx.cov_waivers(db, d.whole),
+                    inputs,
+                    waivers: comb_waivers,
                 })
             }
             None => None,

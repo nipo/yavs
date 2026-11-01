@@ -102,6 +102,8 @@ Syntax, command line, waveforms, coverage, debugger, plugins (E0 and W0)
      - The compile thread of ``--tier=auto`` could not be started (the note gives the operating system error).
    * - _`W0118`
      - ``--threads`` is above 1 and the token server named in ``YAVS_TOKENS`` cannot be reached (nothing listens on that port of 127.0.0.1, it does not answer, or the connection broke during the run; the note says which).
+   * - _`W0119`
+     - Databases that are merged disagree about what a positional ``-- yavs coverage exclude`` directive at one place means: its positions were other operands in another run, so the operands were reordered or replaced under it.
    * - _`E0120`
      - ``yavs run --tier=...`` names a compiled tier that this yavs was built without.
    * - _`E0121`

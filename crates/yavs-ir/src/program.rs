@@ -1210,6 +1210,11 @@ pub struct CovRow {
     /// between the input and the result), the result then; `'?'` when it depends on the
     /// other inputs.
     pub result: char,
+    /// A condition or expression row: every input of its decision, in the order positions address
+    /// them. Empty for a combination, whose [`CovComb::inputs`] say.
+    pub inputs: Vec<Span>,
+    /// A condition or expression row: the directives that waive it.
+    pub waivers: Vec<CovWaiver>,
 }
 
 /// A node of a condition tree in postfix order.
@@ -1258,11 +1263,16 @@ pub struct CovComb {
     pub waivers: Vec<CovWaiver>,
 }
 
-/// A waiver of the combinations a pattern matches: state `s` matches when `s & care == want`.
+/// A waiver of the combinations a pattern matches (state `s` matches when `s & care == want`), or of
+/// one condition or expression row.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct CovWaiver {
     pub care: u32,
     pub want: u32,
+    /// `2 * input + value` of the one row a `row` directive waives; `care` and `want` then mean nothing.
+    pub row: Option<u32>,
+    /// It addresses inputs by position, so its meaning changes when they are reordered.
+    pub positional: bool,
     /// The directive as written after `exclude` (without the reason), for reports.
     pub rule: String,
     pub reason: String,

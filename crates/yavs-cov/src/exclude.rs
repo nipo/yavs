@@ -758,6 +758,34 @@ fn partner<'a>(db: &'a Database, k: &Key) -> Option<&'a Entry> {
     })
 }
 
+/// The comment that waives this item in the source, written before its decision: a combination or
+/// a condition or expression row in the short form. `None` for other kinds, and for a row of a
+/// database that does not hold its number of inputs.
+pub fn directive(k: &Key, e: &Entry) -> Option<String> {
+    let spec = match k.kind {
+        Kind::Combination(_) => crate::pattern(k),
+        Kind::Condition(_) | Kind::Expression(_) => {
+            let (i, v) = k.kind.row()?;
+            let n = u32::from(e.inputs);
+            if i >= n {
+                return None;
+            }
+            let at = |p| {
+                if p != i {
+                    '-'
+                } else if v {
+                    '1'
+                } else {
+                    '0'
+                }
+            };
+            format!("row {}", (0..n).map(at).collect::<String>())
+        }
+        _ => return None,
+    };
+    Some(format!("-- yavs cov exclude {spec}"))
+}
+
 /// An item as an exclusion row, without the trailing comment.
 pub fn head(k: &Key, e: &Entry) -> String {
     let id = format!("{:012x}.{}", k.hash >> 16, k.occ);
@@ -988,6 +1016,7 @@ mod tests {
                     waivers: Vec::new(),
                     unit: "work.e".into(),
                     process: String::new(),
+                    inputs: 0,
                 },
             );
         }
@@ -1265,6 +1294,40 @@ mod tests {
     }
 
     #[test]
+    fn the_directive_of_an_item() {
+        let (k, mut e) = db().items.pop_first().unwrap();
+        assert_eq!(directive(&k, &e), None);
+        let row = |r| Key {
+            kind: Kind::Condition(r),
+            ..k.clone()
+        };
+        e.inputs = 3;
+        assert_eq!(
+            directive(&row(2).clone(), &e).unwrap(),
+            "-- yavs cov exclude row -0-"
+        );
+        assert_eq!(
+            directive(&row(5), &e).unwrap(),
+            "-- yavs cov exclude row --1"
+        );
+        let x = Key {
+            kind: Kind::Expression(1),
+            ..k.clone()
+        };
+        assert_eq!(directive(&x, &e).unwrap(), "-- yavs cov exclude row 1--");
+        // An older database has no count, and a row beyond it is not one.
+        assert_eq!(directive(&row(6), &e), None);
+        e.inputs = 0;
+        assert_eq!(directive(&row(2), &e), None);
+        let c = Key {
+            kind: Kind::Combination(0b1001),
+            sig: format!("a{}b", crate::INPUT_SEP),
+            ..k
+        };
+        assert_eq!(directive(&c, &e).unwrap(), "-- yavs cov exclude 01");
+    }
+
+    #[test]
     fn syntax_errors_name_the_line() {
         assert!(parse("frobnicate x\n").unwrap_err().starts_with("line 1:"));
         assert!(
@@ -1426,6 +1489,7 @@ mod tests {
                         waivers: Vec::new(),
                         unit: "work.e".into(),
                         process: String::new(),
+                        inputs: 0,
                     },
                 );
             }

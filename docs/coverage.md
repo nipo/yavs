@@ -169,7 +169,7 @@ A decision with an input that is constant after elaboration (a generic, a consta
 inputs, or more than 512 combinations is not measured; with `--cov-kind=combination` that is warning
 `W2023` (its other coverage is unaffected).
 
-## Excluding combinations in the source
+## Excluding combinations and rows in the source
 
 A requirement that cannot occur is waived with a comment before the decision or assignment
 (sequential or concurrent), each exclusion on a line of its own, with an optional reason after
@@ -200,6 +200,20 @@ active <= enable and not fault;                    -- an assignment: exclude exp
 | `1` | the input was evaluated and true |
 | `-` | anything, also not evaluated |
 
+A pattern waives combinations. With the word `row` in front it waives one `condition` or `expression` row
+(one input at one value) instead, so the two can never be read as each other:
+
+```vhdl
+-- yavs cov exclude row -0-: never low in practice     -- one symbol per input, exactly one `0` or `1`
+-- yavs cov exclude row count < 15 = 0                 -- any operand by its text; value 0, 1, false or true
+if valid and count < 15 and ready then
+```
+
+`condition row ...` and `expression row ...` say which kind you mean and fit the same constructs as the
+kind words below. `row -0-` is what a report suggests for a missed row. A pattern without `row` always means
+combinations, even with one symbol set, and `-- yavs coverage exclude condition (valid=false)` keeps meaning the
+combinations with `valid` false: the word `condition` there says which decision, not which kind of requirement.
+
 - The positions are the inputs in source order, before any optimisation, and values refer to the input
   itself, before a `not` in front of it: for `enable and not fault`, `01` is `enable` false,
   `fault` true. Reordering the operands changes what a positional exclusion means; the named form does not
@@ -208,7 +222,7 @@ active <= enable and not fault;                    -- an assignment: exclude exp
   follows the last `=`, so `(en = '1' = true)` is the operand `en = '1'`. Case, blanks and outer parentheses do not
   count, so `(COUNT>3 = false)` is the same input; case in a string, character literal or extended identifier does.
   Text that is two inputs, or not an input, is an error that lists the inputs, with a near one if there is one.
-- A positional directive stores the text of its operands in the `.ycov`. When merged databases show the same
+- A positional directive (a pattern, or `row` with a pattern) stores the text of its operands in the `.ycov`. When merged databases show the same
   directive with other operands (they were reordered or replaced under it), that is warning `W0119`, naming both
   lists, since a position now means another input. Formatting alone does not count. This compares runs, so one
   database has nothing to compare, and a directive that also moved to another line is not recognised as the same one.
@@ -218,11 +232,13 @@ active <= enable and not fault;                    -- an assignment: exclude exp
   that follows. Before an `if` they apply to its condition only, not to its `elsif`s or nested
   decisions; a comment right before an `elsif` applies to that condition. A directive before a
   conditional or selected assignment is ambiguous and is an error.
-- A waiver changes the requirements only: statements, branches and the other kinds count as before.
-  The count of a waived combination is still recorded; if it runs, that is shown, not an error.
-  Waived requirements leave the totals, which show `-` when none are left.
+- A waiver changes only the requirements it names: a combination waiver takes out combinations and a `row`
+  waiver takes out one condition or expression row; every other row, combination, statement and branch counts as
+  before. The count of a waived requirement is still recorded; if it runs, that is shown in the exclusion report,
+  not an error. Waived requirements leave the totals, which show `-` when none are left. A decision with a
+  row but too many inputs for combinations can still have that row waived.
 - The directives and their reasons are saved in the `.ycov` file, so a report never reads the source
-  again. Merging a database that waives a combination with one that requires it is an error (`E0137`).
+  again. Merging a database that waives a requirement with one that requires it is an error (`E0137`).
   Editing a comment never changes the identity of a decision.
 
 Directives are checked when the sources are analysed, with or without coverage:
@@ -243,7 +259,7 @@ error[E2021]: exclusion has 2 positions, but the expression has 3 inputs
 A malformed directive is an error (codes `E2020` to `E2025`: syntax, pattern, operand, value,
 target, command), with a hint when a name is close (`vlaid` for `valid`). It is never repaired or
 partly applied. A duplicate or already covered exclusion is warning `W2020`, exclusions that waive
-every combination `W2021`, one that matches no combination `W2022` (on booleans the right operand
+every combination or every row `W2021`, one that matches no combination or names an input with no rows `W2022` (on booleans the right operand
 is not evaluated when the left one decides, so `(valid=false, ready=true)` matches nothing: write
 `0-`), and `W2023` is a decision that is not measured. Warnings follow `-W`/`-Werror`.
 Only comments that start `-- yavs cov` or `-- yavs coverage` are read: other comments, text in a

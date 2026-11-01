@@ -80,7 +80,13 @@ fn arm_names_are_the_comments_of_the_uncovered_rows() {
         "arm 1: (no arm taken)",
         "arm 2: when others",
     ] {
-        assert!(out.contains(&format!("# {arm}\n")), "{arm}\n{out}");
+        // A labelled process follows in the comment.
+        let row = out.lines().find(|l| l.contains(&format!("# {arm}")));
+        let rest = row.and_then(|l| l.split_once(arm)).map(|x| x.1);
+        assert!(
+            rest.is_some_and(|r| r.is_empty() || r.starts_with("  [process ")),
+            "{arm}\n{out}"
+        );
     }
     // Rows carry the same relative path as the report.
     assert!(out.contains(" cov_report.vhd:25   # "), "{out}");

@@ -41,6 +41,8 @@ pub const NOT_MEASURED: &str = "W2023";
 
 /// What `yavs coverage` may be followed by.
 const COMMANDS: [&str; 4] = ["exclude", "off", "on", "off-line"];
+/// What may stand where a pattern is expected, as a word.
+const SPEC_WORDS: [&str; 3] = ["row", "condition", "expression"];
 
 /// The waivers of one file by decision, and the diagnostics of its directives.
 #[derive(Default)]
@@ -272,6 +274,10 @@ enum Spec {
     /// One symbol per input: `0`, `1`, `-`, with the span of the pattern.
     Pattern(Vec<u8>, Span),
     Named(Vec<Named>),
+    /// `row -0-`: one input at one value, by position, with the span of the pattern.
+    RowPattern(Vec<u8>, Span),
+    /// `row INPUT = VALUE`: one input at one value, by its text.
+    RowNamed(Named),
 }
 
 /// A parsed `exclude` directive.
@@ -417,17 +423,6 @@ fn bind(
         ];
     };
     let whole = db.exprs[dec.whole].span;
-    if let Err(why) = dec.combinations(db) {
-        return vec![
-            err(
-                TARGET,
-                "this expression has no combinations to exclude",
-                "no requirements",
-            )
-            .with_secondary(whole, "the expression")
-            .with_note(why),
-        ];
-    }
     let n = dec.leaves.len();
     let src = db.sources.get(whole.file);
     let flat = |s: Span| {
@@ -468,25 +463,139 @@ fn bind(
             .collect::<Vec<_>>()
             .join(", ")
     };
+    // The index of the input a named form means, or the error.
+    let find = |name: &str, at: Span| -> Result<usize, Box<Diagnostic>> {
+        let key = yavs_diag::operand::key(name);
+        let hits: Vec<usize> = (0..n)
+            .filter(|&i| {
+                texts[i] == key
+                    || names[i].as_ref().is_some_and(|x| {
+                        if name.starts_with('\\') {
+                            x == name
+                        } else {
+                            x.eq_ignore_ascii_case(name)
+                        }
+                    })
+            })
+            .collect();
+        match hits[..] {
+            [i] => Ok(i),
+            [] => {
+                let mut e = Diagnostic::error(
+                    OPERAND,
+                    format!("`{name}` is not an input of this expression"),
+                )
+                .with_primary(at, "unknown input")
+                .with_secondary(whole, "the expression")
+                .with_note(format!("inputs, in order: {}", order()));
+                let cands: Vec<(String, &str)> = names
+                    .iter()
+                    .flatten()
+                    .map(|x| (x.to_ascii_lowercase(), x.as_str()))
+                    .chain(texts.iter().map(|x| (x.clone(), x.as_str())))
+                    .collect();
+                if let Some(h) = yavs_sem::suggest::suggest(
+                    &key,
+                    "input",
+                    cands.iter().map(|(k, x)| (k.as_str(), *x)),
+                ) {
+                    e = e.with_help(h);
+                } else {
+                    e = e.with_help(
+                        "write the input as the note lists it, in any formatting, or address it \
+                         by its position with the pattern form, such as `01-`",
+                    );
+                }
+                Err(Box::new(e))
+            }
+            _ => Err(Box::new(
+                Diagnostic::error(
+                    OPERAND,
+                    format!("`{name}` is {} inputs of this expression", hits.len()),
+                )
+                .with_primary(at, "ambiguous input")
+                .with_secondary(whole, "the expression")
+                .with_note(format!("inputs, in order: {}", order()))
+                .with_help("address the inputs by position with the pattern form, such as `01-`"),
+            )),
+        }
+    };
+    let wrong_length = |len: usize, at: Span| {
+        err(
+            PATTERN,
+            &format!(
+                "exclusion has {len} position{}, but the expression has {n} inputs",
+                if len == 1 { "" } else { "s" }
+            ),
+            "wrong number of positions",
+        )
+        .with_secondary(whole, "the expression")
+        .with_note(format!("expected order: {}", order()))
+        .with_help("provide one symbol per input; use `-` for an unrestricted input")
+        .with_secondary(at, "the pattern")
+    };
+    // A condition or expression row: one input at one value. It has nothing to do with the
+    // combinations, so a decision with too many of them can still have rows.
+    let row = match &d.spec {
+        Spec::RowPattern(p, at) => {
+            if p.len() != n {
+                return vec![wrong_length(p.len(), *at)];
+            }
+            let i = p.iter().position(|&c| c != b'-').unwrap_or(0);
+            Some((i, p[i] == b'1', *at))
+        }
+        Spec::RowNamed((name, at, value)) => match find(name, *at) {
+            Ok(i) => Some((i, *value, *at)),
+            Err(e) => return vec![*e],
+        },
+        _ => None,
+    };
+    if let Some((i, value, at)) = row {
+        let consts = dec.consts();
+        if n - (consts.count_ones() as usize) < 2 {
+            return vec![
+                err(TARGET, "this expression has no rows to exclude", "no rows")
+                    .with_secondary(whole, "the expression")
+                    .with_note(
+                        "condition and expression rows need two or more inputs that are not constant",
+                    ),
+            ];
+        }
+        let mut diags = Vec::new();
+        if consts >> i & 1 == 1 {
+            diags.push(
+                Diagnostic::warning(MATCHES_NONE, "this exclusion names an input with no rows")
+                    .with_primary(at, "constant after elaboration")
+                    .with_secondary(whole, "the expression"),
+            );
+        }
+        waivers.entry(dec.whole).or_default().push(CovWaiver {
+            care: 0,
+            want: 0,
+            row: Some(2 * i as u32 + u32::from(value)),
+            positional: matches!(d.spec, Spec::RowPattern(..)),
+            rule: d.rule.clone(),
+            reason: d.reason.clone(),
+            at: d.at,
+        });
+        return diags;
+    }
+    if let Err(why) = dec.combinations(db) {
+        return vec![
+            err(
+                TARGET,
+                "this expression has no combinations to exclude",
+                "no requirements",
+            )
+            .with_secondary(whole, "the expression")
+            .with_note(why),
+        ];
+    }
     let (mut care, mut want) = (0u32, 0u32);
     match &d.spec {
         Spec::Pattern(p, at) => {
             if p.len() != n {
-                return vec![
-                    err(
-                        PATTERN,
-                        &format!(
-                            "exclusion has {} position{}, but the expression has {n} inputs",
-                            p.len(),
-                            if p.len() == 1 { "" } else { "s" }
-                        ),
-                        "wrong number of positions",
-                    )
-                    .with_secondary(whole, "the expression")
-                    .with_note(format!("expected order: {}", order()))
-                    .with_help("provide one symbol per input; use `-` for an unrestricted input")
-                    .with_secondary(*at, "the pattern"),
-                ];
+                return vec![wrong_length(p.len(), *at)];
             }
             for (i, &c) in p.iter().enumerate() {
                 match c {
@@ -501,66 +610,9 @@ fn bind(
         Spec::Named(list) => {
             let mut done: Vec<usize> = Vec::new();
             for (name, at, value) in list {
-                let key = yavs_diag::operand::key(name);
-                let hits: Vec<usize> = (0..n)
-                    .filter(|&i| {
-                        texts[i] == key
-                            || names[i].as_ref().is_some_and(|x| {
-                                if name.starts_with('\\') {
-                                    x == name
-                                } else {
-                                    x.eq_ignore_ascii_case(name)
-                                }
-                            })
-                    })
-                    .collect();
-                let i = match hits[..] {
-                    [i] => i,
-                    [] => {
-                        let mut e = Diagnostic::error(
-                            OPERAND,
-                            format!("`{name}` is not an input of this expression"),
-                        )
-                        .with_primary(*at, "unknown input")
-                        .with_secondary(whole, "the expression")
-                        .with_note(format!("inputs, in order: {}", order()));
-                        let cands: Vec<(String, &str)> = names
-                            .iter()
-                            .flatten()
-                            .map(|x| (x.to_ascii_lowercase(), x.as_str()))
-                            .chain(texts.iter().map(|x| (x.clone(), x.as_str())))
-                            .collect();
-                        if let Some(h) = yavs_sem::suggest::suggest(
-                            &key,
-                            "input",
-                            cands.iter().map(|(k, x)| (k.as_str(), *x)),
-                        ) {
-                            e = e.with_help(h);
-                        } else {
-                            e = e.with_help(
-                                "write the input as the note lists it, in any formatting, or address it \
-                                 by its position with the pattern form, such as `01-`",
-                            );
-                        }
-                        return vec![e];
-                    }
-                    _ => {
-                        return vec![
-                            Diagnostic::error(
-                                OPERAND,
-                                format!(
-                                    "`{name}` is {} inputs of this expression",
-                                    hits.len()
-                                ),
-                            )
-                            .with_primary(*at, "ambiguous input")
-                            .with_secondary(whole, "the expression")
-                            .with_note(format!("inputs, in order: {}", order()))
-                            .with_help(
-                                "address the inputs by position with the pattern form, such as `01-`",
-                            ),
-                        ];
-                    }
+                let i = match find(name, *at) {
+                    Ok(i) => i,
+                    Err(e) => return vec![*e],
                 };
                 if done.contains(&i) {
                     return vec![
@@ -573,6 +625,7 @@ fn bind(
                 want |= (1 + u32::from(*value)) << (2 * i);
             }
         }
+        Spec::RowPattern(..) | Spec::RowNamed(..) => unreachable!("a row returned above"),
     }
     let states = dec.combinations(db).unwrap_or_default();
     let matched = states.iter().filter(|&&s| s & care == want).count();
@@ -594,6 +647,8 @@ fn bind(
     waivers.entry(dec.whole).or_default().push(CovWaiver {
         care,
         want,
+        row: None,
+        positional: matches!(d.spec, Spec::Pattern(..)),
         rule: d.rule.clone(),
         reason: d.reason.clone(),
         at: d.at,
@@ -603,11 +658,13 @@ fn bind(
 
 /// Warnings about the waivers of one decision: duplicates, subsumed ones, all combinations.
 fn redundant(db: &Db, expr: ExprId, v: &[CovWaiver], diags: &mut Vec<Diagnostic>) {
-    let covers =
-        |a: &CovWaiver, b: &CovWaiver| a.care & b.care == a.care && b.want & a.care == a.want;
+    // Rows and combinations are different requirements: one never covers the other.
+    let covers = |a: &CovWaiver, b: &CovWaiver| {
+        a.row == b.row && a.care & b.care == a.care && b.want & a.care == a.want
+    };
     for j in 0..v.len() {
         for i in 0..v.len() {
-            let dup = v[i].care == v[j].care && v[i].want == v[j].want;
+            let dup = v[i].row == v[j].row && v[i].care == v[j].care && v[i].want == v[j].want;
             let first = i < j;
             if i != j && covers(&v[i], &v[j]) && (!dup || first) {
                 diags.push(
@@ -633,12 +690,24 @@ fn redundant(db: &Db, expr: ExprId, v: &[CovWaiver], diags: &mut Vec<Diagnostic>
     if !states.is_empty()
         && states
             .iter()
-            .all(|&s| v.iter().any(|w| s & w.care == w.want))
+            .all(|&s| v.iter().any(|w| w.row.is_none() && s & w.care == w.want))
     {
         diags.push(
             Diagnostic::warning(
                 ALL_WAIVED,
                 "the exclusions together waive every combination of this expression",
+            )
+            .with_primary(v[0].at, "nothing is left to cover")
+            .with_secondary(db.exprs[expr].span, "the expression"),
+        );
+    }
+    let rows = |r: &&CovWaiver| r.row.is_some();
+    let all: BTreeSet<_> = v.iter().filter(rows).filter_map(|w| w.row).collect();
+    if all.len() == 2 * dec.leaves.len() {
+        diags.push(
+            Diagnostic::warning(
+                ALL_WAIVED,
+                "the exclusions together waive every row of this expression",
             )
             .with_primary(v[0].at, "nothing is left to cover")
             .with_secondary(db.exprs[expr].span, "the expression"),
@@ -720,6 +789,7 @@ fn parse(file: FileId, start: u32, text: &str) -> Parsed {
     match w.to_ascii_lowercase().as_str() {
         "condition" => kind = Some(true),
         "expression" => kind = Some(false),
+        "row" => (cur.s, cur.at) = save,
         _ if !w.is_empty() && w.starts_with(|c: char| c.is_ascii_alphabetic()) => {
             // A word in front of `(`: a misspelt kind.
             let after = cur.s.trim_start();
@@ -741,7 +811,21 @@ fn parse(file: FileId, start: u32, text: &str) -> Parsed {
     }
     cur.blank();
     let spec_at = cur.at;
-    let spec = if cur.s.starts_with('(') {
+    let row_word = {
+        let w = cur
+            .s
+            .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+            .next();
+        w.is_some_and(|w| w.eq_ignore_ascii_case("row"))
+    };
+    let spec = if row_word {
+        cur.advance(3);
+        cur.blank();
+        match row_spec(&mut cur, kind, spec_at, &span, &fail) {
+            Ok(s) => s,
+            Err(e) => return e,
+        }
+    } else if cur.s.starts_with('(') {
         let Some(close) = closing_paren(cur.s) else {
             return fail(
                 SYNTAX,
@@ -829,10 +913,11 @@ fn parse(file: FileId, start: u32, text: &str) -> Parsed {
             if !matches!(c, b'0' | b'1' | b'-') {
                 let shown = tok[i..].chars().next().unwrap_or('?');
                 let word = tok.starts_with(|c: char| c.is_ascii_alphabetic());
+                let near = yavs_diag::suggest::tail(tok, "word", SPEC_WORDS.into_iter());
                 return fail(
                     if word { SYNTAX } else { PATTERN },
                     if word {
-                        format!("expected a pattern or `(name=value, ...)`, found `{tok}`")
+                        format!("expected a pattern or `(input=value, ...)`, found `{tok}`{near}")
                     } else {
                         format!("invalid pattern symbol `{shown}`")
                     },
@@ -867,6 +952,114 @@ fn parse(file: FileId, start: u32, text: &str) -> Parsed {
         rule: spec.1,
         reason,
     })
+}
+
+/// What follows `row`: a pattern with one symbol that is not `-`, or `INPUT = VALUE`. The cursor ends
+/// at the reason.
+fn row_spec(
+    cur: &mut Cursor<'_>,
+    kind: Option<bool>,
+    spec_at: usize,
+    span: &dyn Fn(usize, usize) -> Span,
+    fail: &dyn Fn(&'static str, String, usize, usize, &str) -> Parsed,
+) -> Result<(Spec, String), Parsed> {
+    let at = cur.at;
+    let colon = outside_literals(cur.s)
+        .iter()
+        .find(|x| x.1 == ':' && x.2 == 0)
+        .map(|x| x.0);
+    let head = cur.s[..colon.unwrap_or(cur.s.len())].trim_end();
+    if head.is_empty() {
+        return Err(fail(
+            SYNTAX,
+            "`row` needs a pattern or an input and a value".into(),
+            spec_at,
+            3,
+            "expected a pattern such as `-0-`, or `count > 3 = false`",
+        ));
+    }
+    let rule = format!("{}row {head}", kind_word(kind));
+    let eq = value_sign(head);
+    let spec = match eq {
+        None if head.chars().any(char::is_whitespace) || head.starts_with(char::is_alphabetic) => {
+            return Err(fail(
+                SYNTAX,
+                format!("expected `row INPUT = VALUE` or a pattern, found `{head}`"),
+                at,
+                head.len(),
+                "missing `=`",
+            ));
+        }
+        None => {
+            if let Some((i, c)) = head
+                .char_indices()
+                .find(|x| !matches!(x.1, '0' | '1' | '-'))
+            {
+                return Err(fail(
+                    PATTERN,
+                    format!("invalid pattern symbol `{c}`"),
+                    at + i,
+                    c.len_utf8(),
+                    "expected `0`, `1` or `-`",
+                ));
+            }
+            let set = head.bytes().filter(|c| *c != b'-').count();
+            if set != 1 {
+                let msg = format!(
+                    "a row is one input at one value, so its pattern has exactly one `0` or `1`, not {set}"
+                );
+                let Parsed::Err(e) = fail(PATTERN, msg, at, head.len(), "not one row") else {
+                    unreachable!("fail makes an error");
+                };
+                return Err(Parsed::Err(Box::new(e.with_help(
+                    "a combination of inputs is written without `row`, such as `01-`",
+                ))));
+            }
+            Spec::RowPattern(head.as_bytes().to_vec(), span(at, head.len()))
+        }
+        Some(eq) => {
+            let (name, value) = (head[..eq].trim(), head[eq + 1..].trim());
+            if name.is_empty() {
+                return Err(fail(
+                    SYNTAX,
+                    "an exclusion needs an input before `=`".into(),
+                    at,
+                    head.len(),
+                    "expected an input of the expression",
+                ));
+            }
+            let lower = value.to_ascii_lowercase();
+            let v = match lower.as_str() {
+                "1" | "true" => true,
+                "0" | "false" => false,
+                other => {
+                    let vat =
+                        at + eq + 1 + (head[eq + 1..].len() - head[eq + 1..].trim_start().len());
+                    let Parsed::Err(e) = fail(
+                        VALUE,
+                        format!("invalid row value `{value}`"),
+                        vat,
+                        value.len().max(1),
+                        "expected `0`, `1`, `false` or `true`",
+                    ) else {
+                        unreachable!("fail makes an error");
+                    };
+                    let near = yavs_sem::suggest::suggest(
+                        other,
+                        "value",
+                        [("true", "true"), ("false", "false")].into_iter(),
+                    );
+                    return Err(Parsed::Err(Box::new(match near {
+                        Some(h) => e.with_help(h),
+                        None => *e,
+                    })));
+                }
+            };
+            Spec::RowNamed((name.to_string(), span(at, name.len()), v))
+        }
+    };
+    cur.advance(head.len());
+    Ok((spec, rule))
 }
 
 /// The byte offsets and characters of `s` that are outside string and character literals and
@@ -1030,7 +1223,7 @@ mod tests {
                 .into_iter()
                 .map(|x| (x.0, x.2))
                 .collect::<Vec<(String, bool)>>(),
-            Spec::Pattern(..) => panic!("{t}"),
+            _ => panic!("{t}"),
         };
         let one = |s: &str, v| vec![(s.to_string(), v)];
         assert_eq!(
@@ -1080,6 +1273,43 @@ mod tests {
         assert_eq!(error("-- yavs cov exclude (= true)").0, SYNTAX);
         assert_eq!(error("-- yavs cov exclude (a = b)").0, VALUE);
         assert_eq!(error("-- yavs cov exclude (f(a = true)").0, SYNTAX);
+    }
+
+    #[test]
+    fn row_forms_and_errors() {
+        let d = directive("-- yavs cov exclude row -0-: never");
+        assert!(matches!(&d.spec, Spec::RowPattern(p, _) if p == b"-0-"));
+        assert_eq!(d.rule, "row -0-");
+        assert_eq!(d.reason, "never");
+        let d = directive("-- yavs cov exclude condition ROW count < 15 = 1");
+        assert!(matches!(&d.spec, Spec::RowNamed((n, _, true)) if n == "count < 15"));
+        assert_eq!(d.kind, Some(true));
+        let d = directive("-- yavs cov exclude row (a or b) = false : both low");
+        assert!(matches!(&d.spec, Spec::RowNamed((n, _, false)) if n == "(a or b)"));
+        assert_eq!(d.reason, "both low");
+        let d = directive("-- yavs cov exclude row x = ':' = 0");
+        assert!(matches!(&d.spec, Spec::RowNamed((n, _, false)) if n == "x = ':'"));
+        // A pattern with several symbols stays what it was: a combination.
+        assert!(matches!(
+            directive("-- yavs cov exclude 0-").spec,
+            Spec::Pattern(..)
+        ));
+        assert!(matches!(
+            directive("-- yavs cov exclude (r=false)").spec,
+            Spec::Named(..)
+        ));
+        assert_eq!(error("-- yavs cov exclude row").0, SYNTAX);
+        assert_eq!(error("-- yavs cov exclude row : why").0, SYNTAX);
+        assert_eq!(error("-- yavs cov exclude row 01").0, PATTERN);
+        assert_eq!(error("-- yavs cov exclude row --").0, PATTERN);
+        assert_eq!(error("-- yavs cov exclude row 02").0, PATTERN);
+        assert_eq!(error("-- yavs cov exclude row a").0, SYNTAX);
+        assert_eq!(error("-- yavs cov exclude row a b").0, SYNTAX);
+        assert_eq!(error("-- yavs cov exclude row = 1").0, SYNTAX);
+        assert_eq!(error("-- yavs cov exclude row a = 2").0, VALUE);
+        let (c, m) = error("-- yavs cov exclude rwo -0-");
+        assert_eq!(c, SYNTAX);
+        assert!(m.contains("`row`"), "{m}");
     }
 
     #[test]
