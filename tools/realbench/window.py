@@ -280,7 +280,7 @@ def main():
     ap.add_argument("--window", default="", help="T0,T1: replace the window of every selected test (calibration)")
     ap.add_argument("--full", action="store_true", help="the whole run of each test instead of its window (how windows are validated)")
     ap.add_argument("--inherit", action="store_true", help="count all threads of yavs (compile threads too), not the simulation thread")
-    ap.add_argument("--no-sim1", action="store_true", help="leave out the sim1 cell (saves its runs; needs two variants)")
+    ap.add_argument("--no-sim1", action="store_true", help="leave out the sim1 cell (saves its runs; one variant then prints counters only, as perfguard.py uses it)")
     ap.add_argument("--core", type=int, help=f"timing core, default a free one of {TIMED_CORES.start}-{TIMED_CORES.stop - 1}")
     ap.add_argument("--timeout", type=int, default=1500, help="seconds before a run is killed and its test reported failed")
     ap.add_argument("--json", help="also write the results to this file")
@@ -291,8 +291,6 @@ def main():
     specs = a.variants or [str(R.REPO)]
     if not a.no_sim1 and REF not in specs:
         specs = specs + [REF]
-    if len(specs) < 2:
-        raise Fail("--no-sim1 needs two variants to compare, for example A/yavs B/yavs")
     if a.rounds < 1:
         raise Fail("--rounds must be at least 1")
     bars = parse_bars(a.bar)

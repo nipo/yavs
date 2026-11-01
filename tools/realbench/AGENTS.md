@@ -24,6 +24,7 @@ for an agent that tunes performance or measures a performance change on real tes
 | `tests.toml` | One `[[test]]` per testbench: source, path, top, library, generics, why it is in the set, category (field list in its header) |
 | `programs.py` | Builds the program images of the CPU workloads (section 7) from pinned sources into `<cache>/images`; also a command: `programs.py PROGRAM key=value` |
 | `window.py` | Short-window A/B on Cranelift against sim1: minutes, not hours (section 8) |
+| `perfguard.py` | Guard run by hand: window instructions of a commit against a stored reference, pass or fail per test (section 8a) |
 | `cpu/` | The harness's own VHDL and C for the CPU workloads: the Microwatt console, JTAG-socket and testbench replacements and its CoreMark port (source id `@harness` in `tests.toml`) |
 
 `YAVS_BENCH_TIERFLAGS` (extra arguments after `--tier=` of every yavs run cell, e.g. `--tier-heat=1,0,0` to compile every function at its first call) is not part of the cell name: set it for both binaries of a `--compare`.
@@ -107,7 +108,7 @@ numbers of head-to-head 8 (0.206 and 0.571), which the baseline did not reproduc
 | `tools/bench/run.py --ref sim1 --tiers interp,auto --tiny`: sum of yavs / sum of sim1 on the common tests | 2.42 s / 23.48 s | at most 0.105 |
 
 A miss is a finding to chase on a quiet sitting, not a verdict: compare the two builds interleaved on the same cores before blaming the change,
-and name the load. Not covered: whole suites with many testbenches in one library (`d789ead2`, #1029), waves and coverage on, more than one thread.
+and name the load. The head-to-head geomean row covers the 10 h2h designs that existed on 2026-11-01; `rec_pair` (#1052) was added after the bound was set and is judged on its own (`tools/bench/AGENTS.md`). Not covered: whole suites with many testbenches in one library (`d789ead2`, #1029), waves and coverage on, more than one thread.
 
 ## 7. CPU workloads: CoreMark on NEORV32 and Microwatt (category `cpubench`, #924)
 
@@ -212,3 +213,20 @@ What does not hold, and how to use it:
 - **Microwatt cycles need `--full`** (about 4.5 minutes per variant, plus two warm-ups).
 - **iTLB ratios mean something only on GRLIB and Microwatt.** Elsewhere the counts are tiny and identical runs differ by up to 6.5 times.
 - Ratios of two cells are from one sitting on one core; the whole-run cells ran in another sitting, CCD1 not quiet. A warm-up reaches T1 only, so the cache holds what ran by then, not what a whole run would compile.
+
+## 8a. Performance guard (`perfguard.py`, #1052): did a commit move the window instructions?
+
+A by-hand check, nothing is scheduled and nothing is posted. It builds a commit with Cranelift only, runs the nine windows of section 8 at `--tier=auto` (`window.py` with one variant and `--no-sim1`, so sim1 is not needed), and compares the instructions of each window (simulation thread) with a reference stored in `~/.cache/yavs-perfguard/reference.json`. Instructions only: cycles need rounds (section 8).
+
+```sh
+export YAVS_BENCH_VHDL_AI_TEST=/path/to/vhdl-ai-test
+python3 -I tools/realbench/perfguard.py check            # origin/main; or a commit: ... check <commit>   (the one command)
+python3 -I tools/realbench/perfguard.py reference [commit]   # the only command that writes the reference
+python3 -I tools/realbench/perfguard.py --self-test
+```
+
+- Exit 0: every test inside its bound. Exit 1: a test moved past its bound, in either direction (less work can be a test that quietly stopped doing it); the table and the text an issue should carry are printed. Exit 2: it could not run (tool, `perf`, source checkout, reference or build missing, a window failed); it never passes by default.
+- Bounds: 3 percent of the reference per test. `hdlm_lfsr` has 15 and `vai_window_gen_interlock` 20, because the compile outcome of `auto` depends on timing (#673). Measured 2026-11-01 by checking the commit the reference was taken from, twice, on a host with load 23 to 43: those two moved by 1.075 and 1.0 (hdlm_lfsr) and 1.070 and 1.135 (vai_window_gen_interlock), the other seven by under 1.1 percent (GRLIB 0.6, Microwatt 0.7). So at 3 percent seven tests can fail only for a real reason; the two noisy ones catch only large moves, and a smaller move there is found by `window.py` with rounds on a quiet host.
+- A build stays in `~/.cache/yavs-window-build-<hash>` and the checkout in `~/.cache/yavs-perfguard/tree` (detached worktree of this repository, moved to each commit): delete both when done. The libraries of the tests are cached in `~/.cache/yavs-perfguard/rb` (`YAVS_REALBENCH_CACHE` overrides).
+- A reference taken with other windows than `WINDOWS` in `window.py` is refused as stale. Refresh it after a change of a window, of `tests.toml` or of a pinned source, and after an intended speed-up (a move down past the bound also fails).
+- Time: about 6 minutes for the nine windows after the build (362 s and 457 s measured), one timing core of 9 to 15 held for the run.

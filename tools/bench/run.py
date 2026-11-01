@@ -32,7 +32,7 @@ STD = "2008"
 TIMEOUT = 300  # seconds per timed run and reference run (--timeout)
 INTERNAL = ["compute_loop", "ff_rtl", "resolved_bus", "delta_chain", "textio_heavy", "protected_scoreboard", "protected_queue", "calls", "strings_heavy", "access_heavy", "report_heavy", "file_io", "ieee_heavy", "elab_heavy"]
 # head-to-head designs (group h2h; AGENTS.md maps them to the old names)
-H2H = ["rtl_ff", "rtl_lfsr", "rtl_chain", "rtl_fan", "rtl_bus", "rtl_ram", "lfsr64_xor", "lfsr64", "compute_h2h", "xor_sig", "xor_types"]
+H2H = ["rtl_ff", "rtl_lfsr", "rtl_chain", "rtl_fan", "rtl_bus", "rtl_ram", "lfsr64_xor", "lfsr64", "compute_h2h", "xor_sig", "xor_types", "rec_pair"]
 SHIM = """#!/usr/bin/env python3
 import json, os, sys
 if len(sys.argv) > 1 and sys.argv[1] == "run":
