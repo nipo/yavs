@@ -2621,7 +2621,8 @@ scalars; the on-disk format is implementation-defined, so it is fixed here (yavs
   must be (computed from the condition tree at the end of a run) and a toggle's last level. They are separate lines so the
   item lines stay as they were. A hash mismatch means the file changed: an entry says so and underlines nothing.
 - The text beside a missed item must work when pasted: combinations and condition or expression rows take the short
-  directive of `exclude::directive` in its bare form, without the list of inputs (one symbol per input, user 2026-11-01), except before a conditional or selected
+  directive of `exclude::directive` in its bare form, without the list of inputs (one symbol per input, user 2026-11-01,
+  replacing the earlier ruling that a report suggests the list; the list stays what to add if reordering must be caught), except before a conditional or selected
   assignment, where a directive is an error; other kinds take a file row. A signal's toggles take a `s(*)` row only when every bit of that direction is missed.
 - `--uncovered` stays the row format for exclusion files; `--tests`, `--exclusions` and the HTML report keep every
   detail. The number of tests is no longer in the summary; `yavs cov rank` gives it.

@@ -464,7 +464,7 @@ if valid and count < 15 and ready then
 ```
 
 `condition row ...` and `expression row ...` say which kind you mean and fit the same constructs as the
-kind words below. A report suggests the form with the inputs, `row -0- (valid, count < 15, ready)`, for a missed row. A pattern without `row` always means
+kind words below. A report suggests the bare form, `row -0-`, for a missed row; add the list, `row -0- (valid, count < 15, ready)`, if a reordering of the inputs must be caught. A pattern without `row` always means
 combinations, even with one symbol set, and `-- yavs coverage exclude condition (valid=false)` keeps meaning the
 combinations with `valid` false: the word `condition` there says which decision, not which kind of requirement.
 
