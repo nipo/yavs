@@ -137,7 +137,7 @@ Syntax, command line, waveforms, coverage, debugger, plugins (E0 and W0)
    * - _`E0136`
      - The argument layout in ``--load=LIB:args=LAYOUT`` does not exist: ``length`` is the default, ``fat-pointer`` the other one (see the VHPI guide).
    * - _`E0137`
-     - ``yavs cov merge`` or ``yavs cov report`` was given databases that disagree about an in-source coverage exclusion: a combination that a ``-- yavs coverage exclude`` directive waives in one run is a requirement in another (the other run was made from other sources, or with ``--coverage-directives=ignore``).
+     - ``yavs cov merge`` or ``yavs cov report`` was given databases that disagree about an in-source coverage exclusion: a combination or a condition or expression row that a ``-- yavs coverage exclude`` directive waives in one run is a requirement in another (the other run was made from other sources, or with ``--coverage-directives=ignore``).
    * - _`E0138`
      - The file of ``yavs cov report --config`` or ``yavs cov rank --config`` cannot be read or is not a coverage configuration file.
    * - _`E0199`
@@ -487,7 +487,7 @@ Elaboration (E2 and W2)
    * - _`E2001`
      - The lowering to IR does not handle this construct yet; the message names it.
    * - _`E2020`
-     - A ``-- yavs coverage exclude`` directive is malformed: a missing ``)``, a name without ``=value``, text after the pattern that is not a reason (a reason follows ``:``), or an unknown word where ``condition`` or ``expression`` may stand.
+     - A ``-- yavs coverage exclude`` directive is malformed: a missing ``)``, an input without ``=value``, text after the pattern that is not a reason (a reason follows ``:``), an unknown word where ``condition``, ``expression`` or ``row`` may stand, or a ``row`` without a pattern or an ``INPUT = VALUE``.
    * - _`W2020`
      - A coverage exclusion repeats an earlier one of the same expression, or is already covered by a broader one.
    * - _`E2021`

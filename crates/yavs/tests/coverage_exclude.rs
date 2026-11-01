@@ -274,10 +274,7 @@ fn a_bad_configuration_is_e0138() {
     write(&tmp, "d/c.yaml", "exclude: nope.txt\n");
     let o = yavs(&tmp, &["cov", "report", "a.ycov", "--config", "d/c.yaml"]);
     let e = text(&o.stderr);
-    assert!(
-        e.contains("error[E0112]") && e.contains("d/nope.txt"),
-        "{e}"
-    );
+    assert!(e.contains("error[E0112]") && e.contains("nope.txt"), "{e}");
 }
 
 /// An edited statement: its row goes stale, and W0111 says what stands there now.

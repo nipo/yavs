@@ -1104,19 +1104,17 @@ mod tests {
     #[test]
     fn file_rows_take_directories_and_lists() {
         let mut d = db();
-        let files = [
-            "/p/rtl/gen/a.vhd",
-            "/p/rtl/b.vhd",
-            "/p/tb/c.vhd",
-            "/p/rtl/gen/a.vhd",
-        ];
+        // Absolute on this platform, as `Rules::read` makes the base and `Found` the files.
+        let base = std::path::absolute("/p").unwrap();
+        let at = |f: &str| base.join(f).display().to_string();
+        let files = ["rtl/gen/a.vhd", "rtl/b.vhd", "tb/c.vhd", "rtl/gen/a.vhd"];
         for (e, f) in d.items.values_mut().zip(files) {
-            e.file = f.into();
+            e.file = at(f);
         }
         let left = |t: &str, y: bool| {
             let rows = if y { parse_yaml(t) } else { parse(t) }.unwrap();
             let name = "ex".to_string();
-            let base = PathBuf::from("/p");
+            let base = base.clone();
             let a = apply(&d, &[Rules { name, base, rows }]);
             let mut k: Vec<String> = a.kept.items.values().map(|e| e.file.clone()).collect();
             k.sort();
@@ -1124,8 +1122,8 @@ mod tests {
             (k, a.warnings.len())
         };
         // A plain directory, in the older row too, and files_exclude alone or with files.
-        let tb = "/p/tb/c.vhd".to_string();
-        let b = "/p/rtl/b.vhd".to_string();
+        let tb = at("tb/c.vhd");
+        let b = at("rtl/b.vhd");
         assert!(left("file rtl\n", false).0.iter().all(|f| f == &tb));
         assert!(left("files rtl/\n", false).0.iter().all(|f| f == &tb));
         assert_eq!(
@@ -1144,8 +1142,15 @@ mod tests {
         assert!(left(y, true).0.contains(&tb));
         // A pattern that covers nothing warns, with a near name, though its neighbour applies.
         let rows = parse("files rtl/ tbb/\n").unwrap();
-        let (name, base) = ("ex".to_string(), PathBuf::from("/p"));
-        let a = apply(&d, &[Rules { name, base, rows }]);
+        let name = "ex".to_string();
+        let a = apply(
+            &d,
+            &[Rules {
+                name,
+                base: base.clone(),
+                rows,
+            }],
+        );
         assert_eq!(a.warnings.len(), 1);
         let m = &a.warnings[0].message;
         assert!(

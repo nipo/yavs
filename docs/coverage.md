@@ -453,8 +453,9 @@ that would exclude it. It is never excluded on its own: read it, and copy the ro
 
 ```
 warning[W0111]: ex.txt:1: the exclusion matches nothing in the coverage database
-  = note: line 25 of src/fsm.vhd now holds `count <= 1;` (tb.dut): it probably replaced the excluded one
-  = help: if the requirement is still waived, the row is now: statement tb.dut 4d2f0a91c3be.0 src/fsm.vhd:25
+ |
+ = note: line 45 of cov_report.vhd now holds `v := 7;` (cov_report): it probably replaced the excluded one
+ = help: if the requirement is still waived, the row is now: statement cov_report 000a6bd22275.0 cov_report.vhd:45
 ```
 
 ## Which tests cover what

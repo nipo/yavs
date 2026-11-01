@@ -231,15 +231,15 @@ const EXPLAIN: &[(&str, &str)] = &[
     ),
     (
         "E0137",
-        "`yavs cov merge` or `yavs cov report` was given databases that disagree about an in-source coverage exclusion: a combination that a `-- yavs coverage exclude` directive waives in one run is a requirement in another (the other run was made from other sources, or with `--coverage-directives=ignore`). Merging them would let the waiver hide a requirement, so nothing is merged. Run all the databases from the same sources and options.",
+        "`yavs cov merge` or `yavs cov report` was given databases that disagree about an in-source coverage exclusion: a combination or a condition or expression row that a `-- yavs coverage exclude` directive waives in one run is a requirement in another (the other run was made from other sources, or with `--coverage-directives=ignore`). Merging them would let the waiver hide a requirement, so nothing is merged. Run all the databases from the same sources and options.",
     ),
     (
         "E2020",
-        "A `-- yavs coverage exclude` directive is malformed: a missing `)`, a name without `=value`, text after the pattern that is not a reason (a reason follows `:`), or an unknown word where `condition` or `expression` may stand. The directive is rejected as a whole, never repaired. Directives are checked at analysis, whether or not coverage is collected; `--coverage-directives=ignore` reads none.",
+        "A `-- yavs coverage exclude` directive is malformed: a missing `)`, an input without `=value`, text after the pattern that is not a reason (a reason follows `:`), an unknown word where `condition`, `expression` or `row` may stand, or a `row` without a pattern or an `INPUT = VALUE`. The directive is rejected as a whole, never repaired. Directives are checked at analysis, whether or not coverage is collected; `--coverage-directives=ignore` reads none.",
     ),
     (
         "E2021",
-        "A positional exclusion (`-- yavs cov exclude 01-`) has a symbol other than `0` (evaluated false), `1` (evaluated true) or `-` (anything, also not evaluated), or a different number of positions than the expression has inputs. The inputs are the operands of the logic operators of the condition or assignment, left to right in the source; the message lists them. Write `-` for an input that is unrestricted: a pattern is never padded.",
+        "A positional exclusion (`-- yavs cov exclude 01-`) has a symbol other than `0` (evaluated false), `1` (evaluated true) or `-` (anything, also not evaluated), or a different number of positions than the expression has inputs. The inputs are the operands of the logic operators of the condition or assignment, left to right in the source; the message lists them. Write `-` for an input that is unrestricted: a pattern is never padded. A `row` pattern has exactly one `0` or `1`: one input at one value.",
     ),
     (
         "E2022",
