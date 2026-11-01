@@ -113,6 +113,8 @@ pub struct Model {
     /// Aliases of external constants elaboration cannot evaluate (a run-time thunk computes
     /// the target), by (region, alias): the region and declaration of the constant (#255).
     pub(crate) ext_consts: HashMap<(ScopeId, DeclId), (ScopeId, DeclId)>,
+    /// The dimension lengths the external name of each of those gives, and where it is (#1006).
+    pub(crate) ext_const_lens: HashMap<(ScopeId, DeclId), (Vec<u64>, yavs_diag::Span)>,
     /// Aliases of the external names in package subprograms (#255): bound, with their
     /// package's scope, or why not (the subprogram fails when it is called).
     pub(crate) pkg_ext: HashMap<DeclId, ScopeId>,

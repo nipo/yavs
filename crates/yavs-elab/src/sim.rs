@@ -240,6 +240,13 @@ impl Elaborated {
                 .with_note(format!("searched {searched}"))
                 .with_help("load the shared library that defines it with `--load=LIB`");
         }
+        // ponytail: reads the message's words; a kind of its own if more errors want a hint.
+        if let ErrorKind::Runtime(m) = &e.kind
+            && m.contains(" length ")
+            && m.contains(" does not match ")
+        {
+            d = d.with_help("make both sides the same length, or change the target's constraint");
+        }
         d.with_note(at)
     }
 
@@ -997,6 +1004,7 @@ impl Elaborated {
             var_ports,
             ext_vars,
             ext_consts,
+            ext_const_lens,
             pkg_ext,
             ext_unbound,
             var_shapes,
@@ -1153,9 +1161,11 @@ impl Elaborated {
                         let &(t, td) = self.ext_consts.get(&(ps, v.decl)).ok_or_else(|| {
                             sim_err(format!("external constant `{}` not bound", v.name))
                         })?;
-                        self.target_const(
+                        let cv = self.target_const(
                             &rt, ir, t, td, &shared, &mut once, &mut insts, &mut base,
-                        )?
+                        )?;
+                        self.check_ext_const_len(ps, v.decl, &v.name, &cv)?;
+                        cv
                     }
                 };
                 let mut s = shared
@@ -1577,6 +1587,7 @@ impl Elaborated {
                 continue;
             };
             let cv = self.target_const(rt, ir, t, td, shared, once, insts, base)?;
+            self.check_ext_const_len(region, v.decl, &v.name, &cv)?;
             write_cell(&rt.prog, v, cv, &mut d.data)?;
         }
         let d = Arc::new(d);
@@ -1599,6 +1610,56 @@ impl Elaborated {
             cur = self.hier.scope(s).parent;
         }
         None
+    }
+
+    /// The value `cv` a run-time thunk gave the external constant alias `d` of `scope` (or of a
+    /// region around it) has the lengths of the name's subtype indication (LRM 8.7, #1006).
+    fn check_ext_const_len(
+        &self,
+        scope: ScopeId,
+        d: yavs_sem::DeclId,
+        name: &str,
+        cv: &CallVal,
+    ) -> Result<(), SimError> {
+        let CallVal::Composite { desc, .. } = cv else {
+            return Ok(());
+        };
+        let mut cur = Some(scope);
+        let (lens, span) = loop {
+            let Some(s) = cur else { return Ok(()) };
+            if let Some(l) = self.ext_const_lens.get(&(s, d)) {
+                break l;
+            }
+            cur = self.hier.scope(s).parent;
+        };
+        let word = |b: &[u8; 8]| i64::from_le_bytes(*b);
+        for (want, dim) in lens.iter().zip(desc.as_chunks::<24>().0) {
+            let [l, r, dir] = dim.as_chunks::<8>().0 else {
+                continue;
+            };
+            let got = yavs_ir::dim_len(word(l), word(r), word(dir) != 0).unwrap_or(u64::MAX);
+            if got != *want {
+                let mut e = SimError::new(ErrorKind::Runtime(format!(
+                    "object {name} length {got} does not match external name subtype indication length {want}"
+                )));
+                // The innermost statement that holds the name, for the diagnostic's position.
+                let prog = self.ir.as_ref().map(|ir| &*ir.program);
+                let stmt = prog
+                    .into_iter()
+                    .flat_map(|p| p.stmts.iter())
+                    .filter(|(_, i)| {
+                        i.span.file == span.file
+                            && i.span.start <= span.start
+                            && span.end <= i.span.end
+                    });
+                e.trace.extend(
+                    stmt.min_by_key(|(_, i)| i.span.end - i.span.start)
+                        .map(|(id, _)| id),
+                );
+                return Err(e);
+            }
+        }
+        Ok(())
     }
 
     /// The value constant `td` of region `t` got from its thunk (the region's instance data

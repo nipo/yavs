@@ -290,7 +290,7 @@ def compare(ref, got, base):
 # Errors the LRM states that yavs reports when it analyses or elaborates, where the reference
 # simulators (and so the suites) have the run fail: a test that expects a failing last run
 # is met by these (not by an unsupported feature or an internal error).
-EARLY_OK = re.compile(r"\[(E1405|E1812|E2103|E2107|E2110|E2111|E2113|E2117)\]")
+EARLY_OK = re.compile(r"\[(E1405|E1812|E2103|E2107|E2110|E2111|E2113|E2117|E2121)\]")
 
 
 # Tests that print a difference of two wall clock readings: never equal between two runs.

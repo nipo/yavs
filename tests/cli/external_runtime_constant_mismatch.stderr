@@ -1,0 +1,11 @@
+error[E3009]: object c2 length 39 does not match external name subtype indication length 2
+  --> $DIR/external_runtime_constant_mismatch.vhd:10:5
+   |
+10 |     assert << constant b1.c2 : string(1 to 2) >> = "ab" severity note;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: at 0 fs, delta 0
+   = help: make both sides the same length, or change the target's constraint
+
+error: aborting due to 1 previous error
+

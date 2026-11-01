@@ -711,6 +711,19 @@ fn external_mismatch() {
     run_snapshot("external_mismatch", 2);
 }
 
+/// The same for a constant, whose open bounds come from its value (LRM 8.7, #1006).
+#[test]
+fn external_constant_mismatch() {
+    run_snapshot("external_constant_mismatch", 2);
+}
+
+/// A constant only its run-time evaluation computes is compared when the simulation is built, at
+/// the statement that holds the name (LRM 8.7, #1006).
+#[test]
+fn external_runtime_constant_mismatch() {
+    run_snapshot("external_runtime_constant_mismatch", 2);
+}
+
 /// A function calling a procedure of another unit that waits is E1801 at elaboration, not
 /// an internal error (LRM 10.2, #823).
 #[test]

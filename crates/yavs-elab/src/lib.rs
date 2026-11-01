@@ -441,6 +441,9 @@ pub struct Elaborated {
     /// by (region, alias): the region and declaration of the constant (#255).
     pub ext_consts:
         std::collections::HashMap<(ScopeId, yavs_sem::DeclId), (ScopeId, yavs_sem::DeclId)>,
+    /// The dimension lengths the external name of each of those gives, and where it is (#1006).
+    pub ext_const_lens:
+        std::collections::HashMap<(ScopeId, yavs_sem::DeclId), (Vec<u64>, yavs_diag::Span)>,
     /// Aliases of the external names in package subprograms bound once the hierarchy is
     /// elaborated, with their package's scope, and why the others are not: a subprogram
     /// using one fails when it is called (#255).

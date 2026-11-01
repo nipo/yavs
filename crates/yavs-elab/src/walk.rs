@@ -695,6 +695,7 @@ pub(crate) fn elaborate(
         var_ports: e.m.var_ports,
         ext_vars: e.m.ext_vars,
         ext_consts: e.m.ext_consts,
+        ext_const_lens: e.m.ext_const_lens,
         pkg_ext: e.m.pkg_ext,
         ext_unbound: e.m.ext_unbound,
         shared_vars: e.m.shared_vars,
@@ -5118,7 +5119,10 @@ impl Model {
             ExtTarget::Value(t, td) if db.externals[x].class == ExternalClass::Constant => {
                 let mark = self.session.mark();
                 match (self.value_of(db, td, t, db.externals[x].span), t) {
-                    (Ok(v), _) => self.set(r, d, v),
+                    (Ok(v), _) => {
+                        self.check_external_const(db, x, s, td, t, &v)?;
+                        self.set(r, d, v);
+                    }
                     // A constant only its run-time thunk computes (`'path_name`, say): the
                     // alias takes the target's value when the simulation is built (#255).
                     (Err(e), Some(t)) if e.code == codes::NOT_EVALUATED => {
@@ -5126,6 +5130,13 @@ impl Model {
                             .undo(db, mark)
                             .map_err(|m| Box::new(ice(db.externals[x].span, &m)))?;
                         self.ext_consts.insert((r, d), (t, td));
+                        let (st, span) = (db.externals[x].subtype, db.externals[x].span);
+                        if let Some(Shape::Array { dims, .. }) =
+                            self.shape(db, st, Some(s), span)?
+                        {
+                            let lens = dims.iter().map(|b| b.len()).collect();
+                            self.ext_const_lens.insert((r, d), (lens, span));
+                        }
                     }
                     (Err(e), _) => return Err(e),
                 }
@@ -5175,7 +5186,9 @@ impl Model {
         };
         match target {
             ExtTarget::Value(t, d) if db.externals[x].class == ExternalClass::Constant => {
-                self.value_of(db, d, t, span)
+                let v = self.value_of(db, d, t, span)?;
+                self.check_external_const(db, x, scope.unwrap_or(ScopeId(0)), d, t, &v)?;
+                Ok(v)
             }
             _ => Err(Box::new(ice(
                 span,
@@ -5234,16 +5247,7 @@ impl Model {
                 )
             }
         };
-        let fail = |why: String| {
-            Box::new(
-                Diagnostic::error(
-                    codes::EXTERNAL_MISMATCH,
-                    format!("external name does not match {class} `{name}`: {why}"),
-                )
-                .with_primary(ext.span, "external name")
-                .with_note("the object has the type and the array lengths of the name's subtype indication (LRM 8.7)"),
-            )
-        };
+        let fail = |why: String| external_mismatch(ext.span, class, &name, &why);
         if want != got {
             return Err(fail(format!(
                 "its type is `{}`, the name says `{}`",
@@ -5259,6 +5263,39 @@ impl Model {
             Some((name_n, obj_n)) => Err(fail(format!(
                 "the object has {obj_n} elements, the subtype indication {name_n}"
             ))),
+            None => Ok(()),
+        }
+    }
+
+    /// [`Self::check_external`] for a constant, whose open bounds come from its value `v` (of
+    /// constant `td` of region `t`): its lengths are the name's subtype indication's (LRM 8.7,
+    /// #1006).
+    fn check_external_const(
+        &mut self,
+        db: &Db,
+        x: yavs_sem::ExternalId,
+        scope: ScopeId,
+        td: DeclId,
+        t: Option<ScopeId>,
+        v: &Val,
+    ) -> R<()> {
+        let ext = &db.externals[x];
+        let DeclKind::Object(o) = &db.decls[td].kind else {
+            return Ok(());
+        };
+        let Some(sub) = self.shape(db, ext.subtype, Some(scope), ext.span)? else {
+            return Ok(()); // unconstrained: the object's bounds
+        };
+        let Some(obj) = self.shape_init(db, o.subtype, Some(v), t, ext.span)? else {
+            return Ok(());
+        };
+        match length_mismatch(&sub, &obj) {
+            Some((name_n, obj_n)) => Err(external_mismatch(
+                ext.span,
+                "constant",
+                &db.decls[td].name.to_string(),
+                &format!("the object has {obj_n} elements, the subtype indication {name_n}"),
+            )),
             None => Ok(()),
         }
     }
@@ -5811,6 +5848,19 @@ impl Model {
 }
 
 /// The first pair of array dimension lengths (the name's, the object's) that differ.
+/// `E2121`: external name at `span` does not fit the `class` object `name`, because of `why`.
+fn external_mismatch(span: Span, class: &str, name: &str, why: &str) -> Box<Diagnostic> {
+    Box::new(
+        Diagnostic::error(
+            codes::EXTERNAL_MISMATCH,
+            format!("external name does not match {class} `{name}`: {why}"),
+        )
+        .with_primary(span, "external name")
+        .with_note("the object has the type and the array lengths of the name's subtype indication (LRM 8.7)")
+        .with_help("give the name the object's subtype or length, or leave out the constraint"),
+    )
+}
+
 fn length_mismatch(name: &Shape, obj: &Shape) -> Option<(u64, u64)> {
     match (name, obj) {
         (
