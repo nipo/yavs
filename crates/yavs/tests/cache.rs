@@ -1633,12 +1633,16 @@ fn every_spelling_of_a_file_hits_in_elab() {
     std::fs::write(t.join("x.vhd"), pkg_k(3)).unwrap();
     std::fs::write(t.join("tb.vhd"), TB_K).unwrap();
     let abs = t.join("x.vhd").display().to_string();
-    let mut spellings = vec!["x.vhd", "./x.vhd", "sub/../x.vhd", abs.as_str()];
     #[cfg(unix)]
-    {
-        std::os::unix::fs::symlink(&*t, t.join("link")).unwrap();
-        spellings.push("link/x.vhd");
-    }
+    std::os::unix::fs::symlink(&*t, t.join("link")).unwrap();
+    let spellings = [
+        "x.vhd",
+        "./x.vhd",
+        "sub/../x.vhd",
+        abs.as_str(),
+        #[cfg(unix)]
+        "link/x.vhd",
+    ];
     for (i, s) in spellings.iter().enumerate() {
         let lib = t.join(format!("lib{i}"));
         let w = work(&lib);
@@ -1817,12 +1821,14 @@ fn a_file_has_one_entry_however_spelled() {
     )
     .unwrap();
     std::fs::write(t.join("ub.vhd"), "use work.b.all;\nentity ub is end;\n").unwrap();
-    let mut spellings = vec!["sub/../x.vhd", "./x.vhd"];
     #[cfg(unix)]
-    {
-        std::os::unix::fs::symlink(&*t, t.join("link")).unwrap();
-        spellings.push("link/x.vhd");
-    }
+    std::os::unix::fs::symlink(&*t, t.join("link")).unwrap();
+    let spellings = [
+        "sub/../x.vhd",
+        "./x.vhd",
+        #[cfg(unix)]
+        "link/x.vhd",
+    ];
     for (i, s) in spellings.iter().enumerate() {
         let lib = t.join(format!("lib{i}"));
         let w = work(&lib);
