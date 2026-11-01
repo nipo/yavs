@@ -81,7 +81,7 @@ Input totals: 1 of 2 inputs covered, 50.0%
   ---  ----  -------------  --------------------  -----------------------------------------------------------------------
     1     2  en = '1' is 0  n < 15 is 1
     2     1  en = '1' is 1  n < 15 is 1
-    3     0  n < 15 is 0    en = '1' is 1         <- missed (exclude with: -- yavs cov exclude row -0 (en = '1', n < 15))
+    3     0  n < 15 is 0    en = '1' is 1         <- missed (exclude with -- yavs cov exclude row -0)
     4     1  n < 15 is 1    en = '1' is 1
 
 combination:
@@ -89,7 +89,7 @@ Line 27: en = '1' and n < 15
   Combination                                 Hits  Status
   ------------------------------------------  ----  ----------------------------------------------------------------
   en = '1' is false, n < 15 is not evaluated     2  covered
-  en = '1' is true, n < 15 is false              0  MISSED (exclude with: -- yavs cov exclude 10 (en = '1', n < 15))
+  en = '1' is true, n < 15 is false              0  MISSED (exclude with -- yavs cov exclude 10)
   en = '1' is true, n < 15 is true               1  covered
 ```
 
@@ -100,8 +100,8 @@ Line 27: en = '1' and n < 15
   one is a single line. A row is hit only when flipping that input alone changes the result, so a value
   masked by a short circuit stays missed.
 - Beside a missed item is the exact text to exclude it. A combination takes the comment
-  `-- yavs cov exclude 10 (en = '1', n < 15)` and a condition or expression row
-  `-- yavs cov exclude row -0 (en = '1', n < 15)`, before the decision, which yavs checks against the inputs;
+  `-- yavs cov exclude 10` and a condition or expression row `-- yavs cov exclude row -0`, one symbol per input in
+  source order, before the decision. Adding the inputs after it makes yavs check them against reordering;
   a conditional or selected assignment, where a comment is ambiguous, and the other kinds take a row for an
   `--exclude` file. These texts are tested by pasting them.
 - Excluded items show as `excluded`, with the reason, not as missed.

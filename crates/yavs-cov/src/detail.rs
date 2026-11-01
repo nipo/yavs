@@ -51,14 +51,16 @@ fn status(e: &Entry, why: Option<&str>) -> String {
 }
 
 /// The exact text that excludes one missed item, ready to paste, and whether it is short enough
-/// to stand beside the row: for a condition or expression row or a combination the short
+/// to stand beside the row: for a condition or expression row or a combination the bare short
 /// directive where one is allowed, one symbol per input in source order; everything else, or a
 /// database too old to give the directive, an exclusion file row.
 fn exclude_with(k: &Key, e: &Entry) -> (String, bool) {
     if e.detail.directive
         && let Some(text) = crate::exclude::directive(k, e)
     {
-        return (format!("exclude with: {text}"), true);
+        // The bare form (user, 2026-11-01): the pattern, without the list of inputs.
+        let bare = text.split_once(" (").map_or(text.as_str(), |x| x.0);
+        return (format!("exclude with {bare}"), true);
     }
     let row = crate::exclude::head(k, e);
     (

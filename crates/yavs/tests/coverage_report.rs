@@ -621,7 +621,7 @@ fn printed_exclusions_work_when_pasted() {
     // of its kind out and nothing else.
     let comments: Vec<&str> = detailed
         .lines()
-        .filter_map(|l| l.split("exclude with: ").nth(1))
+        .filter_map(|l| l.split("(exclude with ").nth(1))
         .map(|c| c.strip_suffix(')').unwrap_or(c))
         .collect();
     assert!(
@@ -634,6 +634,7 @@ fn printed_exclusions_work_when_pasted() {
     );
     for comment in comments {
         assert!(comment.starts_with("-- yavs cov exclude "), "{comment}");
+        assert!(!comment.contains('('), "the bare form: {comment}");
         let edited = src.replace(
             "    if x and y then",
             &format!("    {comment}\n    if x and y then"),
