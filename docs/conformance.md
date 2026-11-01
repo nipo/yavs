@@ -30,7 +30,7 @@ compilers (LLVM, Cranelift) that run a design; every tier gives the same output.
 
 ## Details
 
-The sections below give each result in full. The last table says where and when each was produced: on CI for every push to `main` and every release tag, or by a local run with installed reference simulators, with its date and commit.
+The sections below give each result in full. The last table says where and when each was produced: on CI every night on `main` and for every release tag, or by a local run with installed reference simulators, with its date and commit.
 
 ### Differential testbenches
 

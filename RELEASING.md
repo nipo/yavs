@@ -37,11 +37,10 @@ the tag's version. A new version spot goes into the `SPOTS` table of `bump.py`.
 
 1. Everything for the release is on `main` and CI is green. The committed conformance report is
    current (`tools/conformance/AGENTS.md`; the `conformance` workflow fails a tag whose report is
-   stale). A docs or changelog commit has no `conformance` run of its own (`docs/decisions.md` "CI
-   scope"), so for a report of the exact commit run `gh workflow run conformance.yml --ref main`
-   and use its artifact, after checking that the run's `headSha` is that commit: a manual run ignores
-   the path filter, and so does the tag push. Main need not be quiet for this: runs on `main` are not
-   cancelled by a newer push.
+   stale). The `conformance` workflow runs nightly, not on a push (`docs/decisions.md` "Conformance runs
+   nightly"), so for a report of the exact commit run `gh workflow run conformance.yml --ref main`
+   and use its artifact, after checking that the run's `headSha` is that commit. Main need not be
+   quiet for this: runs on `main` are not cancelled by a newer push.
 2. A dry run on `main`, if the release flow changed since the last release:
    `gh workflow run release.yml --ref main -f dry_run=true -f checks=true`. It builds and tests
    everything and keeps the files as workflow artifacts; it creates no release and publishes

@@ -351,8 +351,8 @@ expectation is wrong or depends on the implementation is not counted, with its r
 check it and store it in a library; to *simulate* is to elaborate the design and run it. A *tier* is the interpreter or one of the
 compilers (LLVM, Cranelift) that run a design; every tier gives the same output. The *language reference* is the IEEE 1076 standard.
 """]
-    o.append("## Details\n\nThe sections below give each result in full. The last table says where and when each was produced: on CI for every push to `main` "
-             "and every release tag, or by a local run with installed reference simulators, with its date and commit.\n")
+    o.append("## Details\n\nThe sections below give each result in full. The last table says where and when each was produced: on CI every night on `main` "
+             "and for every release tag, or by a local run with installed reference simulators, with its date and commit.\n")
     # --- difftest
     if dt:
         o.append("### Differential testbenches\n\nEvery testbench of `tests/corpus` runs on yavs and its normalised output is compared with the "

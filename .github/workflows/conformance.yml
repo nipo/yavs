@@ -3,47 +3,22 @@
 # outside the repository. On main a stale committed report is a warning; on a release tag it fails the run.
 # It also runs cocotb's own regression over VHPI (tools/cocotb, a pinned cocotb from PyPI and its tests
 # from GitHub); a failing job there fails the run.
-# A commit that changes none of what the report reads has no run: its result is that of the last run
-# (docs/decisions.md "CI scope"). A manual run and a tag push ignore `paths`, and RELEASING.md uses that.
+# Nightly on main, by hand (`gh workflow run conformance.yml --ref main`, which RELEASING.md uses) and on a
+# release tag; not on a push to main (maintainer, 2026-11-01, #1033). A red nightly opens an issue.
 name: conformance
 
 on:
+  schedule:
+    - cron: "41 4 * * *"
   push:
-    branches: [main]
     tags: ["v[0-9]*"]
-    # Later patterns win. Everything except what the report and its tools do not read.
-    paths:
-      - "**"
-      - "!**/*.md"
-      - "!docs/**"
-      - "!release_notes/**"
-      - "!editors/**"
-      - "!fuzz/**"
-      - "!LICENSE*"
-      - "!context7.json"
-      - "!.readthedocs.yaml"
-      - "!.github/dependabot.yml"
-      - "!.github/workflows/*.yml"
-      - "!tools/stepcount/**"
-      - "!tools/release/**"
-      - "!tools/claim"
-      - "!tools/build-bench.sh"
-      - "!tools/check-sim1.sh"
-      - "!tools/ci-plan.py"
-      - "docs/conformance*"
-      - "docs/design/simulator-discrepancies.md"
-      - "lib/**"
-      - "tests/**"
-      - "tools/waveq/**"
-      - ".github/workflows/conformance.yml"
-      - ".github/workflows/ci.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# On main and on tags every commit has a group of its own and finishes (as in ci.yml), so a commit
-# that changes results has a result and a newer push does not cancel a report being made.
+# On main and on tags every run has a group of its own and finishes (as in ci.yml), so a newer push
+# does not cancel a report being made.
 concurrency:
   group: ${{ github.workflow }}-${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) && github.sha || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
@@ -91,3 +66,27 @@ jobs:
           path: |
             ${{ runner.temp }}/conformance/conformance.md
             ${{ runner.temp }}/conformance/*.json
+
+  report:
+    needs: conformance
+    if: ${{ always() && github.event_name == 'schedule' && needs.conformance.result != 'success' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Open or update the conformance nightly issue
+        run: |
+          body="Nightly conformance run $GITHUB_SERVER_URL/$GH_REPO/actions/runs/$GITHUB_RUN_ID on \`$GITHUB_SHA\`: result \`${{ needs.conformance.result }}\`."
+          gh label create conformance-nightly --color B60205 --description "Red nightly conformance run on main" 2>/dev/null || true
+          n=$(gh issue list --label conformance-nightly --state open --json number -q '.[0].number')
+          if [ -n "$n" ]; then
+            gh issue comment "$n" --body "$body"
+          else
+            gh issue create --label conformance-nightly --title "Nightly conformance is red on main" \
+              --body "$body
+
+          Kept up to date by .github/workflows/conformance.yml: later red nightly runs comment here. Close it when the run is green again."
+          fi

@@ -144,6 +144,6 @@ dependencies, and a C++ compiler; installs into a virtual environment outside th
 Result (2026-10-28, #122): **78 of 78 jobs pass**. 43 jobs run VHDL tests (702 tests pass; the 10
 failing tests are the ones that two of cocotb's own tests expect to fail); the other 35 are
 Verilog-only or error-path cases that skip themselves. The result is the same at `--threads 1` and
-`4`, and the `conformance` CI workflow runs it on every push to `main`. Full support is scheduled in
+`4`, and the `conformance` CI workflow runs it nightly on `main`. Full support is scheduled in
 epic #143. An earlier record of 66 of 68 test directories (2026-10-19) had two failures, both in the
 local setup of that time and not in yavs.

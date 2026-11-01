@@ -130,9 +130,10 @@ ownership, commit identity, shared-host limits) do not apply to them.
     pull request (`CONTRIBUTING.md`). CI
     (`.github/workflows/ci.yml`) runs the rule 13 checks (plus the analysis corpus gate) on Linux x86_64 for every push
     that can change them, and on Windows x86_64 too when the push touches source or build files; the nightly run and a release run every job on Linux aarch64 as well (`docs/decisions.md` "CI matrix", "CI
-    scope"). Every commit has a CI run: a prose commit finishes in a minute with no build, and the `conformance`,
+    scope"). Every commit has a CI run: a prose commit finishes in a minute with no build, and the
     `VS Code extension` and `cocotb-windows` workflows have no run for a commit that changes nothing they read, which
-    is not a failure. Watch your CI run (`gh run watch`) and fix a red one. Rebase on
+    is not a failure. The `conformance` workflow does not run on pushes to `main` at all: it runs nightly, on release
+    tags and by hand (maintainer, 2026-11-01); a red nightly opens an issue labelled `conformance-nightly`. Watch your CI run (`gh run watch`) and fix a red one. Rebase on
     `origin/main` first; push only with no rebase in progress and a clean tree. If the push is
     rejected, rebase again and rerun fmt and the tests of what you touched (rule 13). **Before every push run
     `git diff --stat origin/main..HEAD`** (or `git show --stat HEAD`) and confirm every path is

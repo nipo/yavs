@@ -21,7 +21,7 @@ report generator or regenerate the report (#780).
 |---|---|
 | `run.py` | Steps (`step_*` methods of `Run`), static facts (discrepancy catalogue, recorded sim1 corpus lists, CI platforms from `ci.yml`, known limits), `render()`, `--check` |
 | `../../docs/conformance-local.json` | Records of runs that CI cannot repeat: `--local` rewrites `refdiff` and `vhpi`; `vunit-own` and `cocotb` are hand-kept copies of `docs/STATUS.md` numbers (date, commit, command, note); `openlogic` is hand-kept too (Open Logic's own `sim/run.py` run with yavs, 6867 tests: re-run it and edit the record by hand) |
-| `../../.github/workflows/conformance.yml` | CI: build, `run.py --check`, upload the report artifact |
+| `../../.github/workflows/conformance.yml` | CI, nightly (not per push): build, `run.py --check`, upload the report artifact; a red nightly opens an issue |
 
 ## 3. Design decisions that bind this module
 
@@ -45,7 +45,7 @@ report generator or regenerate the report (#780).
 
 ## 5. How to work here
 
-The CI parts need no local run: download the `conformance-report` artifact of a green `conformance` run and run `run.py --report-only --out <dir>` on it to refresh the committed report (the local records stay). A commit that changes nothing the report reads has no run (the `paths` list of `conformance.yml`; `gh workflow run conformance.yml --ref main` makes one); a new input of this tool outside `crates/`, `lib/`, `tests/` and the tools it calls goes on that list.
+The CI parts need no local run: download the `conformance-report` artifact of a green `conformance` run and run `run.py --report-only --out <dir>` on it to refresh the committed report (the local records stay). The workflow runs nightly on `main`, on release tags and by hand, not on a push (`gh workflow run conformance.yml --ref main` makes a run of the current head).
 
 ```sh
 tools/fetch-corpus.sh
