@@ -2,11 +2,11 @@
 
 This page gives the measured speed of yavs against other simulators, and how it was measured.
 
-**In short**, as measured on 2026-10-28 at commit `1a8edb76` (later commits are not re-measured here): on 41 real third-party testbenches, yavs finishes a repeated (warm) run in about a fifth of the time of an established
-open-source VHDL simulator, roughly 5 times faster, and a first (cold) run in a little over half of it, roughly 1.7 times faster. Against an
-open-source simulator with its mcode code generator the figures are about 5.5 times (warm) and 2 times (cold), and against a commercial
-simulator about 6 times and 2.5 times, on the testbenches it can run. yavs is slower on a few long, compute-heavy testbenches (below).
-Every figure is a recorded run with its conditions in "How we measured" at the end, not a promise for your design.
+**In short**, as measured on 2026-11-01 at commit `a95d9ad1` (and re-checked at `cb1a1295`): on 41 real third-party testbenches, yavs finishes a repeated (warm) run in about a fifth of the time of an established
+open-source VHDL simulator, roughly 4.7 times faster, and a first (cold) run in about six tenths of it, roughly 1.7 times faster. yavs is slower on a few
+testbenches, and clearly slower on long runs of whole processors (below). These figures are slightly worse than the previous measurement
+(0.206 warm and 0.571 cold on 2026-10-28), and we have not found out why. The comparisons with the other two simulators are from that earlier run
+and were not repeated. Every figure is a recorded run with its conditions in "How we measured" at the end, not a promise for your design.
 
 ```{contents} On this page
 :local:
@@ -21,28 +21,60 @@ Every figure is a recorded run with its conditions in "How we measured" at the e
 
 ## Result
 
-Run of 2026-10-28 on commit `1a8edb76`, 41 testbenches (`grlib_leon3mp`, a LEON3 system, is listed but kept out of every mean).
+Row A is the run of 2026-11-01 on commit `a95d9ad1`, 41 testbenches (`grlib_leon3mp`, a LEON3 system, is listed but kept out of every mean). Rows B and C
+are the run of 2026-10-28 on commit `1a8edb76`; they were not repeated, so they do not include the changes since.
 
 | Compared with | Warm ratio | Cold ratio | Faster on (warm / cold) | Total time, warm: yavs / other |
 | --- | ---: | ---: | ---: | ---: |
-| **A: an established open-source simulator (compiled code)** | **0.21** | **0.57** | 36 / 34 of 41 | 38 s / 69 s |
-| B: an open-source simulator, mcode code generator | 0.18 | 0.48 | 41 / 40 of 41 | 51 s / 237 s |
-| C: a commercial simulator (29 of the 41 testbenches; it could not analyse or run the others) | 0.16 | 0.40 | 24 / 22 of 29 | 37 s / 94 s |
+| **A: an established open-source simulator (compiled code)** | **0.213** | **0.589** | 37 / 35 of 41 | 37 s / 72 s |
+| B: an open-source simulator, mcode code generator (2026-10-28) | 0.18 | 0.48 | 41 / 40 of 41 | 51 s / 237 s |
+| C: a commercial simulator (2026-10-28; 29 of the 41 testbenches; it could not analyse or run the others) | 0.16 | 0.40 | 24 / 22 of 29 | 37 s / 94 s |
 
-With `grlib_leon3mp` included, the ratio against A is 0.22 warm and 0.59 cold (yavs takes about 2.9 times as long on that one testbench).
+With `grlib_leon3mp` included, the ratio against A is 0.227 warm and 0.614 cold (yavs takes about 3.1 times as long on that one testbench warm, 3.3 times cold).
+Without the libraries' analysis (own files, elaboration and run) the ratio against A is 0.209 warm and 0.491 cold. The executed instructions are 0.29 of A's.
 Against C, only the run itself (elaboration and simulation, without analysing the libraries) can be compared on 40 testbenches: ratio 0.28 warm.
 The "total time" column is the sum over the testbenches in the row; the pass against B ran while the host was busier than the pass against A,
 so compare ratios, not those sums, between rows.
 
+**These figures are slightly worse than the previous head-to-head against A** (0.206 warm and 0.571 cold on 2026-10-28, with 0.219 and 0.594 including `grlib_leon3mp`).
+We do not know why. The hosts' load differed, about 60 commits lie between the two runs, and no quiet run of both builds side by side exists, so the difference is
+neither shown to be a slowdown nor shown to be noise. There was no fully quiet sitting at all: other jobs ran on the same host throughout, most of the time on
+the other half of the cores. Re-checking at `cb1a1295` (a later commit) changed instructions by at most 0.6 percent and cycles by at most 3 percent, with no direction.
+
+## Long runs of whole processors
+
+Two processors running a fixed CoreMark program for a long time, yavs warm (`--tier=auto`) divided by the same open-source simulator A, run including elaboration:
+
+| Testbench | Ratio (warm) | Note |
+| --- | ---: | --- |
+| NEORV32 CoreMark | 1.45 | measured while other jobs ran on the neighbouring cores: it may read a few percent high |
+| Microwatt CoreMark | 3.76 | measured on a quiet half of the CPU; on a busy one the same run gave up to 4.93, and its time varied between 271 s and 413 s |
+
+Both are slower in yavs than in A, and they are the clearest place where yavs loses: Microwatt and `grlib_leon3mp` (3.4 times) run about twice the instructions A does, at lower
+instructions per cycle. On Microwatt and `grlib_leon3mp` the default tier is currently slower than yavs's own interpreter (by 14 and 26 percent in wall time); on NEORV32 it is level.
+Elaboration of NEORV32 is faster than A's, that of Microwatt slower.
+
 ## Where yavs is slower
 
-Against A, yavs was slower warm on 4 of the 41 testbenches (ratios 1.25 to 1.93): the two wide-vector designs `fletcher_bufferwriter_512`
-and `sc5_fifo_repack`, one record-heavy testbench, and an RTL datapath with a windowing generator; cold also `poc_stat_histogram` and
-`poc_arith_addw` (1.29 and 1.01). Against C the long CPU-bound testbenches (`neorv32_*`, `poc_arith_addw`, `fletcher_bufferwriter_512`) are
+Against A (2026-11-01), yavs was slower warm on 4 of the 41 testbenches, on total time including analysis: `fletcher_bufferwriter_512` 1.81, `vai_window_gen_interlock` 1.48,
+`sc5_fifo_repack` 1.26 and `fletcher_bufferreader` 1.12 (and `grlib_leon3mp`, outside the 41, 3.10). Cold it was also slower on `poc_stat_histogram` (1.29) and
+`sc5_timestamp` (1.09), and on those four (1.97, 1.81, 1.76, 1.21; `grlib_leon3mp` 3.32). In all of them the simulation run is what costs, not analysis or elaboration, where yavs is ahead.
+On `hdlm_lfsr` and `sc5_timestamp` the run itself is also slower than A's (1.35 s against 1.11 s, and 0.41 s against 0.30 s), though the total is not.
+The short `neorv32_*` testbenches look fast (ratios 0.4 to 0.7) because of start-up, not simulation speed: see the CoreMark rows above for the rate.
+In the 2026-10-28 run, against C the long CPU-bound testbenches (`neorv32_*`, `poc_arith_addw`, `fletcher_bufferwriter_512`) are
 slower in yavs, by 1.3 to 1.8 times warm: C runs the simulation itself faster on these, while yavs is far ahead
-on start-up and analysis, which is most of a short testbench. Against B yavs was faster on every testbench warm.
+on start-up and analysis, which is most of a short testbench. Against B (2026-10-28) yavs was faster on every testbench warm.
 The cold ratio is higher than the warm one because analysing the libraries and compiling hot code happens in the first run only.
 Among the hand-written RTL designs, clocked designs with very many cheap processes are where fully compiled simulators lead.
+
+## What these numbers do not cover
+
+- **Large suites with many testbenches in one library.** A change after these runs (`d789ead2`, the compile cache keeps up to 4 GiB per library directory) made warm runs of such suites
+  faster, in particular a full Open Logic run. The figures above are one testbench per run and were taken before it, so they say nothing about it. Measurements of whole suites
+  are in [issue 1029](https://github.com/ru551n/yavs/issues/1029); they were not repeated for this page. A suite far over the limit can still be slower warm than cold
+  ([issue 1034](https://github.com/ru551n/yavs/issues/1034)).
+- Waves and coverage on, other tiers than `--tier=auto`, and more than one thread were not measured here.
+- The comparisons with B and C are of 2026-10-28.
 
 ## Measure your own design
 
@@ -54,8 +86,9 @@ an otherwise idle machine, repeat, and compare medians; a short run varies by te
 
 The testbenches come from open-source VHDL projects (verification libraries, FPGA libraries, processor
 designs), each run as its project's own scripts would: analysing the libraries and the testbench's files,
-elaborating and running. yavs is the release build at its default `--tier=auto`. Every pair of timings ran on
-the same CPU core, in turn, on a shared Linux host (AMD Ryzen 9 7950X3D), repeated two to five times. The
+elaborating and running. yavs is a release build at its default `--tier=auto`. Every pair of timings ran on
+the same CPU core, in turn, on a shared Linux host (AMD Ryzen 9 7950X3D), repeated two to five times; the 2026-11-01 run took the best of two passes for each measurement,
+with a median host load of 10 to 14. The
 other simulators are not named; all of them run compiled or generated code. The per-testbench tables, the
 method in full and earlier runs are in
 [`docs/STATUS.md`](https://github.com/ru551n/yavs/blob/main/docs/STATUS.md) ("Real-world performance suite").

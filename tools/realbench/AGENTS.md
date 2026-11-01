@@ -90,6 +90,24 @@ Results (raw samples reduced to medians, plus the markdown) go to `~/.cache/yavs
 
 - The baselines and the worst tests are in `docs/STATUS.md` ("Real-world performance suite, baseline 2026-10-21" for run, "Real-world suite: analysis, elaboration and code generation vs sim1, 2026-10-22" for the other phases). Slow spots are `perf` issues.
 
+## 6a. Bounds a performance change is held to (baseline `a95d9ad1`, 2026-11-01, Cranelift bench build)
+
+Set from the best-of-two-passes baseline plus 2 percent (peak RSS 10 percent), so each one can fail. They replace the
+numbers of head-to-head 8 (0.206 and 0.571), which the baseline did not reproduce for a reason not found (`docs/STATUS.md`,
+"baseline for long CPU tests and large SoC models"). They are read by hand from the report of `run.py` (there is no automatic check).
+
+| what | measured | bound |
+|---|---:|---:|
+| geomean total warm yavs / sim1, 41 tests without `grlib_leon3mp`, `--tier=auto` | 0.213 | at most 0.217 |
+| same, cold | 0.589 | at most 0.601 |
+| geomean peak RSS yavs / sim1, 42 tests | 0.382 | at most 0.42 |
+| `grlib_leon3mp` peak RSS | 502 MB | at most 552 MB |
+| `tools/bench/run.py --ref sim1 --tiers interp,auto`: geomean auto / sim1 of the 10 h2h designs without `xor_sig` | 0.562 | at most 0.573 |
+| `tools/bench/run.py --ref sim1 --tiers interp,auto --tiny`: sum of yavs / sum of sim1 on the common tests | 2.42 s / 23.48 s | at most 0.105 |
+
+A miss is a finding to chase on a quiet sitting, not a verdict: compare the two builds interleaved on the same cores before blaming the change,
+and name the load. Not covered: whole suites with many testbenches in one library (`d789ead2`, #1029), waves and coverage on, more than one thread.
+
 ## 7. CPU workloads: CoreMark on NEORV32 and Microwatt (category `cpubench`, #924)
 
 Two processors running a fixed program, to measure the simulator on long clocked runs of real CPUs. Primary number: simulated clock cycles per
