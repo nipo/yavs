@@ -3,11 +3,11 @@
 Coverage tells you which parts of your design's code ran during a simulation. It is a
 two-step workflow:
 
-1. **Run** with `yavs run --cov`. Each run writes one database file (`.ycov`) with the counts.
+1. **Run** with `yavs run --cov=LETTERS`, naming the kinds to count (`--cov=sbt` counts statements, branches and toggles). Each run writes one database file (`.ycov`) with the counts.
 2. **Report** with `yavs cov`: merge the databases of several runs, then print, export or rank.
 
 You get a `.ycov` database per run, and from it a text summary, an HTML site, Cobertura, JSON, LCOV or
-SonarQube exports for CI, or a list of items that never ran. Without `--cov` there are no counters and no cost.
+SonarQube exports for CI, or a list of items that never ran. Without `--cov` there are no counters and no cost. No kind is on by default: you choose every kind you want counted.
 
 ```{contents} On this page
 :local:
@@ -17,8 +17,8 @@ SonarQube exports for CI, or a list of items that never ran. Without `--cov` the
 
 ```
 yavs analyze --work=lib:out/lib rtl/*.vhd tb/tb.vhd
-yavs run --work=lib:out/lib --cov=a.ycov --cov-kind=statement,branch,toggle,condition tb -gtest=a
-yavs run --work=lib:out/lib --cov=b.ycov --cov-kind=statement,branch,toggle,condition tb -gtest=b
+yavs run --work=lib:out/lib --cov=sbtc --cov-file=a.ycov tb -gtest=a
+yavs run --work=lib:out/lib --cov=sbtc --cov-file=b.ycov tb -gtest=b
 yavs cov merge a.ycov b.ycov -o all.ycov
 yavs cov report all.ycov --html cov-html --cobertura coverage.xml
 yavs cov report all.ycov --uncovered=yaml > exclusions.yaml
@@ -27,7 +27,8 @@ yavs cov report all.ycov --fail-under=80
 yavs cov rank all.ycov
 ```
 
-The two runs write `a.ycov` and `b.ycov` (named `tb(test=a)` and `tb(test=b)` in the database,
+`--cov=sbtc` counts statements, branches, toggles and conditions (the letters are in the table below), and
+`--cov-file` names the database. The two runs write `a.ycov` and `b.ycov` (named `tb(test=a)` and `tb(test=b)` in the database,
 unless you pass `--cov-test`). The report has a table of the kinds the database holds, a line per
 instance or package, and how much never ran. On `tests/cli/cov_report.vhd`:
 
@@ -163,28 +164,32 @@ tells you whether one of the two tests adds nothing the other lacks.
 
 ## What is counted
 
-| Kind | What is counted |
-|------|-----------------|
-| `statement` | every sequential and concurrent statement, each time it runs (declarations are not counted) |
-| `branch` | each arm of `if`/`elsif`/`else` (an `if` without `else` has a "no condition held" arm), each `case` alternative, each choice of a conditional or selected assignment, and the body of a `for`/`while` loop per iteration |
-| `toggle` | for every `bit` and `std_ulogic`/`std_logic` scalar of every signal and port, the 0 to 1 and 1 to 0 changes |
-| `condition` | for every `if`/`elsif`, conditional assignment, `while`, `exit when`, `next when` or `wait until` with two or more inputs, one row per input and value |
-| `assert` | the same rows for the condition of every `assert`, sequential or concurrent; opt in with `--cov-kind`, because half of these rows need a failing run (see Conditions of `wait until` and `assert`). They report as `condition` |
-| `expression` | the same for the logic expression assigned to a signal or variable |
-| `combination` | for the same conditions (not `wait until`) and logic expressions, each combination of the values of the inputs that can occur (see Combinations); opt in with `--cov-kind` |
-| `fsm` | for every detected state machine, per instance, each state reached and each transition taken (see State machines); opt in with `--cov-kind` |
+No kind is counted unless you name it. `--cov=LETTERS` takes the letters in the first column, in any order
+(`--cov=sbt`); `--cov-kind=statement,branch,toggle` is the same with words.
+
+| Letter | Kind | What is counted |
+|--------|------|-----------------|
+| `s` | `statement` | every sequential and concurrent statement, each time it runs (declarations are not counted) |
+| `b` | `branch` | each arm of `if`/`elsif`/`else` (an `if` without `else` has a "no condition held" arm), each `case` alternative, each choice of a conditional or selected assignment, and the body of a `for`/`while` loop per iteration |
+| `t` | `toggle` | for every `bit` and `std_ulogic`/`std_logic` scalar of every signal and port, the 0 to 1 and 1 to 0 changes |
+| `c` | `condition` | for every `if`/`elsif`, conditional assignment, `while`, `exit when`, `next when` or `wait until` with two or more inputs, one row per input and value |
+| `a` | `assert` | the same rows for the condition of every `assert`, sequential or concurrent; because half of these rows need a failing run (see Conditions of `wait until` and `assert`). They report as `condition` |
+| `e` | `expression` | the same for the logic expression assigned to a signal or variable |
+| `m` | `combination` | for the same conditions (not `wait until`) and logic expressions, each combination of the values of the inputs that can occur (see Combinations) |
+| `f` | `fsm` | for every detected state machine, per instance, each state reached and each transition taken (see State machines) |
 
 ## Flags for `yavs run`
 
 | Flag | Meaning |
 |------|---------|
-| `--cov[=FILE]` | turn coverage on; write the database to `FILE` (default `yavs.ycov` in the working directory). Write the `=` form: `--cov FILE` does not take the file |
-| `--cov-kind=LIST` | comma separated kinds from the table above; default `statement,branch,toggle` |
+| `--cov=LETTERS` | turn coverage on and count the kinds the letters name (`s`, `b`, `c`, `e`, `t`, `f`, `a`, `m`, in any order; a repeated letter does no harm). Write the `=` form. No kind is on by default: `--cov` alone, or a letter that is none, is error `E0140` before the run starts, and an old `--cov=FILE` gets the same error with a pointer to `--cov-file` |
+| `--cov-kind=LIST` | the long form: comma separated kinds from the table above. It also turns coverage on, and it is not combined with `--cov=` |
+| `--cov-file=FILE` | the database to write (default `yavs.ycov` in the working directory); needs coverage on |
 | `--coverage-directives=MODE` | `apply` (default) checks the `-- yavs coverage exclude` directives in the sources and waives what they name; `ignore` reads none of them and says how many it left out. Also on `yavs analyze` and `yavs elab` |
 | `--cov-toggle-max=N` | leave signals with more than `N` scalars (default 65536, for example large memories) out of toggle coverage |
 | `--cov-test=NAME` | the name of this run's test in the database |
 | `--cov-exclude-translate-off` | also leave `translate_off` ... `translate_on` regions out |
-| `--cov-embed-sources` | store the text of the source files in the database, so `yavs cov report --html` needs no checkout. Off by default: **the source text then travels with the database**, so think of who gets the file. Needs `--cov` |
+| `--cov-embed-sources` | store the text of the source files in the database, so `yavs cov report --html` needs no checkout. Off by default: **the source text then travels with the database**, so think of who gets the file. Needs coverage on |
 
 `--cov` cannot be combined with a debug session (`--dap`, `--interactive`, `--do`) yet: the run stops before time 0 with a "not implemented" error (exit 2).
 
@@ -242,7 +247,7 @@ the line and a near name.
 or a log line. A whole job is in [Continuous integration](ci.rst).
 
 ```yaml
-- run: yavs run --work=lib:out/lib --cov=cov/a.ycov --cov-kind=statement,branch tb
+- run: yavs run --work=lib:out/lib --cov=sb --cov-file=cov/a.ycov tb
 - run: yavs cov merge cov/*.ycov -o cov/all.ycov
 - run: yavs cov report cov/all.ycov --html cov-html --cobertura coverage.xml --fail-under=85
 - run: echo "coverage $(yavs cov report cov/all.ycov --total)"
@@ -272,8 +277,8 @@ applies to instances only.
 With the `vunit-yavs` package (a release newer than 0.11.0) the test runner collects, merges and checks coverage for you:
 
 ```python
-vu.set_sim_option("enable_coverage", True)      # or pass --yavs-cov to run.py
-vu.set_sim_option("yavs.cov_kind", ["statement", "branch"])   # optional, as --cov-kind
+vu.set_sim_option("enable_coverage", True)      # or pass --yavs-cov=sb to run.py
+vu.set_sim_option("yavs.cov_kind", ["statement", "branch"])   # the kinds, as --cov-kind; needed unless --yavs-cov=LETTERS names them
 vu.set_sim_option("yavs.cov_embed_sources", True)             # optional, as --cov-embed-sources
 vu.main(post_run=lambda results: results.merge_coverage("coverage"))
 ```

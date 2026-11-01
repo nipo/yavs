@@ -137,10 +137,10 @@ class TestFakeYavs(unittest.TestCase):
     def test_coverage_is_collected_merged_and_reported(self):
         merged = "merged"
         env = {"RUN_PY_MERGE_COVERAGE": merged, "RUN_PY_COVERAGE_ARGS": "--cobertura x.xml"}
-        exit_code, output, _, calls = self._run("--yavs-cov", "--yavs-cov-fail-under=80", PASS, COMMA, env=env)
+        exit_code, output, _, calls = self._run("--yavs-cov=sbt", "--yavs-cov-fail-under=80", PASS, COMMA, env=env)
         self.assertEqual(exit_code, 0, output)
         for run in self._runs(calls):
-            self.assertTrue(any(arg.startswith("--cov=") and arg.endswith("coverage.ycov") for arg in run), run)
+            self.assertTrue(any(arg.startswith("--cov-file=") and arg.endswith("coverage.ycov") for arg in run), run)
         (merge,) = [call for call in calls if call[:2] == ["cov", "merge"]]
         self.assertEqual(len(merge), 6)  # cov, merge, -o, OUT, and the two databases
         (report_call,) = [call for call in calls if call[:2] == ["cov", "report"]]
@@ -149,7 +149,7 @@ class TestFakeYavs(unittest.TestCase):
 
     def test_coverage_below_the_threshold_fails_the_run(self):
         env = {"RUN_PY_MERGE_COVERAGE": "merged", "FAKE_YAVS_COVERAGE": "70"}
-        exit_code, output, results, _ = self._run("--yavs-cov", "--yavs-cov-fail-under=80", PASS, env=env)
+        exit_code, output, results, _ = self._run("--yavs-cov=sbt", "--yavs-cov-fail-under=80", PASS, env=env)
         self.assertEqual(exit_code, 1, output)
         self.assertEqual(results, {PASS: "passed"})
         self.assertIn("coverage 70.0% is below the required 80.0%", output)
@@ -164,7 +164,7 @@ class TestFakeYavs(unittest.TestCase):
         self.assertIn("no simulation ran with coverage", output)
 
     def test_coverage_refuses_the_debugger(self):
-        exit_code, output, _, calls = self._run("--yavs-debug=5000", "--yavs-cov", PASS)
+        exit_code, output, _, calls = self._run("--yavs-debug=5000", "--yavs-cov=sbt", PASS)
         self.assertEqual(exit_code, 1)
         self.assertIn("--yavs-debug and coverage cannot be combined", output)
         self.assertFalse(self._runs(calls))
@@ -172,10 +172,10 @@ class TestFakeYavs(unittest.TestCase):
     def test_wrong_combinations_say_why_without_a_traceback(self):
         for args, message in [
             (["--yavs-debug=5000", "--yavs-interactive"], "--yavs-interactive and --yavs-debug cannot be combined"),
-            (["--yavs-debug=5000", "--yavs-cov"], "--yavs-debug and coverage cannot be combined"),
+            (["--yavs-debug=5000", "--yavs-cov=sbt"], "--yavs-debug and coverage cannot be combined"),
             (["--yavs-debug=5000", "--elaborate"], "--yavs-debug and --elaborate cannot be combined"),
             (["--yavs-debug=5000", "-p", "2"], "--yavs-debug runs one test"),
-            (["--yavs-interactive", "--yavs-cov"], "--yavs-interactive and coverage cannot be combined"),
+            (["--yavs-interactive", "--yavs-cov=sbt"], "--yavs-interactive and coverage cannot be combined"),
             (["--yavs-interactive", "--elaborate"], "--yavs-interactive and --elaborate cannot be combined"),
             (["--yavs-interactive", "-p", "2"], "--yavs-interactive runs one test"),
             (["--yavs-surfer", "--elaborate"], "--yavs-surfer and --elaborate cannot be combined"),

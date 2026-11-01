@@ -38,7 +38,7 @@ fn database(name: &str) -> Tmp {
         &[
             "run",
             "--work=work:lib",
-            "--cov=a.ycov",
+            "--cov-file=a.ycov",
             "--cov-kind=statement,branch",
             "cov_report",
         ],
@@ -147,7 +147,10 @@ fn file_patterns_are_relative_to_their_file() {
     let lib = format!("--work=work:{}/lib", tmp.display());
     let o = yavs(&tmp, &["analyze", &lib, &abs]);
     assert!(o.status.success(), "{}", text(&o.stderr));
-    let o = yavs(&tmp, &["run", &lib, "--cov=a.ycov", "cov_report"]);
+    let o = yavs(
+        &tmp,
+        &["run", &lib, "--cov=sbt", "--cov-file=a.ycov", "cov_report"],
+    );
     assert!(o.status.success(), "{}", text(&o.stderr));
     write(
         &tmp,
@@ -296,7 +299,7 @@ fn w0111_names_the_edited_statement() {
         vec![
             "run",
             "--work=work:lib",
-            "--cov=b.ycov",
+            "--cov-file=b.ycov",
             "--cov-kind=statement,branch",
             "cov_report",
         ],
@@ -340,7 +343,7 @@ fn run_database(name: &str, args: &[&str]) -> Tmp {
     let mut v = vec![
         "run",
         "--work=mylib:lib",
-        "--cov=a.ycov",
+        "--cov-file=a.ycov",
         "--cov-kind=statement,branch,toggle",
     ];
     v.extend(args);
@@ -536,7 +539,7 @@ fn decision_of(tmp: &Path, name: &str, cond: &str, directive: &str, kinds: &str)
         &[
             "run",
             "--work=work:lib",
-            &format!("--cov={name}.ycov"),
+            &format!("--cov-file={name}.ycov"),
             &format!("--cov-kind={kinds}"),
             "d",
         ],
@@ -592,7 +595,7 @@ fn e0137_is_unchanged_by_the_operand_text() {
         &[
             "run",
             "--work=work:lib",
-            "--cov=b.ycov",
+            "--cov-file=b.ycov",
             "--cov-kind=combination",
             "--coverage-directives=ignore",
             "d",
@@ -787,7 +790,7 @@ fn rows_follow_the_merge_rules() {
         &[
             "run",
             "--work=work:lib",
-            "--cov=b.ycov",
+            "--cov-file=b.ycov",
             "--cov-kind=condition",
             "--coverage-directives=ignore",
             "d",
@@ -817,7 +820,7 @@ fn a_row_waiver_changes_no_count() {
         &[
             "run",
             "--work=work:lib",
-            "--cov=b.ycov",
+            "--cov-file=b.ycov",
             "--cov-kind=condition",
             "--threads=4",
             "--coverage-directives=ignore",
@@ -870,7 +873,7 @@ fn a_row_directive_waives_an_expression_row() {
             &[
                 "run",
                 "--work=work:lib",
-                "--cov=a.ycov",
+                "--cov-file=a.ycov",
                 "--cov-kind=expression",
                 "d",
             ],
@@ -1066,7 +1069,7 @@ fn the_bare_forms_are_accepted_without_a_warning() {
             &[
                 "run",
                 "--work=work:lib",
-                "--cov=a.ycov",
+                "--cov-file=a.ycov",
                 &format!("--cov-kind={kind}"),
                 "d",
             ],
@@ -1192,7 +1195,12 @@ fn fsm_run(tmp: &Path, src: &str, extra: &[&str]) -> String {
     let o = yavs(tmp, &["analyze", "--work=work:lib", "m.vhd"]);
     assert!(o.status.success(), "{}", text(&o.stderr));
     let args = [
-        &["run", "--work=work:lib", "--cov=a.ycov", "--cov-kind=fsm"][..],
+        &[
+            "run",
+            "--work=work:lib",
+            "--cov-file=a.ycov",
+            "--cov-kind=fsm",
+        ][..],
         extra,
         &["tb"][..],
     ]

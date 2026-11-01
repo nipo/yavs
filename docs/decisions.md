@@ -2420,7 +2420,7 @@ scalars; the on-disk format is implementation-defined, so it is fixed here (yavs
   the file. Why: offsets would break merging after any edit above the statement; per-iteration
   generate paths would make generate-heavy designs hard to read.
 - **Database:** text, `yavs-coverage 2` then one tab-separated line per item, sorted; one file
-  per run (`--cov=FILE`, default `yavs.ycov`, overwritten), written whatever the run's outcome;
+  per run (`--cov-file=FILE`, default `yavs.ycov`, overwritten; `--cov=FILE` until the opt-in change below), written whatever the run's outcome;
   `yavs cov merge` adds counts per key and keeps items only one input has. Cobertura output has
   timestamp 0 so equal databases give byte-identical reports.
 - **HTML (#344, reworked #689):** `cov report --html DIR`: static files (inline CSS and one
@@ -2552,7 +2552,7 @@ scalars; the on-disk format is implementation-defined, so it is fixed here (yavs
 ## Toggle coverage (yavs-cov, CLI, #343, 2026-10-19)
 
 - **An observer, not IR:** `yavs_cov::toggle::Toggles` subscribes to the kernel's value-change
-  bus only when toggle coverage is on (`--cov` with `toggle` in `--cov-kind`, the default), so
+  bus only when toggle coverage is on (`--cov` with `toggle` in `--cov-kind`), so
   a run without it has no toggle cost. It keeps the last level of every tracked scalar and
   compares on each change; changes reach observers once per cycle on the main thread, so the
   counts do not depend on `--threads`. Why: docs/design/ir.md puts toggle coverage on the bus.
@@ -2730,7 +2730,7 @@ scalars; the on-disk format is implementation-defined, so it is fixed here (yavs
 - **Exclusions:** per row, `condition INSTANCE HEX12.OCC ROW [FILE:LINE]` (and `expression`), or
   YAML `kind: condition|expression` with `hash: HEX12.OCC` and `row: N`; matching, `W0110`,
   `W0111`, `W0114` as for statements. `instance`, `unit` and `file` rules take rows out too.
-- **Default of `--cov-kind`:** unchanged (`statement,branch,toggle`); `condition` and
+- **Default of `--cov-kind`:** was `statement,branch,toggle` (superseded: no kind is on by default, "Coverage kinds are opt in" below); `condition` and
   `expression` are asked for. Measured (user-mode instructions, interpreter, release build, one
   run each): over the default kinds, `condition` costs +27 percent and `expression` +17 percent
   (both +44 percent) on a loop where every iteration has two multi-input conditions and one
@@ -13282,3 +13282,21 @@ code in the compilation cache" and the 512 notes.
   is removed at the limit moves with the host's load.
 - **A put looks before it writes**, so a refused entry costs no write, and the `.swept` marker holds "full" until the next look,
   so a full directory is not listed by every put.
+
+
+## Coverage kinds are opt in (#1020, 2026-11-01)
+
+- **Decision (maintainer, 2026-11-01):** "none should be on by default, all should be opt in", and the kinds are chosen with
+  letters: `yavs run --cov=LETTERS` turns coverage on and selects kinds, `s` statement, `b` branch, `c` condition, `e` expression,
+  `t` toggle, `f` fsm, `a` assert, `m` combination, in any order, a repeated letter harmless (`--cov=sbt`). `--cov-kind=LIST` stays
+  as the long form with words and also turns coverage on. The letters are yavs's own; the table lives in `crates/yavs/src/elab.rs`
+  (`COV_LETTERS`) and, mirrored, in vunit-yavs, whose test compares the two.
+- **No fallback:** bare `--cov`, `--cov=`, a letter that is none, `--cov=` together with `--cov-kind`, and `--cov-file` or
+  `--cov-embed-sources` without coverage on are `E0140` before analysis (exit 2). The first lists every kind with its letter and a
+  command to copy; a bad letter also says the database goes in `--cov-file`, so an old `--cov=FILE` command gets its fix. An unknown
+  word in `--cov-kind` keeps clap's value error with the shared "did you mean". There is no `all` shorthand.
+- **The database path moved** from `--cov=FILE` to `--cov-file=FILE` (default `yavs.ycov`). This is a breaking change for every
+  caller: tests, CI, the vunit-yavs interface (`--cov-file`, with `--cov-kind` or `--cov=LETTERS` from `yavs.cov_kind`,
+  `--yavs-cov-kind` or `--yavs-cov=LETTERS`; a simulation with coverage on and no kind fails before yavs starts, naming the sim
+  option and both flags).
+- The VS Code extension and the CI action have no coverage input in this repository: `--cov` with a debug session stays `E0199`.

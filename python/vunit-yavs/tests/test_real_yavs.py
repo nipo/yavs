@@ -179,7 +179,7 @@ class TestRealYavs(unittest.TestCase):
         example = HERE.parents[2] / "docs" / "examples" / "vunit" / "run.py"
         if not example.exists():
             self.skipTest("Not run from the yavs repository")
-        coverage = ["--yavs-cov", "--yavs-cov-html", "cov-html", "--yavs-cov-fail-under", "85"]
+        coverage = ["--yavs-cov=sbt", "--yavs-cov-html", "cov-html", "--yavs-cov-fail-under", "85"]
         for flags in ([], coverage):
             proc = subprocess.run(
                 [sys.executable, str(example), "-p", "2", "-x", str(self.xml), *flags],
@@ -349,7 +349,7 @@ class TestRealYavs(unittest.TestCase):
 
     def _coverage_run(self, *args, **env):
         return subprocess.run(
-            self._command("--yavs-cov", PASS, COMMA, *args),
+            self._command(*([] if any(a.startswith("--yavs-cov-kind") for a in args) else ["--yavs-cov=sbt"]), PASS, COMMA, *args),
             env=dict(self._env(), RUN_PY_MERGE_COVERAGE=str(self.tempdir / "all"), **env),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -1008,3 +1008,11 @@ class TestRealYavs(unittest.TestCase):
             )
             self.assertEqual(proc.returncode, 0, proc.stdout)
             self.assertEqual(report(self.xml), {"lib.tb_vendor.all": "passed"}, proc.stdout)
+
+    def test_the_letters_are_those_of_yavs(self):
+        yavs = str(Path(os.environ["VUNIT_YAVS_PATH"]) / "yavs") if "VUNIT_YAVS_PATH" in os.environ else "yavs"
+        proc = subprocess.run([yavs, "run", "--cov=!", "--work=w:d", "top"], capture_output=True, text=True, check=False)
+        self.assertIn("E0140", proc.stderr)
+        shown = [line.strip() for line in proc.stderr.splitlines()]
+        for row in vunit_yavs._cov_letters_text().splitlines():  # pylint: disable=protected-access
+            self.assertIn(row.strip(), shown)

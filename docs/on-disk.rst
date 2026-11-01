@@ -90,7 +90,7 @@ Other files a run writes
    * - ``<top>.fst`` beside the library directory
      - ``--surfer`` without ``--wave``; its path is printed.
    * - ``yavs.ycov`` in the current directory
-     - ``--cov`` without a file name.
+     - ``--cov=LETTERS`` without ``--cov-file``.
    * - The file of ``--profile=FILE``
      - The profile as JSON.
    * - The file of ``--activity=FILE``

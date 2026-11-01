@@ -105,7 +105,7 @@ fn want() -> Vec<(u32, String, u64, usize)> {
 fn requirements_counts_and_waivers() {
     let tmp = setup("comb");
     let plain = run(&tmp, &[]);
-    let with = run(&tmp, &["--cov=a.ycov", "--cov-kind=combination"]);
+    let with = run(&tmp, &["--cov-file=a.ycov", "--cov-kind=combination"]);
     // Evaluation order, short-circuit and side effects (the calls of `tick`) are untouched.
     assert_eq!(out(&plain), out(&with));
     assert_eq!(err(&plain), err(&with));
@@ -155,7 +155,11 @@ fn requirements_counts_and_waivers() {
     // Byte-identical at four threads.
     run(
         &tmp,
-        &["--cov=a4.ycov", "--cov-kind=combination", "--threads=4"],
+        &[
+            "--cov-file=a4.ycov",
+            "--cov-kind=combination",
+            "--threads=4",
+        ],
     );
     assert_eq!(
         std::fs::read(tmp.join("a.ycov")).expect("a"),
@@ -164,7 +168,7 @@ fn requirements_counts_and_waivers() {
     // The other kinds do not collect combinations, and vice versa.
     run(
         &tmp,
-        &["--cov=s.ycov", "--cov-kind=statement,branch,condition"],
+        &["--cov-file=s.ycov", "--cov-kind=statement,branch,condition"],
     );
     assert!(
         read(&tmp.join("s.ycov"))
@@ -209,7 +213,7 @@ fn comment_edits_keep_identity() {
         let d = tmp.join(dir);
         let o = yavs(&d, &["analyze", "--work=work:lib", "d.vhd"]);
         assert!(o.status.success(), "{}", err(&o));
-        run(&d, &["--cov=a.ycov", "--cov-kind=combination"]);
+        run(&d, &["--cov-file=a.ycov", "--cov-kind=combination"]);
         read(&d.join("a.ycov"))
     };
     let base = keys(&src, "base");
@@ -256,7 +260,7 @@ fn ignore_applies_no_waiver_and_says_so() {
     let o = run(
         &tmp,
         &[
-            "--cov=i.ycov",
+            "--cov-file=i.ycov",
             "--cov-kind=combination",
             "--coverage-directives=ignore",
         ],
@@ -271,7 +275,7 @@ fn ignore_applies_no_waiver_and_says_so() {
     let i = read(&tmp.join("i.ycov"));
     assert!(rows(&i).iter().all(|r| r.3 == 0));
     // The same requirements, counted the same.
-    run(&tmp, &["--cov=a.ycov", "--cov-kind=combination"]);
+    run(&tmp, &["--cov-file=a.ycov", "--cov-kind=combination"]);
     let a = read(&tmp.join("a.ycov"));
     let strip = |d: &Database| {
         let mut v = rows(d);
@@ -300,7 +304,7 @@ fn warm_caches_follow_edits_and_options() {
     let waivers = |extra: &[&str]| {
         run(
             &tmp,
-            &[&["--cov=w.ycov", "--cov-kind=combination"][..], extra].concat(),
+            &[&["--cov-file=w.ycov", "--cov-kind=combination"][..], extra].concat(),
         );
         rows(&read(&tmp.join("w.ycov")))
             .iter()
@@ -336,7 +340,7 @@ fn exclusion_files_take_combination_rows() {
     run(
         &tmp,
         &[
-            "--cov=a.ycov",
+            "--cov-file=a.ycov",
             "--cov-kind=combination",
             "--coverage-directives=ignore",
         ],
@@ -414,7 +418,10 @@ fn exclusion_files_take_combination_rows() {
 #[test]
 fn exclusion_report_covers_inline_and_file_rules() {
     let tmp = setup("comb_report");
-    run(&tmp, &["--cov=a.ycov", "--cov-kind=statement,combination"]);
+    run(
+        &tmp,
+        &["--cov-file=a.ycov", "--cov-kind=statement,combination"],
+    );
     // An external row that overlaps the directive of line 15, one that matches nothing, and one
     // for a metric that was not collected.
     let id = {
@@ -820,7 +827,7 @@ fn undecidable_decisions_are_reported_when_measured() {
             "run",
             "--work=work:lib",
             "d",
-            "--cov=a.ycov",
+            "--cov-file=a.ycov",
             "--cov-kind=combination",
         ],
     );
@@ -840,13 +847,17 @@ fn tiers_agree() {
     let tmp = setup("comb_tiers");
     run(
         &tmp,
-        &["--cov=i.ycov", "--cov-kind=combination", "--tier=interp"],
+        &[
+            "--cov-file=i.ycov",
+            "--cov-kind=combination",
+            "--tier=interp",
+        ],
     );
     for tier in ["clift", "auto"] {
         run(
             &tmp,
             &[
-                &format!("--cov={tier}.ycov"),
+                &format!("--cov-file={tier}.ycov"),
                 "--cov-kind=combination",
                 &format!("--tier={tier}"),
             ],
@@ -884,7 +895,7 @@ end;
         &[
             "run",
             "--work=work:lib",
-            "--cov=c.ycov",
+            "--cov-file=c.ycov",
             "--cov-kind=combination",
             "c",
         ],

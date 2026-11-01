@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Breaking: no coverage kind is on by default. `--yavs-cov` becomes `--yavs-cov=LETTERS` (`s` statement, `b` branch,
+  `c` condition, `e` expression, `t` toggle, `f` fsm, `a` assert, `m` combination; for example `--yavs-cov=sbt`), and
+  `--yavs-cov-kind` or `yavs.cov_kind` name kinds by word. A simulation with coverage on and no kind fails before yavs
+  starts, with a message that names the flag, the option and the letters. The database goes to yavs by `--cov-file`
+  instead of `--cov=FILE`. Needs a yavs with `--cov=LETTERS` and `--cov-file`.
 - `--yavs-lint` checks the configuration once before any library: an unknown key, rule or rule group in
   `yavs-lint.yaml` or the waiver file is error E0134, told once, and fails the compile step. Needs a yavs
   that rejects unknown keys.

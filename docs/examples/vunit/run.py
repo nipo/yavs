@@ -26,7 +26,7 @@ for width in (3, 5):
 
 def merge_coverage(results):
     """merge_coverage is an error when no simulation collected coverage"""
-    if "--yavs-cov" in sys.argv:
+    if any(arg.startswith(("--yavs-cov=", "--yavs-cov-kind")) for arg in sys.argv):
         results.merge_coverage("coverage", args=["--exclude", str(ROOT / "coverage-exclude.txt")])
 
 

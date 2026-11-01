@@ -448,15 +448,15 @@ Arguments:
 
    Run the processes of a delta cycle in a random order, to find testbenches that depend on the order. SEED defaults to 1; the seed is printed at the start so that a failing run can be replayed with ``--shuffle=SEED``.
 
-.. option:: --cov, --cov=FILE
+.. option:: --cov, --cov=LETTERS
 
-   Count statement, branch and toggle coverage and write the run's coverage database to FILE (default ``yavs.ycov``).
+   Count coverage and write the run's coverage database (``--cov-file``). LETTERS selects the kinds, in any order: ``s`` statement, ``b`` branch, ``c`` condition, ``e`` expression, ``t`` toggle, ``f`` fsm, ``a`` assert, ``m`` combination; for example ``--cov=sbt``. No kind is on by default.
 
 .. option:: --cov-kind=KIND,...
 
-   With ``--cov``: the kinds of coverage to count, comma separated.
+   Count coverage of these kinds, comma separated (``statement``, ``branch``, ``toggle``, ...): the long form of ``--cov=LETTERS``, not with it.
 
-   A list, values separated by ``,``. Default: ``statement,branch,toggle``.
+   A list, values separated by ``,``.
 
    Values:
 
@@ -469,23 +469,27 @@ Arguments:
    * ``combination``: Each combination of the inputs of conditions and logic expressions that can occur (an input a short-circuit operator skips counts as not evaluated, not as false)
    * ``fsm``: Each state a state machine reached and each transition it took, per instance
 
+.. option:: --cov-file=FILE
+
+   With coverage on (``--cov`` or ``--cov-kind``): the coverage database to write (default ``yavs.ycov``).
+
 .. option:: --cov-test=NAME
 
-   With ``--cov``: the name of this run's test in the database (default: the enabled test case of a ``runner_cfg`` generic, else the top level with its ``-g`` generics).
+   With coverage on: the name of this run's test in the database (default: the enabled test case of a ``runner_cfg`` generic, else the top level with its ``-g`` generics).
 
 .. option:: --cov-toggle-max=N
 
-   With ``--cov``: leave signals with more ``bit``/``std_ulogic`` scalars than this out of toggle coverage.
+   With coverage on: leave signals with more ``bit``/``std_ulogic`` scalars than this out of toggle coverage.
 
    Default: ``65536``.
 
 .. option:: --cov-exclude-translate-off
 
-   With ``--cov``: also leave ``translate_off`` ... ``translate_on`` regions out of the coverage.
+   With coverage on: also leave ``translate_off`` ... ``translate_on`` regions out of the coverage.
 
 .. option:: --cov-embed-sources
 
-   With ``--cov``: store the text of the source files in the database, so ``yavs cov report --html`` needs no checkout. The source text then travels with the database.
+   With coverage on: store the text of the source files in the database, so ``yavs cov report --html`` needs no checkout. The source text then travels with the database.
 
 .. option:: --vhpi=LIB[:ENTRY]
 

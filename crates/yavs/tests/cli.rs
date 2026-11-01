@@ -2748,8 +2748,8 @@ fn package_init_report_is_printed_once() {
     let path = src.display().to_string();
     let o = yavs_cmd(&["analyze", "--relaxed", "--std=2008", &lib, &path]);
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
-    let cov = format!("--cov={}/x.ycov", dir.display());
-    for args in [vec![], vec![cov.as_str()]] {
+    let cov = format!("--cov-file={}/x.ycov", dir.display());
+    for args in [vec![], vec!["--cov=sbt", cov.as_str()]] {
         let mut run = vec!["run", "--relaxed", "--std=2008", &lib];
         run.extend(args);
         run.push("top");

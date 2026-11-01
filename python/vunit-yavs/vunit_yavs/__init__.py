@@ -109,8 +109,42 @@ def _exit_with_failure():
 _COV_KINDS = ("statement", "branch", "toggle", "condition", "expression", "combination", "fsm")
 
 
+# The letters of 'yavs run --cov=LETTERS': test_real_yavs.py checks this table against the yavs in use
+_COV_LETTERS = {
+    "s": "statement",
+    "b": "branch",
+    "c": "condition",
+    "e": "expression",
+    "t": "toggle",
+    "f": "fsm",
+    "a": "assert",
+    "m": "combination",
+}
+
+
+def _cov_letters_text():
+    """The table of coverage kinds, letter and word, for the messages that name them"""
+    return "\n".join(f"  {letter}  {word}" for letter, word in _COV_LETTERS.items())
+
+
+def _cov_letters(text):
+    """argparse type of --yavs-cov: kind letters, or empty for a bare flag that run_script then refuses"""
+    unknown = sorted({letter for letter in text if letter not in _COV_LETTERS})
+    if unknown:
+        raise argparse.ArgumentTypeError(
+            f"{', '.join(map(repr, unknown))} in --yavs-cov={text} is not a coverage kind letter; the letters are:\n"
+            f"{_cov_letters_text()}\nWrite the letters with =, as --yavs-cov=sbt; words go in --yavs-cov-kind=LIST"
+        )
+    return text
+
+
 # The exports of 'yavs cov report': the flag and what it writes
 _COV_EXPORTS = {"cobertura": "Cobertura XML", "json": "JSON", "lcov": "LCOV", "sonarqube": "SonarQube generic coverage"}
+
+
+def _coverage_requested(args):
+    """Whether --yavs-cov or --yavs-cov-kind turns coverage on, as yavs run --cov and --cov-kind do"""
+    return getattr(args, "yavs_cov", None) is not None or bool(getattr(args, "yavs_cov_kind", None))
 
 
 def _plain_percentage(text):
@@ -143,7 +177,7 @@ def _percentage(text):
 
 class CoverageArgs:  # pylint: disable=too-few-public-methods
     """
-    The coverage command line arguments: --yavs-cov, --yavs-cov-kind, --yavs-cov-html, --yavs-cov-fail-under, --yavs-cov-below,
+    The coverage command line arguments: --yavs-cov (the kind letters), --yavs-cov-kind, --yavs-cov-html, --yavs-cov-fail-under, --yavs-cov-below,
     --yavs-cov-detailed, --yavs-cov-embed-sources, --yavs-cov-exclude, --yavs-cov-config
     """
 
@@ -159,9 +193,11 @@ class CoverageArgs:  # pylint: disable=too-few-public-methods
         config=None,
         exports=None,
         kinds=None,
+        letters=None,
     ):
         self.enabled = enabled
         self.kinds = kinds
+        self.letters = letters
         self.html = html
         self.fail_under = fail_under
         self.below = below
@@ -292,10 +328,15 @@ class YavsInterface(SimulatorInterface):
         )
         group.add_argument(
             "--yavs-cov",
-            action="store_true",
-            default=False,
+            nargs="?",
+            const="",
+            default=None,
+            type=_cov_letters,
+            metavar="LETTERS",
             help="Collect coverage in every simulation, as the VUnit option enable_coverage does for the tests "
-            "it is set for. Merge and report with results.merge_coverage() in the post_run function.",
+            "it is set for, of the kinds the letters name (--yavs-cov=sbt): s statement, b branch, c condition, "
+            "e expression, t toggle, f fsm, a assert, m combination. No kind is on by default. Write the letters "
+            "with =. Merge and report with results.merge_coverage() in the post_run function.",
         )
         group.add_argument(
             "--yavs-cov-directives",
@@ -309,7 +350,8 @@ class YavsInterface(SimulatorInterface):
             default=None,
             metavar="KIND,...",
             help="The kinds of coverage to count, as yavs run --cov-kind (fsm, assert, condition, ...), for the tests "
-            "without a yavs.cov_kind sim option. Needs --yavs-cov or the enable_coverage sim option.",
+            "without a yavs.cov_kind sim option; the long form of --yavs-cov=LETTERS, not with it, and it also turns "
+            "coverage on.",
         )
         group.add_argument(
             "--yavs-cov-html",
@@ -380,6 +422,8 @@ class YavsInterface(SimulatorInterface):
                 "use --yavs-debug and attach a DAP client such as VS Code."
             )
         # Arguments added by a package are missing from a namespace the run script built itself
+        if getattr(args, "yavs_cov", None) and getattr(args, "yavs_cov_kind", None):
+            refuse("--yavs-cov=LETTERS and --yavs-cov-kind both select the coverage kinds. Give the kinds once.")
         debug_port = getattr(args, "yavs_debug", None)
         interactive = getattr(args, "yavs_interactive", False)
         surfer = getattr(args, "yavs_surfer", None)
@@ -415,8 +459,9 @@ class YavsInterface(SimulatorInterface):
             lint=getattr(args, "yavs_lint", False),
             cov_directives=getattr(args, "yavs_cov_directives", None),
             coverage=CoverageArgs(
-                enabled=getattr(args, "yavs_cov", False),
+                enabled=_coverage_requested(args),
                 kinds=getattr(args, "yavs_cov_kind", None),
+                letters=getattr(args, "yavs_cov", None) or None,
                 html=getattr(args, "yavs_cov_html", None),
                 fail_under=getattr(args, "yavs_cov_fail_under", None),
                 below=getattr(args, "yavs_cov_below", None),
@@ -689,12 +734,23 @@ class YavsInterface(SimulatorInterface):
                 )
                 return False
             database = script_path / "coverage.ycov"
-            cmd += [f"--cov={database}", f"--cov-test={test_suite_name}"]
             kinds = config.sim_options.get("yavs.cov_kind", [])
             if kinds:
                 cmd += [f"--cov-kind={','.join(kinds)}"]
             elif self._coverage.kinds:
                 cmd += [f"--cov-kind={self._coverage.kinds}"]
+            elif self._coverage.letters:
+                cmd += [f"--cov={self._coverage.letters}"]
+            else:
+                print(
+                    "error: coverage is on, but no coverage kind is selected, and none is on by default.\n"
+                    "Fix: give the kinds with --yavs-cov=LETTERS (for example --yavs-cov=sbt), "
+                    "--yavs-cov-kind=statement,branch,toggle, or the sim option yavs.cov_kind "
+                    "(for example set_sim_option('yavs.cov_kind', ['statement', 'branch', 'toggle'])).\n"
+                    f"The kinds:\n{_cov_letters_text()}"
+                )
+                return False
+            cmd += [f"--cov-file={database}", f"--cov-test={test_suite_name}"]
             if self._coverage.embed_sources or config.sim_options.get("yavs.cov_embed_sources", False):
                 cmd += ["--cov-embed-sources"]
             self._coverage_files.add(str(database))
@@ -788,7 +844,7 @@ class YavsInterface(SimulatorInterface):
         if not databases:
             refuse(
                 "There is no coverage database to merge: no simulation ran with coverage. "
-                "Set the sim option enable_coverage or pass --yavs-cov."
+                "Set the sim option enable_coverage or pass --yavs-cov=LETTERS."
             )
 
         merged = Path(file_name)
@@ -876,7 +932,7 @@ def check_debug_args(args):
     """
     Refuse arguments that cannot be combined with --yavs-debug
     """
-    if getattr(args, "yavs_cov", False):
+    if _coverage_requested(args):
         refuse(
             "--yavs-debug and coverage cannot be combined: yavs does not collect coverage under the debugger. "
             "Drop --yavs-cov or --yavs-debug."
@@ -897,7 +953,7 @@ def check_interactive_args(args, debug_port):
     """
     Refuse arguments that cannot be combined with --yavs-interactive
     """
-    if getattr(args, "yavs_cov", False):
+    if _coverage_requested(args):
         refuse(
             "--yavs-interactive and coverage cannot be combined: yavs does not collect coverage under the debugger. "
             "Drop --yavs-cov or --yavs-interactive."

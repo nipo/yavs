@@ -108,10 +108,13 @@ fn run_merge_report() {
     let src = src.to_str().expect("utf-8 path");
     assert!(yavs(&tmp, &["analyze", &lib, src]).status.success());
     let run = |db: &str, extra: &[&str]| {
-        let o = yavs(&tmp, &[&["run", &lib, "cov_run", db][..], extra].concat());
+        let o = yavs(
+            &tmp,
+            &[&["run", &lib, "cov_run", "--cov=sbt", db][..], extra].concat(),
+        );
         assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
     };
-    run("--cov=a.ycov", &[]);
+    run("--cov-file=a.ycov", &[]);
     let a = read(&tmp.join("a.ycov"));
     let mut want: Vec<_> = EXPECTED
         .iter()
@@ -121,14 +124,14 @@ fn run_merge_report() {
     assert_eq!(counts(&a), want);
 
     // Byte-identical at four threads.
-    run("--cov=a4.ycov", &["--threads", "4"]);
+    run("--cov-file=a4.ycov", &["--threads", "4"]);
     assert_eq!(
         std::fs::read(tmp.join("a.ycov")).expect("a"),
         std::fs::read(tmp.join("a4.ycov")).expect("a4")
     );
 
     // A second run (the `for` loop not entered), merged: every count is the sum.
-    run("--cov=b.ycov", &["-gn=0"]);
+    run("--cov-file=b.ycov", &["-gn=0"]);
     let b = read(&tmp.join("b.ycov"));
     let o = yavs(&tmp, &["cov", "merge", "a.ycov", "b.ycov", "-o", "c.ycov"]);
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
@@ -187,6 +190,58 @@ fn run_merge_report() {
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
+/// No kind is on by default: coverage without kinds, a bad letter and contradictory options are
+/// E0140 before anything is analysed; letters in any order and repeated mean the same kinds.
+#[test]
+fn kinds_are_opt_in() {
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/cli/cov_run.vhd");
+    let tmp = tempdir("optin");
+    let lib = format!("--work=work:{}/lib", tmp.display());
+    let src = src.to_str().expect("utf-8 path");
+    assert!(yavs(&tmp, &["analyze", &lib, src]).status.success());
+    let fails = |extra: &[&str], text: &[&str]| {
+        let o = yavs(&tmp, &[&["run", &lib, "cov_run"][..], extra].concat());
+        let err = String::from_utf8_lossy(&o.stderr);
+        assert_eq!(o.status.code(), Some(2), "{extra:?}: {err}");
+        for t in std::iter::once(&"error[E0140]").chain(text) {
+            assert!(err.contains(t), "{extra:?} lacks `{t}`: {err}");
+        }
+        assert!(!tmp.join("yavs.ycov").exists());
+    };
+    let letters = ["  s  statement", "  m  combination", "--cov=sbt"];
+    fails(&["--cov"], &letters);
+    fails(&["--cov="], &letters);
+    // The old form: the file name is not letters, and the way out is named.
+    fails(
+        &["--cov=a.ycov"],
+        &[&letters[..], &["--cov-file=FILE"]].concat(),
+    );
+    fails(&["--cov=sbx"], &["`x` in `--cov=sbx`"]);
+    fails(&["--cov=s", "--cov-kind=branch"], &["both select"]);
+    fails(&["--cov-file=a.ycov"], &["`--cov-file` needs coverage on"]);
+    fails(&["--cov-embed-sources"], &["needs coverage on"]);
+    // An unknown word keeps the shared "did you mean".
+    let o = yavs(&tmp, &["run", &lib, "cov_run", "--cov-kind=statment"]);
+    assert!(String::from_utf8_lossy(&o.stderr).contains("`statement`"));
+    // Letters in any order, repeated, give the same database as the words; the file is `yavs.ycov`.
+    let go = |args: &[&str]| {
+        let o = yavs(&tmp, &[&["run", &lib, "cov_run"][..], args].concat());
+        assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    };
+    go(&["--cov=tbsb"]);
+    let by_letters = read(&tmp.join("yavs.ycov"));
+    go(&["--cov-kind=statement,branch,toggle", "--cov-file=w.ycov"]);
+    let by_words = read(&tmp.join("w.ycov"));
+    assert_eq!(counts(&by_letters), counts(&by_words));
+    // Statements only: no branch or toggle item.
+    go(&["--cov=s", "--cov-file=s.ycov"]);
+    let only = counts(&read(&tmp.join("s.ycov")));
+    assert!(
+        !only.is_empty() && only.iter().all(|c| c.0 == "s"),
+        "{only:?}"
+    );
+}
+
 const EXCL: &str = "entity cov_excl is end entity;
 architecture sim of cov_excl is
   signal s : integer := 0;
@@ -214,7 +269,16 @@ fn cov_run(tmp: &Path, src: &str) -> String {
             .status
             .success()
     );
-    let o = yavs(tmp, &["run", "--work=work:lib", "cov_excl", "--cov=a.ycov"]);
+    let o = yavs(
+        tmp,
+        &[
+            "run",
+            "--work=work:lib",
+            "cov_excl",
+            "--cov=sbt",
+            "--cov-file=a.ycov",
+        ],
+    );
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
     String::from_utf8_lossy(&o.stderr).into_owned()
 }
@@ -384,7 +448,7 @@ fn toggle_coverage() {
         assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
         String::from_utf8_lossy(&o.stderr).into_owned()
     };
-    run(&["--cov=a.ycov"]);
+    run(&["--cov=sbt", "--cov-file=a.ycov"]);
     let a = read(&tmp.join("a.ycov"));
     let want: Vec<_> = TOGGLES
         .iter()
@@ -393,7 +457,7 @@ fn toggle_coverage() {
     assert_eq!(toggles(&a), want);
 
     // Byte-identical at four threads; merge adds the counts.
-    run(&["--cov=a4.ycov", "--threads", "4"]);
+    run(&["--cov=sbt", "--cov-file=a4.ycov", "--threads", "4"]);
     assert_eq!(
         std::fs::read(tmp.join("a.ycov")).expect("a"),
         std::fs::read(tmp.join("a4.ycov")).expect("a4")
@@ -407,7 +471,11 @@ fn toggle_coverage() {
     }
 
     // Only toggles; the cap leaves `v` (two scalars) out with W0115.
-    let err = run(&["--cov=t.ycov", "--cov-kind=toggle", "--cov-toggle-max=1"]);
+    let err = run(&[
+        "--cov-file=t.ycov",
+        "--cov-kind=toggle",
+        "--cov-toggle-max=1",
+    ]);
     assert!(
         err.contains("warning[W0115]") && err.contains("cov_toggle.v"),
         "{err}"
@@ -502,7 +570,17 @@ fn per_test_attribution() {
     ] {
         let o = yavs(
             &tmp,
-            &[&["run", &lib, "cov_run", &format!("--cov={db}")][..], extra].concat(),
+            &[
+                &[
+                    "run",
+                    &lib,
+                    "cov_run",
+                    "--cov=sbt",
+                    &format!("--cov-file={db}"),
+                ][..],
+                extra,
+            ]
+            .concat(),
         );
         assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
     }
@@ -562,8 +640,8 @@ fn cov_dbs(tmp: &Path, file: &str, top: &str, runs: &[(&str, &[&str])]) {
             .success()
     );
     for (db, extra) in runs {
-        let cov = format!("--cov={db}");
-        let args = [&["run", &lib, top, &cov][..], extra].concat();
+        let cov = format!("--cov-file={db}");
+        let args = [&["run", &lib, top, "--cov=sbt", &cov][..], extra].concat();
         let o = yavs(tmp, &args);
         assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
     }
@@ -780,10 +858,15 @@ fn toggles_of_collapsed_ports() {
             .success()
     );
     let run = |db: &str, extra: &[&str]| {
-        let cov = format!("--cov={db}");
+        let cov = format!("--cov-file={db}");
         let o = yavs(
             &tmp,
-            &[&["run", &lib, &cov][..], extra, &["in_port_collapse_part"]].concat(),
+            &[
+                &["run", &lib, "--cov=sbt", &cov][..],
+                extra,
+                &["in_port_collapse_part"],
+            ]
+            .concat(),
         );
         assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
         toggles(&read(&tmp.join(db)))
@@ -866,7 +949,7 @@ fn replayed_calls_run_optimised() {
             "--std=2008",
             &lib,
             "cov_replay",
-            "--cov=r.ycov",
+            "--cov-file=r.ycov",
             "--cov-kind=statement",
             "--tier=interp",
             "--no-cache",
@@ -934,7 +1017,7 @@ fn edge_triggers_count_their_edges() {
                 "--std=2008",
                 &lib,
                 "cov_edge",
-                &format!("--cov={db}"),
+                &format!("--cov-file={db}"),
                 "--cov-kind=statement,branch",
                 "--tier=interp",
                 "--threads",
@@ -981,7 +1064,7 @@ fn copies_count_alike() {
     let go = |db: &str, threads: &str, env: &[(&str, &str)]| {
         let o = Command::new(env!("CARGO_BIN_EXE_yavs"))
             .args(["--color", "never", "run", &lib, "cov_copies"])
-            .args([&format!("--cov={db}"), kinds, "--tier=interp"])
+            .args([&format!("--cov-file={db}"), kinds, "--tier=interp"])
             .args(["--no-cache", "--threads", threads])
             .envs(env.iter().copied())
             .env("YAVS_COUNTERS", "1")

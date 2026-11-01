@@ -73,7 +73,7 @@ Syntax, command line, waveforms, coverage, debugger, plugins (E0 and W0)
    * - _`W0109`
      - ``--threads`` is ignored with ``--dap``, ``--interactive`` and ``--do``: a debug session stops inside processes, which needs the simulation on one thread.
    * - _`E0110`
-     - A coverage database or report cannot be written (``yavs run --cov=FILE``, ``yavs cov merge -o FILE``, ``yavs cov report --cobertura FILE``): the note gives the operating system's reason.
+     - A coverage database or report cannot be written (``yavs run --cov-file=FILE``, ``yavs cov merge -o FILE``, ``yavs cov report --cobertura FILE``): the note gives the operating system's reason.
    * - _`W0110`
      - A row of the exclusion file names a line (``file:line``) that is not where the excluded statement is now.
    * - _`E0111`
@@ -140,6 +140,8 @@ Syntax, command line, waveforms, coverage, debugger, plugins (E0 and W0)
      - ``yavs cov merge`` or ``yavs cov report`` was given databases that disagree about an in-source coverage exclusion: a combination or a condition or expression row that a ``-- yavs coverage exclude`` directive waives in one run is a requirement in another (the other run was made from other sources, or with ``--coverage-directives=ignore``).
    * - _`E0138`
      - The file of ``yavs cov report --config`` or ``yavs cov rank --config`` cannot be read or is not a coverage configuration file.
+   * - _`E0140`
+     - The coverage options of ``yavs run`` do not name a coverage kind to count, or contradict each other.
    * - _`E0199`
      - A command option or combination is not implemented yet.
    * - _`E0701`

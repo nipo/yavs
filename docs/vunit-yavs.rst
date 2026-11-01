@@ -40,7 +40,8 @@ as ``--name=value``.
    * - ``yavs.cov_kind``
      - ``yavs run --cov-kind=LIST``: the kinds of coverage to count (``statement``, ``branch``,
        ``toggle``, ``condition``, ``assert``, ``expression``, ``combination``, ``fsm``). Used with VUnit's own ``enable_coverage``
-       sim option, which makes every run write a coverage database (:ref:`vunit-coverage`).
+       sim option, which makes every run write a coverage database (:ref:`vunit-coverage`). No kind is on by default:
+       ``enable_coverage`` without this option, ``--yavs-cov-kind`` or ``--yavs-cov=LETTERS`` fails the simulation with a message that names them.
    * - ``yavs.init_files.after_load``
      - Files of console commands sourced after each ``vunit_load`` (:doc:`interactive`).
    * - ``yavs.init_files.before_run``
@@ -83,15 +84,17 @@ out stops the run script with one ``error:`` line that says why and what to drop
        directory you run in or an ancestor. ``file_list`` in that file is not read: the project says
        which files a library has. The configuration is read once before any library is checked: an
        unknown key, rule or rule group in it or in the waiver file is error E0134 and fails the compile step.
-   * - ``--yavs-cov``
+   * - ``--yavs-cov=LETTERS``
      - Collects coverage in every simulation, as ``enable_coverage`` does for the tests it is set
-       for. Not with ``--yavs-debug`` or ``--yavs-interactive``.
+       for, of the kinds the letters name (``--yavs-cov=sbt``): ``s`` statement, ``b`` branch, ``c`` condition,
+       ``e`` expression, ``t`` toggle, ``f`` fsm, ``a`` assert, ``m`` combination. No kind is on by default.
+       Write the letters with ``=``. Not with ``--yavs-debug`` or ``--yavs-interactive``.
    * - ``--yavs-cov-directives MODE``
      - ``apply`` or ``ignore``: what ``yavs analyze``, ``elab`` and ``run`` do with the
        ``-- yavs coverage exclude`` comments in the sources (``--coverage-directives``, :doc:`coverage`).
        Without it they are checked when compiling, as yavs does by default.
    * - ``--yavs-cov-kind KIND,...``
-     - The kinds of coverage to count, as ``yavs run --cov-kind`` (``fsm``, ``assert``, ``condition`` and the others), for tests without a ``yavs.cov_kind`` sim option. Needs ``--yavs-cov`` or the ``enable_coverage`` sim option.
+     - The kinds of coverage to count, as ``yavs run --cov-kind`` (``fsm``, ``assert``, ``condition`` and the others), for tests without a ``yavs.cov_kind`` sim option. The long form of ``--yavs-cov=LETTERS``, not given with it; it also turns coverage on.
    * - ``--yavs-cov-html DIR``
      - ``results.merge_coverage()`` also writes the HTML coverage report into DIR.
    * - ``--yavs-cov-fail-under PCT``
@@ -138,15 +141,15 @@ Coverage
 
 .. code-block:: python
 
-   vu.set_sim_option("enable_coverage", True)      # or run with --yavs-cov
-   vu.set_sim_option("yavs.cov_kind", ["statement", "branch"])
+   vu.set_sim_option("enable_coverage", True)      # or run with --yavs-cov=sb
+   vu.set_sim_option("yavs.cov_kind", ["statement", "branch"])     # no kind is on by default
    vu.main(post_run=lambda results: results.merge_coverage("coverage"))
 
 Each simulation writes a database named after its test. ``merge_coverage("coverage")`` merges
 them into ``coverage.ycov``. With ``--yavs-cov-html``, ``--yavs-cov-fail-under`` or arguments for
 ``yavs cov report`` (``merge_coverage("coverage", args=["--cobertura", "c.xml"])``) it then
 reports on the merged database. The reports, exclusions and numbers are in :doc:`coverage`;
-a CI gate is ``python run.py --yavs-cov --yavs-cov-fail-under 85``. In a script, what a report does goes through ``args``: ``merge_coverage("coverage", args=["--below=100", "--detailed"])`` is the
+a CI gate is ``python run.py --yavs-cov=sbt --yavs-cov-fail-under 85``. In a script, what a report does goes through ``args``: ``merge_coverage("coverage", args=["--below=100", "--detailed"])`` is the
 "what is left to do" view.
 
 A run script passes exclusions in ``args``, and a person adds more on the command line:

@@ -168,14 +168,14 @@ class TestPackage(unittest.TestCase):
         self.assertIn("Write the port as --yavs-debug=PORT", stderr.getvalue())
 
     def test_coverage_arguments(self):
-        vu = self._vunit("--yavs-cov", "--yavs-cov-html=cov html", "--yavs-cov-fail-under=92.5")
+        vu = self._vunit("--yavs-cov=sbt", "--yavs-cov-html=cov html", "--yavs-cov-fail-under=92.5")
         vu.get_simulator_name()
         args = vu._args  # pylint: disable=protected-access
-        self.assertEqual((args.yavs_cov, args.yavs_cov_html, args.yavs_cov_fail_under), (True, "cov html", "92.5"))
+        self.assertEqual((args.yavs_cov, args.yavs_cov_html, args.yavs_cov_fail_under), ("sbt", "cov html", "92.5"))
         vu = self._vunit()
         vu.get_simulator_name()
         args = vu._args  # pylint: disable=protected-access
-        self.assertEqual((args.yavs_cov, args.yavs_cov_html, args.yavs_cov_fail_under), (False, None, None))
+        self.assertEqual((args.yavs_cov, args.yavs_cov_html, args.yavs_cov_fail_under), (None, None, None))
         vu = self._vunit("--yavs-cov-fail-under=statement:90,branch:80")
         vu.get_simulator_name()
         self.assertEqual(vu._args.yavs_cov_fail_under, "statement:90,branch:80")  # pylint: disable=protected-access
@@ -214,6 +214,17 @@ class TestPackage(unittest.TestCase):
         with mock.patch("sys.stderr", new_callable=io.StringIO) as stderr, self.assertRaises(SystemExit):
             vu.get_simulator_name()
         self.assertIn("invalid choice", stderr.getvalue())
+
+    def test_coverage_letters(self):
+        vu = self._vunit("--yavs-cov=sbtfamce")
+        vu.get_simulator_name()
+        self.assertEqual(vu._args.yavs_cov, "sbtfamce")  # pylint: disable=protected-access
+        # A file name where the letters go (the old form) is refused with the letters and the way out
+        vu = self._vunit("--yavs-cov=a.ycov")
+        with mock.patch("sys.stderr", new_callable=io.StringIO) as stderr, self.assertRaises(SystemExit):
+            vu.get_simulator_name()
+        for text in ("in --yavs-cov=a.ycov", "  s  statement", "  m  combination", "--yavs-cov=sbt"):
+            self.assertIn(text, stderr.getvalue())
 
     def test_coverage_options(self):
         self._vunit().get_simulator_name()
@@ -462,9 +473,9 @@ class TestYavsInterface(unittest.TestCase):
         )
         _, cmd, _ = self._simulate(config, suite="lib.tb.test_a")
         # The options come before the raw flags, which win
-        at = cmd.index(f"--cov={database}")
+        at = cmd.index("--cov-kind=statement,branch,toggle")
         self.assertEqual(
-            cmd[at : at + 3], [f"--cov={database}", "--cov-test=lib.tb.test_a", "--cov-kind=statement,branch,toggle"]
+            cmd[at : at + 3], ["--cov-kind=statement,branch,toggle", f"--cov-file={database}", "--cov-test=lib.tb.test_a"]
         )
         self.assertLess(at, cmd.index("--cov-kind=condition"))
         # Not for an elaboration, and not without the option
@@ -497,10 +508,25 @@ class TestYavsInterface(unittest.TestCase):
         self.assertIn("--cov-kind=statement", cmd)
         self.assertNotIn("--cov-kind=fsm,assert", cmd)
 
-    def test_command_line_enables_coverage_without_kinds(self):
-        _, cmd, _ = self._simulate(make_config(), coverage=CoverageArgs(enabled=True))
-        self.assertEqual(len([arg for arg in cmd if arg.startswith("--cov")]), 2)
+    def test_command_line_letters_reach_yavs(self):
+        self.simif = YavsInterface(
+            prefix="prefix", output_path=self.output_path, coverage=CoverageArgs(enabled=True, letters="sbt")
+        )
+        database = Path(self.output_path) / "yavs" / "coverage.ycov"
+        _, cmd, _ = self._simulate(make_config(), suite="lib.tb.test_a")
+        self.assertEqual(cmd[cmd.index("--cov=sbt") :][:3], ["--cov=sbt", f"--cov-file={database}", "--cov-test=lib.tb.test_a"])
         self.assertFalse(any(arg.startswith("--cov-kind") for arg in cmd))
+
+    def test_coverage_without_kinds_is_refused_before_yavs_runs(self):
+        for coverage, sim_options in [(CoverageArgs(enabled=True), {}), (None, {"enable_coverage": True})]:
+            self.simif = YavsInterface(prefix="prefix", output_path=self.output_path, coverage=coverage)
+            self.simif.setup_library_mapping(self._project("2008"))
+            with mock.patch("vunit_yavs.Process", autospec=True) as process, mock.patch("sys.stdout", new=io.StringIO()) as out:
+                config = make_config(sim_options=sim_options)
+                self.assertFalse(self.simif.simulate(self.output_path, "lib.tb", config, False))
+            process.assert_not_called()
+            for text in ("no coverage kind is selected", "--yavs-cov=sbt", "--yavs-cov-kind", "yavs.cov_kind", "  f  fsm"):
+                self.assertIn(text, out.getvalue())
 
     def test_coverage_refuses_the_debugger(self):
         with mock.patch("vunit_yavs.Process", autospec=True) as process, mock.patch("sys.stdout", new=io.StringIO()) as out:
@@ -512,21 +538,23 @@ class TestYavsInterface(unittest.TestCase):
         self.assertIn("--yavs-debug and coverage cannot be combined", out.getvalue())
 
     def test_embed_sources_option_and_flag(self):
-        config = make_config(sim_options={"enable_coverage": True, "yavs.cov_embed_sources": True})
+        config = make_config(
+            sim_options={"enable_coverage": True, "yavs.cov_kind": ["statement"], "yavs.cov_embed_sources": True}
+        )
         _, cmd, _ = self._simulate(config, suite="lib.tb.test_a")
         self.assertIn("--cov-embed-sources", cmd)
-        _, cmd, _ = self._simulate(make_config(sim_options={"enable_coverage": True}), suite="lib.tb.test_a")
+        _, cmd, _ = self._simulate(make_config(sim_options={"enable_coverage": True, "yavs.cov_kind": ["statement"]}), suite="lib.tb.test_a")
         self.assertNotIn("--cov-embed-sources", cmd)
         self.simif = YavsInterface(
             prefix="prefix", output_path=self.output_path, coverage=CoverageArgs(embed_sources=True)
         )
-        _, cmd, _ = self._simulate(make_config(sim_options={"enable_coverage": True}), suite="lib.tb.test_a")
+        _, cmd, _ = self._simulate(make_config(sim_options={"enable_coverage": True, "yavs.cov_kind": ["statement"]}), suite="lib.tb.test_a")
         self.assertIn("--cov-embed-sources", cmd)
 
     def _simulate_with_coverage(self, **kwargs):
         """Run a simulation with coverage; yavs would write its database at yavs/coverage.ycov"""
         self.simif = YavsInterface(prefix="prefix", output_path=self.output_path, **kwargs)
-        self._simulate(make_config(sim_options={"enable_coverage": True}))
+        self._simulate(make_config(sim_options={"enable_coverage": True, "yavs.cov_kind": ["statement"]}))
 
     def test_merge_coverage(self):
         self._simulate_with_coverage()

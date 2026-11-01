@@ -141,11 +141,11 @@ recorded and how to watch a run while it goes.
 Measure coverage
 ----------------
 
-Run with ``--cov``, then report on the database it writes:
+Run with ``--cov=sb`` (statements and branches; no kind is counted unless you name it), then report on the database it writes:
 
 .. code-block:: bash
 
-    ./run.sh --cov=build/tb.ycov --cov-kind=statement,branch
+    ./run.sh --cov=sb --cov-file=build/tb.ycov
     yavs cov report build/tb.ycov
 
 .. code-block:: text

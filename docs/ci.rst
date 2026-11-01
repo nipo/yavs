@@ -83,7 +83,7 @@ A coverage gate
 
 .. code-block:: bash
 
-    yavs run --work=work:build/work --map=rtl:build/rtl counter_tb --cov=cov/a.ycov
+    yavs run --work=work:build/work --map=rtl:build/rtl counter_tb --cov=sbt --cov-file=cov/a.ycov
     yavs cov merge cov/*.ycov -o cov/all.ycov
     yavs cov report cov/all.ycov --html cov-html --cobertura coverage.xml --fail-under=85
     echo "coverage $(yavs cov report cov/all.ycov --total)"
@@ -96,7 +96,7 @@ names the ones that fall short. ``--json``, ``--lcov`` and ``--sonarqube`` write
 
 .. code-block:: bash
 
-    python run.py --yavs-cov --yavs-cov-html cov-html --yavs-cov-fail-under 85
+    python run.py --yavs-cov=sbt --yavs-cov-html cov-html --yavs-cov-fail-under 85
 
 A lint step
 -----------
@@ -169,8 +169,8 @@ This is the walkthrough project (:doc:`project-walkthrough`) as a job. It needs 
           - name: Simulate
             run: |
               mkdir -p cov
-              yavs run --work=work:build/work --map=rtl:build/rtl counter_tb -gWIDTH=3 --cov=cov/w3.ycov
-              yavs run --work=work:build/work --map=rtl:build/rtl counter_tb -gWIDTH=4 --cov=cov/w4.ycov
+              yavs run --work=work:build/work --map=rtl:build/rtl counter_tb -gWIDTH=3 --cov=sbt --cov-file=cov/w3.ycov
+              yavs run --work=work:build/work --map=rtl:build/rtl counter_tb -gWIDTH=4 --cov=sbt --cov-file=cov/w4.ycov
 
           - name: Coverage
             run: |

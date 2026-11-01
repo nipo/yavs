@@ -33,7 +33,7 @@ fn database(name: &str) -> Tmp {
         &[
             "run",
             &lib,
-            "--cov=a.ycov",
+            "--cov-file=a.ycov",
             "--cov-kind=statement,branch",
             "cov_report",
         ],
@@ -510,9 +510,9 @@ fn embedded_sources_need_no_checkout() {
     let tmp = database("embed");
     let lib = format!("--work=work:{}/lib", tmp.display());
     let run = |db: &str, extra: &[&str]| {
-        let cov = format!("--cov={db}");
+        let cov = format!("--cov-file={db}");
         let args = [
-            &["run", lib.as_str(), "cov_report", cov.as_str()][..],
+            &["run", lib.as_str(), "cov_report", "--cov=sbt", cov.as_str()][..],
             extra,
         ]
         .concat();
@@ -593,7 +593,7 @@ fn printed_exclusions_work_when_pasted() {
             "run",
             lib.as_str(),
             "t",
-            "--cov=a.ycov",
+            "--cov-file=a.ycov",
             "--cov-kind=statement,branch,toggle,condition,combination",
         ];
         let o = yavs(&tmp, &args);
@@ -776,7 +776,7 @@ fn printed_toggle_rows_take_out_only_the_missed_bits() {
             "run",
             lib.as_str(),
             "t",
-            "--cov=a.ycov",
+            "--cov-file=a.ycov",
             "--cov-kind=toggle",
         ],
     );

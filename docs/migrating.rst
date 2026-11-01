@@ -46,7 +46,7 @@ The same tasks in yavs
    * - Check code without simulating
      - ``yavs lint`` (:doc:`lint`, a release newer than 0.11.0).
    * - Collect coverage
-     - ``--cov=FILE`` on ``run``, then ``yavs cov report`` (:doc:`coverage`).
+     - ``--cov=LETTERS`` and ``--cov-file=FILE`` on ``run``, then ``yavs cov report`` (:doc:`coverage`).
    * - See why a run does not finish, what failed, what is busy
      - ``--hang-report``, ``--assert-summary``, ``--activity`` (:doc:`cli`, a release newer than 0.11.0).
    * - Silence a warning

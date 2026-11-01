@@ -191,9 +191,23 @@ fn a_package_loaded_during_elaboration_runs_after_the_calls_before_it() {
 fn the_build_replays_the_calls_in_the_same_order() {
     // Coverage counters: the simulation initialises the packages again and replays the calls.
     let dir = design("late-pkg-cov");
-    check_values(&run(&dir, &["--no-cache", "--tier=interp", "--cov=a.ycov"]));
-    check_values(&run(&dir, &["--tier=interp", "--cov=b.ycov"]));
-    check_values(&run(&dir, &["--tier=interp", "--cov=c.ycov"]));
+    check_values(&run(
+        &dir,
+        &[
+            "--no-cache",
+            "--tier=interp",
+            "--cov=sbt",
+            "--cov-file=a.ycov",
+        ],
+    ));
+    check_values(&run(
+        &dir,
+        &["--tier=interp", "--cov=sbt", "--cov-file=b.ycov"],
+    ));
+    check_values(&run(
+        &dir,
+        &["--tier=interp", "--cov=sbt", "--cov-file=c.ycov"],
+    ));
 }
 
 #[cfg(feature = "llvm")]
@@ -202,7 +216,7 @@ fn llvm_tiers_keep_the_order() {
     let dir = design("late-pkg-llvm");
     for tier in ["--tier=llvm", "--tier=auto"] {
         check(&run(&dir, &[tier]));
-        check_values(&run(&dir, &[tier, "--cov=l.ycov"]));
+        check_values(&run(&dir, &[tier, "--cov=sbt", "--cov-file=l.ycov"]));
     }
 }
 
@@ -212,7 +226,7 @@ fn clift_tiers_keep_the_order() {
     let dir = design("late-pkg-clift");
     for tier in ["--tier=clift", "--tier=clift-auto"] {
         check(&run(&dir, &[tier]));
-        check_values(&run(&dir, &[tier, "--cov=c.ycov"]));
+        check_values(&run(&dir, &[tier, "--cov=sbt", "--cov-file=c.ycov"]));
     }
 }
 

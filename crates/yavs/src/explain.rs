@@ -199,7 +199,7 @@ const EXPLAIN: &[(&str, &str)] = &[
     ),
     (
         "E0110",
-        "A coverage database or report cannot be written (`yavs run --cov=FILE`, `yavs cov merge -o FILE`, `yavs cov report --cobertura FILE`): the note gives the operating system's reason.",
+        "A coverage database or report cannot be written (`yavs run --cov-file=FILE`, `yavs cov merge -o FILE`, `yavs cov report --cobertura FILE`): the note gives the operating system's reason.",
     ),
     (
         "E0111",
@@ -220,6 +220,10 @@ const EXPLAIN: &[(&str, &str)] = &[
     (
         "E0112",
         "An exclusion file given to `yavs cov report --exclude` cannot be read or has a malformed row or entry (a `.yaml` or `.yml` file is read as YAML, any other as text rows); the note names the line. Rows start with `statement`, `branch`, `condition`, `expression`, `combination`, `toggle`, `instance`, `unit`, `file`, `files`, `files_exclude`, `library`, `entity` or `process`; a YAML entry has the same word as its `kind`. A `library`, `entity` or `process` row over a database written by an older yavs is this error too: such a database does not record those names, so run the simulations again.",
+    ),
+    (
+        "E0140",
+        "The coverage options of `yavs run` do not name a coverage kind to count, or contradict each other. No kind is on by default: `--cov=LETTERS` turns coverage on and selects kinds (`s` statement, `b` branch, `c` condition, `e` expression, `t` toggle, `f` fsm, `a` assert, `m` combination), `--cov-kind=LIST` does the same with words. Bare `--cov`, a letter that is none (an old `--cov=FILE` is this error: the database file is `--cov-file=FILE` now), `--cov` together with `--cov-kind`, and `--cov-file` or `--cov-embed-sources` without coverage on are this error. The run stops before analysis (exit status 2).",
     ),
     (
         "E0138",

@@ -162,7 +162,10 @@ fn want() -> Vec<(String, u32, String, u64)> {
 fn counts_threads_and_reports() {
     let tmp = setup("fec");
     let plain = run(&tmp, &[]);
-    let with = run(&tmp, &["--cov=a.ycov", "--cov-kind=condition,expression"]);
+    let with = run(
+        &tmp,
+        &["--cov-file=a.ycov", "--cov-kind=condition,expression"],
+    );
     // The design behaves the same with the counters on.
     assert_eq!(plain.stdout, with.stdout);
     assert_eq!(plain.stderr, with.stderr);
@@ -175,7 +178,7 @@ fn counts_threads_and_reports() {
     run(
         &tmp,
         &[
-            "--cov=a4.ycov",
+            "--cov-file=a4.ycov",
             "--cov-kind=condition,expression",
             "--threads=4",
         ],
@@ -186,17 +189,17 @@ fn counts_threads_and_reports() {
     );
 
     // The other kinds alone, and each kind apart.
-    run(&tmp, &["--cov=s.ycov", "--cov-kind=statement,branch"]);
+    run(&tmp, &["--cov-file=s.ycov", "--cov-kind=statement,branch"]);
     assert!(
         read(&tmp.join("s.ycov"))
             .items
             .keys()
             .all(|k| !k.kind.is_fec())
     );
-    run(&tmp, &["--cov=c.ycov", "--cov-kind=condition"]);
+    run(&tmp, &["--cov-file=c.ycov", "--cov-kind=condition"]);
     let c = rows(&read(&tmp.join("c.ycov")));
     assert!(!c.is_empty() && c.iter().all(|r| r.0.starts_with('c')));
-    run(&tmp, &["--cov=e.ycov", "--cov-kind=expression"]);
+    run(&tmp, &["--cov-file=e.ycov", "--cov-kind=expression"]);
     let e = rows(&read(&tmp.join("e.ycov")));
     assert!(!e.is_empty() && e.iter().all(|r| r.0.starts_with('e')));
 
@@ -274,7 +277,7 @@ fn merge_keeps_tests() {
         run(
             &tmp,
             &[
-                &format!("--cov={t}.ycov"),
+                &format!("--cov-file={t}.ycov"),
                 "--cov-kind=condition,expression",
                 &format!("--cov-test={t}"),
             ],
@@ -303,7 +306,7 @@ fn tiers_agree() {
         run(
             &tmp,
             &[
-                &format!("--cov={tier}.ycov"),
+                &format!("--cov-file={tier}.ycov"),
                 "--cov-kind=condition,expression",
                 &format!("--tier={tier}"),
             ],
@@ -336,7 +339,7 @@ fn cov_run(tmp: &Path, src: &str) {
             "run",
             "--work=work:lib",
             "d",
-            "--cov=a.ycov",
+            "--cov-file=a.ycov",
             "--cov-kind=condition,expression",
         ],
     );

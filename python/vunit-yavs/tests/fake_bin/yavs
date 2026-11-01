@@ -194,8 +194,8 @@ def run(args, elaborate_only):
     if elaborate_only:
         return 0
     use_tokens()
-    if "cov" in opts:
-        Path(opts["cov"][-1]).write_text(f"fake database of {opts.get('cov-test', ['?'])[-1]}\n", encoding="utf-8")
+    if "cov-file" in opts:
+        Path(opts["cov-file"][-1]).write_text(f"fake database of {opts.get('cov-test', ['?'])[-1]}\n", encoding="utf-8")
     if "dap" in opts:
         port = opts["dap"][-1]
         print(f"yavs: DAP listening on 127.0.0.1:{port}", file=sys.stderr)

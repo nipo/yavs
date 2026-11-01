@@ -328,8 +328,8 @@ fn walkthrough_generics_edit_waves_coverage() {
         RTL,
         "counter_tb",
         "--wave=build/tb.fst",
-        "--cov=build/tb.ycov",
-        "--cov-kind=statement,branch",
+        "--cov=sb",
+        "--cov-file=build/tb.ycov",
     ]);
     assert!(std::fs::metadata(e.0.join("build/tb.fst")).unwrap().len() > 0);
     let report = e.ok(&["cov", "report", "build/tb.ycov"]);

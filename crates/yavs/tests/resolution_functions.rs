@@ -26,7 +26,7 @@ fn check(name: &str, source: &str, standards: &[&str]) {
             &[][..],
             &[][..],
             &["--threads=4"][..],
-            &["--cov=a.ycov"][..],
+            &["--cov=sbt", "--cov-file=a.ycov"][..],
         ] {
             let mut args = vec!["run", "--std", std, "--work=work:lib", "--tier=interp"];
             args.extend(flags);

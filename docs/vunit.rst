@@ -120,9 +120,12 @@ Newer than 0.11.0, the package collects, merges and checks coverage:
 
 .. code-block:: bash
 
-    python run.py --yavs-cov --yavs-cov-html cov-html --yavs-cov-fail-under 85
+    python run.py --yavs-cov=sbt --yavs-cov-html cov-html --yavs-cov-fail-under 85
 
-``--yavs-cov`` makes every simulation write a database. To have them merged, the run script calls
+``--yavs-cov=LETTERS`` makes every simulation write a database and counts the kinds the letters name
+(``s`` statement, ``b`` branch, ``c`` condition, ``e`` expression, ``t`` toggle, ``f`` fsm, ``a`` assert,
+``m`` combination). No kind is on by default: coverage without a kind is an error that names the option, the
+flag and the letters. To have the databases merged, the run script calls
 ``results.merge_coverage`` after the run, as the script above does. It writes ``coverage.ycov``, and with
 the other two flags also the HTML report and the gate. ``merge_coverage`` is an error when no simulation
 collected coverage, so the script calls it only under ``--yavs-cov``.
@@ -140,6 +143,9 @@ A sim option collects coverage for some tests, or for every run:
 
     vu.set_sim_option("enable_coverage", True)
     vu.set_sim_option("yavs.cov_kind", ["statement", "branch"])
+
+The kinds come from the ``yavs.cov_kind`` sim option (words), else ``--yavs-cov-kind`` (words), else the letters of
+``--yavs-cov=LETTERS``. ``--yavs-cov=LETTERS`` and ``--yavs-cov-kind`` are not given together.
 
 Below the limit the run exits with status 1, after VUnit has written its reports. Coverage cannot be combined
 with ``--yavs-debug``. :ref:`vunit-coverage` has more, and :doc:`coverage` the reports and exclusions.

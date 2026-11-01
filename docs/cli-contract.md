@@ -84,7 +84,7 @@ The test runner's capability answers for yavs (`SimulatorInterface` hooks):
 | `supports_vhdl_call_paths` | True | 2019 `std.env` call paths (`get_call_path`, `file_name`, `file_line`), implemented (#99) |
 | `has_valid_exit_code` | True | see section 5 |
 | `supports_vhpi` | True | M5 (`--vhpi`) |
-| `supports_coverage` | True | `enable_coverage` adds `--cov`, `merge_coverage` runs `cov merge` and `cov report` (section 5) |
+| `supports_coverage` | True | `enable_coverage` adds `--cov-file` with the kinds of `yavs.cov_kind`, `--yavs-cov-kind` or `--yavs-cov=LETTERS`, `merge_coverage` runs `cov merge` and `cov report` (section 5) |
 | `supports_gui_flag` | True | waves opened in the viewer, section 6 |
 
 ## 2. Standards
@@ -338,7 +338,7 @@ yavs analyze --std=FILE_STD --work=NAME:PATH [--map=NAME:PATH ...] [--color=alwa
 yavs run  [--std=STD] --work=NAME:PATH [--map=NAME:PATH ...] [--color=always]
           [--ieee-warnings=off] [yavs.global_flags] [yavs.elab_flags]
           [yavs.sim_flags] --exit-severity=LEVEL [--wave=FILE.fst]
-          [--cov[=FILE]] TOP [-gNAME=VALUE ...] [+NAME[=VALUE] ...]
+          [--cov=LETTERS] [--cov-file=FILE] TOP [-gNAME=VALUE ...] [+NAME[=VALUE] ...]
 yavs elab [--std=STD] --work=NAME:PATH [--map=NAME:PATH ...] [--color=always]
           [yavs.global_flags] [yavs.elab_flags] TOP [-gNAME=VALUE ...]
 ```
@@ -718,8 +718,14 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   caller still has its label (and its element in a `get_call_path`).
 - `--message-format=json` (section 0) is accepted by `run` and `elab` too, and
   covers runtime errors with their VHDL stacktrace; the test runner does not pass it today.
-- `--cov[=FILE]` (`run` only) writes the run's coverage database to `FILE` (default
-  `yavs.ycov`, relative to the working directory) after the simulation, whatever its exit
+- `--cov=LETTERS` (`run` only) turns coverage on and selects the kinds, in any order: `s` statement,
+  `b` branch, `c` condition, `e` expression, `t` toggle, `f` fsm, `a` assert, `m` combination
+  (`--cov=sbt`); a repeated letter is harmless. No kind is on by default (user, 2026-11-01):
+  bare `--cov`, `--cov=` or a letter that is none is `E0140` before analysis (exit 2), listing every
+  letter and a command to copy; a value that looks like a file name also says that the database goes
+  in `--cov-file`. `--cov-kind=LIST` is the long form with words, also turns coverage on, and is not
+  given with `--cov=` (`E0140`). `--cov-file=FILE` (needs coverage on, else `E0140`) names the database
+  (default `yavs.ycov`, relative to the working directory), which is written after the simulation, whatever its exit
   status; an elaboration failure writes none. The file is overwritten, never appended to:
   one database per run, merged afterwards with `yavs cov merge A B ... -o OUT`. `yavs cov report
   DB ... [--cobertura FILE.xml] [--json FILE] [--lcov FILE] [--sonarqube FILE] [--html DIR] [--root DIR] [--kind LIST] [--total] [--fail-under PCT|KIND:PCT,...] [--below PCT] [--exclude FILE]... [--config FILE] [--uncovered] [-W...]` prints a text summary on
@@ -736,7 +742,7 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   (beside or instead of the plain number) does the same per kind, counted as `--kind=KIND --total` counts, and the message names every
   requirement that failed (`branch coverage 50.0% is below the required 80.0%`); a PCT that is not a number
   in range, an unknown kind or a repeat is a clap usage error with exit status 2. A kind `--fail-under` names with no items is `E0115`. A total with no item to count (`--total`
-  or `--fail-under` with a `--kind` the database lacks) is `E0115`, exit 1. `--cov-embed-sources` (`run`, needs `--cov`) stores the sources in the database. `--html DIR` writes a static HTML report (`index.html`,
+  or `--fail-under` with a `--kind` the database lacks) is `E0115`, exit 1. `--cov-embed-sources` (`run`, needs coverage on, else `E0140`) stores the sources in the database. `--html DIR` writes a static HTML report (`index.html`,
   `src-N.html` per source file in name order; inline CSS and one inline script, no external
   resources, no timestamp, so equal databases give equal bytes; source paths shown relative to
   the current directory or to `--root DIR`, as in the text reports); embedded sources are used, others are read from the paths in the
@@ -765,7 +771,7 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   without them is `E0112`. `--uncovered` adds `[process LABEL]` to the comment of an item in a labelled process.
   Exclusions apply when reporting; databases keep raw counts. `--cov-exclude-translate-off`
   (`run`) also leaves `translate_off`/`translate_on` regions out; unbalanced `-- coverage`
-  pragmas are `W0112`/`W0113`. `--cov-kind=statement,branch,toggle,condition,assert,expression,combination,fsm` (`run`, default `statement,branch,toggle`)
+  pragmas are `W0112`/`W0113`. `--cov-kind=statement,branch,toggle,condition,assert,expression,combination,fsm` (`run`, no default)
   chooses what is counted (`condition` and `expression` are focused expression coverage, #688:
   one row per input and value of a boolean condition or logic expression with 2 or more inputs;
   `docs/decisions.md` "Condition and expression coverage"); `--cov-toggle-max=N` (default 65536) leaves signals with more

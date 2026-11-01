@@ -116,7 +116,7 @@ fn wait_and_assert_conditions() {
     let mut want = None;
     for flags in tiers() {
         let args = [
-            &["--cov=a.ycov", "--cov-kind=condition,assert"][..],
+            &["--cov-file=a.ycov", "--cov-kind=condition,assert"][..],
             &flags[..],
         ]
         .concat();
@@ -162,7 +162,7 @@ fn wait_and_assert_conditions() {
     );
 
     // Without the option there are no rows of an `assert`, with it alone no rows of a wait.
-    let o = run(&["--cov=w.ycov", "--cov-kind=condition"]);
+    let o = run(&["--cov-file=w.ycov", "--cov-kind=condition"]);
     assert_eq!(trace(&o), plain);
     let wait_only = rows(&read(&tmp.join("w.ycov")));
     assert!(wait_only.iter().any(|r| r.0 == edge_en));
@@ -170,7 +170,7 @@ fn wait_and_assert_conditions() {
         !wait_only.iter().any(|r| r.0 == conc || r.0 == seq),
         "{wait_only:#?}"
     );
-    let o = run(&["--cov=s.ycov", "--cov-kind=assert"]);
+    let o = run(&["--cov-file=s.ycov", "--cov-kind=assert"]);
     assert_eq!(trace(&o), plain);
     let assert_only = rows(&read(&tmp.join("s.ycov")));
     assert!(assert_only.iter().any(|r| r.0 == conc));
@@ -179,7 +179,7 @@ fn wait_and_assert_conditions() {
         "{assert_only:#?}"
     );
     // A combination is not measured at either.
-    let o = run(&["--cov=m.ycov", "--cov-kind=combination"]);
+    let o = run(&["--cov-file=m.ycov", "--cov-kind=combination"]);
     assert_eq!(trace(&o), plain);
     assert!(
         !read(&tmp.join("m.ycov"))
@@ -210,7 +210,7 @@ fn a_failing_assertion_hits_its_row_and_a_bad_kind_is_refused() {
             "run",
             "--work=work:lib",
             "f",
-            "--cov=a.ycov",
+            "--cov-file=a.ycov",
             "--cov-kind=assert",
         ],
     );
@@ -227,7 +227,7 @@ fn a_failing_assertion_hits_its_row_and_a_bad_kind_is_refused() {
             "run",
             "--work=work:lib",
             "f",
-            "--cov=b.ycov",
+            "--cov-file=b.ycov",
             "--cov-kind=asert",
         ],
     );
@@ -275,7 +275,7 @@ fn fsm_states_and_transitions() {
     assert!(plain.status.success());
     let mut want = None;
     for flags in tiers() {
-        let args = [&["--cov=a.ycov", "--cov-kind=fsm"][..], &flags[..]].concat();
+        let args = [&["--cov-file=a.ycov", "--cov-kind=fsm"][..], &flags[..]].concat();
         let o = run(&args);
         assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
         assert_eq!(o.stdout, plain.stdout, "{flags:?}");
@@ -324,7 +324,7 @@ fn fsm_not_detected_is_visible() {
             "run",
             "--work=work:lib",
             "cov_fsm",
-            "--cov=a.ycov",
+            "--cov-file=a.ycov",
             "--cov-kind=fsm",
         ],
     );
@@ -462,7 +462,7 @@ fn fsm_exclusions_merge_and_rank() {
             "run",
             "--work=work:lib",
             "cov_fsm",
-            "--cov=a.ycov",
+            "--cov-file=a.ycov",
             "--cov-kind=fsm",
             "--cov-test=a",
         ],
@@ -474,7 +474,7 @@ fn fsm_exclusions_merge_and_rank() {
             "run",
             "--work=work:lib",
             "cov_fsm",
-            "--cov=b.ycov",
+            "--cov-file=b.ycov",
             "--cov-kind=fsm",
             "--cov-test=b",
             "-gdo_reset=false",
@@ -578,7 +578,16 @@ fn fsm_exclusions_merge_and_rank() {
 #[test]
 fn fsm_old_databases_and_no_items() {
     let tmp = fsm_setup("meas_fsm_old");
-    let o = yavs(&tmp, &["run", "--work=work:lib", "cov_fsm", "--cov=a.ycov"]);
+    let o = yavs(
+        &tmp,
+        &[
+            "run",
+            "--work=work:lib",
+            "cov_fsm",
+            "--cov=sbt",
+            "--cov-file=a.ycov",
+        ],
+    );
     assert!(o.status.success());
     assert!(fsm_items(&read(&tmp.join("a.ycov"))).is_empty());
     assert!(read(&tmp.join("a.ycov")).unmeasured.is_empty());
@@ -610,7 +619,7 @@ fn walking_a_method_alias_of_a_private_variable_ends() {
             "--std=2019",
             "--work=work:lib",
             "private_variables",
-            "--cov=a.ycov",
+            "--cov-file=a.ycov",
             "--cov-kind=fsm",
         ],
     );
@@ -671,7 +680,13 @@ end;
     let run = |db: &str, kinds: &str| {
         let o = yavs(
             &tmp,
-            &["run", "--work=work:lib", "t", &format!("--cov={db}"), kinds],
+            &[
+                "run",
+                "--work=work:lib",
+                "t",
+                &format!("--cov-file={db}"),
+                kinds,
+            ],
         );
         assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
     };

@@ -977,7 +977,7 @@ fn idle_skip_changes_nothing() {
         // them; toggle coverage alone keeps it.
         let cov = |kinds: &str| {
             let kinds = format!("--cov-kind={kinds}");
-            run_design(&d, design, src, "interp", &["--cov=c.ycov", &kinds])
+            run_design(&d, design, src, "interp", &["--cov-file=c.ycov", &kinds])
         };
         let (counted, toggle) = (cov("statement,branch,toggle"), cov("toggle"));
         assert_eq!((counted.code, toggle.code), (0, 0), "{design}");
@@ -1013,7 +1013,7 @@ fn lean_events_change_nothing() {
     assert_eq!(off.counters["lean_signals"], 0);
     assert_eq!(on.counters["lean_signals"], 2, "{:?}", on.counters);
     // Coverage observes the run: every signal keeps its history.
-    let cov = run_design_env(&d, "lean_events", src, "interp", &["--cov"], &[]);
+    let cov = run_design_env(&d, "lean_events", src, "interp", &["--cov=sbt"], &[]);
     assert_eq!(cov.code, 0, "{}", cov.all());
     assert_eq!(cov.stdout, on.stdout);
     assert_eq!(cov.counters["lean_signals"], 0);
@@ -1096,14 +1096,14 @@ fn skipping_follows_observers() {
     let wave = format!("--wave={}", fst.display());
     assert_eq!(run("", "", &[&wave]), 3);
     // Coverage of every kind: the skip changes no count.
-    assert_eq!(run("", "", &["--cov=c.ycov"]), 3);
-    assert_eq!(run("", "", &["--cov=c.ycov", "--cov-kind=toggle"]), 3);
+    assert_eq!(run("", "", &["--cov=sbt", "--cov-file=c.ycov"]), 3);
+    assert_eq!(run("", "", &["--cov-file=c.ycov", "--cov-kind=toggle"]), 3);
     assert_eq!(
         run(
             "",
             "",
             &[
-                "--cov=c.ycov",
+                "--cov-file=c.ycov",
                 "--cov-kind=statement,branch,condition,expression,toggle"
             ]
         ),

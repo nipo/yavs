@@ -186,33 +186,33 @@ pub struct RunArgs {
     /// be replayed with `--shuffle=SEED`.
     #[arg(long, value_name = "SEED", num_args = 0..=1, require_equals = true, default_missing_value = "1")]
     shuffle: Option<u64>,
-    /// Count statement, branch and toggle coverage and write the run's coverage database to
-    /// FILE (default `yavs.ycov`).
-    #[arg(long, value_name = "FILE", num_args = 0..=1, require_equals = true, default_missing_value = "yavs.ycov")]
+    /// Count coverage and write the run's coverage database (`--cov-file`). LETTERS selects the
+    /// kinds, in any order: `s` statement, `b` branch, `c` condition, `e` expression, `t` toggle,
+    /// `f` fsm, `a` assert, `m` combination; for example `--cov=sbt`. No kind is on by default.
+    #[arg(long, value_name = "LETTERS", num_args = 0..=1, require_equals = true, default_missing_value = "")]
     cov: Option<String>,
-    /// With `--cov`: the kinds of coverage to count, comma separated.
-    #[arg(
-        long,
-        value_enum,
-        value_delimiter = ',',
-        value_name = "KIND,...",
-        default_value = "statement,branch,toggle"
-    )]
+    /// Count coverage of these kinds, comma separated (`statement`, `branch`, `toggle`, ...): the
+    /// long form of `--cov=LETTERS`, not with it.
+    #[arg(long, value_enum, value_delimiter = ',', value_name = "KIND,...")]
     cov_kind: Vec<CovKindArg>,
-    /// With `--cov`: the name of this run's test in the database (default: the enabled test
+    /// With coverage on (`--cov` or `--cov-kind`): the coverage database to write (default
+    /// `yavs.ycov`).
+    #[arg(long, value_name = "FILE")]
+    cov_file: Option<String>,
+    /// With coverage on: the name of this run's test in the database (default: the enabled test
     /// case of a `runner_cfg` generic, else the top level with its `-g` generics).
     #[arg(long, value_name = "NAME")]
     cov_test: Option<String>,
-    /// With `--cov`: leave signals with more `bit`/`std_ulogic` scalars than this out of
+    /// With coverage on: leave signals with more `bit`/`std_ulogic` scalars than this out of
     /// toggle coverage.
     #[arg(long, value_name = "N", default_value = "65536")]
     cov_toggle_max: u64,
-    /// With `--cov`: also leave `translate_off` ... `translate_on` regions out of the coverage.
+    /// With coverage on: also leave `translate_off` ... `translate_on` regions out of the coverage.
     #[arg(long)]
     cov_exclude_translate_off: bool,
-    /// With `--cov`: store the text of the source files in the database, so `yavs cov report
+    /// With coverage on: store the text of the source files in the database, so `yavs cov report
     /// --html` needs no checkout. The source text then travels with the database.
-    #[arg(long, requires = "cov")]
+    #[arg(long)]
     cov_embed_sources: bool,
     /// Load a VHPI plugin, `LIB[:ENTRY]` (E0901 when it cannot be loaded, E0902 when the entry
     /// point is missing).
@@ -389,7 +389,113 @@ fn plusarg(s: &str) -> Result<String, String> {
     }
 }
 
+/// The letters of `--cov=LETTERS`, with the kind each selects.
+const COV_LETTERS: [(char, CovKindArg); 8] = [
+    ('s', CovKindArg::Statement),
+    ('b', CovKindArg::Branch),
+    ('c', CovKindArg::Condition),
+    ('e', CovKindArg::Expression),
+    ('t', CovKindArg::Toggle),
+    ('f', CovKindArg::Fsm),
+    ('a', CovKindArg::Assert),
+    ('m', CovKindArg::Combination),
+];
+
+impl CovKindArg {
+    fn word(self) -> String {
+        use clap::ValueEnum;
+        let v = self.to_possible_value();
+        v.map(|v| v.get_name().to_string()).unwrap_or_default()
+    }
+}
+
+/// The table of coverage kinds, letter and word, for the notes of E0140.
+fn cov_letter_table() -> String {
+    let rows: Vec<String> = COV_LETTERS
+        .iter()
+        .map(|(l, k)| format!("  {l}  {}", k.word()))
+        .collect();
+    format!(
+        "the kinds, as the letters of `--cov=LETTERS` or the words of `--cov-kind=LIST`:\n{}",
+        rows.join("\n")
+    )
+}
+
 impl RunArgs {
+    /// Turns `--cov=LETTERS`, `--cov-kind` and `--cov-file` into the kinds to count (`cov_kind`)
+    /// and the database path (`cov`), before the run starts. No kind is on by default: coverage
+    /// on without a kind, a letter that is none, or `--cov-file` and the like with coverage off
+    /// are E0140.
+    fn resolve_cov(&mut self) -> Result<(), Box<Diagnostic>> {
+        let err = |m: String| Diagnostic::error("E0140", m);
+        let example = "for example `--cov=sbt`, or `--cov-kind=statement,branch,toggle`";
+        let kinds = match (self.cov.take(), self.cov_kind.is_empty()) {
+            (Some(_), false) => {
+                return Err(Box::new(
+                    err("`--cov` and `--cov-kind` both select the coverage kinds".into())
+                        .with_help(
+                            "give the kinds once: `--cov=LETTERS`, or `--cov-kind=LIST` with no `--cov`",
+                        ),
+                ));
+            }
+            (Some(l), true) if l.is_empty() => {
+                return Err(Box::new(
+                    err("coverage was asked for, but no kind was selected".into())
+                        .with_note("no kind is counted by default")
+                        .with_note(cov_letter_table())
+                        .with_help(example),
+                ));
+            }
+            (Some(l), true) => {
+                let mut kinds = Vec::new();
+                for c in l.chars() {
+                    let Some((_, k)) = COV_LETTERS.iter().find(|(x, _)| *x == c) else {
+                        let words: Vec<String> =
+                            COV_LETTERS.iter().map(|(_, k)| k.word()).collect();
+                        let close = if words.contains(&l) {
+                            Some(format!("`{l}` is a coverage kind"))
+                        } else {
+                            let cands = words.iter().map(|w| (w.as_str(), w.as_str()));
+                            yavs_diag::suggest::suggest(&l, "kind", cands)
+                        };
+                        let mut d = err(format!(
+                            "`{c}` in `--cov={l}` is not a coverage kind letter"
+                        ))
+                        .with_note(cov_letter_table())
+                        .with_help(
+                            "the coverage database file goes in `--cov-file=FILE`, not in `--cov`",
+                        );
+                        if let Some(h) = close {
+                            d = d.with_help(format!("{h}; words go in `--cov-kind=LIST`"));
+                        }
+                        return Err(Box::new(d.with_help(example)));
+                    };
+                    kinds.push(*k);
+                }
+                kinds
+            }
+            (None, false) => std::mem::take(&mut self.cov_kind),
+            (None, true) => {
+                let off = |what: &str| {
+                    Box::new(
+                        err(format!("{what} needs coverage on, and none is"))
+                            .with_help(format!("add `--cov=LETTERS` ({example})")),
+                    )
+                };
+                if self.cov_file.is_some() {
+                    return Err(off("`--cov-file`"));
+                }
+                if self.cov_embed_sources {
+                    return Err(off("`--cov-embed-sources`"));
+                }
+                return Ok(());
+            }
+        };
+        self.cov = Some(self.cov_file.take().unwrap_or_else(|| "yavs.ycov".into()));
+        self.cov_kind = kinds;
+        Ok(())
+    }
+
     /// Whether the run goes through the debug server: a client or the console drives it.
     fn debugged(&self) -> bool {
         self.dap.is_some() || self.interactive || !self.do_commands.is_empty()
@@ -1691,7 +1797,8 @@ fn reloader(
     Box::new(move |extra| {
         let mut args = argv.clone();
         args.extend_from_slice(extra);
-        let a = crate::run_args(&args)?;
+        let mut a = crate::run_args(&args)?;
+        a.resolve_cov().map_err(|d| d.message)?;
         match prepare(&a, format, color, encoding, false) {
             Ok(p) => Ok(yavs_dap::Loaded {
                 db: Arc::new(p.db),
@@ -1750,6 +1857,11 @@ fn run_design(
     color: bool,
     encoding: yavs_syntax::Encoding,
 ) -> ExitCode {
+    if let Err(d) = a.resolve_cov() {
+        let mut out = Out::new(format, color);
+        out.emit(&SourceMap::default(), &d);
+        return out.finish(2);
+    }
     // `--surfer` without `--wave`: `<top>.fst` beside the work library directory.
     if a.surfer.is_some() && a.wave.is_none() {
         let dir = a.common.work.split_once(':').map_or("", |(_, d)| d);

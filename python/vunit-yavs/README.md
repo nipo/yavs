@@ -31,8 +31,8 @@ or later (`pip install vunit-yavs` installs it, a pre-release) and yavs 0.11.0 o
 | `yavs.elab_flags` | `yavs run` and `elab` |
 | `yavs.sim_flags` | `yavs run`, such as `--assert-summary`, `--activity`, `--hang-report`, `--wave-include`: they pass through to the run |
 | `yavs.max_threads` (integer, at least 1) | `yavs run --threads=N`, the most threads of one simulation |
-| `enable_coverage` (VUnit's option) | `yavs run --cov=<test output>/yavs/coverage.ycov --cov-test=<test name>` (coverage, below) |
-| `yavs.cov_kind` (list of strings) | `yavs run --cov-kind=LIST`: `statement`, `branch`, `toggle`, `condition`, `assert`, `expression`, `combination`, `fsm` |
+| `enable_coverage` (VUnit's option) | `yavs run --cov-file=<test output>/yavs/coverage.ycov --cov-test=<test name>` with the kinds below (coverage, below) |
+| `yavs.cov_kind` (list of strings) | `yavs run --cov-kind=LIST`: `statement`, `branch`, `toggle`, `condition`, `assert`, `expression`, `combination`, `fsm`. No kind is on by default |
 | `yavs.init_files.after_load` | Console command files sourced after each `vunit_load` |
 | `yavs.init_files.before_run` | Console command files sourced before each `vunit_run` |
 | `yavs.init_file.gui` | A console command file sourced by `vunit_user_init` and at the start of `--yavs-interactive` |
@@ -44,7 +44,7 @@ or later (`pip install vunit-yavs` installs it, a pre-release) and yavs 0.11.0 o
 | `--yavs-surfer[=HOST:PORT]` | Shows the waves of the one selected test in Surfer 0.6.0 or later while it runs (`yavs run --surfer`); strictly opt-in. Combines with `--yavs-debug` and `--yavs-interactive`, where the cursor follows the stops |
 | `--yavs-max-threads N` | `yavs.max_threads` for every test that does not set it (environment variable `VUNIT_YAVS_MAX_THREADS` for run scripts with a command line of their own) |
 | `--yavs-lint` | After compiling, runs `yavs lint` on every library of the project that is not external; a finding of severity error fails the compile step. To leave out VUnit's own libraries, put `exclude: ['**/vunit/vhdl/**']` in `yavs-lint.yaml`. `file_list` in that file is not read: the project says which files a library has. Unknown keys in that file are warned about once, for the first library |
-| `--yavs-cov` | Collects coverage in every simulation, as `enable_coverage` does for the tests it is set for |
+| `--yavs-cov=LETTERS` | Collects coverage in every simulation, as `enable_coverage` does for the tests it is set for, of the kinds the letters name: `s` statement, `b` branch, `c` condition, `e` expression, `t` toggle, `f` fsm, `a` assert, `m` combination (`--yavs-cov=sbt`). No kind is on by default; coverage without a kind fails the simulation, naming this flag, `--yavs-cov-kind` and `yavs.cov_kind`. Write the letters with `=` |
 | `--yavs-cov-directives MODE` | `apply` or `ignore`: what `yavs analyze`, `elab` and `run` do with the `-- yavs coverage exclude` comments in the sources (`--coverage-directives`); without it yavs's default, `apply`, which checks them when compiling |
 | `--yavs-cov-html DIR` | `results.merge_coverage()` also writes the HTML coverage report into DIR |
 | `--yavs-cov-fail-under PCT` | `results.merge_coverage()` prints the coverage report and the run exits with status 1 when the total is below PCT percent; per kind with `statement:90,branch:80` |
@@ -65,19 +65,19 @@ its default, unless the token server runs (`--threads=min(N, 4)` for `-p N`, bel
 ## Coverage
 
 ```python
-vu.set_sim_option("enable_coverage", True)      # or run with --yavs-cov
-vu.set_sim_option("yavs.cov_kind", ["statement", "branch"])   # optional; default statement, branch, toggle
+vu.set_sim_option("enable_coverage", True)      # or run with --yavs-cov=sb
+vu.set_sim_option("yavs.cov_kind", ["statement", "branch"])   # the kinds; none is on by default
 vu.main(post_run=lambda results: results.merge_coverage("coverage"))
 ```
 
-Each simulation writes a yavs coverage database named after its test. `results.merge_coverage("coverage")`
+Each simulation writes a yavs coverage database named after its test (`yavs run --cov-file`). The kinds come from the `yavs.cov_kind` sim option, else `--yavs-cov-kind`, else the letters of `--yavs-cov=LETTERS`; the letters and `--yavs-cov-kind` are not given together. `results.merge_coverage("coverage")`
 merges them into `coverage.ycov` (`yavs cov merge`); with `--yavs-cov-html DIR` or
 `--yavs-cov-fail-under PCT`, or arguments in `merge_coverage("coverage", args=["--cobertura", "c.xml"])`, it
 then runs `yavs cov report` on the merged database. A total below the threshold makes the run exit with status 1
 after VUnit has written its reports (a JUnit file included). For a CI gate:
 
 ```sh
-VUNIT_SIMULATOR=yavs python run.py --yavs-cov --yavs-cov-html cov-html --yavs-cov-fail-under 85
+VUNIT_SIMULATOR=yavs python run.py --yavs-cov=sbt --yavs-cov-html cov-html --yavs-cov-fail-under 85
 ```
 
 Coverage cannot be combined with `--yavs-debug`. Reports, exclusions and the numbers are in the yavs

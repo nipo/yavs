@@ -1522,7 +1522,8 @@ fn coverage_with_dap_reports_a_command_limitation() {
             "run",
             "--work=work:lib",
             "--dap=stdio",
-            "--cov=a.ycov",
+            "--cov=sbt",
+            "--cov-file=a.ycov",
             "tb",
         ])
         .output()
