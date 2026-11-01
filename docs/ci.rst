@@ -2,7 +2,7 @@ Continuous integration
 ======================
 
 This page has recipes for running yavs in CI: what the exit status means, a coverage gate, what to
-cache between runs and a complete GitHub Actions job built from plain steps.
+cache between runs and a complete GitHub Actions job.
 
 .. contents:: On this page
    :local:
@@ -38,11 +38,27 @@ Every ``yavs`` command says how it went with its exit status, so a CI step fails
 ``set -o pipefail``, as GitHub Actions does for ``bash`` when you write ``shell: bash``. ``-Werror`` makes
 warnings fail the step too.
 
+.. _ci-getting-yavs:
+
 Getting yavs
 ------------
 
-Pin the version. Releases are pre-releases for now, so there is no "latest" to follow, and a pinned version
-also keeps the cache valid between runs:
+On GitHub Actions, use `yavs-action <https://github.com/ru551n/yavs-action>`__. It installs a release on
+Linux x86_64, Linux aarch64 or Windows x86_64, verifies it against ``SHA256SUMS``, checks that it is the
+version you asked for and puts it on ``PATH``:
+
+.. code-block:: yaml
+
+    - uses: ru551n/yavs-action@main   # write @v1 once that repository has a v1 tag
+      with:
+        version: 0.11.0
+
+Pin the version: it gives the same simulator on every run and keeps your cache valid. Without ``version`` you
+get the newest stable release, which can change your results on the day a release comes out. An unknown
+version, a runner without an archive or a failed download fails the step with an error naming the cause and
+the fix. The action's page has the outputs and the rest.
+
+On other CI systems, download the archive with plain commands:
 
 .. code-block:: bash
 
@@ -103,8 +119,8 @@ directory and analyze again.
 A GitHub Actions job
 --------------------
 
-This is the walkthrough project (:doc:`project-walkthrough`) as a job. It uses plain steps and needs nothing
-but ``actions/checkout``, ``actions/cache`` and ``actions/upload-artifact``.
+This is the walkthrough project (:doc:`project-walkthrough`) as a job. It needs nothing but ``yavs-action``,
+``actions/checkout``, ``actions/cache`` and ``actions/upload-artifact``.
 
 .. code-block:: yaml
 
@@ -120,14 +136,9 @@ but ``actions/checkout``, ``actions/cache`` and ``actions/upload-artifact``.
         steps:
           - uses: actions/checkout@v4
 
-          - name: Install yavs
-            run: |
-              A=yavs-$YAVS_VERSION-x86_64-unknown-linux-gnu
-              curl -fsSLO https://github.com/ru551n/yavs/releases/download/v$YAVS_VERSION/$A.tar.gz
-              curl -fsSLO https://github.com/ru551n/yavs/releases/download/v$YAVS_VERSION/SHA256SUMS
-              sha256sum -c SHA256SUMS --ignore-missing
-              tar xzf $A.tar.gz
-              echo "$PWD/$A" >> "$GITHUB_PATH"
+          - uses: ru551n/yavs-action@main   # write @v1 once that repository has a v1 tag
+            with:
+              version: ${{ env.YAVS_VERSION }}
 
           - uses: actions/cache@v4
             with:

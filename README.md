@@ -99,7 +99,7 @@ yavs is early: expect gaps and please [report](https://github.com/ru551n/yavs/is
 
 ## Installation
 
-Download the archive for your platform from the [releases](https://github.com/ru551n/yavs/releases) page, unpack it and put the directory on `PATH`. Every platform has one archive, with the Cranelift compiled tier built in and nothing else to install. See [`docs/install.rst`](docs/install.rst) for checks, the build variants and building from source.
+Download the archive for your platform from the [releases](https://github.com/ru551n/yavs/releases) page, unpack it and put the directory on `PATH`. Every platform has one archive, with the Cranelift compiled tier built in and nothing else to install. See [`docs/install.rst`](docs/install.rst) for checks, the build variants and building from source. In a GitHub Actions workflow, [yavs-action](https://github.com/ru551n/yavs-action) installs it.
 
 ## License
 

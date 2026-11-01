@@ -2623,6 +2623,8 @@ builds and packages `yavs` with `lib/` for the three targets on a `v*` tag and p
 pre-release with SHA256SUMS (#165); `workflow_dispatch` with `dry_run` only builds the archives. The Linux archives are built with cargo-zigbuild against glibc 2.17 and smoke-tested in centos:7.
 An installed binary finds `lib/` next to itself (#43).
 
+The GitHub Action that installs a release lives in its own repository, `ru551n/yavs-action` (#862); `docs/ci.rst` links it.
+
 ## sem (`crates/yavs-sem`, M1)
 
 - A negated abstract literal at the i64 minimum (`-9223372036854775808`, `-9223372036854775808 fs`) is `E1402` in user code (L58, #214, majority rule); only library `std` uses it (TIME's lower bound) and folds it to `i64::MIN`.

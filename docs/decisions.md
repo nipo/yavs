@@ -13019,3 +13019,10 @@ index (machine written; a damaged index says to re-analyze).
 - **For-generate indices stay as they are**: `gen(1)` is one level, in parentheses as in `'path_name`. A separator inside an index or an extended identifier is part of the name (`gen(':')`, `\\a.b\\`), which the helper knows.
 - **Kept with colons, not shown**: a data breakpoint's `dataId` is an opaque protocol id; the coverage database stores `:tb:u` because the colon tells an instance from a package (`work.pkg`) and older databases stay mergeable; reports show `Key::shown`.
 - **The tools normalise, the comparison stays exact** (maintainer): `tools/difftest` turns a yavs process path into `:tb:p` (`lrm_path`) before comparing, on the path field only; message text, where `'path_name` values appear, is compared as printed.
+
+## The GitHub Action lives in its own repository (#862, maintainer, 2026-11-01)
+
+- **`ru551n/yavs-action`, not `setup/action.yml` in this repository** (maintainer): `action.yml` at its root, versioned on its own (`v1.0.0` and a floating `v1`), independent of yavs versions. This repository only links to it.
+- **`latest` is the highest release tagged `vX.Y.Z`** (agent): every yavs release carries GitHub's pre-release mark and the repository's "Latest" release is another product's, so neither GitHub mark can say what is stable.
+- **No cache** (agent; the issue's plan had one): an archive downloads in seconds, and restoring from a cache would skip the checksum and leave CI testing only the restored path.
+- **Levels** (rule 32): the action only installs a release. The CLI, the VS Code extension and the Python scripting API have nothing to add; `vunit-yavs` finds `yavs` on `PATH` as before, and the action's CI runs it.

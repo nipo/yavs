@@ -1,7 +1,8 @@
 Installation
 ============
 
-This page says how to get yavs: a release archive for your platform, or a build from source.
+This page says how to get yavs: a release archive for your platform, or a build from source. In a GitHub
+Actions workflow, use `yavs-action <https://github.com/ru551n/yavs-action>`__ (:ref:`ci-getting-yavs`).
 
 .. contents:: On this page
    :local:
