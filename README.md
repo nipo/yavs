@@ -10,33 +10,17 @@ yavs is a VHDL simulator written in Rust, for VHDL-1993, 2008 and 2019.
 
 ## What it does
 
-- [Debugger tutorial](https://yavs.readthedocs.io/en/latest/debugger-tutorial.html): a failing test debugged step by step, in VS Code and at a prompt.
+- [VHDL support](https://yavs.readthedocs.io/en/latest/language-support.html): VHDL-1993, 2008 and 2019, mixed in one project, with the IEEE packages built in.
+- [VS Code debugger](https://yavs.readthedocs.io/en/latest/debugging.html): `python run.py lib.tb.test --yavs-debug`, set breakpoints, press F5, no configuration; a [tutorial](https://yavs.readthedocs.io/en/latest/debugger-tutorial.html) walks through it.
 - [Interactive console](https://yavs.readthedocs.io/en/latest/interactive.html): breakpoints, stepping, `examine`, `force`, `drivers`, `trace x` and `restart` at a `yavs>` prompt or in a script.
-- [VS Code debugger](https://yavs.readthedocs.io/en/latest/debugging.html): attach with no configuration, or use any Debug Adapter Protocol client.
+- [Sane error messages, Rust style](https://yavs.readthedocs.io/en/latest/troubleshooting.html)
 - [Live waveforms](https://yavs.readthedocs.io/en/latest/waveforms.html): Surfer follows the run and the debugger's stops; FST files for any viewer.
-- [Static analysis](https://yavs.readthedocs.io/en/latest/lint.html): `yavs lint` reports what can be proved wrong before a simulation.
 - [Coverage](https://yavs.readthedocs.io/en/latest/coverage.html): from statements to condition combinations, with HTML and Cobertura reports and a CI gate.
-- [Run reports](https://yavs.readthedocs.io/en/latest/cli.html#control-a-run): what failed, what keeps a run busy, what each process waits for, where the time goes.
+- [Static analysis](https://yavs.readthedocs.io/en/latest/lint.html): `yavs lint` reports what can be proved wrong before a simulation.
 - [VHPI](https://yavs.readthedocs.io/en/latest/vhpi.html): plugins and C functions called from VHDL.
-- [Languages](https://yavs.readthedocs.io/en/latest/language-support.html): each file under its own standard, IEEE packages built in, a subset of PSL.
 - [Platforms](https://yavs.readthedocs.io/en/latest/install.html): Linux x86_64, Linux aarch64 and Windows x86_64, one archive with nothing else to install.
 
 Some of this needs a release newer than 0.11.0: see the [release notes](https://yavs.readthedocs.io/en/latest/release_notes.html).
-
-## Error messages
-
-```
-error[E1100]: `cnt` is not declared
- --> hello_error.vhd:7:12
-  |
-5 |   signal count : natural;
-  |          ----- similar name declared here
-6 | begin
-7 |   count <= cnt + 1;
-  |            ^^^ not found in this scope
-  |
-  = help: a signal with a similar name exists: `count`
-```
 
 ## Quickstart
 

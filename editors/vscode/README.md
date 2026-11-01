@@ -1,8 +1,8 @@
 # yavs VHDL debugger for VS Code
 
 Debug VHDL testbenches with the [yavs](https://github.com/ru551n/yavs) simulator from VS Code's
-Run and Debug view. The extension contributes a `yavs` debugger that analyzes your sources,
-starts `yavs run --dap=stdio` and connects to it over the Debug Adapter Protocol. It also
+Run and Debug view. The extension contributes a `yavs` debugger that attaches to a test waiting
+on a port, over the Debug Adapter Protocol, with no configuration. It also
 registers the `vhdl` language for `.vhd` and `.vhdl` files so that breakpoints can be set
 without another VHDL extension (it does not highlight or lint VHDL).
 
@@ -25,7 +25,7 @@ It needs a yavs release newer than 0.11.0.
 
 ## Install
 
-yavs 0.11.0 or newer must be on `PATH`, or set `yavsPath` in the launch configuration. The
+yavs 0.11.0 or newer must be on `PATH` of the test run. The
 extension needs VS Code 1.80 or newer.
 
 Download `yavs-debug-<version>.vsix` from the
@@ -47,10 +47,12 @@ code --install-extension yavs-debug.vsix
 
 To try it without installing, open `editors/vscode` in VS Code and press F5.
 
-## Launch configuration
+## Launch configuration (optional)
 
-Add a configuration to the testbench workspace's `.vscode/launch.json` (the snippet "yavs: Debug
-testbench" inserts one; `sample/` is a complete workspace):
+A test run needs none of this. To start a run without a test runner, the extension analyzes your sources and starts
+`yavs run --dap=stdio`, from a configuration in the testbench workspace's `.vscode/launch.json` (the snippet "yavs: Debug
+testbench" inserts one; `sample/` is a complete workspace). It takes generics and arguments, and `yavsPath` names the
+executable. A fixed port for attaching is in the next section.
 
 ```json
 {

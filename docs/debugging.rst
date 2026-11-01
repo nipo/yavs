@@ -2,7 +2,7 @@ Debugging
 =========
 
 This page says how to debug a simulation from VS Code or another editor. yavs has a debugger built in. It speaks the Debug Adapter Protocol (DAP), the protocol of the
-debug views of VS Code and most other editors.
+debug views of VS Code and most other editors. :doc:`debugger-tutorial` walks through a failing test.
 
 .. contents:: On this page
    :local:
@@ -26,8 +26,7 @@ VS Code
 
 The VS Code extension adds a ``yavs`` debugger. Download ``yavs-debug-<version>.vsix`` from the
 `releases of yavs <https://github.com/ru551n/yavs/releases>`_ (releases after 0.11.0 carry the extension of the same
-version; until then, the release titled "yavs VS Code debugger"; ``SHA256SUMS`` is attached) and install it. yavs must be
-on ``PATH``, or set ``yavsPath``:
+version; until then, the release titled "yavs VS Code debugger"; ``SHA256SUMS`` is attached) and install it:
 
 .. code-block:: bash
 
@@ -40,32 +39,6 @@ To build it from the source tree instead (``editors/vscode``):
     cd editors/vscode
     npx @vscode/vsce package --out yavs-debug.vsix
     code --install-extension yavs-debug.vsix
-
-Add a launch configuration to ``.vscode/launch.json`` of your testbench's workspace:
-
-.. code-block:: json
-
-    {
-      "version": "0.2.0",
-      "configurations": [
-        {
-          "type": "yavs",
-          "request": "launch",
-          "name": "Debug tb",
-          "top": "tb",
-          "work": "work:${workspaceFolder}/.yavs/work",
-          "sources": ["${workspaceFolder}/pkg.vhd", "${workspaceFolder}/tb.vhd"],
-          "libraries": [],
-          "std": "2008",
-          "generics": { "WIDTH": "8" },
-          "args": ["--stop-time=1ms"]
-        }
-      ]
-    }
-
-``sources`` are analyzed into ``work`` in order before every session (leave it empty to analyze
-yourself), ``libraries`` are more ``NAME:PATH`` mappings, and ``args`` go to ``yavs run``. ``std``
-is ``2008`` or ``2019``. Set a breakpoint, pick "Debug tb" in the Run and Debug view and press F5.
 
 What you can do:
 
@@ -101,6 +74,37 @@ What you can do:
 Reports go to the Debug Console as they are made, also from a process that does not suspend, and the session ends with a line giving the exit status of the run. A launch that cannot
 start (no such top level, an elaboration error, no Surfer) prints its diagnostic there; a command line yavs refuses or a
 crash shows a notification with the command to try in a terminal.
+
+Launch configuration (optional)
+-------------------------------
+
+A test run needs no launch configuration. Write one in ``.vscode/launch.json`` of your testbench's workspace to start a run
+without a test runner: the extension analyzes the files and starts yavs, with the generics and arguments you give it, and
+``yavsPath`` names the executable. The next section has the one for a fixed port:
+
+.. code-block:: json
+
+    {
+      "version": "0.2.0",
+      "configurations": [
+        {
+          "type": "yavs",
+          "request": "launch",
+          "name": "Debug tb",
+          "top": "tb",
+          "work": "work:${workspaceFolder}/.yavs/work",
+          "sources": ["${workspaceFolder}/pkg.vhd", "${workspaceFolder}/tb.vhd"],
+          "libraries": [],
+          "std": "2008",
+          "generics": { "WIDTH": "8" },
+          "args": ["--stop-time=1ms"]
+        }
+      ]
+    }
+
+``sources`` are analyzed into ``work`` in order before every session (leave it empty to analyze
+yourself), ``libraries`` are more ``NAME:PATH`` mappings, and ``args`` go to ``yavs run``. ``std``
+is ``2008`` or ``2019``. Set a breakpoint, pick "Debug tb" in the Run and Debug view and press F5.
 
 Attach to a run started elsewhere
 ---------------------------------

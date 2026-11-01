@@ -38,11 +38,7 @@ FIFO with a memory, a write pointer and a read pointer:
    :language: python
    :caption: run.py
 
-``.vscode/launch.json`` has one configuration, which attaches to the port that ``--yavs-debug`` listens on:
-
-.. literalinclude:: examples/fifo-debug/.vscode/launch.json
-   :language: json
-   :caption: .vscode/launch.json
+VS Code needs no configuration: the extension attaches to the port that ``--yavs-debug`` listens on.
 
 Run all three tests once. Two pass; ``fails_on_purpose`` fails with
 ``word 2 - Got 0010_0110 (38). Expected 0100_1011 (75).`` The rest of this page finds out which side is wrong.
@@ -77,7 +73,7 @@ Open the demo directory as a folder in VS Code. Open ``fifo.vhd`` and click in t
 3. Attach
 ~~~~~~~~~
 
-In the Run and Debug view pick "Attach to run.py" and press F5. The simulation stops at the breakpoint: the editor shows
+Press F5, or run "yavs: Attach" from the command palette. The simulation stops at the breakpoint: the editor shows
 line 40 highlighted, and Surfer opens next to it.
 
 4. Look at the variables, then step
@@ -169,7 +165,7 @@ Press Shift+F5 to end the session. In the terminal run the test that passes, the
     python run.py lib.tb_fifo.fill_and_drain --yavs-debug --yavs-surfer
 
 Right-click the red dot on the ``check_equal(dout, ...)`` line, pick "Edit Breakpoint...", choose Expression and enter ``n = 2``.
-Pick "Attach to run.py" and press F5. The simulation skips the reads of words 0 and 1 and stops at 100 ns with ``n`` = 2.
+Press F5. The simulation skips the reads of words 0 and 1 and stops at 100 ns with ``n`` = 2.
 
 11. Stop when a signal changes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

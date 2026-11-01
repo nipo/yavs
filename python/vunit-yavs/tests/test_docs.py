@@ -83,11 +83,9 @@ class TestDebuggerTutorial(unittest.TestCase):
             name, line = ref.split(":")
             self.assertIn(code, (DEMO / name).read_text(encoding="utf-8").splitlines()[int(line) - 1], ref)
 
-    def test_attach_configuration_matches_the_page(self):
-        launch = json.loads((DEMO / ".vscode" / "launch.json").read_text(encoding="utf-8"))
-        (config,) = launch["configurations"]
-        self.assertEqual((config["request"], config["port"]), ("attach", 4711))
-        self.assertIn(config["name"], self.text)
+    def test_attach_needs_no_configuration(self):
+        self.assertFalse((DEMO / ".vscode").exists())
+        self.assertIn("yavs: Attach", self.text)
         self.assertIn("127.0.0.1:4711", self.text)
 
     def test_run_script_does_not_point_at_a_local_binary(self):
