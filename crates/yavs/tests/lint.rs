@@ -909,6 +909,10 @@ fn unknown_keys_warn_and_the_run_goes_on() {
         let said = stderr(&o);
         assert_eq!(said.matches("[W0139]").count(), 1, "{said}");
         assert!(said.contains("90 unknown rules in `rule`"), "{said}");
+        if format == SHORT {
+            let lines = said.lines().filter(|l| !l.contains("[lint_")).count();
+            assert_eq!(lines, 1, "one line per diagnostic: {said}");
+        }
         for i in 0..90 {
             assert!(said.contains(&format!("`style_{i:03}`")), "{said}");
         }

@@ -278,16 +278,16 @@ fn read_file(path: &Path) -> Result<String, Box<Diagnostic>> {
     })
 }
 
-/// The configuration, the waivers, the directories their patterns are relative to, the warnings.
-type Settings = (Config, Waivers, PathBuf, PathBuf, Vec<Diagnostic>);
+/// The configuration, the waivers, the directories their patterns are relative to, the text of
+/// the warnings.
+type Settings = (Config, Waivers, PathBuf, PathBuf, Vec<String>);
 
-/// W0139 for what a settings file names and nothing reads.
-fn unknown_keys(path: &Path, unknown: &[yavs_lint::Unknown], out: &mut Vec<Diagnostic>) {
+/// The text of W0139 for what a settings file names and nothing reads.
+fn unknown_keys(path: &Path, unknown: &[yavs_lint::Unknown], out: &mut Vec<String>) {
     let cwd = std::env::current_dir().unwrap_or_default();
     let shown = path.strip_prefix(&cwd).unwrap_or(path);
     for text in yavs_lint::unknown_messages(unknown) {
-        let message = format!("`{}` {text}", shown.display());
-        out.push(Diagnostic::new(Severity::Warning, "W0139", message));
+        out.push(format!("`{}` {text}", shown.display()));
     }
 }
 
@@ -414,6 +414,15 @@ pub fn run(a: Args, format: MessageFormat, color: bool, encoding: Encoding) -> E
             return out.finish(2);
         }
     };
+    // The short format is one line per diagnostic; only the human one wraps a list of names.
+    let warnings: Vec<Diagnostic> = warnings
+        .iter()
+        .map(|text| match format {
+            MessageFormat::Human => text.clone(),
+            _ => text.replace('\n', " "),
+        })
+        .map(|text| Diagnostic::new(Severity::Warning, "W0139", text))
+        .collect();
     if a.list_rules {
         for d in &warnings {
             out.emit(&none, d);
