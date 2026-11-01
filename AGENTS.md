@@ -111,10 +111,11 @@ ownership, commit identity, shared-host limits) do not apply to them.
     or a request in that file's Requests section. Never fork another crate's types.
 
 ### Tests and checks
-13. **Green before every push, on the exact commit you push:**
+13. **Green locally once before you push, on your commit before the final rebase:**
     `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
-    `cargo test --workspace`. Never pipe a check through `grep`/`tail` in a way that hides its exit
-    status. These checks run whenever the pushed range (`origin/main..HEAD`) touches `crates/`,
+    `cargo test --workspace`. After a clean rebase rerun fmt and the tests of what you touched,
+    plus difftest after conflicts or for a result-affecting change (rule 17). Never pipe a check
+    through `grep`/`tail` in a way that hides its exit status. These checks run whenever the pushed range (`origin/main..HEAD`) touches `crates/`,
     regardless of what you think you changed.
 14. **Every behaviour gets a test.** Errors get a negative test with the code and position.
     Rendered output changes are snapshot changes that show up in review (`YAVS_BLESS=1` to update,
@@ -133,7 +134,7 @@ ownership, commit identity, shared-host limits) do not apply to them.
     `VS Code extension` and `cocotb-windows` workflows have no run for a commit that changes nothing they read, which
     is not a failure. Watch your CI run (`gh run watch`) and fix a red one. Rebase on
     `origin/main` first; push only with no rebase in progress and a clean tree. If the push is
-    rejected, rebase again and re-run the checks. **Before every push run
+    rejected, rebase again and rerun fmt and the tests of what you touched (rule 13). **Before every push run
     `git diff --stat origin/main..HEAD`** (or `git show --stat HEAD`) and confirm every path is
     one you meant to change: any diff outside your area means a bad rebase (commit 219eabe, a
     "tools only" commit, silently reverted another agent's Rust work through a conflicted rebase
@@ -218,8 +219,10 @@ the shared source of truth; `tools/claim` (needs `gh`) is the only protocol. `wh
   someone else holds it or won the race, pick another issue). Never start on a claimed issue.
 - While working: `tools/claim list` shows active claims; `tools/claim stale [hours]` lists claims
   older than 24 h by default, for a human to clear.
-- Before every push: `git fetch && git rebase origin/main`, then the CI gates (rule 13) green on
-  that exact commit. Push only fast-forward to `main` (`git push origin HEAD:main`), never force.
+- Before every push: run the CI gates (rule 13) locally once before the final rebase; after a clean
+  rebase rerun fmt and the tests of what you touched, plus difftest after conflicts or for a
+  result-affecting change; push fast-forward only (`git push origin HEAD:main`), never force;
+  watch CI, and whoever turned main red fixes it first.
 - When done or abandoned: `tools/claim release <issue> <who> [note]`.
 - Comments posted through the maintainer's account are prefixed "Written by an agent (<who>)."
   by the tool.
