@@ -39,6 +39,12 @@ static void raw(const char *name) {
   v.bufSize = sizeof b;
   v.value.ptr = b;
   int rc = vhpi_get_value(h(name), &v);
+  /* Its natural format has no tool-defined layout: raw only when asked for. */
+  if (rc == -1) {
+    vhpi_printf("natural of %s: error=%d\n", name, vhpi_check_error(NULL) != 0);
+    v.format = vhpiRawDataVal;
+    rc = vhpi_get_value(h(name), &v);
+  }
   char what[64];
   snprintf(what, sizeof what, "%s rc=%d format=%d elems=%d", name, rc, (int)v.format, v.numElems);
   hex(what, b, rc == 0 ? 16 : 0);

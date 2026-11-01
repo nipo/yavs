@@ -355,16 +355,23 @@ impl Callbacks {
     }
 
     /// Removes a callback, also a matured one.
-    pub(crate) fn remove(&mut self, id: u64) {
+    /// Removes a callback; returns the trigger handle it owned, for the caller to release.
+    pub(crate) fn remove(&mut self, id: u64) -> Option<vhpiHandleT> {
         if self.all.get(&id).is_some_and(|cb| cb.state == vhpiEnable) {
             self.arm(id, false);
         }
-        let Some(cb) = self.all.remove(&id) else {
-            return;
-        };
+        let cb = self.all.remove(&id)?;
         if let Some(w) = cb.wake {
             self.wakes.remove(&w);
             self.to_cancel.push(w);
+        }
+        cb.obj.is_some().then_some(cb.data.obj)
+    }
+
+    /// The handle a value-change, force, release or transaction callback gets as `data.obj`.
+    pub(crate) fn set_trigger(&mut self, id: u64, own: vhpiHandleT) {
+        if let Some(cb) = self.all.get_mut(&id) {
+            cb.data.obj = own;
         }
     }
 
@@ -719,7 +726,9 @@ mod tests {
             arm(&mut cbs);
             let reports = order.map(|s| (s, WHOLE));
             let ran = cycle(&mut cbs, delta, &reports, |cbs, _| {
-                ids.get().iter().for_each(|&i| cbs.remove(i));
+                ids.get().iter().for_each(|&i| {
+                    cbs.remove(i);
+                });
                 arm(cbs);
             });
             // The first one reported runs; its re-armed trigger on the other signal runs at

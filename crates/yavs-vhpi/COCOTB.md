@@ -122,9 +122,8 @@ testbenches:
 | `tests/cb_toggle` | `tb_cb_toggle.vhdl` | disabling and re-enabling callbacks |
 | `tests/foreignf` | `tb_foreignf.vhdl` | foreign subprograms through `vhpi_register_foreignf` |
 
-It is not a dependency yet: every plugin needs values, which the model lacks
-until #270, and a Rust plugin has to be its own cdylib crate. The
-M5 plan:
+`tools/vhpi-conformance/rust_plugins.py` runs them (#273): nothing to install by hand on a machine
+with cargo, git and libclang (`vhpi-sys` generates its bindings with bindgen). The original plan:
 
 1. A test (or `scripts/vhpi-conformance.sh`) that builds the crate's
    plugins from a pinned checkout, runs each with its testbench on the primary reference simulator

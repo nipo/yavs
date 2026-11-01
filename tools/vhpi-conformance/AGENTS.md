@@ -17,6 +17,7 @@ extend the VHPI conformance run (#273).
 | Path | What |
 |---|---|
 | `run.py` | Builds each plugin with the vendored `vhpi_user.h`, runs yavs and the reference simulators (`RUNS` table: plugin to designs), writes traces, diffs, three-way tables (`*.three`) and stderr to `--out` (default `~/.cache/yavs-vhpi-conformance`), prints one PASS/DIFF line per pair, plus a three-way count when a second reference is set |
+| `rust_plugins.py` | The second client (#273): the Rust `vhpi` crate's plugins and testbenches from a pinned commit in the cache (`--out`, default `~/.cache/yavs-vhpi-rust`), built with cargo; markers and testbench names read from the checkout's run scripts at run time, never copied here; one pass or FAIL line per plugin and testbench, the dumper's output diffed against sim1. Needs network the first time and libclang (bindgen); says so when they are missing. Linux only |
 | `plugins/walk.c` | Hierarchy walk: regions, declarations, instances, parent navigation |
 | `plugins/props.c` | Name lookup, kinds, integer and string properties, type handles, indexing, resolution |
 | `plugins/values.c` | Every signal read in every value format |

@@ -179,3 +179,31 @@ PLUGIN_EXPORT void console(void) {
   on(vhpiCbExitInteractive, "exit interactive", phase);
   on(vhpiCbEndOfTool, "end of tool", phase);
 }
+
+static void released_change(const vhpiCbDataT *cb) {
+  vhpiValueT v;
+  memset(&v, 0, sizeof v);
+  v.format = vhpiIntVal;
+  int rc = vhpi_get_value(cb->obj, &v);
+  vhpi_printf("released trigger: %d count %d\n", rc, v.value.intg);
+}
+
+static void register_then_release(const vhpiCbDataT *cb) {
+  (void)cb;
+  vhpiHandleT count = vhpi_handle_by_name("top:count", NULL);
+  vhpiCbDataT w;
+  memset(&w, 0, sizeof w);
+  w.reason = vhpiCbValueChange;
+  w.cb_rtn = released_change;
+  w.obj = count;
+  vhpiHandleT h = vhpi_register_cb(&w, vhpiReturnCb);
+  vhpi_release_handle(count);
+  vhpiCbDataT info;
+  vhpi_get_cb_info(h, &info);
+  vhpi_printf("info obj valid: %d\n", vhpi_get(vhpiKindP, info.obj) == vhpiSigDeclK);
+}
+
+/* released: the plugin releases the handle it registered a callback with (#273). */
+PLUGIN_EXPORT void released(void) {
+  on(vhpiCbStartOfSimulation, "start", register_then_release);
+}

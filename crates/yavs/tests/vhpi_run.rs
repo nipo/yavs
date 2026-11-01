@@ -1336,6 +1336,7 @@ fn vhpi_composites_raw_values_and_protected_objects() {
         assert!(out.contains(want), "no `{want}` in\n{out}");
     }
     for want in [
+        "natural of top:r: error=1",
         "size of top:r: 15",
         "int of a record: -1 error=1",
         "small phys of len: rc=0 2000",
@@ -1691,4 +1692,15 @@ fn vhpi_sig_interrupt_callback() {
         rest.find("end of tool: phase 6").expect("end of tool"),
     );
     assert!(a < b && b < c, "{rest}");
+}
+
+/// A callback's `obj` stays valid after the plugin released the handle it registered with (#273).
+#[test]
+fn vhpi_callback_outlives_the_released_handle() {
+    let (code, err, out) = phases("released", &[]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("info obj valid: 1"), "{out}{err}");
+    assert!(out.contains("released trigger: 0 count 1"), "{out}{err}");
+    assert!(out.contains("released trigger: 0 count 6"), "{out}{err}");
+    assert!(!err.contains("W0903"), "{err}");
 }

@@ -25,7 +25,7 @@ gap has an issue.
 | Foreign models | supported | `vhpiFuncF`, `vhpiProcF`, `vhpiArchF`, `vhpiLibF`, `vhpiAppF`, `vhpi_create` of processes and drivers | file parameters, `vhpiForeignfs` (W0904, foreign models only ever take scalars, arrays, records, access and signals) |
 | Simulation control | supported | `vhpi_control(vhpiStop)`, `vhpi_control(vhpiFinish)`, `vhpi_control(vhpiReset)` (refused with options that report on a whole run) | |
 | Errors and handles | supported | `vhpi_check_error` after every call, `vhpi_assert`, `vhpi_printf`, generational handles, `vhpi_compare_handles`, `vhpi_release_handle`, iterators released when exhausted | |
-| Conformance evidence | partial | a Python testbench framework's own regression (CI: the whole of it on Linux, the jobs that need no make on Windows, workflow `cocotb-windows`), C plugin traces diffed against a reference simulator (`tools/vhpi-conformance`), the plugin tests of `crates/yavs/tests/vhpi_run.rs` | the Rust `vhpi` crate's plugins as a second client ([#273](https://github.com/ru551n/yavs/issues/273)) |
+| Conformance evidence | partial | a Python testbench framework's own regression (CI: the whole of it on Linux, the jobs that need no make on Windows, workflow `cocotb-windows`), C plugin traces diffed against a reference simulator (`tools/vhpi-conformance`), the plugin tests of `crates/yavs/tests/vhpi_run.rs` | on Windows, the Rust `vhpi` crate's plugins as a second client (Linux: `tools/vhpi-conformance/rust_plugins.py`; [#273](https://github.com/ru551n/yavs/issues/273)) |
 
 ## Details
 
@@ -76,7 +76,7 @@ callback. Formats: `vhpiObjTypeVal` (the object's own format), `vhpiBinStrVal`, 
 `vhpiTimeVal`, `vhpiPhysVal`, and the vector forms of the enumeration, logic, integer, real,
 time and physical formats. A buffer that is too small makes the call return the size needed. A
 format that does not fit is warning `W0903` and returns -1. A record or an array of composites
-has `vhpiRawDataVal` (also what `vhpiObjTypeVal` means for it): its scalars in order, without
+has `vhpiRawDataVal`, only when asked for (`vhpiObjTypeVal` on one is an error, as in the reference): its scalars in order, without
 padding, native byte order: enumerations of up to 256 literals 1 byte (the position), longer ones
 4, integers 4 or 8 as the kernel holds them, reals, times (in the resolution limit) and other
 physical values (base units) 8. `vhpiSmallPhysVal` and `vhpiSmallPhysVecVal` are base units in 32

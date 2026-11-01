@@ -286,7 +286,7 @@ ch IntVec rc=-1 error
 ch RealVec rc=-1 error
 ch TimeVec rc=-1 error
 ch Ptr rc=-1 error
-rec ObjType rc=9 fmt=22 then rc=0 n=6 ?
+rec ObjType rc=-1 fmt=13 error
 rec BinStr rc=-1 error
 rec OctStr rc=-1 error
 rec DecStr rc=-1 error

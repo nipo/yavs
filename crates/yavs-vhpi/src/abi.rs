@@ -423,7 +423,9 @@ pub extern "C" fn vhpi_get_real(prop: vhpiRealPropertyT, h: vhpiHandleT) -> vhpi
 #[unsafe(no_mangle)]
 pub extern "C" fn vhpi_get_phys(prop: vhpiPhysPropertyT, h: vhpiHandleT) -> vhpiPhysT {
     with_state(|s| {
-        if prop == vhpiResolutionLimitP && h.is_null() {
+        if prop == vhpiResolutionLimitP
+            && (h.is_null() || matches!(s.handles.get(h), Some(Object::Tool)))
+        {
             return phys(s.clock.resolution.fs());
         }
         if prop == vhpiTimeP
@@ -578,8 +580,19 @@ pub unsafe extern "C" fn vhpi_register_cb(cb: *mut vhpiCbDataT, flags: i32) -> v
             None
         };
         match s.cbs.register(data, flags, delay, watch, &s.clock) {
-            Ok(id) if flags & vhpiReturnCb != 0 => s.handles.alloc(Object::Callback(id)),
-            Ok(_) => std::ptr::null_mut(),
+            Ok(id) => {
+                // `data.obj` in the callback is the callback's own handle: a plugin may release
+                // the one it passed as soon as this returns (#273).
+                if let Some(o) = s.cbs.get(id).and_then(|cb| cb.obj.clone()) {
+                    let own = s.handles.alloc(o);
+                    s.cbs.set_trigger(id, own);
+                }
+                if flags & vhpiReturnCb != 0 {
+                    s.handles.alloc(Object::Callback(id))
+                } else {
+                    std::ptr::null_mut()
+                }
+            }
             Err(RegisterError::Misuse(why)) => {
                 s.fail(Fault::Misuse, format!("vhpi_register_cb: {why}"));
                 std::ptr::null_mut()
@@ -613,7 +626,9 @@ fn with_callback(h: vhpiHandleT, func: &str, f: impl FnOnce(&mut State, u64) -> 
 #[unsafe(no_mangle)]
 pub extern "C" fn vhpi_remove_cb(h: vhpiHandleT) -> c_int {
     with_callback(h, "vhpi_remove_cb", |s, id| {
-        s.cbs.remove(id);
+        if let Some(own) = s.cbs.remove(id) {
+            s.handles.release(own);
+        }
         s.handles.release(h);
         0
     })
@@ -819,9 +834,8 @@ fn get_value(s: &mut State, obj: &Object, v: &mut vhpiValueT) -> c_int {
         return 0;
     }
     // A composite has the one format that holds its elements; any scalar or array has it too.
-    if matches!(obj, Object::Node(_) | Object::Elem { .. })
-        && (v.format == vhpiRawDataVal || v.format == vhpiObjTypeVal && s.is_composite(obj))
-    {
+    // Only when asked for: a client of `vhpiObjTypeVal` cannot decode a tool-defined layout (#273).
+    if matches!(obj, Object::Node(_) | Object::Elem { .. }) && v.format == vhpiRawDataVal {
         let res = s.clock.resolution.fs();
         let (mut bytes, mut n) = (Vec::new(), 0);
         if let Err((fault, m)) = s.raw_read(obj, res, &mut bytes, &mut n) {
@@ -901,9 +915,7 @@ pub unsafe extern "C" fn vhpi_put_value(
         let decode = |ty: &value::Scalar, n| unsafe { decode(v, ty, n, res, "vhpi_put_value") };
         let put = if matches!(o, Object::Call(_) | Object::Param { .. }) {
             s.foreign_put(&o, mode, v.map(|v| v.numElems), decode)
-        } else if let Some(v) = v.filter(|v| {
-            v.format == vhpiRawDataVal || v.format == vhpiObjTypeVal && s.is_composite(&o)
-        }) {
+        } else if let Some(v) = v.filter(|v| v.format == vhpiRawDataVal) {
             // SAFETY: the plugin's buffer has `bufSize` readable bytes.
             let bytes = unsafe {
                 let p = v.value.ptr;
