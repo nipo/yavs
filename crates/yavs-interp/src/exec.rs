@@ -6615,6 +6615,10 @@ impl Machine {
                     self.regs[dst as usize] = t!(self.op_leq(a, b, n));
                     k += 1;
                 }
+                Op::LKey { dst, a, n } => {
+                    self.regs[dst as usize] = t!(self.op_lkey(a, n));
+                    k += 1;
+                }
                 Op::Cat => {
                     let pc = code.at.get(k).copied().unwrap_or(0);
                     let Some(&Inst::Cat {
@@ -8383,6 +8387,21 @@ impl Machine {
             })
         });
         Ok(eq.into())
+    }
+
+    /// `Op::LKey`, out of line.
+    #[inline(never)]
+    fn op_lkey(&self, a: u32, n: u32) -> R<u64> {
+        let n = self.regs[n as usize];
+        let x = self.rd(self.regs[a as usize], 32)?;
+        let mask = (1u64 << n) - 1;
+        // '0' is code 2 and '1' code 3: plane 1 set, planes 2 and 3 clear.
+        let other = !plane_word(x, 1) | plane_word(x, 2) | plane_word(x, 3);
+        Ok(if other & mask == 0 {
+            plane_word(x, 0) & mask
+        } else {
+            u64::MAX
+        })
     }
 
     /// `Op::LCopy`, out of line.
@@ -10336,6 +10355,10 @@ impl Machine {
                 let n = self.r(n);
                 let v = self.planes(self.r(a), n)? == self.planes(self.r(b), n)?;
                 self.set(dst, v.into());
+            }
+            Inst::LKey { dst, a, n } => {
+                let v = self.op_lkey(a.0, n.0)?;
+                self.set(dst, v);
             }
             Inst::MemEq { dst, a, b, n } => {
                 let n = self.r(n);

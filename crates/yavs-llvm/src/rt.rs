@@ -2776,6 +2776,7 @@ pub fn inline_regs(f: &Func, i: &Inst) -> Vec<Reg> {
         } => vec![dst, dst_off, src, src_off, n],
         Inst::LSet { base, idx, v } => vec![base, idx, v],
         Inst::LEq { dst, a, b, n } => vec![dst, a, b, n],
+        Inst::LKey { dst, a, n } => vec![dst, a, n],
         Inst::LFill { base, idx, n, v } => vec![base, idx, n, v],
         Inst::SigVal {
             dst, offset, len, ..
@@ -2901,6 +2902,7 @@ pub fn keeps_objects(i: &Inst) -> bool {
             | Inst::LogicOp { .. }
             | Inst::LNum { .. }
             | Inst::LEq { .. }
+            | Inst::LKey { .. }
             | Inst::MemEq { .. }
             | Inst::LGet { .. }
             | Inst::LSet { .. }
@@ -3480,6 +3482,7 @@ fn steady(i: &Inst) -> bool {
             | Inst::Bool { .. }
             | Inst::LogicOp { .. }
             | Inst::LEq { .. }
+            | Inst::LKey { .. }
             | Inst::MemEq { .. }
             | Inst::LGet { .. }
             | Inst::LSet { .. }
@@ -3647,6 +3650,7 @@ pub fn param_addrs(f: &Func) -> Vec<ParamAddr> {
             Inst::LSet { base, .. } | Inst::LFill { base, .. } => (&[], &[*base]),
             Inst::LCopy { dst, src, .. } => (&[*src], &[*dst]),
             Inst::LEq { a, b, .. } | Inst::MemEq { a, b, .. } => (&[*a, *b], &[]),
+            Inst::LKey { a, .. } => (&[*a], &[]),
             _ => (&[], &[]),
         };
         let looped = loops.iter().any(|&(s, e)| s <= pc && pc <= e);
@@ -4019,6 +4023,7 @@ pub fn xstep_ok(f: &Func, i: &Inst) -> bool {
             | Inst::LayoutOf { .. }
             | Inst::LFill { .. }
             | Inst::LEq { .. }
+            | Inst::LKey { .. }
             | Inst::Report { .. }
             | Inst::FToI { .. }
             | Inst::FToIRange { .. }

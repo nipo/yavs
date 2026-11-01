@@ -2687,6 +2687,28 @@ fn gen_func(
                 g.st(dst, v);
                 g.join(join);
             }
+            // The elements as a number when all are '0' or '1' (plane 1 set, planes 2 and 3 clear).
+            Inst::LKey { dst, a, n } => {
+                let (slow, join) = g.slow_path_x(pc, &inst, f);
+                let av = g.ld(a);
+                let pa = g.host(av, Some(a), Op::C(0), Op::C(32), false, slow);
+                let cnt = g.ld(n);
+                let gf = g.gf;
+                let p0 = g.b.ins().load(I64, gf, pa, 0);
+                let p1 = g.b.ins().load(I64, gf, pa, 8);
+                let p2 = g.b.ins().load(I64, gf, pa, 16);
+                let p3 = g.b.ins().load(I64, gf, pa, 24);
+                let not1 = g.b.ins().bnot(p1);
+                let high = g.b.ins().bor(p2, p3);
+                let other = g.b.ins().bor(not1, high);
+                let mask = g.low_mask(cnt);
+                let bad = g.b.ins().band(other, mask);
+                let key = g.b.ins().band(p0, mask);
+                let none = g.c64(-1);
+                let v = g.b.ins().select(bad, none, key);
+                g.st(dst, v);
+                g.join(join);
+            }
             // The bytes of two ranges compared.
             Inst::MemEq { dst, a, b, n } => {
                 let (slow, join) = g.slow_path_x(pc, &inst, f);

@@ -97,6 +97,7 @@ fn classify(f: &crate::Func, i: &Inst) -> Option<Use> {
         }
         Inst::LogicOp { dst, a, b, .. } | Inst::LNum { dst, a, b, .. } => u.ok.extend([dst, a, b]),
         Inst::LEq { a, b, .. } | Inst::MemEq { a, b, .. } => u.ok.extend([a, b]),
+        Inst::LKey { a, .. } => u.ok.push(a),
         Inst::LGet { base, .. } | Inst::LSet { base, .. } | Inst::LFill { base, .. } => {
             u.ok.push(base)
         }

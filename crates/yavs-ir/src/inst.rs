@@ -463,6 +463,13 @@ pub enum Inst {
         b: Reg,
         n: Reg,
     },
+    /// The `n` (1 to 63) elements of the logic array at `a` as a number when all are '0' or '1',
+    /// element 0 in bit 0, else -1: what a `Case` on the array's value dispatches on.
+    LKey {
+        dst: Reg,
+        a: Reg,
+        n: Reg,
+    },
     /// `dst` is 1 when the `n` bytes at `a` and at `b` are equal, else 0: equality of two
     /// arrays of integer or enumeration elements of the same length.
     MemEq {
@@ -1109,6 +1116,11 @@ impl Inst {
                 d(dst, i);
                 f(a, Use, p);
                 f(b, Use, p);
+                f(n, Use, i);
+            }
+            Inst::LKey { dst, a, n } => {
+                d(dst, i);
+                f(a, Use, p);
                 f(n, Use, i);
             }
             Inst::MemEq { dst, a, b, n } => {

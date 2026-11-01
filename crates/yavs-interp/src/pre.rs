@@ -667,6 +667,12 @@ pub(crate) enum Op {
         b: u32,
         n: u32,
     },
+    /// `Inst::LKey`, out of line.
+    LKey {
+        dst: u32,
+        a: u32,
+        n: u32,
+    },
     /// `Inst::LCopy`.
     LCopy {
         dst: u32,
@@ -5037,6 +5043,11 @@ impl Code {
                     doff: dst_off.0,
                     src: src.0,
                     soff: src_off.0,
+                    n: n.0,
+                },
+                Inst::LKey { dst, a, n } => Op::LKey {
+                    dst: dst.0,
+                    a: a.0,
                     n: n.0,
                 },
                 Inst::LEq { dst, a, b, n } => Op::LEq {

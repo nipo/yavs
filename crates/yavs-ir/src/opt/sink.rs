@@ -524,6 +524,7 @@ fn writes_nothing(i: &Inst) -> bool {
             | Inst::FCmp { .. }
             | Inst::Bool { .. }
             | Inst::LEq { .. }
+            | Inst::LKey { .. }
             | Inst::MemEq { .. }
             | Inst::LGet { .. }
             | Inst::Check { .. }

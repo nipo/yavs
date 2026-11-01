@@ -147,6 +147,7 @@ fn inst_ok(prog: &Program, i: &Inst, calls: &mut Vec<FuncId>) -> bool {
         | Inst::LogicOp { .. }
         | Inst::LNum { .. }
         | Inst::LEq { .. }
+        | Inst::LKey { .. }
         | Inst::MemEq { .. }
         | Inst::LGet { .. }
         | Inst::LSet { .. }

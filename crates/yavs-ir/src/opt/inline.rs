@@ -662,6 +662,7 @@ fn allowed(prog: &crate::Program, i: &Inst) -> bool {
         | Inst::Deref { .. }
         | Inst::LGet { .. }
         | Inst::LEq { .. }
+        | Inst::LKey { .. }
         | Inst::MemEq { .. }
         | Inst::SubtypeCheck { .. }
         | Inst::FBin { .. }

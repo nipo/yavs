@@ -533,6 +533,9 @@ case!(
     ]
 );
 
+// A `case` of 16 choices on a logic vector: one key and one dispatch, no compare per choice (#1051).
+case!(case_vector, "n=8468", &[], [("ops", Max(37800))]);
+
 // The forms of `edge_forms` through object aliases (#1001): the edge trigger of the signal itself,
 // so each process runs on its edge only (2532 runs without it).
 case!(
