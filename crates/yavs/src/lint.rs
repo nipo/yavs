@@ -23,8 +23,9 @@ const WAIVERS: &str = "yavs-lint-waivers.yaml";
 #[cfg_attr(test, derive(Debug))]
 #[derive(ClapArgs)]
 pub struct Args {
-    /// The files and directories to check (`.vhd`, `.vhdl`), read in this order. Default: every
-    /// file recorded in the work library, which then needs `--work`.
+    /// The files and directories to check (`.vhd`, `.vhdl`), read in this order, before those of
+    /// `file_list` in the configuration. With neither: every file recorded in the work library,
+    /// which then needs `--work`.
     #[arg(value_name = "FILE|DIR")]
     inputs: Vec<PathBuf>,
     /// Look for files in the subdirectories of a directory too.
@@ -47,6 +48,9 @@ pub struct Args {
     /// The waiver file. Default: `yavs-lint-waivers.yaml` next to the configuration, or in the working directory or an ancestor. Fails with E0134.
     #[arg(long, value_name = "FILE")]
     waivers: Option<PathBuf>,
+    /// Do not check the files of `file_list` in the configuration.
+    #[arg(long)]
+    no_file_list: bool,
     /// Print every rule with its class and whether this configuration runs it, and exit.
     #[arg(long)]
     list_rules: bool,
@@ -138,9 +142,54 @@ fn input_error(message: String) -> Box<Diagnostic> {
     Box::new(Diagnostic::error("E0133", message))
 }
 
+/// The configuration file named or found.
+fn config_path(a: &Args) -> Option<PathBuf> {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    a.config
+        .clone()
+        .or_else(|| yavs_lint::find_up(&cwd, CONFIG))
+}
+
+/// The files `file_list` names, in its order. An entry that gives no file is an error.
+fn listed(a: &Args, cfg: &Config) -> Result<Vec<PathBuf>, Box<Diagnostic>> {
+    let config = config_path(a).unwrap_or_default();
+    let error = |text: String| {
+        let at = format!("`file_list` in `{}`", config.display());
+        Box::new(Diagnostic::error("E0134", format!("{at}: {text}")))
+    };
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let mut out = Vec::new();
+    for entry in cfg.file_list() {
+        let mut files = Vec::new();
+        let found = yavs_lint::expand(entry).map_err(error)?;
+        for f in &found {
+            if f.is_dir() {
+                vhdl_files(f, a.recursive, &mut files)
+                    .map_err(|e| error(format!("cannot read directory `{}`: {e}", f.display())))?;
+            } else {
+                files.push(f.clone());
+            }
+        }
+        if files.is_empty() {
+            let what = if found.is_empty() {
+                "matches no file"
+            } else {
+                "is a directory with no VHDL file (`--recursive` also looks in its subdirectories)"
+            };
+            return Err(error(format!(
+                "the entry `{entry}` {what}: it is relative to the working directory `{}`, so correct the entry or run from the directory it is relative to{}",
+                cwd.display(),
+                yavs_lint::near_entry(entry),
+            )));
+        }
+        out.append(&mut files);
+    }
+    Ok(out)
+}
+
 /// The files to check: those recorded in a library in the order of the library, then the others
-/// in the order given.
-fn sources(a: &Args, libs: &Libraries, work: &str) -> yavs_lib::Result<Vec<Source>> {
+/// in the order given, those of `file_list` last. A file named twice is read once.
+fn sources(a: &Args, cfg: &Config, libs: &Libraries, work: &str) -> yavs_lib::Result<Vec<Source>> {
     let mut recorded: Vec<Source> = Vec::new();
     for name in std::iter::once(work).chain(libs.names()) {
         let Some(l) = libs.get(name).filter(|l| l.has_manifest()) else {
@@ -157,7 +206,12 @@ fn sources(a: &Args, libs: &Libraries, work: &str) -> yavs_lib::Result<Vec<Sourc
             });
         }
     }
-    if a.inputs.is_empty() {
+    let list = if a.no_file_list {
+        Vec::new()
+    } else {
+        listed(a, cfg)?
+    };
+    if a.inputs.is_empty() && list.is_empty() {
         recorded.retain(|s| s.library == yavs_lib::fold(work));
         if recorded.is_empty() {
             return Err(input_error(
@@ -183,6 +237,12 @@ fn sources(a: &Args, libs: &Libraries, work: &str) -> yavs_lib::Result<Vec<Sourc
             )));
         }
     }
+    files.extend(list);
+    let mut seen = std::collections::HashSet::new();
+    files.retain(|f| {
+        let abs = std::path::absolute(f).unwrap_or_else(|_| f.clone());
+        seen.insert(yavs_diag::files::lexical(&abs))
+    });
     let abs: Vec<PathBuf> = files
         .iter()
         .map(|f| std::path::absolute(f).unwrap_or_else(|_| f.clone()))
@@ -228,10 +288,7 @@ fn load_settings(a: &Args) -> Result<(Config, Waivers, PathBuf, PathBuf), Box<Di
             format!("invalid file `{}`: {e}", p.display()),
         ))
     };
-    let config = a
-        .config
-        .clone()
-        .or_else(|| yavs_lint::find_up(&cwd, CONFIG));
+    let config = config_path(a);
     let cfg = match &config {
         Some(p) => Config::parse(&read_file(p)?).map_err(|e| bad(p, e))?,
         None => Config::default(),
@@ -372,7 +429,7 @@ pub fn run(a: Args, format: MessageFormat, color: bool, encoding: Encoding) -> E
             work = name;
         }
     }
-    let sources = match sources(&a, &libs, &work) {
+    let sources = match sources(&a, &cfg, &libs, &work) {
         Ok(s) => s,
         Err(d) => {
             out.emit(&none, &d);

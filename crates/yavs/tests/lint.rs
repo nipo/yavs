@@ -512,6 +512,213 @@ fn exclude_in_the_configuration() {
     );
 }
 
+/// The files of the findings in the short format, sorted.
+fn files_found(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = text
+        .lines()
+        .filter(|l| l.contains("lint_"))
+        .map(|l| l.split(':').next().unwrap().replace('\\', "/"))
+        .collect();
+    out.sort();
+    out
+}
+
+fn file_list_tree() -> common::Tmp {
+    let dir = tempdir("lint");
+    for d in ["src/deep", "src/.hidden", "other"] {
+        std::fs::create_dir_all(dir.join(d)).unwrap();
+    }
+    for f in [
+        "src/a.vhd",
+        "src/b.vhdl",
+        "src/deep/c.vhd",
+        "src/.hidden/d.vhd",
+        "other/e.vhd",
+    ] {
+        let name = Path::new(f).file_stem().unwrap().to_str().unwrap();
+        let text = format!(
+            "entity {name} is end;\narchitecture a of {name} is\nbegin\n  process begin report \"x\"; end process;\nend;\n"
+        );
+        std::fs::write(dir.join(f), text).unwrap();
+    }
+    dir
+}
+
+const SHORT: &str = "--message-format=short";
+
+/// `file_list`: paths, globs, `**`, variables, a directory; hidden entries are skipped.
+#[test]
+fn file_list_names_what_to_check() {
+    let dir = file_list_tree();
+    let run = |list: &str| {
+        std::fs::write(dir.join("yavs-lint.yaml"), list).unwrap();
+        let o = yavs(&dir, &["lint", SHORT]);
+        assert_eq!(status(&o), 1, "{}", stderr(&o));
+        files_found(&stderr(&o))
+    };
+    assert_eq!(run("file_list:\n  - other/e.vhd\n"), ["other/e.vhd"]);
+    assert_eq!(run("file_list: ['src/*.vhd']\n"), ["src/a.vhd"]);
+    assert_eq!(
+        run("file_list: ['src/**/*.vhd']\n"),
+        ["src/a.vhd", "src/deep/c.vhd"],
+        "`**` crosses directories, and a hidden directory is skipped"
+    );
+    assert_eq!(
+        run("file_list: ['src/?.vhd*']\n"),
+        ["src/a.vhd", "src/b.vhdl"]
+    );
+    // A directory reads as on the command line.
+    assert_eq!(run("file_list: [src]\n"), ["src/a.vhd", "src/b.vhdl"]);
+    let o = {
+        std::fs::write(dir.join("yavs-lint.yaml"), "file_list: [src]\n").unwrap();
+        yavs(&dir, &["lint", SHORT, "--recursive"])
+    };
+    assert_eq!(
+        files_found(&stderr(&o)),
+        [
+            "src/.hidden/d.vhd",
+            "src/a.vhd",
+            "src/b.vhdl",
+            "src/deep/c.vhd"
+        ],
+        "as a directory on the command line, which reads hidden directories too"
+    );
+    std::fs::write(
+        dir.join("yavs-lint.yaml"),
+        "file_list: ['$LINT_TEST_LIST_DIR/e.vhd', '${LINT_TEST_LIST_DIR}/e.vhd']\n",
+    )
+    .unwrap();
+    let o = Command::new(env!("CARGO_BIN_EXE_yavs"))
+        .args(["--color", "never", "lint", SHORT])
+        .env("LINT_TEST_LIST_DIR", "other")
+        .current_dir(&*dir)
+        .output()
+        .unwrap();
+    assert_eq!(files_found(&stderr(&o)), ["other/e.vhd"], "{}", stderr(&o));
+}
+
+/// Files on the command line are checked as well as the list, once each; `exclude` wins over it;
+/// `--no-file-list` leaves it out; a library's files keep the library they are recorded in.
+#[test]
+fn file_list_with_files_on_the_command_line() {
+    let dir = file_list_tree();
+    let cfg = dir.join("yavs-lint.yaml");
+    std::fs::write(&cfg, "file_list: [src/a.vhd, other/e.vhd]\n").unwrap();
+    let o = yavs(&dir, &["lint", SHORT, "src/deep/c.vhd", "./src/a.vhd"]);
+    assert_eq!(
+        files_found(&stderr(&o)),
+        ["./src/a.vhd", "other/e.vhd", "src/deep/c.vhd"],
+        "named once, the first way: {}",
+        stderr(&o)
+    );
+    let o = yavs(&dir, &["lint", SHORT, "--no-file-list", "src/deep/c.vhd"]);
+    assert_eq!(
+        files_found(&stderr(&o)),
+        ["src/deep/c.vhd"],
+        "{}",
+        stderr(&o)
+    );
+    // Nothing given and the list left out: the usual error.
+    let o = yavs(&dir, &["lint", SHORT, "--no-file-list"]);
+    assert_eq!(status(&o), 2);
+    assert!(stderr(&o).contains("nothing to check"), "{}", stderr(&o));
+    std::fs::write(
+        &cfg,
+        "file_list: [src/a.vhd, other/e.vhd]\nexclude: [other]\n",
+    )
+    .unwrap();
+    let o = yavs(&dir, &["lint", SHORT]);
+    assert_eq!(files_found(&stderr(&o)), ["src/a.vhd"], "{}", stderr(&o));
+
+    // The list wins over the default of a library: with `--work` it says what is checked.
+    std::fs::write(&cfg, "file_list: [src/a.vhd]\n").unwrap();
+    let analyze = yavs(&dir, &["analyze", "--work=mine:lib", "other/e.vhd"]);
+    assert!(analyze.status.success(), "{}", stderr(&analyze));
+    let o = yavs(&dir, &["lint", SHORT, "--work=mine:lib"]);
+    assert_eq!(files_found(&stderr(&o)), ["src/a.vhd"], "{}", stderr(&o));
+    let o = yavs(&dir, &["lint", SHORT, "--work=mine:lib", "--no-file-list"]);
+    let text = stderr(&o);
+    assert!(text.contains("e.vhd") && !text.contains("a.vhd"), "{text}");
+}
+
+/// Entries are relative to the working directory, not the configuration file.
+#[test]
+fn file_list_is_relative_to_the_working_directory() {
+    let dir = file_list_tree();
+    std::fs::write(dir.join("other/list.yaml"), "file_list: [src/a.vhd]\n").unwrap();
+    let o = yavs(&dir, &["lint", SHORT, "--config=other/list.yaml"]);
+    assert_eq!(files_found(&stderr(&o)), ["src/a.vhd"], "{}", stderr(&o));
+    // The configuration found in an ancestor: the entry does not exist from here.
+    std::fs::write(dir.join("yavs-lint.yaml"), "file_list: [src/a.vhd]\n").unwrap();
+    let o = yavs(&dir.join("other"), &["lint", SHORT]);
+    assert_eq!(status(&o), 2);
+    assert!(
+        stderr(&o).contains("relative to the working directory"),
+        "{}",
+        stderr(&o)
+    );
+    let o = yavs(
+        &dir.join("other"),
+        &["lint", SHORT, "--no-file-list", "e.vhd"],
+    );
+    assert_eq!(status(&o), 1, "{}", stderr(&o));
+}
+
+/// An entry that gives no file is E0134 naming the entry, the configuration and the directory it is relative to, with a near name; so is a bad form of the key.
+#[test]
+fn file_list_entry_that_is_missing() {
+    let dir = file_list_tree();
+    let cfg = dir.join("yavs-lint.yaml");
+    let bad = |list: &str| {
+        std::fs::write(&cfg, list).unwrap();
+        let o = yavs(&dir, &["lint", SHORT]);
+        assert_eq!(status(&o), 2, "{}", stderr(&o));
+        let text = stderr(&o);
+        assert!(text.contains("E0134"), "{text}");
+        assert!(text.contains("yavs-lint.yaml"), "{text}");
+        text
+    };
+    let text = bad("file_list:\n  - src/a.vhd\n  - src/deep/no_such.vhd\n");
+    assert!(text.contains("`src/deep/no_such.vhd`"), "{text}");
+    assert!(text.contains("working directory"), "{text}");
+    assert!(findings(&text).is_empty(), "nothing is checked: {text}");
+    let text = bad("file_list: [src/deep/cc.vhd]\n");
+    assert!(
+        text.contains("a path with a similar name exists: `c.vhd`"),
+        "{text}"
+    );
+    let text = bad("file_list: ['sources/*.vhd', src/a.vhd]\n");
+    assert!(text.contains("`sources/*.vhd` matches no file"), "{text}");
+    let text = bad("file_list: ['srd/*.vhd']\n");
+    assert!(
+        text.contains("a path with a similar name exists: `src`"),
+        "{text}"
+    );
+    let text = bad("file_list: ['src/*.txt']\n");
+    assert!(text.contains("`src/*.txt`"), "{text}");
+    let text = bad("file_list: ['$LINT_TEST_NOT_SET/a.vhd']\n");
+    assert!(text.contains("`$LINT_TEST_NOT_SET/a.vhd`"), "{text}");
+    std::fs::create_dir_all(dir.join("empty")).unwrap();
+    let text = bad("file_list: [empty]\n");
+    assert!(text.contains("no VHDL file"), "{text}");
+    let text = bad("file_list: src\n");
+    assert!(text.contains("must be a list"), "{text}");
+    let text = bad("file_list:\n  - src/a.vhd:\n      rule: {}\n");
+    assert!(
+        text.contains("not implemented") && text.contains("`src/a.vhd`"),
+        "{text}"
+    );
+    let text = bad("file_lst: [src/a.vhd]\n");
+    assert!(
+        text.contains("a key with a similar name exists: `file_list`"),
+        "{text}"
+    );
+    // `--list-rules` and `--explain` read no files.
+    std::fs::write(&cfg, "file_list: [no_such.vhd]\n").unwrap();
+    let o = yavs(&dir, &["lint", "--list-rules"]);
+    assert_eq!(status(&o), 0, "{}", stderr(&o));
+}
+
 /// lint_782 and lint_006 name what analysis rejects first (E1403, E0002), so the run says so with
 /// that code, and the rules stay only for a configuration to name.
 #[test]

@@ -454,7 +454,8 @@ class YavsInterface(SimulatorInterface):
             # An external library is not this project's, and a library without files has nothing to check
             if library.is_external or not (Path(library.directory) / "yavs-lib.toml").exists():
                 continue
-            cmd = self._get_command("lint", library.name, library.directory)
+            # The project says which files a library has, not file_list in the configuration
+            cmd = self._get_command("lint", library.name, library.directory) + ["--no-file-list"]
             failed |= subprocess.run(cmd, check=False).returncode != 0
         if failed:
             raise CompileError

@@ -805,14 +805,15 @@ Every place that takes a path takes both forms: `:tb:u:s` and `tb.u.s` are the s
 
 ```
 yavs lint [FILE|DIR ...] [--recursive] [--work=NAME:PATH] [--map=NAME:PATH ...] [--std=STD]
-          [--config=FILE] [--waivers=FILE] [--list-rules] [--explain=RULE] [-W...]
+          [--config=FILE] [--waivers=FILE] [--no-file-list] [--list-rules] [--explain=RULE] [-W...]
           [--json=FILE] [--sarif=FILE] [--junit=FILE] [--quality-report=FILE] [--sonarqube=FILE] [--facts=FILE]
 ```
 
 - Reads sources again with the analysis `yavs analyze` does and writes nothing into any library: no record, no
   index, no cache entry (the analysed-unit cache is read). `--define`, `--psl` and `--relaxed` must be those the
   files were analyzed with, as for `elab`.
-- Without `FILE|DIR`, every file recorded in `--work`, in the order of the library. With them, the files recorded
+- `file_list` in the configuration is a list of paths, directories and globs (`*`, `?`, `**`; `$NAME`, `${NAME}`; hidden entries skipped by a glob, each glob sorted), relative to the working directory, not to the configuration file. Its files are added after `FILE|DIR`; a file named twice is read once, as first named. `--no-file-list` leaves it out. An entry that gives no file, a form that is not a list, and settings for one entry (`{path: {rule: ...}}`, not implemented) are `E0134`, status 2, before anything is read. `--list-rules` and `--explain` do not look at the files.
+- Without `FILE|DIR` and without files from `file_list`, every file recorded in `--work`, in the order of the library. With them, the files recorded
   in a mapped library come first in that library's order and into that library; the others follow in the order
   given, into the work library (`work` when `--work` is not given, kept in memory). A directory is its `.vhd` and
   `.vhdl` files, sorted, with its subdirectories under `--recursive`. `std` and `ieee` cannot be mapped (`E0102`).

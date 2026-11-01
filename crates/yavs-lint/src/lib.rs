@@ -11,7 +11,7 @@ mod report;
 mod rules;
 mod testbench;
 
-pub use config::{Config, Waivers, find_up, unmatched};
+pub use config::{Config, Waivers, expand, find_up, near_entry, unmatched};
 pub use report::{Entry, Reports};
 
 use serde_json::Value;

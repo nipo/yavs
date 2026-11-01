@@ -27,7 +27,7 @@ pub fn glob(pattern: &[u8], text: &[u8]) -> bool {
 }
 
 /// `path` with `.` and `..` taken out, without asking the file system.
-fn lexical(path: &Path) -> PathBuf {
+pub fn lexical(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for c in path.components() {
         match c {

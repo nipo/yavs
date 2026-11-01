@@ -7,7 +7,7 @@ Read the root `AGENTS.md` first. This file is for an agent about to change `crat
 - The rules of `yavs lint` over the analysed HIR, the classes they belong to, the configuration and
   waiver files, and the report files. Users' view: `docs/lint.rst`; decisions: `docs/decisions.md`
   "Static analysis"; command line: `crates/yavs/src/lint.rs`, `docs/cli-contract.md` 5a.
-- Does not: parse or analyze (`yavs-sem`), choose the files, render console output (`yavs-diag`
+- Does not: parse or analyze (`yavs-sem`), choose the files (it expands the entries of `file_list`, the CLI decides what is read), render console output (`yavs-diag`
   through the CLI), run during `analyze`, `elab` or `run`.
 - Depends on: `yavs-diag`, `yavs-sem`, `yavs-syntax` (lint_005), `regex` (`re:` in lint_602, lint_603), `saphyr-parser`, `serde_json`. Called by: `yavs`.
 - The rules and their test cases come from the owner's project of the same licence, MIT OR
@@ -20,7 +20,7 @@ Read the root `AGENTS.md` first. This file is for an agent about to change `crat
 | `src/lib.rs` | `Certainty`, `Rule`, `rule`, `Finding`, `lint` (configuration applied, order, dedup; facts) |
 | `src/rules.rs` | `RULES`, the one list; `check` and `Walk`: the regions and statements of a unit, the definite rules and lint_712, 713, 760; lint_005 |
 | `src/design.rs` | One architecture as a design, flattened to `Conc`: lint_001, 002, 004, 600, 601, 602, 603, 700, 701, 702, 703, 710, 711, 720, 730; `shape` says what a process is; `Flow`: the dependencies of a process for lint_720; the design facts; `component` (lint_750) |
-| `src/config.rs` | YAML to `Config` (`rule:`, levels global, group, rule; `rtl:`, `testbench:`, `Kind`) and `Waivers`, `find_up` |
+| `src/config.rs` | YAML to `Config` (`rule:`, levels global, group, rule; `rtl:`, `testbench:`, `Kind`; `file_list`, `expand`, `near_entry`) and `Waivers`, `find_up` |
 | `src/testbench.rs` | Which kind a file is, only when a block for one exists |
 | `src/report.rs` | `Reports`: JSON, SARIF, JUnit, Code Climate, SonarQube |
 
@@ -33,6 +33,7 @@ Read the root `AGENTS.md` first. This file is for an agent about to change `crat
 | A rule judges only what analysis folded; statically turned off code is not walked | No guessing about generics |
 | Predefined operators only for lint_741 and lint_781 | Overloads define their own behaviour |
 | Generic instances are not walked: their spans are the generic's | One finding per place |
+| `file_list` is relative to the working directory, `exclude` and waivers to their file; decisions.md "Static analysis" | A real configuration relies on it |
 | `exclude` and a waiver's `files` share `yavs_diag::files::Place::covered_by`, coverage exclusion files too; waivers also keep matching the reported path and a bare name | Directories mean the same everywhere; existing waiver files keep working |
 
 ## 4. Invariants and pitfalls

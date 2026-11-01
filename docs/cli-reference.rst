@@ -686,7 +686,7 @@ Report what can be proved wrong about a design before it is simulated.
 
 Arguments:
 
-* ``FILE|DIR`` (any number): The files and directories to check (``.vhd``, ``.vhdl``), read in this order. Default: every file recorded in the work library, which then needs ``--work``.
+* ``FILE|DIR`` (any number): The files and directories to check (``.vhd``, ``.vhdl``), read in this order, before those of ``file_list`` in the configuration. With neither: every file recorded in the work library, which then needs ``--work``.
 
 .. option:: -r, --recursive
 
@@ -713,6 +713,10 @@ Arguments:
 .. option:: --waivers=FILE
 
    The waiver file. Default: ``yavs-lint-waivers.yaml`` next to the configuration, or in the working directory or an ancestor. Fails with E0134.
+
+.. option:: --no-file-list
+
+   Do not check the files of ``file_list`` in the configuration.
 
 .. option:: --list-rules
 

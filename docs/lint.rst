@@ -131,6 +131,36 @@ last three are inferences and can be wrong: list the files to decide it yourself
 which files it took for testbenches. ``suffixes`` and ``prefixes`` hold for the whole run, wherever they
 are set.
 
+To name the files to check in the configuration, list them under ``file_list``: paths, directories or
+globs. ``yavs lint`` with no file on the command line then checks them, and files on the command line
+are checked as well as the list, each file once:
+
+.. code-block:: yaml
+
+   file_list:
+     - modules/fifo/src/fifo.vhd     # a file
+     - 'modules/*/src/*.vhd'         # `*` and `?` stop at `/`, sorted, hidden entries skipped
+     - 'modules/**/test/*.vhd'       # `**` crosses directories
+     - $IP_ROOT/src/*.vhd            # $NAME and ${NAME} come from the environment
+     - generated                     # a directory, as on the command line
+
+Entries are relative to the directory you run in, not to the configuration file, unlike ``exclude`` and
+waivers. An entry that gives no file stops the run with ``E0134``, naming the entry, the configuration
+and that directory. ``exclude`` wins over ``file_list``. ``--no-file-list`` leaves the list out, to
+check one file, or the files a library records. Settings for one entry are not implemented; a waiver
+turns a rule off for a file.
+
+The files of a mapped library are read in the order of the library and into that library, whichever
+way they were named. Other files are read in the order given, as library ``work`` or ``--work``, and a
+glob gives them in sorted order: a file that uses a package that sorts after it fails analysis unless
+that package is in an analyzed library given with ``--work`` or ``--map``. So analyze the design first
+and give its libraries:
+
+.. code-block:: console
+
+   $ yavs analyze --work=fifo:out/fifo modules/fifo/src/fifo_pkg.vhd modules/fifo/src/fifo.vhd
+   $ yavs lint --map=fifo:out/fifo
+
 Waivers
 -------
 
@@ -232,7 +262,8 @@ With VUnit
 
 ``python run.py --compile --yavs-lint`` checks every library the run compiled, after compiling, and
 fails the run with a finding of severity error (:doc:`vunit-yavs`). It reads ``yavs-lint.yaml`` from
-the directory you run in or an ancestor, so ``exclude`` applies.
+the directory you run in or an ancestor, so ``exclude`` applies. ``file_list`` does not: the project
+says which files a library has.
 
 In VS Code
 ----------

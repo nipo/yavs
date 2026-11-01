@@ -77,7 +77,8 @@ out stops the run script with one ``error:`` line that says why and what to drop
      - After compiling, runs ``yavs lint`` (:doc:`lint`) on every library of the project that is not
        external; a finding of severity error fails the compile step. VUnit's own libraries are among
        them: to leave them out, put ``exclude: ['**/vunit/vhdl/**']`` in ``yavs-lint.yaml`` in the
-       directory you run in or an ancestor.
+       directory you run in or an ancestor. ``file_list`` in that file is not read: the project says
+       which files a library has.
    * - ``--yavs-cov``
      - Collects coverage in every simulation, as ``enable_coverage`` does for the tests it is set
        for. Not with ``--yavs-debug`` or ``--yavs-interactive``.

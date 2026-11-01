@@ -1,5 +1,5 @@
-//! `yavs-lint.yaml` (the `rule:` section) and `yavs-lint-waivers.yaml`. Unknown keys and rule ids
-//! are errors naming them. Values are read as the text they were written as.
+//! `yavs-lint.yaml` (`rule`, `exclude`, `file_list`) and `yavs-lint-waivers.yaml`. Unknown keys and
+//! rule ids are errors naming them. Values are read as the text they were written as.
 
 use crate::{Certainty, Rule};
 use saphyr_parser::{Event, Parser};
@@ -167,6 +167,8 @@ pub struct Config {
     testbench_libraries: Vec<String>,
     /// The `rule:` sections of `rtl:` and `testbench:`, which win for files of that kind.
     kinds: [Option<Box<Config>>; 2],
+    /// `file_list`: the path or glob of each entry, as written.
+    file_list: Vec<String>,
 }
 
 /// Which rule block of the configuration applies to a file.
@@ -235,17 +237,26 @@ impl Config {
                     cfg.kinds[at as usize] = Some(Box::new(block));
                 }
                 "rule" => cfg.rules_section(l, &v)?,
+                "file_list" => {
+                    let Node::Seq(items) = v else {
+                        return Err(format!("line {l}: `file_list` must be a list of files"));
+                    };
+                    for n in items {
+                        file_list_entry(l, n, &mut cfg.file_list)?;
+                    }
+                }
                 _ => {
                     let keys = [
                         "rule",
                         "exclude",
+                        "file_list",
                         "testbench_files",
                         "testbench_libraries",
                         "rtl",
                         "testbench",
                     ];
                     return Err(format!(
-                        "line {l}: unknown key `{key}` (expected `rule`, `exclude`, `testbench_files`, `testbench_libraries`, `rtl` or `testbench`){}",
+                        "line {l}: unknown key `{key}` (expected `rule`, `exclude`, `file_list`, `testbench_files`, `testbench_libraries`, `rtl` or `testbench`){}",
                         near(&key, "key", keys.into_iter())
                     ));
                 }
@@ -320,6 +331,11 @@ impl Config {
         }
         let place = Place::new(file, base);
         self.exclude.iter().any(|p| place.covered_by(p))
+    }
+
+    /// The entries of `file_list`; [`expand`] gives the files of one.
+    pub fn file_list(&self) -> &[String] {
+        &self.file_list
     }
 
     /// The list a rule's own settings give (`suffixes`, `prefixes`), empty when not set. The
@@ -412,6 +428,139 @@ impl Config {
             .find_map(|l| l.severity)
             .unwrap_or(Severity::Error)
     }
+}
+
+/// One entry of `file_list`: a path or glob, or a map from one to its settings, of which only
+/// empty ones are taken. Settings of one file are refused, never dropped.
+fn file_list_entry(l: usize, n: Node, out: &mut Vec<String>) -> Result<(), String> {
+    match n {
+        Node::Scalar(s) => out.push(s),
+        Node::Map(entries) => {
+            for (l, pattern, settings) in entries {
+                if !matches!(&settings, Node::Scalar(s) if s.is_empty())
+                    && !matches!(&settings, Node::Map(m) if m.is_empty())
+                {
+                    return Err(format!(
+                        "line {l}: settings for one `file_list` entry are not implemented: list `{pattern}` as a plain path, and use a waiver to turn a rule off for it"
+                    ));
+                }
+                out.push(pattern);
+            }
+        }
+        Node::Seq(_) => {
+            return Err(format!("line {l}: a `file_list` entry must be a path"));
+        }
+    }
+    Ok(())
+}
+
+/// `$NAME` and `${NAME}` replaced from the environment; one that is not set stays as written, and
+/// then matches no file.
+fn expand_vars(text: &str) -> String {
+    let word = |c: char| c.is_alphanumeric() || c == '_';
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(i) = rest.find('$') {
+        out.push_str(&rest[..i]);
+        rest = &rest[i..];
+        let after = &rest[1..];
+        let (name, len) = match after.strip_prefix('{').and_then(|a| a.split_once('}')) {
+            Some((name, _)) if !name.is_empty() && name.chars().all(word) => (name, name.len() + 3),
+            _ => {
+                let end = after.find(|c| !word(c)).unwrap_or(after.len());
+                (&after[..end], end + 1)
+            }
+        };
+        match std::env::var(name) {
+            Ok(value) if !name.is_empty() => out.push_str(&value),
+            _ => out.push_str(&rest[..len]),
+        }
+        rest = &rest[len..];
+    }
+    out + rest
+}
+
+/// The files below `dir`, leaving out hidden entries; symbolic links to directories are not followed.
+fn walk(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
+    let cannot = |e: std::io::Error| format!("cannot read directory `{}`: {e}", dir.display());
+    for entry in std::fs::read_dir(dir).map_err(cannot)? {
+        let entry = entry.map_err(cannot)?;
+        if entry.file_name().to_string_lossy().starts_with('.') {
+            continue;
+        }
+        let path = entry.path();
+        if entry.file_type().map_err(cannot)?.is_dir() {
+            walk(&path, out)?;
+        } else if path.is_file() {
+            out.push(path);
+        }
+    }
+    Ok(())
+}
+
+/// What one `file_list` entry names, relative to the working directory: the sorted files a glob
+/// matches, or a path that exists, which may be a directory. Empty when nothing is there.
+pub fn expand(entry: &str) -> Result<Vec<PathBuf>, String> {
+    let pattern = normalize(&expand_vars(entry));
+    let Some(wild) = pattern.find(['*', '?']) else {
+        let path = PathBuf::from(&pattern);
+        return Ok(if path.exists() {
+            vec![path]
+        } else {
+            Vec::new()
+        });
+    };
+    let base = match pattern[..wild].rfind('/') {
+        Some(0) => "/",
+        Some(i) => &pattern[..i],
+        None => ".",
+    };
+    let mut files = Vec::new();
+    if Path::new(base).is_dir() {
+        walk(Path::new(base), &mut files)?;
+    }
+    let mut files: Vec<PathBuf> = files
+        .into_iter()
+        .map(|f| f.strip_prefix(".").map(Path::to_path_buf).unwrap_or(f))
+        .filter(|f| {
+            glob(
+                pattern.as_bytes(),
+                normalize(&f.to_string_lossy()).as_bytes(),
+            )
+        })
+        .collect();
+    files.sort();
+    Ok(files)
+}
+
+/// The tail of an error about an entry that matches nothing: the name close to its first part
+/// that is not there. Empty when none is close, or when the parts before a wildcard are all there.
+pub fn near_entry(entry: &str) -> String {
+    let pattern = normalize(&expand_vars(entry));
+    let mut dir = PathBuf::new();
+    for part in Path::new(&pattern).components() {
+        let text = part.as_os_str().to_string_lossy();
+        if text.contains(['*', '?']) {
+            break;
+        }
+        let next = dir.join(part);
+        if !next.exists() {
+            let shown = if dir.as_os_str().is_empty() {
+                Path::new(".")
+            } else {
+                &dir
+            };
+            let names: Vec<String> = std::fs::read_dir(shown)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .collect();
+            return near(&text, "path", names.iter().map(String::as_str));
+        }
+        dir = next;
+    }
+    String::new()
 }
 
 struct Waiver {
@@ -647,9 +796,43 @@ mod tests {
     }
 
     #[test]
+    fn file_list_forms() {
+        let list = |t: &str| Config::parse(t).map(|c| c.file_list);
+        assert_eq!(
+            list("file_list:\n  - a.vhd\n  - 'src/*.vhd'\n  - b.vhd: {}\n  - c.vhd:\n").unwrap(),
+            ["a.vhd", "src/*.vhd", "b.vhd", "c.vhd"]
+        );
+        assert!(
+            list("file_list: a.vhd\n")
+                .unwrap_err()
+                .contains("must be a list")
+        );
+        assert!(list("file_list:\n").unwrap_err().contains("must be a list"));
+        assert!(
+            list("file_list:\n  - [a.vhd]\n")
+                .unwrap_err()
+                .contains("must be a path")
+        );
+        let per_file = list("file_list:\n  - a.vhd:\n      rule: {}\n").unwrap_err();
+        assert!(
+            per_file.contains("`a.vhd`") && per_file.contains("not implemented"),
+            "{per_file}"
+        );
+    }
+
+    #[test]
+    fn variables_in_an_entry() {
+        let dir = env!("CARGO_MANIFEST_DIR");
+        assert_eq!(
+            expand_vars("${CARGO_MANIFEST_DIR}/x/$CARGO_MANIFEST_DIR/$LINT_TEST_NOT_SET/${}/$"),
+            format!("{dir}/x/{dir}/$LINT_TEST_NOT_SET/${{}}/$")
+        );
+    }
+
+    #[test]
     fn unknown_names_are_errors_that_name_them() {
         for (text, needle) in [
-            ("vsg_rs: {}\n", "unknown key `vsg_rs`"),
+            ("no_such_key: {}\n", "unknown key `no_such_key`"),
             ("rule:\n  lint_100:\n    disable: false\n", "`lint_100`"),
             ("rule:\n  entity_019:\n    disable: false\n", "`entity_019`"),
             ("rule:\n  lint_770:\n    fixable: false\n", "`fixable`"),
