@@ -1870,3 +1870,30 @@ fn a_file_has_one_entry_however_spelled() {
     ok(at(&t, &["analyze", "--std=2008", &w, "sub/x.vhd"]));
     assert_eq!(entries_of(&lib), 2);
 }
+
+/// #1044: an edited file the index knows by a symlink of another name has one entry, so a unit
+/// dropped from it is `L0031`, not `L0034` for the symlink's entry.
+#[cfg(unix)]
+#[test]
+fn an_edited_file_known_by_a_symlink_of_another_name_has_one_entry() {
+    let t = tempdir("spell-alias");
+    std::fs::write(t.join("x.vhd"), "package a is\nend;\npackage b is\nend;\n").unwrap();
+    std::fs::write(t.join("ub.vhd"), "use work.b.all;\nentity ub is end;\n").unwrap();
+    std::os::unix::fs::symlink(t.join("x.vhd"), t.join("alias.vhd")).unwrap();
+    let lib = t.join("lib");
+    let w = work(&lib);
+    ok(at(
+        &t,
+        &["analyze", "--std=2008", &w, "alias.vhd", "ub.vhd"],
+    ));
+    assert_eq!(entries_of(&lib), 2);
+    std::fs::write(t.join("x.vhd"), "package a is\nend;\n").unwrap();
+    ok(at(&t, &["analyze", "--std=2008", &w, "x.vhd"]));
+    assert_eq!(entries_of(&lib), 2);
+    let o = at(&t, &["elab", &w, "ub"]);
+    assert_ne!(o.code, 0, "{o:?}");
+    assert!(
+        o.stderr.contains("L0031") && !o.stderr.contains("L0034"),
+        "{o:?}"
+    );
+}

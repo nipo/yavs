@@ -323,6 +323,8 @@ impl Session {
                 ),
             ));
         };
+        let resolved = yavs_diag::files::resolve(&path);
+        let real = resolved.to_str().unwrap_or(path_s);
         let mp = self.lib.manifest_path();
         let mut st = self.state.lock().unwrap();
         if st.manifest.is_none() {
@@ -365,9 +367,9 @@ impl Session {
             .into_iter()
             .filter(|&d| d != digest)
             .collect();
-        dead.extend(m.remove_other_spellings(&path, hash));
+        dead.extend(m.remove_other_spellings(path_s, real));
         dead.extend(m.take_units(&units));
-        m.push_file(path_s, hash, standard, stamp, digest, &units);
+        m.push_file((path_s, real), hash, standard, stamp, digest, &units);
         st.dirty = true;
         st.dead.extend(dead);
         Ok(())

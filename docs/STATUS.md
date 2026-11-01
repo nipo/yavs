@@ -121,7 +121,7 @@ An expression that is not globally static as a port actual is `E1360` in a 1993 
 
 ### Weak dependencies (#819, 2026-10-31)
 
-An architecture named by an instance or binding may be analysed later: manifest format 4 lists it as `weak`, pulled into the closure without ordering its file (L165).
+An architecture named by an instance or binding may be analysed later: manifest format 4 lists it as `weak`, pulled into the closure without ordering its file (L165). A file has one index entry however it is spelled, symlinks of another name included: the entry holds its resolved path too (library format 5, #1044; `a_file_has_one_entry_however_spelled`, `an_edited_file_known_by_a_symlink_of_another_name_has_one_entry` in `cache.rs`).
 
 ### Static actuals outside the formal's subtype (#910, 2026-10-31)
 

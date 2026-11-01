@@ -31,8 +31,9 @@ The directory of ``--work=NAME:PATH`` or ``--map=NAME:PATH``:
 
 A library holds no copy of your sources: it records their absolute paths and hashes, and ``run`` reads
 them again. So the sources must stay where they were analyzed (``L0033`` if not) and unchanged (``L0034``).
-A library written by a yavs with another library format is refused with ``L0004``: delete the directory and
-analyze again.
+A file has one entry however it is spelled (``..``, a symlink, another name of the same file): analyzing
+it under a second spelling replaces the first entry. A library written by a yavs with another library
+format (this one is 5) is refused with ``L0004``: delete the directory and analyze again.
 
 The compile cache
 -----------------

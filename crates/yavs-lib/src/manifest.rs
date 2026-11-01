@@ -8,7 +8,7 @@ pub const MANIFEST_FILE: &str = "yavs-lib.toml";
 pub const LOCK_FILE: &str = "_YAVS_LIB";
 /// The directory of the per-file records, next to the index.
 pub const RECORD_DIR: &str = "yavs-lib.d";
-pub(crate) const FORMAT: u32 = 4;
+pub(crate) const FORMAT: u32 = 5;
 
 /// Case-fold an identifier: basic identifiers are case-insensitive,
 /// extended identifiers (`\Foo\`) are not.
@@ -212,6 +212,9 @@ struct Span(u32, u32);
 #[derive(Clone, Debug)]
 struct IFile {
     path: Span,
+    /// The file `path` names with symlinks and `..` resolved, when that differs from `path`: how
+    /// two spellings of one file are found without a system call (#1044).
+    real: Option<Span>,
     hash: Span,
     std: Span,
     size: Option<u64>,
@@ -500,6 +503,9 @@ impl Manifest {
     fn put_file(&self, o: &mut String, i: usize, f: &IFile, at: &mut usize) {
         o.push_str("\n[[file]]\n");
         put_line(o, "path", self.s(f.path));
+        if let Some(r) = f.real {
+            put_line(o, "real", self.s(r));
+        }
         put_line(o, "hash", self.s(f.hash));
         put_line(o, "std", self.s(f.std));
         if let Some(n) = f.size {
@@ -557,19 +563,15 @@ impl Manifest {
     }
 
     /// Forget the entries of the file at `path` under another spelling (`..`, a symlink), so that a
-    /// file has one entry (#1031); the digests of their records. Only a candidate is resolved: an
-    /// entry of the same file name, or of the content `hash` (a symlink of another name).
-    // ponytail: an edited file that the index knows by a symlink of another name stays as a second
-    // entry (L0034, its help clears it); a resolved path in the index would close that.
-    pub(crate) fn remove_other_spellings(&mut self, path: &Path, hash: &str) -> Vec<u128> {
+    /// file has one entry (#1031, #1044); the digests of their records. `real` is the resolved
+    /// path of `path`; each entry keeps its own, so this makes no system call.
+    // ponytail: an entry's `real` is as of its analysis; a symlink retargeted since is not noticed.
+    pub(crate) fn remove_other_spellings(&mut self, path: &str, real: &str) -> Vec<u128> {
         let mut gone = Vec::new();
         let mut i = 0;
         while i < self.files.len() {
-            let f = self.file_at(i);
-            if f.path != path
-                && (f.path.file_name() == path.file_name() || f.hash == hash)
-                && same_file(f.path, path)
-            {
+            let f = &self.files[i];
+            if self.s(f.path) != path && self.s(f.real.unwrap_or(f.path)) == real {
                 gone.push(self.remove_at(i));
             } else {
                 i += 1;
@@ -621,10 +623,10 @@ impl Manifest {
         gone
     }
 
-    /// Add `path` at the end of the analysis order.
+    /// Add `path` (with its resolved path `real`) at the end of the analysis order.
     pub(crate) fn push_file(
         &mut self,
-        path: &str,
+        (path, real): (&str, &str),
         hash: &str,
         std: &str,
         stamp: Option<Stamp>,
@@ -634,6 +636,7 @@ impl Manifest {
         let file = self.files.len() as u32;
         let f = IFile {
             path: self.add(path),
+            real: (real != path).then(|| self.add(real)),
             hash: self.add(hash),
             std: self.add(std),
             size: stamp.map(|s| s.size),
@@ -672,6 +675,7 @@ fn parse_index(text: &str, dir: &Path) -> std::result::Result<Manifest, (usize, 
     #[derive(Default)]
     struct Pending {
         path: Option<Span>,
+        real: Option<Span>,
         hash: Option<Span>,
         std: Option<Span>,
         size: Option<u64>,
@@ -740,6 +744,7 @@ fn parse_index(text: &str, dir: &Path) -> std::result::Result<Manifest, (usize, 
                     .map(|s| (s, p.end));
                 m.files.push(IFile {
                     path,
+                    real: p.real,
                     hash,
                     std,
                     size: p.size,
@@ -808,6 +813,7 @@ fn parse_index(text: &str, dir: &Path) -> std::result::Result<Manifest, (usize, 
                 pos = eol(vstart + c.pos()).ok_or_else(|| (n(), "text after the value"))?;
             }
             (Some(p), "path") => p.path = Some(string!()),
+            (Some(p), "real") => p.real = Some(string!()),
             (Some(p), "hash") => p.hash = Some(string!()),
             (Some(p), "std") => p.std = Some(string!()),
             (Some(p), "size") => {
@@ -915,13 +921,13 @@ mod tests {
         let a = UnitRecord::new(UnitKind::Package, "Pkg_A", "2008");
         let b = UnitRecord::package_body("Pkg_A", "2008");
         let c = UnitRecord::architecture("Ent", "Rtl", "2019");
-        m.push_file(path, "sha256:ab", "2008", None, 7, &[a, b]);
+        m.push_file((path, path), "sha256:ab", "2008", None, 7, &[a, b]);
         let stamp = Some(Stamp {
             size: 12,
             mtime_ns: 1_700_000_000_123_456_789,
         });
         m.push_file(
-            "/x/b.vhd",
+            ("/x/b.vhd", "/x/b.vhd"),
             "sha256:cd",
             "2019",
             stamp,
@@ -977,7 +983,7 @@ mod tests {
         ] {
             let m = sample(path);
             let text = m.to_text();
-            assert!(text.starts_with("format = 4\nname = \"lib\"\n"));
+            assert!(text.starts_with("format = 5\nname = \"lib\"\n"));
             let back = Manifest::parse(&text, Path::new("/l/yavs-lib.toml")).unwrap();
             same(&m, &back);
             // Written again, the same text.
@@ -994,7 +1000,7 @@ mod tests {
         // The text stays valid TOML, for anyone who looks at it.
         let text = sample("/x/it's \"q\" \\ \u{e9}.vhd").to_text();
         let v: toml::Value = toml::from_str(&text).unwrap();
-        assert_eq!(v["format"].as_integer(), Some(4));
+        assert_eq!(v["format"].as_integer(), Some(5));
         assert_eq!(
             v["file"][0]["path"].as_str(),
             Some("/x/it's \"q\" \\ \u{e9}.vhd")
@@ -1004,13 +1010,32 @@ mod tests {
     }
 
     #[test]
+    fn entries_of_one_file_are_found_by_their_resolved_path() {
+        let mut m = Manifest::new("lib", Path::new("/l"));
+        m.push_file(
+            ("/x/alias.vhd", "/x/x.vhd"),
+            "sha256:ab",
+            "2008",
+            None,
+            1,
+            &[],
+        );
+        m.push_file(("/x/y.vhd", "/x/y.vhd"), "sha256:cd", "2008", None, 2, &[]);
+        let back = Manifest::parse(&m.to_text(), Path::new("/l/yavs-lib.toml")).unwrap();
+        let mut m = back;
+        assert!(m.remove_other_spellings("/x/y.vhd", "/x/y.vhd").is_empty());
+        assert_eq!(m.remove_other_spellings("/x/x.vhd", "/x/x.vhd"), [1]);
+        assert_eq!(m.files().count(), 1);
+    }
+
+    #[test]
     fn partial_and_removed_files() {
         let mut m = sample("/x/a.vhd");
         // c.vhd defines package pkg_a again: a.vhd keeps only its body and is partial.
         let gone = m.take_units(&[UnitRecord::new(UnitKind::Package, "Pkg_A", "2008")]);
         assert!(gone.is_empty());
         m.push_file(
-            "/x/c.vhd",
+            ("/x/c.vhd", "/x/c.vhd"),
             "sha256:ef",
             "2008",
             None,
@@ -1035,7 +1060,7 @@ mod tests {
         assert!(back.file(Path::new("/x/a.vhd")).unwrap().partial);
         assert_eq!(m.remove_file("/x/a.vhd"), Some(7));
         m.push_file(
-            "/x/a.vhd",
+            ("/x/a.vhd", "/x/a.vhd"),
             "sha256:ab",
             "2008",
             None,
@@ -1064,7 +1089,7 @@ mod tests {
         // A file that lost a unit is written afresh, the other one copied; a new file is appended.
         m.take_units(&[UnitRecord::new(UnitKind::Package, "Pkg_A", "2008")]);
         assert!(m.files[0].block.is_none() && m.files[1].block.is_some());
-        m.push_file("/x/c.vhd", "sha256:ef", "2008", None, 9, &[]);
+        m.push_file(("/x/c.vhd", "/x/c.vhd"), "sha256:ef", "2008", None, 9, &[]);
         let r = m.render();
         assert!(r.text.contains("partial = true") && r.text.contains("/x/c.vhd"));
         assert_eq!(r.text, m.render_whole());
@@ -1075,7 +1100,7 @@ mod tests {
         assert!(m.files.iter().all(|f| f.block.is_some()));
         let before = m.render().text;
         m.remove_file("/x/b.vhd");
-        m.push_file("/x/b.vhd", "sha256:cd", "2019", None, 5, &[]);
+        m.push_file(("/x/b.vhd", "/x/b.vhd"), "sha256:cd", "2019", None, 5, &[]);
         let after = m.render();
         assert_ne!(after.text, before);
         assert_eq!(after.text, m.render_whole());
@@ -1132,7 +1157,7 @@ mod tests {
                 .contains("bad string")
         );
         // Another format version is not corrupt.
-        let e = Manifest::parse(&good.replacen("format = 4", "format = 5", 1), p).unwrap_err();
+        let e = Manifest::parse(&good.replacen("format = 5", "format = 6", 1), p).unwrap_err();
         assert!(crate::render(&e, false).contains("L0004"));
     }
 }
