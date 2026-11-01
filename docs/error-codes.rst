@@ -106,6 +106,8 @@ Syntax, command line, waveforms, coverage, debugger, plugins (E0 and W0)
      - Databases that are merged disagree about what a positional ``-- yavs coverage exclude`` directive at one place means: its positions were other operands in another run, so the operands were reordered or replaced under it.
    * - _`E0120`
      - ``yavs run --tier=...`` names a compiled tier that this yavs was built without.
+   * - _`W0120`
+     - With ``--cov-kind=fsm``, something looks like a state machine but is not one the coverage measures: a register of an enumeration type that a ``case`` does not select on, a ``case`` on a part of a signal, on a port or on a variable of a clocked process.
    * - _`E0121`
      - A compiled tier could not compile the design for ``--tier=clift`` or ``--tier=llvm``, or could not start compiling for ``--tier=auto``.
    * - _`E0123`

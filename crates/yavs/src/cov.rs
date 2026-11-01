@@ -27,6 +27,7 @@ pub enum KindArg {
     Condition,
     Expression,
     Combination,
+    Fsm,
 }
 
 /// The form of `--exclusions`.
@@ -46,6 +47,7 @@ impl KindArg {
             KindArg::Condition => yavs_cov::Kind::Condition(0),
             KindArg::Expression => yavs_cov::Kind::Expression(0),
             KindArg::Combination => yavs_cov::Kind::Combination(0),
+            KindArg::Fsm => yavs_cov::Kind::Fsm(false),
         };
         k.name().to_string()
     }
@@ -401,6 +403,10 @@ fn shown(db: &Database, excluded: &Excluded, root: &str) -> (Database, Excluded)
         .values_mut()
         .chain(excluded.iter_mut().map(|x| &mut x.1));
     all.for_each(|e| e.file = relative(&e.file, root));
+    db.unmeasured = std::mem::take(&mut db.unmeasured)
+        .into_iter()
+        .map(|(f, l, t)| (relative(&f, root), l, t))
+        .collect();
     (db, excluded)
 }
 

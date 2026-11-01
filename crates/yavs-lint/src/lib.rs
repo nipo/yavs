@@ -7,6 +7,7 @@
 
 mod config;
 mod design;
+pub use design::fsm::{Machine, NotMeasured, machines};
 mod report;
 mod rules;
 mod testbench;

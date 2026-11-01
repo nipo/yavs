@@ -467,6 +467,7 @@ Arguments:
    * ``assert``: The same for the conditions of ``assert``. A row that fails the assertion is hit only by a failing run, so these rows are asked for apart; they report as conditions
    * ``expression``: The same for the logic expression assigned to a signal or variable
    * ``combination``: Each combination of the inputs of conditions and logic expressions that can occur (an input a short-circuit operator skips counts as not evaluated, not as false)
+   * ``fsm``: Each state a state machine reached and each transition it took, per instance
 
 .. option:: --cov-test=NAME
 
@@ -601,7 +602,7 @@ Arguments:
 
    Report only these kinds of item (``statement``, ``branch``, ``toggle``, ``condition``, ``expression``, ``combination``, comma separated); ``--total`` and ``--fail-under`` then count only them.
 
-   Accepted: ``statement``, ``branch``, ``toggle``, ``condition``, ``expression``, ``combination``.
+   Accepted: ``statement``, ``branch``, ``toggle``, ``condition``, ``expression``, ``combination``, ``fsm``.
 
    A list, values separated by ``,``.
 

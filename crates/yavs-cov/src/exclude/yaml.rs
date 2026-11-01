@@ -23,13 +23,14 @@ use yavs_diag::files::normalize;
 use yavs_diag::suggest::tail;
 
 /// The kinds of exclusion an entry may have.
-pub(super) const KINDS: [&str; 12] = [
+pub(super) const KINDS: [&str; 13] = [
     "statement",
     "branch",
     "condition",
     "expression",
     "combination",
     "toggle",
+    "fsm",
     "instance",
     "unit",
     "file",
@@ -183,6 +184,10 @@ fn entry(line: usize, n: Node) -> Result<Row, String> {
             &["kind", "instance", "signal", "direction", "reason"],
             &["instance", "signal"],
         ),
+        "fsm" => (
+            &["kind", "instance", "signal", "item", "reason"],
+            &["instance", "signal", "item"],
+        ),
         "instance" => (&["kind", "instance", "reason"], &["instance"]),
         "unit" => (&["kind", "unit", "reason"], &["unit"]),
         "file" => (&["kind", "file", "reason"], &[]),
@@ -241,6 +246,11 @@ fn entry(line: usize, n: Node) -> Result<Row, String> {
             yavs_diag::dotted(find("instance").unwrap_or_default()),
             find("signal").unwrap_or_default().into(),
             find("direction").map(|d| direction(d, &bad)).transpose()?,
+        ),
+        "fsm" => Rule::Fsm(
+            yavs_diag::dotted(find("instance").unwrap_or_default()),
+            find("signal").unwrap_or_default().into(),
+            find("item").unwrap_or_default().into(),
         ),
         "instance" => Rule::Instance(yavs_diag::dotted(find("instance").unwrap_or_default())),
         "unit" => Rule::Unit(find("unit").unwrap_or_default().into()),

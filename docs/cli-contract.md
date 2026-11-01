@@ -757,7 +757,7 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   without them is `E0112`. `--uncovered` adds `[process LABEL]` to the comment of an item in a labelled process.
   Exclusions apply when reporting; databases keep raw counts. `--cov-exclude-translate-off`
   (`run`) also leaves `translate_off`/`translate_on` regions out; unbalanced `-- coverage`
-  pragmas are `W0112`/`W0113`. `--cov-kind=statement,branch,toggle,condition,assert,expression,combination` (`run`, default `statement,branch,toggle`)
+  pragmas are `W0112`/`W0113`. `--cov-kind=statement,branch,toggle,condition,assert,expression,combination,fsm` (`run`, default `statement,branch,toggle`)
   chooses what is counted (`condition` and `expression` are focused expression coverage, #688:
   one row per input and value of a boolean condition or logic expression with 2 or more inputs;
   `docs/decisions.md` "Condition and expression coverage"); `--cov-toggle-max=N` (default 65536) leaves signals with more
@@ -771,7 +771,7 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   ...`) and per test its items and the items no other test hit. `yavs cov` exits 0, or 1 with `E0111` (a database cannot be
   read), `E0114`, `E0115`, `E0112` (an exclusion file cannot be read or has a malformed row), `E0138` (`--config`) or `E0110` (a file
   cannot be written), or when `-Werror` makes a warning an error; `run` exits at least 1 when the database cannot be written (`E0110`). The
-  database format (a `yavs-coverage 9` line, a tests section of `test`, id, name lines with
+  database format (a `yavs-coverage 10` line, a tests section of `test`, id, name lines with
   ids numbering the names in sorted order, then one tab-separated item per line: kind `s` or
   `bN`, path, statement text hash, occurrence, count, tests, line, file, statement text for
   display; conditions and expressions: kind `cN` or `eN` (N = 2 * input + value), the same fields with the

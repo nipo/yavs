@@ -12,6 +12,7 @@ saphyr-parser = "0.2.2"
 yavs-elab = { path = "../yavs-elab" }
 yavs-ir = { path = "../yavs-ir" }
 yavs-kernel = { path = "../yavs-kernel" }
+yavs-lint = { path = "../yavs-lint" }
 yavs-sem = { path = "../yavs-sem" }
 
 [lints]

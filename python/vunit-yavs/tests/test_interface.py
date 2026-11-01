@@ -207,6 +207,7 @@ class TestPackage(unittest.TestCase):
         self._vunit().get_simulator_name()
         self.factory.check_sim_option("enable_coverage", True)
         self.factory.check_sim_option("yavs.cov_kind", ["statement", "branch"])
+        self.factory.check_sim_option("yavs.cov_kind", ["fsm", "assert", "condition"])
 
     def test_max_threads_argument(self):
         vu = self._vunit("--yavs-max-threads", "3")
@@ -473,6 +474,16 @@ class TestYavsInterface(unittest.TestCase):
         self.simif.setup_library_mapping(project)
         analyze = self.simif.compile_vhdl_file_command(project.get_source_files_in_order()[0])
         self.assertIn("--coverage-directives=ignore", analyze)
+
+    def test_command_line_kinds_and_the_option_wins(self):
+        self.simif = YavsInterface(
+            prefix="prefix", output_path=self.output_path, coverage=CoverageArgs(enabled=True, kinds="fsm,assert")
+        )
+        _, cmd, _ = self._simulate(make_config())
+        self.assertIn("--cov-kind=fsm,assert", cmd)
+        _, cmd, _ = self._simulate(make_config(sim_options={"yavs.cov_kind": ["statement"]}))
+        self.assertIn("--cov-kind=statement", cmd)
+        self.assertNotIn("--cov-kind=fsm,assert", cmd)
 
     def test_command_line_enables_coverage_without_kinds(self):
         _, cmd, _ = self._simulate(make_config(), coverage=CoverageArgs(enabled=True))

@@ -16,7 +16,7 @@
 //! same text in one unit, their order. Byte offsets never enter it, so an edit elsewhere in
 //! the file keeps the databases of older runs mergeable.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt::Write as _;
 
 use yavs_diag::Diagnostic;
@@ -41,6 +41,9 @@ pub enum Kind {
     /// One combination of the inputs of a condition or logic expression: two bits per input of
     /// `Key::sig` (0 not evaluated, 1 false, 2 true).
     Combination(u32),
+    /// A state of a state machine reached (`false`) or a transition taken (`true`): `Key::sig` is
+    /// `SIGNAL:STATE` or `SIGNAL:FROM->TO`; hash and occ are 0.
+    Fsm(bool),
 }
 
 impl Kind {
@@ -53,6 +56,7 @@ impl Kind {
             Kind::Condition(_) => "condition",
             Kind::Expression(_) => "expression",
             Kind::Combination(_) => "combination",
+            Kind::Fsm(_) => "fsm",
         }
     }
 
@@ -140,6 +144,7 @@ pub const OPERANDS_CHANGED: &str = "W0119";
 
 pub mod exclude;
 pub mod exclusions;
+pub mod fsm;
 pub mod html;
 pub mod toggle;
 
@@ -159,18 +164,22 @@ pub struct Database {
     /// Some of its items do not say their unit and process: a database older than version 7 is in
     /// it, so `library`, `entity` and `process` exclusions cannot be applied.
     pub no_units: bool,
+    /// What looks like a state machine and is not measured: file, line and what it says, for the
+    /// reports (`--cov-kind=fsm`). Display only.
+    pub unmeasured: BTreeSet<(String, u32, String)>,
 }
 
-const MAGIC: &str = "yavs-coverage 9";
+const MAGIC: &str = "yavs-coverage 10";
 /// Older versions [`Database::parse`] still reads: 2 has no toggles, 2 and 3 no tests, 4 no
 /// conditions, 5 no combinations and no in-source exclusions, 6 no units and process labels, 7 no
-/// operand texts of its waivers, 8 no waivers and input counts of condition and expression rows.
+/// operand texts of its waivers, 8 no waivers and input counts of condition and expression rows, 9 no state machines.
 const OLD: &[&str] = &["yavs-coverage 2", "yavs-coverage 3"];
 const V4: &str = "yavs-coverage 4";
 const V5: &str = "yavs-coverage 5";
 const V6: &str = "yavs-coverage 6";
 const V7: &str = "yavs-coverage 7";
 const V8: &str = "yavs-coverage 8";
+const V9: &str = "yavs-coverage 9";
 
 /// `line` without its `--` comment (a `--` inside a string literal is text).
 fn uncommented(line: &str) -> &str {
@@ -711,6 +720,8 @@ impl Database {
     /// conditions (`c<row>`) and expressions (`e<row>`) the same with the row's input before
     /// the text;
     /// toggles (`t1` rise, `t0` fall): kind, path, scalar name, count, tests, line, file.
+    /// state machines (`f0` a state, `f1` a transition): the same fields as a toggle, `SIGNAL:ITEM`
+    /// for the scalar name; `unmeasured`, line, file, text: what was not measured.
     /// `tests` is the comma-separated ids of the tests that hit the item, `-` for none. Every line
     /// ends in the unit (`library.entity` or `library.package`), and all but toggles then in the
     /// process label; `-` for none.
@@ -723,12 +734,19 @@ impl Database {
             id[old] = new;
             let _ = writeln!(s, "test\t{new}\t{}", self.tests[old]);
         }
+        for (file, line, text) in &self.unmeasured {
+            let _ = writeln!(s, "unmeasured\t{line}\t{file}\t{text}");
+        }
         // About 150 bytes a line: one allocation for the database of a large design.
         s.reserve(self.items.len() * 150);
         for (k, e) in &self.items {
-            if let Kind::Toggle(r) = k.kind {
+            if let Kind::Toggle(r) | Kind::Fsm(r) = k.kind {
                 // The common line, written without the formatting machinery.
-                s.push('t');
+                s.push(if matches!(k.kind, Kind::Fsm(_)) {
+                    'f'
+                } else {
+                    't'
+                });
                 s.push(if r { '1' } else { '0' });
                 s.push('\t');
                 s.push_str(&k.path);
@@ -794,7 +812,7 @@ impl Database {
                     );
                     continue;
                 }
-                Kind::Toggle(_) => continue,
+                Kind::Toggle(_) | Kind::Fsm(_) => continue,
             };
             let _ = writeln!(
                 s,
@@ -819,12 +837,14 @@ impl Database {
         let mut lines = text.lines();
         let head = lines.next();
         let old = head.is_some_and(|h| OLD.contains(&h));
-        let known = [MAGIC, V8, V7, V6, V5, V4].iter().any(|v| head == Some(*v));
+        let known = [MAGIC, V9, V8, V7, V6, V5, V4]
+            .iter()
+            .any(|v| head == Some(*v));
         if !known && !old {
             return Err(format!("not a yavs coverage database (no `{MAGIC}` line)"));
         }
-        let with_units = [MAGIC, V8, V7].iter().any(|v| head == Some(*v));
-        let row_waivers = head == Some(MAGIC);
+        let with_units = [MAGIC, V9, V8, V7].iter().any(|v| head == Some(*v));
+        let row_waivers = head == Some(MAGIC) || head == Some(V9);
         let mut db = Database {
             legacy: !with_units && head != Some(V6),
             no_units: !with_units,
@@ -840,12 +860,25 @@ impl Database {
                 db.tests.push(name.to_string());
                 continue;
             }
+            if let Some(t) = l.strip_prefix("unmeasured\t") {
+                let p: Vec<&str> = t.splitn(3, '\t').collect();
+                let [line, file, text] = p[..] else {
+                    return Err(bad());
+                };
+                db.unmeasured.insert((
+                    file.to_string(),
+                    line.parse().map_err(|_| bad())?,
+                    text.to_string(),
+                ));
+                continue;
+            }
             let mut f: Vec<&str> = l.split('\t').collect();
+            let named = l.starts_with('t') || l.starts_with('f');
             // The last fields of this version: the process (not of toggles), then the unit.
             let mut process = String::new();
             let mut unit = String::new();
             if with_units {
-                if !l.starts_with('t') {
+                if !named {
                     let p = f.pop().ok_or_else(bad)?;
                     process = undash(p).to_string();
                 }
@@ -853,7 +886,7 @@ impl Database {
                 db.no_units |= unit.is_empty();
             }
             // Versions before 4 have no tests field (after the count).
-            let at = if l.starts_with('t') { 4 } else { 5 };
+            let at = if named { 4 } else { 5 };
             if old && f.len() >= at {
                 f.insert(at, "-");
             }
@@ -870,18 +903,20 @@ impl Database {
                     .ok_or_else(bad)?,
                 None => return Err(bad()),
             };
-            let (key, entry) = if l.starts_with('t') {
+            let (key, entry) = if named {
                 let [kind, path, sig, count, _, line, file] = f[..] else {
                     return Err(bad());
                 };
-                let rise = match kind {
-                    "t1" => true,
-                    "t0" => false,
+                let kind = match kind {
+                    "t1" => Kind::Toggle(true),
+                    "t0" => Kind::Toggle(false),
+                    "f1" => Kind::Fsm(true),
+                    "f0" => Kind::Fsm(false),
                     _ => return Err(bad()),
                 };
                 let key = Key {
                     path: path.to_string(),
-                    kind: Kind::Toggle(rise),
+                    kind,
                     hash: 0,
                     occ: 0,
                     sig: sig.to_string(),
@@ -988,6 +1023,7 @@ impl Database {
         let mut conflicts = Vec::new();
         self.legacy |= other.legacy;
         self.no_units |= other.no_units;
+        self.unmeasured.extend(other.unmeasured);
         let id: Vec<u32> = other
             .tests
             .iter()
@@ -1164,8 +1200,9 @@ impl Database {
     pub fn summary(&self) -> String {
         let pct = percent;
         let col = |h: usize, t: usize| format!("{h}/{t} {}", pct(h, t));
-        // Per path: statements, branches, toggles, conditions, expressions (hit, total each).
-        let mut per: BTreeMap<&str, [usize; 12]> = BTreeMap::new();
+        // Per path: statements, branches, toggles, conditions, expressions, combinations, state
+        // machines (hit, total each).
+        let mut per: BTreeMap<&str, [usize; 14]> = BTreeMap::new();
         for (k, e) in &self.items {
             let c = per.entry(&k.path).or_default();
             let o = match k.kind {
@@ -1175,18 +1212,19 @@ impl Database {
                 Kind::Condition(_) => 6,
                 Kind::Expression(_) => 8,
                 Kind::Combination(_) => 10,
+                Kind::Fsm(_) => 12,
             };
             c[o + 1] += 1;
             c[o] += usize::from(e.count > 0);
         }
-        let mut t = [0; 12];
+        let mut t = [0; 14];
         for c in per.values() {
             for (a, b) in t.iter_mut().zip(c) {
                 *a += b;
             }
         }
         // Conditions and expressions show only when the database has them.
-        let (fc, fe, fm) = (t[7] > 0, t[9] > 0, t[11] > 0);
+        let (fc, fe, fm, ff) = (t[7] > 0, t[9] > 0, t[11] > 0, t[13] > 0);
         let mut s = format!(
             "statements {}\nbranches   {}\ntoggles    {}\n",
             col(t[0], t[1]),
@@ -1201,6 +1239,11 @@ impl Database {
         }
         if fm {
             let _ = writeln!(s, "combinations {}", col(t[10], t[11]));
+        }
+        if ff {
+            let _ = writeln!(s, "fsm {}", col(t[12], t[13]));
+        }
+        if fm || ff {
             // The longest label sets the column.
             s = s
                 .lines()
@@ -1218,7 +1261,7 @@ impl Database {
             .unwrap_or(0)
             .max(4);
         // The toggles column is padded only when a column follows.
-        let pad = if fc || fe || fm { 20 } else { 0 };
+        let pad = if fc || fe || fm || ff { 20 } else { 0 };
         let _ = write!(
             s,
             "{:w$}  {:<20}  {:<20}  {:<pad$}",
@@ -1231,7 +1274,10 @@ impl Database {
             let _ = write!(s, "  {:<20}", "expressions");
         }
         if fm {
-            let _ = write!(s, "  combinations");
+            let _ = write!(s, "  {:<20}", "combinations");
+        }
+        if ff {
+            let _ = write!(s, "  fsm");
         }
         s = s.trim_end().to_string();
         s.push('\n');
@@ -1251,7 +1297,10 @@ impl Database {
                 let _ = write!(s, "  {:<20}", col(c[8], c[9]));
             }
             if fm {
-                let _ = write!(s, "  {}", col(c[10], c[11]));
+                let _ = write!(s, "  {:<20}", col(c[10], c[11]));
+            }
+            if ff {
+                let _ = write!(s, "  {}", col(c[12], c[13]));
             }
             s = s.trim_end().to_string();
             s.push('\n');
@@ -1269,6 +1318,7 @@ impl Database {
                     Kind::Toggle(r) => format!("{} {}", k.sig, arrow(r)),
                     Kind::Condition(_) | Kind::Expression(_) => fec_text(k, e),
                     Kind::Combination(_) => comb_text(k, e),
+                    Kind::Fsm(_) => fsm_text(k),
                     _ => e.text.clone(),
                 };
                 [
@@ -1295,6 +1345,12 @@ impl Database {
                 w2 = w[2]
             );
         }
+        if !self.unmeasured.is_empty() {
+            s.push_str("\nnot measured as state machines:\n");
+            for (file, line, text) in &self.unmeasured {
+                let _ = writeln!(s, "  {file}:{line}  {text}");
+            }
+        }
         s
     }
 
@@ -1309,6 +1365,11 @@ impl Database {
                 .collect(),
             no_units: self.no_units,
             tests: self.tests.clone(),
+            unmeasured: if kinds.iter().any(|n| n == "fsm") {
+                self.unmeasured.clone()
+            } else {
+                BTreeSet::new()
+            },
             legacy: self.legacy,
         }
     }
@@ -1332,11 +1393,12 @@ impl Database {
         // Counts per source statement (or arm), summed over paths.
         let mut stmts: BTreeMap<(&str, u32, u64, u32), u64> = BTreeMap::new();
         let mut files: BTreeMap<&str, BTreeMap<u32, Line>> = BTreeMap::new();
-        for (k, e) in self
-            .items
-            .iter()
-            .filter(|(k, _)| !matches!(k.kind, Kind::Toggle(_) | Kind::Combination(_)))
-        {
+        for (k, e) in self.items.iter().filter(|(k, _)| {
+            !matches!(
+                k.kind,
+                Kind::Toggle(_) | Kind::Combination(_) | Kind::Fsm(_)
+            )
+        }) {
             let line = files.entry(&e.file).or_default().entry(e.line).or_default();
             match k.kind {
                 Kind::Statement => {
@@ -1361,7 +1423,7 @@ impl Database {
                     *c = c.saturating_add(e.count);
                 }
                 // Combinations are not branches: Cobertura has no notion of them.
-                Kind::Toggle(_) | Kind::Combination(_) => {}
+                Kind::Toggle(_) | Kind::Combination(_) | Kind::Fsm(_) => {}
             }
         }
         for ((f, l, _, _), c) in stmts {
@@ -1452,6 +1514,16 @@ pub fn fec_text(k: &Key, e: &Entry) -> String {
 }
 
 /// What a combination is about: `valid is false, ready is true in valid and ready`.
+/// A state or transition of a state machine as reports show it: `state: idle -> busy`.
+pub fn fsm_text(k: &Key) -> String {
+    let (signal, item) = k.sig.split_once(':').unwrap_or(("", &k.sig));
+    match item.split_once("->") {
+        Some((from, to)) => format!("{signal}: {from} -> {to}"),
+        None => format!("{signal}: {item}"),
+    }
+}
+
+/// A combination in words, for a report.
 pub fn comb_text(k: &Key, e: &Entry) -> String {
     format!("{} in {}", combination_words(k), e.text)
 }
@@ -1638,7 +1710,7 @@ mod tests {
         let mut d = Database::default();
         d.items.insert(key.clone(), entry(2, vec![waiver.clone()]));
         let text = d.write();
-        assert!(text.starts_with("yavs-coverage 9\n"));
+        assert!(text.starts_with("yavs-coverage 10\n"));
         let back = Database::parse(&text).unwrap();
         assert_eq!(back, d);
         assert_eq!(pattern(&key), "01");

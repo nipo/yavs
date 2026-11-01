@@ -118,14 +118,15 @@ def _percentage(text):
 
 class CoverageArgs:  # pylint: disable=too-few-public-methods
     """
-    The coverage command line arguments: --yavs-cov, --yavs-cov-html, --yavs-cov-fail-under, --yavs-cov-exclude,
-    --yavs-cov-config
+    The coverage command line arguments: --yavs-cov, --yavs-cov-kind, --yavs-cov-html, --yavs-cov-fail-under,
+    --yavs-cov-exclude, --yavs-cov-config
     """
 
     def __init__(  # pylint: disable=too-many-arguments
-        self, enabled=False, html=None, fail_under=None, exclude=None, config=None
+        self, enabled=False, html=None, fail_under=None, exclude=None, config=None, kinds=None
     ):
         self.enabled = enabled
+        self.kinds = kinds
         self.html = html
         self.fail_under = fail_under
         self.exclude = exclude or []
@@ -264,6 +265,13 @@ class YavsInterface(SimulatorInterface):
             "elaborating and running: apply (yavs's default) or ignore (read none of them).",
         )
         group.add_argument(
+            "--yavs-cov-kind",
+            default=None,
+            metavar="KIND,...",
+            help="The kinds of coverage to count, as yavs run --cov-kind (fsm, assert, condition, ...), for the tests "
+            "without a yavs.cov_kind sim option. Needs --yavs-cov or the enable_coverage sim option.",
+        )
+        group.add_argument(
             "--yavs-cov-html",
             default=None,
             metavar="DIR",
@@ -340,6 +348,7 @@ class YavsInterface(SimulatorInterface):
             cov_directives=getattr(args, "yavs_cov_directives", None),
             coverage=CoverageArgs(
                 enabled=getattr(args, "yavs_cov", False),
+                kinds=getattr(args, "yavs_cov_kind", None),
                 html=getattr(args, "yavs_cov_html", None),
                 fail_under=getattr(args, "yavs_cov_fail_under", None),
                 exclude=getattr(args, "yavs_cov_exclude", None),
@@ -603,6 +612,8 @@ class YavsInterface(SimulatorInterface):
             kinds = config.sim_options.get("yavs.cov_kind", [])
             if kinds:
                 cmd += [f"--cov-kind={','.join(kinds)}"]
+            elif self._coverage.kinds:
+                cmd += [f"--cov-kind={self._coverage.kinds}"]
             self._coverage_files.add(str(database))
 
         cmd += config.sim_options.get("yavs.global_flags", [])

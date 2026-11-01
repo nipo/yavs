@@ -14,7 +14,9 @@ Decisions are in `docs/decisions.md` "Code coverage"; the user view in `docs/cov
 - Does not: emit counters (yavs-lower, `LowerOptions::coverage`), count them (yavs-interp
   `Op::Cover*`, yavs-llvm compiled `Cover`, #692), lay out the counter rows (yavs-elab `Elaborated::cov_rows`), or parse options
   (the `yavs` CLI: `run --cov`, `cov merge`, `cov report`).
-- Depends on: `yavs-diag`, `yavs-elab`, `yavs-ir`, `yavs-kernel` (observer), `yavs-sem`.
+- Counts the states and transitions of state machines as a second kernel observer
+  (`fsm::Fsm`, subscribed only with `--cov-kind=fsm`); which signals are machines is `yavs_lint::machines`.
+- Depends on: `yavs-diag`, `yavs-elab`, `yavs-ir`, `yavs-kernel` (observer), `yavs-lint` (state machine detection only), `yavs-sem`.
   Called by: `yavs`.
 
 ## 2. Map
@@ -23,6 +25,7 @@ Decisions are in `docs/decisions.md` "Code coverage"; the user view in `docs/cov
 |---|---|
 | `src/lib.rs` | `Kind`, `Key`, `Entry` (with `tests`), `Database` (`tests`, `write`, `parse`, `merge`, `attribute`, `rank`, `summary`, `only`, `totals`, `cobertura`), `tenths`/`percent` (round down), `collect` (items to keys: owning unit, statement text hash, occurrence; rows to instance paths; `arm_name` turns `CovArm` into `Entry::text` of a branch) |
 | `src/toggle.rs` | `toggles` (signals and ports to named scalars, `--cov-toggle-max` cap), `Toggles` (value-change observer over `SigView::planes`, `add_to` the database as one bulk insert) |
+| `src/fsm.rs` | `fsm` (the machines of every instance to `Watch`es, and what is not measured), `Fsm` (value-change observer), `add_to` |
 | `src/exclude.rs` | `Rules` (one exclusion file: `read`), `parse` (text rows), `apply` (W0110, W0111, W0114), `Database::uncovered` and `uncovered_yaml`, `Database::hits_by_test` (`--tests`); `collect` also scans `-- coverage off/on/off-line` pragmas (W0112, W0113) |
 | `src/exclude/yaml.rs` | `parse_yaml`: `saphyr-parser` events to a small node tree to the same `Rule`s as the text rows; `quote` for `--uncovered=yaml`. A new rule kind: add its key lists and rule in `entry` (and its text row in `parse`) |
 | `src/exclusions.rs` | `build` (the `exclude::Applied` of a run to a `Report`: every rule, inline and from an exclusion file, with status applied/redundant/matches nothing/metric not collected, its matched items, totals per kind before and after) and its `text`, `json` (version 1) and `html_body` forms: `cov report --exclusions` and the HTML page |
@@ -58,6 +61,8 @@ Decisions are in `docs/decisions.md` "Code coverage"; the user view in `docs/cov
 | A branch's `Entry::text` is its arm named from the source (`if C`, `elsif C`, `else`, `when CHOICES`, `(no arm taken)`, `loop body`), built from `CovInfo::arm`; the key is unchanged. Percentages and `--total` round down; the toggle words are `arrow()` (`rise (0->1)`) | Display only, so databases and exclusions stay compatible; a gate never rounds up | `docs/decisions.md` "Readable coverage report" (#877) |
 
 | Combination items: `Kind::Combination(state)` (two bits per input: 0 not evaluated, 1 false, 2 true), hash and occurrence of the decision's text, `Key::sig` the input texts joined by `INPUT_SEP`, `Entry::text` the decision, `Entry::waivers` the in-source directives that waive the requirement (rule as written, reason, file, line; the count stays raw); database lines `mSTATE` with the waivers last (version 6, 2 to 5 still read and marked `Database::legacy`); `merge` returns the conflicts (a waiver on one side only, the item then merged without it) and the CLI makes them `E0137`; `Database::operand_changes` is `W0119`, the same positional directive over other operands; `exclude::apply` takes waived items out like exclusion rows, condition and expression rows with a `row` directive too (`Entry::waivers`, `Entry::inputs`; `exclude::directive` writes the comment for a report), and lists every rule in `Applied::uses`; a `combination` exclusion row has a `0`/`1`/`-` pattern that can match several requirements; the statement hash ignores `--` comments | Comment and directive edits must not change identity; a waiver from one run must not hide a requirement of another; overlapping rules count a requirement once | `docs/decisions.md` "Combination coverage and inline exclusions" (#883) |
+
+| State machine items: `Kind::Fsm(transition)`, `Key::sig` = `SIGNAL:STATE` or `SIGNAL:FROM->TO`, hash and occ 0, per scope path; database lines `f0`/`f1` (the toggle fields) and `unmeasured`; version 10, older ones still read; no Cobertura | Names survive edits; a value-change observer counts alike in every tier | `docs/decisions.md` "State machine coverage" |
 
 Module-local decisions go in this section in the same commit (root `AGENTS.md` rule 24).
 

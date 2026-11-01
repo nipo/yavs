@@ -13140,3 +13140,21 @@ index (machine written; a damaged index says to re-analyze).
 - No combinations at either: the directives bind to the decisions they know, which are unchanged.
 - Identical text in one unit shares its occurrence numbers across sites, so a `wait until` or `assert`
   with the text of a later `if` moves that `if`'s occurrence, and an exclusion row of it reports `W0111`.
+
+## State machine coverage (yavs-cov, yavs-lint, CLI, #1020, 2026-11-01)
+
+- **A kernel observer, not counters in the code** (`yavs_cov::fsm`, as toggles): it compares the
+  register's value with the last one, so every tier and thread count sees the same, and lowering and
+  the optimiser are not touched. A self-loop changes no value, so it is not an item.
+- **Detection is shared with lint, and wider** (`yavs_lint::machines`, `design/fsm.rs`, on `design.rs`'s
+  flattening and helpers). `lint_710` and `lint_711` judge a whole type and need every assignment readable, or
+  they would report falsely; a count needs only the register. So two-process machines and package types
+  are measured here and left alone by those rules, which are unchanged.
+- **`yavs-cov` depends on `yavs-lint`**: one edge, no cycle (lint knows nothing below sem). `yavs_lint`
+  still runs no rule during a run, and only with `--cov-kind=fsm` does the detection run at all.
+- **Transitions no `case` names** (a reset) are added when they happen rather than dropped: every
+  transition taken is in the database, at the price that such an item can only be hit.
+- **What is not measured is recorded**: `W0120` at the run and `Database::unmeasured`, so a report does not
+  hide a gap from whoever reads it later. Display only: not part of any total.
+- Database version 10: `f0`/`f1` lines and `unmeasured` lines; older versions still read.
+

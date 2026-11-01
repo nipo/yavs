@@ -84,6 +84,8 @@ enum Rule {
     },
     /// Path glob, scalar glob, direction (`Some(true)` rise, `Some(false)` fall, `None` both).
     Toggle(String, String, Option<bool>),
+    /// Path glob, signal glob, and a glob of the state or `FROM->TO` transition.
+    Fsm(String, String, String),
     Instance(String),
     Unit(String),
     Library(String),
@@ -328,6 +330,7 @@ pub fn parse(text: &str) -> Result<Vec<Row>, String> {
             ["toggle", g, sig, d] => {
                 Rule::Toggle(dotted(g), sig.to_string(), Some(direction(d, &bad)?))
             }
+            ["fsm", g, sig, item] => Rule::Fsm(dotted(g), sig.to_string(), item.to_string()),
             ["instance", g] => Rule::Instance(dotted(g)),
             ["unit", u] => Rule::Unit(u.to_string()),
             ["file", g] => Rule::File(g.to_string()),
@@ -337,8 +340,8 @@ pub fn parse(text: &str) -> Result<Vec<Row>, String> {
             ["files" | "files_exclude", ref rest @ ..] if !rest.is_empty() => files_row(&w, &bad)?,
             [
                 "statement" | "branch" | "condition" | "expression" | "combination" | "toggle"
-                | "instance" | "unit" | "file" | "files" | "files_exclude" | "library" | "entity"
-                | "process",
+                | "fsm" | "instance" | "unit" | "file" | "files" | "files_exclude" | "library"
+                | "entity" | "process",
                 ..,
             ] => {
                 return Err(bad("wrong number of fields"));
@@ -425,7 +428,7 @@ fn matches(r: &Rule, k: &Key, e: &Entry, files: Option<&BTreeSet<&str>>) -> bool
                 Kind::Branch(a) => *kind == ItemKind::Branch && a == *arm,
                 Kind::Condition(r) => *kind == ItemKind::Condition && r == *arm,
                 Kind::Expression(r) => *kind == ItemKind::Expression && r == *arm,
-                Kind::Toggle(_) | Kind::Combination(_) => false,
+                Kind::Toggle(_) | Kind::Combination(_) | Kind::Fsm(_) => false,
             };
             kind_ok
                 && k.occ == *occ
@@ -449,6 +452,10 @@ fn matches(r: &Rule, k: &Key, e: &Entry, files: Option<&BTreeSet<&str>>) -> bool
             matches!(k.kind, Kind::Toggle(r) if d.is_none_or(|d| d == r))
                 && glob(g, &path)
                 && glob(sig, &k.sig)
+        }
+        Rule::Fsm(g, sig, item) => {
+            let (signal, it) = k.sig.split_once(':').unwrap_or(("", &k.sig));
+            matches!(k.kind, Kind::Fsm(_)) && glob(g, &path) && glob(sig, signal) && glob(item, it)
         }
         Rule::Instance(g) => {
             k.path.starts_with(':')
@@ -502,6 +509,7 @@ pub fn apply(db: &Database, files: &[Rules]) -> Applied {
         kept: Database {
             tests: db.tests.clone(),
             legacy: db.legacy,
+            unmeasured: db.unmeasured.clone(),
             ..Default::default()
         },
         excluded: Vec::new(),
@@ -794,6 +802,10 @@ pub fn head(k: &Key, e: &Entry) -> String {
         Kind::Statement => format!("statement {path} {id} {}:{}", e.file, e.line),
         Kind::Branch(a) => format!("branch {path} {id}.{a} {}:{}", e.file, e.line),
         Kind::Toggle(r) => format!("toggle {path} {} {}", k.sig, dir_word(r)),
+        Kind::Fsm(_) => {
+            let (signal, item) = k.sig.split_once(':').unwrap_or(("", &k.sig));
+            format!("fsm {path} {signal} {item}")
+        }
         Kind::Condition(r) => format!("condition {path} {id} {r} {}:{}", e.file, e.line),
         Kind::Expression(r) => format!("expression {path} {id} {r} {}:{}", e.file, e.line),
         Kind::Combination(_) => format!(
@@ -816,6 +828,8 @@ pub fn comment(k: &Key, e: &Entry) -> String {
         Kind::Statement => e.text.clone(),
         Kind::Branch(a) => format!("arm {a}: {}", e.text),
         Kind::Toggle(r) => format!("{} ({}:{})", crate::arrow(r), e.file, e.line),
+        Kind::Fsm(false) => format!("state ({}:{})", e.file, e.line),
+        Kind::Fsm(true) => format!("transition ({}:{})", e.file, e.line),
         Kind::Condition(_) | Kind::Expression(_) => crate::fec_text(k, e),
         Kind::Combination(_) => crate::comb_text(k, e),
     }
@@ -886,6 +900,15 @@ pub fn miss_yaml(db: &Database, k: &Key, e: &Entry) -> Option<String> {
             q(&id),
             q(&crate::pattern(k))
         ),
+        Kind::Fsm(_) => {
+            let (signal, item) = k.sig.split_once(':').unwrap_or(("", &k.sig));
+            format!(
+                "  - kind: fsm   # {c}\n    instance: {}\n    signal: {}\n    item: {}\n",
+                q(&k.shown()),
+                q(signal),
+                q(item)
+            )
+        }
         Kind::Toggle(r) => format!(
             "  - kind: toggle   # {c}\n    instance: {}\n    signal: {}\n{}",
             q(&k.shown()),

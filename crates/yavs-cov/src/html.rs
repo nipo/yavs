@@ -107,7 +107,7 @@ fn cell(h: usize, t: usize) -> String {
 
 /// Hit and total of statements, branches and toggles.
 #[derive(Default, Clone, Copy)]
-struct Tally([usize; 12]);
+struct Tally([usize; 14]);
 
 impl Tally {
     fn add(&mut self, k: &Key, e: &Entry) {
@@ -118,13 +118,14 @@ impl Tally {
             Kind::Condition(_) => 6,
             Kind::Expression(_) => 8,
             Kind::Combination(_) => 10,
+            Kind::Fsm(_) => 12,
         };
         self.0[o + 1] += 1;
         self.0[o] += usize::from(e.count > 0);
     }
     /// The cells of the kinds shown: conditions, expressions and combinations only when `fec`
     /// says so.
-    fn cells(&self, fec: [bool; 3]) -> String {
+    fn cells(&self, fec: [bool; 4]) -> String {
         columns(fec)
             .into_iter()
             .map(|i| cell(self.0[2 * i], self.0[2 * i + 1]))
@@ -133,18 +134,19 @@ impl Tally {
 }
 
 /// The tally columns shown: statements, branches, toggles, then the optional kinds.
-fn columns(fec: [bool; 3]) -> Vec<usize> {
+fn columns(fec: [bool; 4]) -> Vec<usize> {
     let mut c = vec![0, 1, 2];
-    c.extend((0..3).filter(|&i| fec[i]).map(|i| 3 + i));
+    c.extend((0..4).filter(|&i| fec[i]).map(|i| 3 + i));
     c
 }
 
-fn table_head(first: &str, fec: [bool; 3]) -> String {
+fn table_head(first: &str, fec: [bool; 4]) -> String {
     format!(
-        "<tr><th>{first}</th><th>statements</th><th>branches</th><th>toggles</th>{}{}{}</tr>\n",
+        "<tr><th>{first}</th><th>statements</th><th>branches</th><th>toggles</th>{}{}{}{}</tr>\n",
         if fec[0] { "<th>conditions</th>" } else { "" },
         if fec[1] { "<th>expressions</th>" } else { "" },
-        if fec[2] { "<th>combinations</th>" } else { "" }
+        if fec[2] { "<th>combinations</th>" } else { "" },
+        if fec[3] { "<th>fsm</th>" } else { "" }
     )
 }
 
@@ -172,7 +174,12 @@ pub fn pages(
         per_path.entry(&k.path).or_default().add(k, e);
         per_file.entry(&e.file).or_default().add(k, e);
     }
-    let fec = [total.0[7] > 0, total.0[9] > 0, total.0[11] > 0];
+    let fec = [
+        total.0[7] > 0,
+        total.0[9] > 0,
+        total.0[11] > 0,
+        total.0[13] > 0,
+    ];
     let mut b = String::from("<h1>Coverage report</h1>\n");
     let _ = write!(
         b,
@@ -266,6 +273,8 @@ fn what(k: &Key, e: &Entry) -> String {
         Kind::Toggle(r) => format!("toggle {} {}", k.sig, arrow(r)),
         Kind::Condition(_) | Kind::Expression(_) => String::new(),
         Kind::Combination(_) => format!("combinations of {}", e.text),
+        Kind::Fsm(false) => format!("state {}", crate::fsm_text(k)),
+        Kind::Fsm(true) => format!("transition {}", crate::fsm_text(k)),
     }
 }
 
@@ -411,7 +420,12 @@ fn file_page(
     for n in 1..=lines.len().max(last) {
         let mut its = by.remove(&(n as u32)).unwrap_or_default();
         // Groups: statement, branch arms, then toggles by signal and direction.
-        let order = |i: &LineItem| (matches!(i.0.kind, Kind::Toggle(_)), i.0.sig.clone());
+        let order = |i: &LineItem| {
+            (
+                matches!(i.0.kind, Kind::Toggle(_) | Kind::Fsm(_)),
+                i.0.sig.clone(),
+            )
+        };
         // Rows of one condition together, in row order.
         let group = |i: &LineItem| {
             let k = i.0;

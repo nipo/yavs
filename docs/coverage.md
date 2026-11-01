@@ -58,7 +58,8 @@ tells you whether one of the two tests adds nothing the other lacks.
 | `condition` | for every `if`/`elsif`, conditional assignment, `while`, `exit when`, `next when` or `wait until` with two or more inputs, one row per input and value |
 | `assert` | the same rows for the condition of every `assert`, sequential or concurrent; opt in with `--cov-kind`, because half of these rows need a failing run (see Conditions of `wait until` and `assert`). They report as `condition` |
 | `expression` | the same for the logic expression assigned to a signal or variable |
-| `combination` | for the same conditions and logic expressions, each combination of the values of the inputs that can occur (see Combinations); opt in with `--cov-kind` |
+| `combination` | for the same conditions (not `wait until`) and logic expressions, each combination of the values of the inputs that can occur (see Combinations); opt in with `--cov-kind` |
+| `fsm` | for every detected state machine, per instance, each state reached and each transition taken (see State machines); opt in with `--cov-kind` |
 
 ## Flags for `yavs run`
 
@@ -89,7 +90,7 @@ Report options:
 | `--cobertura FILE.xml` | Cobertura XML for CI services, one entry per source line (it has no toggles, so those are only in the text and HTML reports) |
 | `--html DIR` | static pages that open from disk (`index.html`) |
 | `--root DIR` | the prefix stripped from the source paths in every report (default: the current directory) |
-| `--kind=LIST` (newer than 0.11.0) | report only these kinds (`statement`, `branch`, `toggle`, `condition`, `expression`, `combination`, comma separated); `--total` and `--fail-under` then count only them |
+| `--kind=LIST` (newer than 0.11.0) | report only these kinds (`statement`, `branch`, `toggle`, `condition`, `expression`, `combination`, `fsm`, comma separated); `--total` and `--fail-under` then count only them |
 | `--total` (newer than 0.11.0) | print only the total coverage as one percentage such as `74.3%`: the items that ran over all items, after exclusions; cannot be combined with `--uncovered` or `--tests` |
 | `--fail-under=PCT` (newer than 0.11.0) | exit with status 1 when the total is below PCT (`80`, `92.5`); the report is printed as usual and `error[E0114]: coverage 70.0% is below the required 80.0%` follows on standard error. With `--total` the percentage is printed too |
 | `--uncovered[=yaml]` | one exclusion row per item that never ran, with file, line and the statement as a comment; `=yaml` prints a YAML exclusion file |
@@ -144,13 +145,71 @@ vu.main(post_run=lambda results: results.merge_coverage("coverage"))
 ```
 
 Every simulation writes a database named after its test; `merge_coverage("coverage")` merges them
-into `coverage.ycov`. `python run.py --yavs-cov-html cov-html --yavs-cov-fail-under 85` then also
+into `coverage.ycov`. `--yavs-cov-kind fsm,assert` on the command line gives the kinds of tests without that option. `python run.py --yavs-cov-html cov-html --yavs-cov-fail-under 85` then also
 writes the HTML report and fails the run (exit status 1, after the test results are written) when
 the total is below 85%. Further arguments for `yavs cov report` go in
 `merge_coverage("coverage", args=["--cobertura", "coverage.xml"])`. Exclusions go in
 `merge_coverage("coverage", exclude=["waived.yaml"], config="coverage.yaml")` or on the command line as
 `--yavs-cov-exclude FILE` (repeatable) and `--yavs-cov-config FILE`. Coverage is not available
 under `--yavs-debug`.
+
+## State machines
+
+`--cov-kind=fsm` counts, per instance, how often the register of a state machine entered each state and
+each transition it took. It only reads the register's value as the simulation changes it, so it adds no
+counter to the code and a run prints what it prints without coverage. It costs a look at each signal
+that changes, in every cycle.
+
+**What counts as a machine.** A signal of an enumeration type (declared anywhere, but not by the `std`
+or `ieee` libraries) in an architecture, block or generate, when
+
+- a process or concurrent assignment with an edge test drives it, and
+- a `case` of a process in the same architecture selects on it, with the signal itself as the selector.
+
+Each such signal is one machine, whatever else drives it. The forms covered are one process, two
+processes (`state <= next_state` in the clocked one, `case state is ... next_state <= B` in the other,
+with or without a default assignment) and `wait until rising_edge(clk)`. The next-state signal is not a
+machine of its own: it may change several times within a time step, the register only once.
+
+**What is reported as not measured.** These have no `fsm` items. Each is warning `W0120` at the run,
+and `yavs cov report` lists it under `not measured as state machines:`
+
+- a register of an enumeration type that reads itself and that no `case` selects on (`if state = a then`),
+- a `case` on a part of a signal (`case r.state is`, `case states(i) is`),
+- a `case` on a port that the architecture drives, and on a variable of a clocked process.
+
+The warning for a variable is a guess: a variable set from a port and then selected on is no machine.
+
+**What is not detected at all.** Nothing says these are state machines, so nothing warns: a state held in
+a `std_logic_vector`, an integer or a constant-encoded type, a `case` in a subprogram with a register that
+does not read itself in the process, and a register driven only through a port map of another instance.
+
+**States.** All literals of the type are items, including those the signal's subtype leaves out. The
+initial value counts as reached once, at time 0.
+
+**Transitions.** The items are the transitions a `case` alternative names: an assignment under `when A`
+of the literal `B` to the register or to a signal a clocked process copies into it, nested in an `if` or
+not. A value that is not a literal names no transition. A transition that happens and is not named, such
+as a reset from `busy` to `idle`, is added to the database when it happens, and its line is the signal's
+declaration. So it only ever counts as hit: the total grows with it, and a run with more resets shows a
+slightly higher percentage. A transition from a state to itself is never an item, since the value does
+not change and there is nothing to observe.
+
+```
+not covered:
+  fifo.vhd:16  fsm  state: spare          tb.dut
+  fifo.vhd:55  fsm  state: busy -> done   tb.dut
+```
+
+An exclusion row names the instance, the signal and the state or transition, and `*` matches in all three:
+
+```
+fsm tb.dut state spare                # unused state
+fsm tb.dut state spare->*
+```
+
+Cobertura has no notion of these items and leaves them out; the text and HTML reports show them. The
+items are identified by those names, so an edit keeps them mergeable, and renaming a state makes new ones.
 
 ## Combinations
 
@@ -326,7 +385,7 @@ process tb.dut.u_fsm p_trace                            # a labelled process
 library vendor_models
 ```
 
-Row types are `statement`, `branch`, `condition`, `expression`, `combination`, `toggle`, `instance`, `unit`,
+Row types are `statement`, `branch`, `condition`, `expression`, `combination`, `toggle`, `fsm`, `instance`, `unit`,
 `file`, `files`, `files_exclude`, `library`, `entity` and `process`; `*` and `?` match in instance paths, toggle paths, signal names and file
 patterns. A file whose name ends in `.yaml` or `.yml` is read as YAML:
 
@@ -370,6 +429,7 @@ there to read (a stale line is warning `W0110`). `yavs cov report --uncovered DB
 | `condition`, `expression` | `INSTANCE HEX12.OCC ROW` (YAML: plus `row: N`) |
 | `combination` | `INSTANCE HEX12.OCC PATTERN [FILE:LINE]` (YAML: `pattern`) |
 | `toggle` | `PATH SCALAR [rise\|fall]` (YAML: `instance`, `signal`, `direction`) |
+| `fsm` | `INSTANCE SIGNAL STATE` or `INSTANCE SIGNAL FROM->TO` (YAML: `instance`, `signal`, `item`) |
 | `instance` | an instance path and everything below it |
 | `unit` | a package, such as `work.pkg_tools` |
 | `library` | a library: the items of the instances of its entities and of its packages (YAML: `library`) |
@@ -478,6 +538,7 @@ warning into an error, or when the total is below `--fail-under`; a malformed op
 | `W0114` | an excluded item did run |
 | `W0115` | a signal was left out of toggle coverage because of `--cov-toggle-max` |
 | `W0119` | merged databases disagree about the operands under a positional `-- yavs coverage exclude` directive |
+| `W0120` | something looks like a state machine but is not one `--cov-kind=fsm` measures |
 
 **Tiers and threads.** Counts are the same in every tier and at any `--threads`.
 

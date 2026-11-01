@@ -8,8 +8,9 @@ Read the root `AGENTS.md` first. This file is for an agent about to change `crat
   waiver files, and the report files. Users' view: `docs/lint.rst`; decisions: `docs/decisions.md`
   "Static analysis"; command line: `crates/yavs/src/lint.rs`, `docs/cli-contract.md` 5a.
 - Does not: parse or analyze (`yavs-sem`), choose the files (it expands the entries of `file_list`, the CLI decides what is read), render console output (`yavs-diag`
-  through the CLI), run during `analyze`, `elab` or `run`.
-- Depends on: `yavs-diag`, `yavs-sem`, `yavs-syntax` (lint_005), `regex` (`re:` in lint_602, lint_603), `saphyr-parser`, `serde_json`. Called by: `yavs`.
+  through the CLI), run a rule during `analyze`, `elab` or `run`. `machines` (detection only) runs
+  for `yavs-cov` under `--cov-kind=fsm`.
+- Depends on: `yavs-diag`, `yavs-sem`, `yavs-syntax` (lint_005), `regex` (`re:` in lint_602, lint_603), `saphyr-parser`, `serde_json`. Called by: `yavs`, `yavs-cov`.
 - The rules and their test cases come from the owner's project of the same licence, MIT OR
   Apache-2.0 (licence note; copied once, not kept in sync, maintainer 2026-10-30).
 
@@ -20,6 +21,7 @@ Read the root `AGENTS.md` first. This file is for an agent about to change `crat
 | `src/lib.rs` | `Certainty`, `Rule`, `rule`, `Finding`, `lint` (configuration applied, order, dedup; facts) |
 | `src/rules.rs` | `RULES`, the one list; `check` and `Walk`: the regions and statements of a unit, the definite rules and lint_712, 713, 760; lint_005 |
 | `src/design.rs` | One architecture as a design, flattened to `Conc`: lint_001, 002, 004, 600, 601, 602, 603, 700, 701, 702, 703, 710, 711, 720, 730; `shape` says what a process is; `Flow`: the dependencies of a process for lint_720; the design facts; `component` (lint_750) |
+| `src/design/fsm.rs` | `machines`: the state machines of an architecture as coverage counts them, wider than `lint_710` and `lint_711`, and `NotMeasured` for `W0120` |
 | `src/config.rs` | YAML to `Config` (`rule:`, levels global, group, rule; `rtl:`, `testbench:`, `Kind`; `file_list`, `expand`, `near_entry`) and `Waivers`, `find_up` |
 | `src/testbench.rs` | Which kind a file is, only when a block for one exists |
 | `src/report.rs` | `Reports`: JSON, SARIF, JUnit, Code Climate, SonarQube |

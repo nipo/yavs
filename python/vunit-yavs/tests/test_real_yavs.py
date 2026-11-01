@@ -56,6 +56,38 @@ end;
 """
 
 
+FSM_TESTBENCH = """library vunit_lib;
+context vunit_lib.vunit_context;
+
+entity tb_fsm is
+  generic (runner_cfg : string);
+end entity;
+
+architecture tb of tb_fsm is
+  type state_t is (idle, busy);
+  signal state : state_t := idle;
+  signal clk, a, b : bit := '0';
+begin
+  clk <= not clk after 5 ns;
+  process (clk)
+  begin
+    if rising_edge(clk) then
+      case state is
+        when idle => state <= busy;
+        when busy => state <= idle;
+      end case;
+    end if;
+  end process;
+  assert a = '0' or b = '0';
+  main : process
+  begin
+    test_runner_setup(runner, runner_cfg);
+    wait for 30 ns;
+    test_runner_cleanup(runner);
+  end process;
+end architecture;
+"""
+
 NON_ASCII_PACKAGE = """
 package pkg is
   constant answer : integer := 42;
@@ -342,6 +374,20 @@ class TestRealYavs(unittest.TestCase):
         proc = self._coverage_run(RUN_PY_COVERAGE_EXCLUDE=str(rows))
         self.assertEqual(proc.returncode, 0, proc.stdout)
         self.assertIn("excluded (", proc.stdout)
+
+    def test_coverage_of_state_machines_and_assertions(self):
+        source = self.tempdir / "tb_fsm.vhd"
+        source.write_text(FSM_TESTBENCH, encoding="utf-8")
+        proc = self._coverage_run("lib.tb_fsm.all", "--yavs-cov-kind=fsm,assert,condition", EXTRA_VHDL=str(source))
+        self.assertEqual(proc.returncode, 0, proc.stdout)
+        database = (self.tempdir / "all.ycov").read_text(encoding="utf-8")
+        self.assertIn("state:busy->idle", database)
+        self.assertIn("fsm ", proc.stdout)
+        self.assertIn("conditions ", proc.stdout)
+        # A kind yavs does not know fails the run, naming the one meant
+        proc = self._coverage_run("lib.tb_fsm.all", "--yavs-cov-kind=fsn", EXTRA_VHDL=str(source))
+        self.assertNotEqual(proc.returncode, 0, proc.stdout)
+        self.assertIn("fsm", proc.stdout)
 
     def test_coverage_below_the_threshold_fails_after_the_reports(self):
         proc = self._coverage_run("--yavs-cov-fail-under=100")

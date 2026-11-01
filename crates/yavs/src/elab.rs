@@ -475,6 +475,8 @@ pub enum CovKindArg {
     /// Each combination of the inputs of conditions and logic expressions that can occur
     /// (an input a short-circuit operator skips counts as not evaluated, not as false).
     Combination,
+    /// Each state a state machine reached and each transition it took, per instance.
+    Fsm,
 }
 
 #[cfg_attr(test, derive(Debug))]
@@ -2056,6 +2058,27 @@ fn run_design(
         sim.subscribe(Box::new(t.clone()));
         t
     });
+    // State machine coverage the same way, over the machines detection finds.
+    let mut unmeasured = std::collections::BTreeSet::new();
+    let fsm = kind(CovKindArg::Fsm).then(|| {
+        let (f, missed) = yavs_cov::fsm::fsm(&db, &e);
+        for (span, text) in missed {
+            let src = db.sources.get(span.file);
+            unmeasured.insert((
+                src.path.clone(),
+                src.line_col(span.start).0 as u32,
+                text.clone(),
+            ));
+            out.emit(
+                &db.sources,
+                &Diagnostic::warning("W0120", format!("not measured as a state machine: {text}"))
+                    .with_primary(span, "this looks like a state machine")
+                    .with_help("`docs/coverage.md` says which forms are measured"),
+            );
+        }
+        sim.subscribe(Box::new(f.clone()));
+        f
+    });
     let interrupted = Arc::new(AtomicBool::new(false));
     let view: ViewSlot = Arc::default();
     let recorder = match observers(&a, &db, &e, &mut sim, built.as_ref(), &mut out, &view) {
@@ -2368,16 +2391,18 @@ fn run_design(
         cov.items.retain(|k, _| match k.kind {
             yavs_cov::Kind::Statement => kind(CovKindArg::Statement),
             yavs_cov::Kind::Branch(_) => kind(CovKindArg::Branch),
-            yavs_cov::Kind::Toggle(_) => false,
-            yavs_cov::Kind::Condition(_) => {
-                kind(CovKindArg::Condition) || kind(CovKindArg::Assert)
-            }
+            yavs_cov::Kind::Toggle(_) | yavs_cov::Kind::Fsm(_) => false,
+            yavs_cov::Kind::Condition(_) => kind(CovKindArg::Condition) || kind(CovKindArg::Assert),
             yavs_cov::Kind::Expression(_) => kind(CovKindArg::Expression),
             yavs_cov::Kind::Combination(_) => kind(CovKindArg::Combination),
         });
         if let Some(t) = &toggles {
             t.add_to(&mut cov);
         }
+        if let Some(f) = &fsm {
+            f.add_to(&mut cov);
+        }
+        cov.unmeasured = unmeasured;
         cov.attribute(
             &a.cov_test
                 .clone()

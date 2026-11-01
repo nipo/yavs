@@ -79,6 +79,7 @@ fn rule_kind(rule: &str) -> Option<&'static str> {
         "expression",
         "combination",
         "toggle",
+        "fsm",
     ]
     .into_iter()
     .find(|k| *k == w)
@@ -146,6 +147,7 @@ fn item_words(k: &Key, e: &Entry) -> String {
         Kind::Combination(_) => format!("{}  in {}", crate::combination_words(k), e.text),
         Kind::Condition(_) | Kind::Expression(_) => crate::fec_text(k, e),
         Kind::Toggle(r) => format!("{} {}", k.sig, crate::arrow(r)),
+        Kind::Fsm(_) => crate::fsm_text(k),
         Kind::Statement => e.text.clone(),
         Kind::Branch(_) => e.text.clone(),
     }

@@ -3,6 +3,8 @@
 //! `Db::stmt_reads`, `Db::edge_shape`), so nothing here reads names from text. A process is
 //! judged only in a shape that says what it is; anything else is left alone.
 
+pub(crate) mod fsm;
+
 use crate::Config;
 use crate::rules::{Raw, Related};
 use serde_json::{Value, json};

@@ -298,6 +298,10 @@ const EXPLAIN: &[(&str, &str)] = &[
         "A signal or port has more `bit`/`std_ulogic` scalars than `--cov-toggle-max` (default 65536), so its toggles are not counted. Raise the limit to count them; large memories are usually left out on purpose.",
     ),
     (
+        "W0120",
+        "With `--cov-kind=fsm`, something looks like a state machine but is not one the coverage measures: a register of an enumeration type that a `case` does not select on, a `case` on a part of a signal, on a port or on a variable of a clocked process. It has no `fsm` items, and the coverage report lists it under \"not measured as state machines\". The other kinds are not affected.",
+    ),
+    (
         "W0116",
         "The signal handlers of a running simulation (Ctrl-C and SIGTERM writing out the buffered output, SIGUSR1 printing a hang report) could not be installed (the note gives the operating system error). The run goes on without them, and its output is written line by line; `--hang-report` is not affected.",
     ),

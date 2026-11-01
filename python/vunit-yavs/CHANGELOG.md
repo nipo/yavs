@@ -4,6 +4,8 @@
 
 - `--yavs-cov-exclude FILE` (repeatable), `--yavs-cov-config FILE` and `results.merge_coverage(exclude=..., config=...)` apply
   exclusion files and a coverage configuration to the report. Needs a yavs with repeatable `--exclude` and `--config`.
+- `yavs.cov_kind` takes `fsm` and `assert`, and `--yavs-cov-kind LIST` gives the kinds on the command line for tests
+  without that option. Needs a yavs with state machine coverage.
 - A simulation ends with its test runner: yavs gets `--exit-on-stdin-close` and ends when the pipe the runner keeps to
   its standard input closes, so killing only `python run.py` (SIGKILL included) no longer leaves yavs waiting for a
   debugger on the port. Needs a yavs with that option.
