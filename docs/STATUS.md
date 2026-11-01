@@ -22,6 +22,8 @@
 
 ### Dotted paths (#975, 2026-10-31)
 
+`{i}` of `SetVhdlAssertFormat` is `'instance_name` of the region around the process, without the last colon (#982, 2026-11-01; test `assert_format_i_is_the_instance_name`).
+
 Every path yavs writes is dotted through `yavs_diag::dotted`: reports, errors, hierarchy, hang report, activity, profile, coverage reports, JSON. The kernel holds the dotted names; `'path_name`, `'instance_name`, `{i}`, VHPI names, the coverage database and `dataId` keep colons. Both forms are accepted as input. `tools/difftest` normalises the process path.
 
 ### Documentation update (#826, 2026-10-28)
@@ -5465,6 +5467,8 @@ hand with a MinGW DLL (the test cannot spawn the compiler inside wine). Native W
 runs the test as written.
 
 ## vhpi export (`crates/yavs-vhpi`, `crates/yavs`)
+
+Done (#984, #983, 2026-11-01): `vhpi_printf` and `vhpi_assert` write UTF-8, text that is not valid UTF-8 is read as ISO-8859-1; `vhpiRandomSeedP`, one reference's extension, stays an error. Test `vhpi_printf_text_is_utf8`.
 
 Done (#273, 2026-11-01): `tools/vhpi-conformance/rust_plugins.py`, the Rust `vhpi` crate's plugins at a pinned commit, Linux. All pass (markers and exit status): `test_simple` 2/2, `cb_toggle` 6/6, `foreignf` 2/2, `stringindexing` no markers, exit 0, `dumper` 3/3 on each of 6 testbenches. The dumper's output differs from the reference in what is deliberate: processes are regions, `vhpi_get_next_time` only in the end-of-time-step phase, error texts, the order of value changes within a cycle, plus issue-tracked encoding of characters above 127. Found and fixed: a callback's `obj` was invalid once the plugin released the handle it registered with, `vhpi_get_phys(vhpiResolutionLimitP)` refused the tool handle, `vhpiObjTypeVal` on a composite gave tool-defined raw data (a generic client aborted on it; now an error, raw only when asked for). Not done: the same plugins on Windows (`dynamic` feature, #124), not in CI (network, libclang).
 

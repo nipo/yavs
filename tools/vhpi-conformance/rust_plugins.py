@@ -21,7 +21,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 import simconf  # noqa: E402
 
-REPO = "https://github.com/nickg/rust-vhpi"
+CRATE = "vhpi@0.6.0"
 COMMIT = "65484e320b3830eb0eff1acd7f2dcce635a7bf34"
 # The run scripts with plugins that run here. run_dumper_mixed.sh: a Verilog design, not for yavs.
 SCRIPTS = ["run_test_simple", "run_stringindexing", "run_cb_toggle_checks", "run_foreignf_checks", "run_dumper_checks"]
@@ -35,13 +35,23 @@ def run(cmd, cwd=None, env=None):
     return subprocess.run(cmd, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")
 
 
+def repository():
+    """The repository of the crate, from its metadata on crates.io."""
+    p = run(["cargo", "info", CRATE])
+    m = re.search(r"^repository: (\S+)", p.stdout, re.M)
+    if not m:
+        sys.exit(f"error: cannot read the repository of {CRATE}: {p.stdout.strip()}\nhelp: check the network")
+    return m.group(1)
+
+
 def checkout(cache):
     """The pinned commit under `cache/src`, built; returns (source, directory of the plugins)."""
     src = cache / "src"
     if not src.exists():
-        p = run(["git", "clone", "--quiet", REPO, str(src)])
+        repo = repository()
+        p = run(["git", "clone", "--quiet", repo, str(src)])
         if p.returncode:
-            sys.exit(f"error: cannot clone {REPO}: {p.stdout.strip()}\nhelp: check the network, or clone it to {src} by hand")
+            sys.exit(f"error: cannot clone {repo}: {p.stdout.strip()}\nhelp: check the network, or clone it to {src} by hand")
     p = run(["git", "-C", str(src), "checkout", "--quiet", "--detach", COMMIT])
     if p.returncode:
         sys.exit(f"error: commit {COMMIT} is not in {src}: {p.stdout.strip()}\nhelp: delete {src} to clone again")
