@@ -332,3 +332,185 @@ fn w0111_names_the_edited_statement() {
     );
     assert!(text(&o.stderr).is_empty(), "{}", text(&o.stderr));
 }
+
+/// `cov_run.vhd`: entity `cov_run` over two `cov_sub`, process `decode` in each, package `cov_pkg`.
+fn run_database(name: &str, args: &[&str]) -> Tmp {
+    let tmp = tempdir(name);
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/cli/cov_run.vhd");
+    std::fs::copy(&src, tmp.join("cov_run.vhd")).expect("copy");
+    let o = yavs(&tmp, &["analyze", "--work=mylib:lib", "cov_run.vhd"]);
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    let mut v = vec![
+        "run",
+        "--work=mylib:lib",
+        "--cov=a.ycov",
+        "--cov-kind=statement,branch,toggle",
+    ];
+    v.extend(args);
+    v.push("cov_run");
+    let o = yavs(&tmp, &v);
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    tmp
+}
+
+/// The item lines of the summary's path table left after a rule, by path.
+fn paths_after(tmp: &Path, rule: &str) -> (Vec<String>, String) {
+    write(tmp, "r.txt", rule);
+    let o = yavs(tmp, &["cov", "report", "a.ycov", "--exclude", "r.txt"]);
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    let out = text(&o.stdout);
+    let table = out.split("path ").nth(1).expect("table");
+    let names = table
+        .lines()
+        .skip(1)
+        .take_while(|l| !l.trim().is_empty())
+        .map(|l| l.split_whitespace().next().unwrap_or("").to_string())
+        .collect();
+    (names, text(&o.stderr))
+}
+
+#[test]
+fn library_entity_and_process_rows_on_a_real_run() {
+    let tmp = run_database("names", &[]);
+    let all = paths_after(&tmp, "").0;
+    assert_eq!(
+        all,
+        ["cov_run", "cov_run.u1", "cov_run.u2", "mylib.cov_pkg"]
+    );
+    assert_eq!(
+        paths_after(&tmp, "entity cov_sub\n").0,
+        ["cov_run", "mylib.cov_pkg"]
+    );
+    assert_eq!(
+        paths_after(&tmp, "entity mylib.cov_s*\n").0,
+        ["cov_run", "mylib.cov_pkg"]
+    );
+    assert!(paths_after(&tmp, "library mylib\n").0.is_empty());
+    // A process takes its statements and branches.
+    let rows = text(&yavs(&tmp, &["cov", "report", "a.ycov", "--uncovered"]).stdout);
+    assert!(rows.contains("[process decode]"), "{rows}");
+    write(&tmp, "r.txt", "process cov_run.u* decode\n");
+    let o = yavs(
+        &tmp,
+        &[
+            "cov",
+            "report",
+            "a.ycov",
+            "--exclude",
+            "r.txt",
+            "--uncovered",
+        ],
+    );
+    let left = text(&o.stdout);
+    assert!(
+        !left.contains("[process decode]") && left.contains("[process stim]"),
+        "{left}"
+    );
+    let r = yavs(
+        &tmp,
+        &[
+            "cov",
+            "report",
+            "a.ycov",
+            "--exclude",
+            "r.txt",
+            "--exclusions",
+        ],
+    );
+    let r = text(&r.stdout);
+    assert!(r.contains("rule:    process cov_run.u* decode"), "{r}");
+    // A near name, on a row that matches nothing.
+    let (_, e) = paths_after(&tmp, "entity cov_sb\n");
+    assert!(
+        e.contains("warning[W0111]") && e.contains("`cov_sub`"),
+        "{e}"
+    );
+    let (_, e) = paths_after(&tmp, "process cov_run.u1 decod\n");
+    assert!(e.contains("`decode`"), "{e}");
+    // The report rows of what never ran are still exclusion rows.
+    write(&tmp, "r.txt", &rows);
+    let o = yavs(
+        &tmp,
+        &[
+            "cov",
+            "report",
+            "a.ycov",
+            "--exclude",
+            "r.txt",
+            "--uncovered",
+        ],
+    );
+    assert_eq!(text(&o.stdout), "", "{}", text(&o.stderr));
+    let y = yavs(&tmp, &["cov", "report", "a.ycov", "--uncovered=yaml"]);
+    write(&tmp, "r.yaml", &text(&y.stdout));
+    let o = yavs(
+        &tmp,
+        &[
+            "cov",
+            "report",
+            "a.ycov",
+            "--exclude",
+            "r.yaml",
+            "--uncovered",
+        ],
+    );
+    assert_eq!(text(&o.stdout), "", "{}", text(&o.stderr));
+}
+
+#[test]
+fn an_older_database_says_it_lacks_the_names() {
+    let tmp = tempdir("oldnames");
+    write(
+        &tmp,
+        "old.ycov",
+        "yavs-coverage 6\ns\t:t\t0000000000000007\t0\t0\t-\t3\ta.vhd\tx;\n",
+    );
+    for (row, word) in [
+        ("library work\n", "library"),
+        ("entity e\n", "entity"),
+        ("process t p\n", "process"),
+    ] {
+        write(&tmp, "r.txt", row);
+        for cmd in ["report", "rank"] {
+            let o = yavs(&tmp, &["cov", cmd, "old.ycov", "--exclude", "r.txt"]);
+            assert_eq!(o.status.code(), Some(1));
+            let e = text(&o.stderr);
+            assert!(
+                e.contains("error[E0112]") && e.contains(&format!("a `{word}` row")),
+                "{e}"
+            );
+            assert!(e.contains("written by an older yavs"), "{e}");
+            assert!(e.contains("run the simulations again"), "{e}");
+        }
+    }
+    // Merged with a new one the file says so still; other rows work.
+    let new = run_database("oldnames2", &[]);
+    let db = new.join("a.ycov").display().to_string();
+    let o = yavs(&tmp, &["cov", "merge", "old.ycov", &db, "-o", "m.ycov"]);
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    write(&tmp, "r.txt", "entity cov_sub\n");
+    let o = yavs(&tmp, &["cov", "report", "m.ycov", "--exclude", "r.txt"]);
+    assert_eq!(o.status.code(), Some(1), "{}", text(&o.stderr));
+    write(&tmp, "r.txt", "instance t\n");
+    let o = yavs(&tmp, &["cov", "report", "old.ycov", "--exclude", "r.txt"]);
+    assert!(o.status.success(), "{}", text(&o.stderr));
+}
+
+/// What the new names need is read from the design: the counts and the rest of each database line are
+/// the same at any thread count.
+#[test]
+fn names_do_not_change_with_threads() {
+    let one = run_database("t1", &["--threads=1"]);
+    let four = run_database("t4", &["--threads=4"]);
+    let (a, b) = (
+        std::fs::read_to_string(one.join("a.ycov")).expect("read"),
+        std::fs::read_to_string(four.join("a.ycov")).expect("read"),
+    );
+    assert!(a.contains("\tmylib.cov_sub\tdecode\n"), "{a}");
+    // Paths in the two directories differ only by the directory.
+    let (a, b) = (
+        a.replace(&one.display().to_string(), ""),
+        b.replace(&four.display().to_string(), ""),
+    );
+    assert_eq!(a, b);
+}

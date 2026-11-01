@@ -2,7 +2,7 @@
 //!
 //! ```yaml
 //! exclude:
-//!   - kind: statement          # statement | branch | condition | expression | toggle | instance | unit | file
+//!   - kind: statement          # statement | branch | condition | expression | combination | toggle | instance | unit | file | library | entity | process
 //!     instance: ":tb:dut:u_fsm"
 //!     hash: "4d2f0a91c3be.0"   # branch: HEX12.OCC.ARM
 //!     line: "src/fsm.vhd:61"   # optional, never matched
@@ -23,7 +23,7 @@ use yavs_diag::files::normalize;
 use yavs_diag::suggest::tail;
 
 /// The kinds of exclusion an entry may have.
-pub(super) const KINDS: [&str; 9] = [
+pub(super) const KINDS: [&str; 12] = [
     "statement",
     "branch",
     "condition",
@@ -33,6 +33,9 @@ pub(super) const KINDS: [&str; 9] = [
     "instance",
     "unit",
     "file",
+    "library",
+    "entity",
+    "process",
 ];
 
 enum Node {
@@ -183,6 +186,12 @@ fn entry(line: usize, n: Node) -> Result<Row, String> {
         "instance" => (&["kind", "instance", "reason"], &["instance"]),
         "unit" => (&["kind", "unit", "reason"], &["unit"]),
         "file" => (&["kind", "file", "reason"], &[]),
+        "library" => (&["kind", "library", "reason"], &["library"]),
+        "entity" => (&["kind", "entity", "reason"], &["entity"]),
+        "process" => (
+            &["kind", "instance", "process", "reason"],
+            &["instance", "process"],
+        ),
         _ => {
             let l = get.iter().find(|f| f.1 == "kind").map_or(line, |f| f.0);
             let kinds = KINDS.into_iter();
@@ -235,6 +244,12 @@ fn entry(line: usize, n: Node) -> Result<Row, String> {
         ),
         "instance" => Rule::Instance(yavs_diag::dotted(find("instance").unwrap_or_default())),
         "unit" => Rule::Unit(find("unit").unwrap_or_default().into()),
+        "library" => Rule::Library(find("library").unwrap_or_default().into()),
+        "entity" => Rule::Entity(find("entity").unwrap_or_default().into()),
+        "process" => Rule::Process(
+            yavs_diag::dotted(find("instance").unwrap_or_default()),
+            find("process").unwrap_or_default().into(),
+        ),
         _ if lists.is_empty() => Rule::File(find("file").unwrap_or_default().into()),
         _ => {
             let list = |key: &str| -> Vec<String> {

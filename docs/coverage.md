@@ -295,10 +295,13 @@ toggle tb.dut data(*) fall
 instance tb.u_debug*                                    # debug logic
 file */generated/*.vhd
 unit work.pkg_tools
+entity fifo_debug                                       # every instance of it
+process tb.dut.u_fsm p_trace                            # a labelled process
+library vendor_models
 ```
 
 Row types are `statement`, `branch`, `condition`, `expression`, `combination`, `toggle`, `instance`, `unit`,
-`file`, `files` and `files_exclude`; `*` and `?` match in instance paths, toggle paths, signal names and file
+`file`, `files`, `files_exclude`, `library`, `entity` and `process`; `*` and `?` match in instance paths, toggle paths, signal names and file
 patterns. A file whose name ends in `.yaml` or `.yml` is read as YAML:
 
 ```yaml
@@ -343,10 +346,18 @@ there to read (a stale line is warning `W0110`). `yavs cov report --uncovered DB
 | `toggle` | `PATH SCALAR [rise\|fall]` (YAML: `instance`, `signal`, `direction`) |
 | `instance` | an instance path and everything below it |
 | `unit` | a package, such as `work.pkg_tools` |
+| `library` | a library: the items of the instances of its entities and of its packages (YAML: `library`) |
+| `entity` | the items of every instance of an entity, `NAME` or `LIBRARY.NAME`, toggles included but not the instances below them (YAML: `entity`) |
+| `process` | `INSTANCE LABEL`: the statements, branches, conditions and expressions of a labelled process, also a labelled concurrent statement. An unlabelled one has no name and cannot be matched; its items stay reachable by hash. Toggles belong to signals, not processes (YAML: `instance`, `process`) |
 | `file` | a file glob or directory, such as `*/generated/*.vhd` |
 | `files`, `files_exclude` | lists of files, directories and patterns relative to the exclusion file (YAML: under `kind: file`) |
 
 In YAML, quote values that start with `*` or contain `: `.
+
+`--uncovered` prints one row per item, since that is what can be checked and kept, and adds the process to the
+comment (`# y <= 11;  [process decode]`) so a `process` row is easy to write; a process, entity or library that
+never ran at all has no row of its own. These three rows need names only databases of this release record: over
+an older database they are the error `E0112`, which says to run the simulations again.
 
 When a statement is edited its hash changes, so a row for it matches nothing and warning `W0111` says so. A
 row with a line also names what stands at or near that line now, of the same kind and instance, with the row
@@ -412,7 +423,7 @@ warning into an error, or when the total is below `--fail-under`; a malformed op
 |------|---------|
 | `E0110` | cannot write the output |
 | `E0111` | cannot read a database |
-| `E0112` | an exclusion file cannot be read or has a bad row; the message names the file and the line |
+| `E0112` | an exclusion file cannot be read or has a bad row, or a `library`, `entity` or `process` row meets a database too old to hold those names; the message names the file and the line |
 | `E0138` | the file of `--config` cannot be read or has a bad key; the message names the file and the line |
 | `E0113` | HTML report cannot find a source file at its stored path; nothing is written |
 | `E0114` | the total coverage is below `--fail-under` (the report was printed) |

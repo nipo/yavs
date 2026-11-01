@@ -219,7 +219,7 @@ const EXPLAIN: &[(&str, &str)] = &[
     ),
     (
         "E0112",
-        "An exclusion file given to `yavs cov report --exclude` cannot be read or has a malformed row or entry (a `.yaml` or `.yml` file is read as YAML, any other as text rows); the note names the line. Rows start with `statement`, `branch`, `toggle`, `instance`, `unit` or `file`; a YAML entry has the same word as its `kind`.",
+        "An exclusion file given to `yavs cov report --exclude` cannot be read or has a malformed row or entry (a `.yaml` or `.yml` file is read as YAML, any other as text rows); the note names the line. Rows start with `statement`, `branch`, `condition`, `expression`, `combination`, `toggle`, `instance`, `unit`, `file`, `files`, `files_exclude`, `library`, `entity` or `process`; a YAML entry has the same word as its `kind`. A `library`, `entity` or `process` row over a database written by an older yavs is this error too: such a database does not record those names, so run the simulations again.",
     ),
     (
         "E0138",

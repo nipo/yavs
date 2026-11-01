@@ -291,6 +291,24 @@ fn excluded(
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
+    if db.no_units
+        && let Some((f, (line, word))) = files.iter().find_map(|f| f.needs_units().map(|n| (f, n)))
+    {
+        return Err(Box::new(
+            Diagnostic::error(
+                EXCLUDE_ERROR,
+                format!(
+                    "{}:{line}: a `{word}` row cannot be applied to these databases",
+                    f.name
+                ),
+            )
+            .with_note(
+                "a database written by an older yavs is included; it does not record the library, \
+                 entity and process of each item",
+            )
+            .with_help("run the simulations again with this yavs, or take the row out"),
+        ));
+    }
     let a = yavs_cov::exclude::apply(&db, &files);
     for w in &a.warnings {
         out.emit(&SourceMap::default(), w);

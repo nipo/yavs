@@ -110,6 +110,11 @@ pub struct Entry {
     /// The in-source `-- yavs coverage exclude` directives that waive it (combinations only).
     /// The count stays the raw one.
     pub waivers: Vec<Waiver>,
+    /// `library.unit` of what it belongs to: the entity of its instance, or the package. Empty in
+    /// a database that does not record it. Not part of the identity.
+    pub unit: String,
+    /// The label of the process it is in; empty when it is in none or the process has no label.
+    pub process: String,
 }
 
 /// An in-source exclusion of a requirement.
@@ -141,14 +146,18 @@ pub struct Database {
     /// A database read from a file older than version 6 is in it: such files do not record
     /// in-source exclusions, so there is nothing to say about them.
     pub legacy: bool,
+    /// Some of its items do not say their unit and process: a database older than version 7 is in
+    /// it, so `library`, `entity` and `process` exclusions cannot be applied.
+    pub no_units: bool,
 }
 
-const MAGIC: &str = "yavs-coverage 6";
+const MAGIC: &str = "yavs-coverage 7";
 /// Older versions [`Database::parse`] still reads: 2 has no toggles, 2 and 3 no tests, 4 no
-/// conditions, 5 no combinations and no in-source exclusions.
+/// conditions, 5 no combinations and no in-source exclusions, 6 no units and process labels.
 const OLD: &[&str] = &["yavs-coverage 2", "yavs-coverage 3"];
 const V4: &str = "yavs-coverage 4";
 const V5: &str = "yavs-coverage 5";
+const V6: &str = "yavs-coverage 6";
 
 /// `line` without its `--` comment (a `--` inside a string literal is text).
 fn uncommented(line: &str) -> &str {
@@ -192,6 +201,8 @@ struct Item {
     /// A condition row: the text of its input; a combination: the texts of all its inputs.
     input: String,
     waivers: Vec<Waiver>,
+    /// The label of the process around it.
+    process: String,
 }
 
 /// Between the texts of the inputs of a combination in `Key::sig`.
@@ -372,6 +383,24 @@ pub fn collect(
     for v in units.values_mut() {
         v.sort();
     }
+    // The labelled processes of each file: (start, end, label), sorted.
+    let mut labelled: HashMap<yavs_diag::FileId, Vec<(u32, u32, String)>> = HashMap::new();
+    for p in &e.procs {
+        let s = &db.stmts[p.stmt];
+        if let Some(l) = &s.label {
+            let span = (s.span.start, s.span.end, l.text.to_string());
+            labelled.entry(s.span.file).or_default().push(span);
+        }
+    }
+    for v in labelled.values_mut() {
+        v.sort();
+        v.dedup();
+    }
+    let process_at = |span: yavs_diag::Span| {
+        let v = labelled.get(&span.file)?;
+        let (_, end, label) = v[..v.partition_point(|x| x.0 <= span.start)].last()?;
+        (span.start < *end).then(|| label.clone())
+    };
     let mut items = Vec::with_capacity(n);
     let mut owner = HashMap::new();
     for (_, c) in prog.cov.iter() {
@@ -425,6 +454,7 @@ pub fn collect(
             })
             .unwrap_or_default();
         items.push(Item {
+            process: process_at(span).unwrap_or_default(),
             waivers,
             input: match (comb, &c.row) {
                 (Some(k), _) => k
@@ -496,12 +526,16 @@ pub fn collect(
         None => String::from("?"),
     };
     let loc = |id: yavs_sem::UnitId| (db.units[id].file, db.units[id].span.start);
-    // An instance: its path and the units whose items it counts.
+    let unit_name = |id: yavs_sem::UnitId| {
+        let u = &db.units[id];
+        format!("{}.{}", db.libs[u.lib].name.text, u.name.text).to_ascii_lowercase()
+    };
+    // An instance: its path, the units whose items it counts, and its entity.
     let instance = |s: ScopeId| match e.hier.scope(s).kind {
         ScopeKind::Instance { entity, arch } => {
             let p = e.hier.path_name(s, Case::Lrm);
             let p = p.strip_suffix(':').filter(|p| !p.is_empty()).unwrap_or(&p);
-            Some((p.to_string(), [loc(entity), loc(arch)]))
+            Some((p.to_string(), [loc(entity), loc(arch)], unit_name(entity)))
         }
         _ => None,
     };
@@ -512,11 +546,13 @@ pub fn collect(
         occ: occ[i],
         sig: items[i].input.clone(),
     };
-    let mut add = |k: Key, i: usize, c: u64| {
+    let mut add = |k: Key, i: usize, c: u64, unit: &str| {
         if items[i].skip {
             return;
         }
         let e = out.items.entry(k).or_insert_with(|| Entry {
+            unit: unit.to_string(),
+            process: items[i].process.clone(),
             file: items[i].file.clone(),
             line: items[i].line,
             count: 0,
@@ -528,17 +564,18 @@ pub fn collect(
     };
     // Every item, with no count yet: per instance for design entities, else per unit.
     for s in 0..e.hier.scopes.len() {
-        if let Some((path, units)) = instance(ScopeId(s as u32)) {
+        if let Some((path, units, entity)) = instance(ScopeId(s as u32)) {
             for (i, it) in items.iter().enumerate() {
                 if units.contains(&it.unit) {
-                    add(key(path.clone(), i), i, 0);
+                    add(key(path.clone(), i), i, 0, &entity);
                 }
             }
         }
     }
     for (i, it) in items.iter().enumerate() {
         if !design_entity(it.unit) {
-            add(key(unit_path(it.unit), i), i, 0);
+            let path = unit_path(it.unit);
+            add(key(path.clone(), i), i, 0, &path);
         }
     }
     // Row 0 has no instance; row r + 1 is region r's instance data.
@@ -548,16 +585,30 @@ pub fn collect(
             .and_then(|r| instance(e.instance_of(ScopeId(r as u32))));
         for (i, &c) in cs.iter().enumerate().filter(|(_, c)| **c > 0) {
             let unit = items[i].unit;
-            let path = match &inst {
-                Some((p, units)) if units.contains(&unit) => p.clone(),
+            match &inst {
+                Some((p, units, entity)) if units.contains(&unit) => {
+                    add(key(p.clone(), i), i, c, entity);
+                }
                 // A package subprogram (or one passed as a generic subprogram): counted under
                 // the unit declaring it.
-                _ => unit_path(unit),
-            };
-            add(key(path, i), i, c);
+                _ => {
+                    let path = unit_path(unit);
+                    add(key(path.clone(), i), i, c, &path);
+                }
+            }
         }
     }
     (out, warns)
+}
+
+/// A field that may be empty, as a database line writes it.
+fn dash(s: &str) -> &str {
+    if s.is_empty() { "-" } else { s }
+}
+
+/// The field [`dash`] wrote.
+fn undash(s: &str) -> &str {
+    if s == "-" { "" } else { s }
 }
 
 /// `v` in decimal.
@@ -600,7 +651,9 @@ impl Database {
     /// conditions (`c<row>`) and expressions (`e<row>`) the same with the row's input before
     /// the text;
     /// toggles (`t1` rise, `t0` fall): kind, path, scalar name, count, tests, line, file.
-    /// `tests` is the comma-separated ids of the tests that hit the item, `-` for none.
+    /// `tests` is the comma-separated ids of the tests that hit the item, `-` for none. Every line
+    /// ends in the unit (`library.entity` or `library.package`), and all but toggles then in the
+    /// process label; `-` for none.
     pub fn write(&self) -> String {
         let mut s = format!("{MAGIC}\n");
         let mut order: Vec<usize> = (0..self.tests.len()).collect();
@@ -629,6 +682,8 @@ impl Database {
                 push_num(&mut s, u64::from(e.line));
                 s.push('\t');
                 s.push_str(&e.file);
+                s.push('\t');
+                s.push_str(dash(&e.unit));
                 s.push('\n');
                 continue;
             }
@@ -645,8 +700,17 @@ impl Database {
                     };
                     let _ = writeln!(
                         s,
-                        "{c}{r}\t{}\t{:016x}\t{}\t{}\t{t}\t{}\t{}\t{}\t{}",
-                        k.path, k.hash, k.occ, e.count, e.line, e.file, k.sig, e.text
+                        "{c}{r}\t{}\t{:016x}\t{}\t{}\t{t}\t{}\t{}\t{}\t{}\t{}\t{}",
+                        k.path,
+                        k.hash,
+                        k.occ,
+                        e.count,
+                        e.line,
+                        e.file,
+                        k.sig,
+                        e.text,
+                        dash(&e.unit),
+                        dash(&e.process)
                     );
                     continue;
                 }
@@ -668,8 +732,17 @@ impl Database {
                     };
                     let _ = writeln!(
                         s,
-                        "m{st}\t{}\t{:016x}\t{}\t{}\t{t}\t{}\t{}\t{}\t{}\t{w}",
-                        k.path, k.hash, k.occ, e.count, e.line, e.file, k.sig, e.text
+                        "m{st}\t{}\t{:016x}\t{}\t{}\t{t}\t{}\t{}\t{}\t{}\t{w}\t{}\t{}",
+                        k.path,
+                        k.hash,
+                        k.occ,
+                        e.count,
+                        e.line,
+                        e.file,
+                        k.sig,
+                        e.text,
+                        dash(&e.unit),
+                        dash(&e.process)
                     );
                     continue;
                 }
@@ -677,8 +750,16 @@ impl Database {
             };
             let _ = writeln!(
                 s,
-                "{kind}\t{}\t{:016x}\t{}\t{}\t{t}\t{}\t{}\t{}",
-                k.path, k.hash, k.occ, e.count, e.line, e.file, e.text
+                "{kind}\t{}\t{:016x}\t{}\t{}\t{t}\t{}\t{}\t{}\t{}\t{}",
+                k.path,
+                k.hash,
+                k.occ,
+                e.count,
+                e.line,
+                e.file,
+                e.text,
+                dash(&e.unit),
+                dash(&e.process)
             );
         }
         s
@@ -690,11 +771,14 @@ impl Database {
         let mut lines = text.lines();
         let head = lines.next();
         let old = head.is_some_and(|h| OLD.contains(&h));
-        if head != Some(MAGIC) && head != Some(V5) && head != Some(V4) && !old {
+        let known = [MAGIC, V6, V5, V4].iter().any(|v| head == Some(*v));
+        if !known && !old {
             return Err(format!("not a yavs coverage database (no `{MAGIC}` line)"));
         }
+        let with_units = head == Some(MAGIC);
         let mut db = Database {
-            legacy: head != Some(MAGIC),
+            legacy: head != Some(MAGIC) && head != Some(V6),
+            no_units: !with_units,
             ..Database::default()
         };
         for (n, l) in lines.enumerate() {
@@ -708,6 +792,17 @@ impl Database {
                 continue;
             }
             let mut f: Vec<&str> = l.split('\t').collect();
+            // The last fields of this version: the process (not of toggles), then the unit.
+            let mut process = String::new();
+            let mut unit = String::new();
+            if with_units {
+                if !l.starts_with('t') {
+                    let p = f.pop().ok_or_else(bad)?;
+                    process = undash(p).to_string();
+                }
+                unit = undash(f.pop().ok_or_else(bad)?).to_string();
+                db.no_units |= unit.is_empty();
+            }
             // Versions before 4 have no tests field (after the count).
             let at = if l.starts_with('t') { 4 } else { 5 };
             if old && f.len() >= at {
@@ -749,6 +844,8 @@ impl Database {
                     text: String::new(),
                     tests,
                     waivers: Vec::new(),
+                    unit,
+                    process,
                 };
                 (key, entry)
             } else {
@@ -808,6 +905,8 @@ impl Database {
                     text: text.to_string(),
                     tests,
                     waivers,
+                    unit,
+                    process,
                 };
                 (key, entry)
             };
@@ -825,6 +924,7 @@ impl Database {
     pub fn merge(&mut self, other: Database) -> Vec<String> {
         let mut conflicts = Vec::new();
         self.legacy |= other.legacy;
+        self.no_units |= other.no_units;
         let id: Vec<u32> = other
             .tests
             .iter()
@@ -1097,6 +1197,7 @@ impl Database {
                 .filter(|(k, _)| kinds.iter().any(|n| n == k.kind.name()))
                 .map(|(k, e)| (k.clone(), e.clone()))
                 .collect(),
+            no_units: self.no_units,
             tests: self.tests.clone(),
             legacy: self.legacy,
         }
@@ -1301,6 +1402,8 @@ mod tests {
                 text: "x := 1;".into(),
                 tests: Vec::new(),
                 waivers: Vec::new(),
+                unit: "work.e".into(),
+                process: String::new(),
             },
         )
     }
@@ -1374,7 +1477,7 @@ mod tests {
         );
         let t = d.write();
         assert!(
-            t.ends_with("t1\t:top:u1\tr.d(7)\t3\t-\t4\ta&b.vhd\n"),
+            t.ends_with("t1\t:top:u1\tr.d(7)\t3\t-\t4\ta&b.vhd\twork.e\n"),
             "{t}"
         );
         assert_eq!(Database::parse(&t).unwrap(), d);
@@ -1383,7 +1486,11 @@ mod tests {
         let v3 = Database::parse("yavs-coverage 3\nt1\t:top:u1\tr.d(7)\t3\t4\ta&b.vhd\n");
         let v3 = v3.unwrap();
         assert!(v3.legacy);
-        assert_eq!(v3.items, d.items);
+        assert!(v3.no_units);
+        assert_eq!(
+            v3.items.keys().collect::<Vec<_>>(),
+            d.items.keys().collect::<Vec<_>>()
+        );
         assert!(d.cobertura().contains("lines-valid=\"0\""));
         assert!(d.summary().contains("toggles    1/1 100.0%"));
     }
@@ -1406,6 +1513,8 @@ mod tests {
             text: "valid and ready".into(),
             tests: Vec::new(),
             waivers,
+            unit: "work.e".into(),
+            process: String::new(),
         };
         let waiver = Waiver {
             rule: "01".into(),
@@ -1416,7 +1525,7 @@ mod tests {
         let mut d = Database::default();
         d.items.insert(key.clone(), entry(2, vec![waiver.clone()]));
         let text = d.write();
-        assert!(text.starts_with("yavs-coverage 6\n"));
+        assert!(text.starts_with("yavs-coverage 7\n"));
         let back = Database::parse(&text).unwrap();
         assert_eq!(back, d);
         assert_eq!(pattern(&key), "01");

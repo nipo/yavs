@@ -1,0 +1,1 @@
+Coverage exclusion files take `library`, `entity` and `process` rows, in text and YAML. `--uncovered` names the process of each item, and a database from an older release is told apart with a clear error.

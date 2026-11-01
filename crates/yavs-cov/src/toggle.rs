@@ -30,6 +30,8 @@ struct Name {
     file: String,
     line: u32,
     bit: u32,
+    /// `library.unit`: the entity of its instance, or the package.
+    unit: String,
 }
 
 struct State {
@@ -89,14 +91,26 @@ pub fn toggles(db: &Db, e: &Elaborated, max: u64) -> (Toggles, Vec<Skipped>) {
         names: Vec::new(),
     };
     let mut skipped = Vec::new();
+    let unit_name = |id: yavs_sem::UnitId| {
+        let u = &db.units[id];
+        format!("{}.{}", db.libs[u.lib].name.text, u.name.text).to_ascii_lowercase()
+    };
     for (si, sc) in e.hier.scopes.iter().enumerate() {
         // Package signals under `library.package`, as package statements.
         let p = match sc.kind {
-            yavs_elab::ScopeKind::Package { unit } => {
-                let u = &db.units[unit];
-                format!("{}.{}", db.libs[u.lib].name.text, u.name.text).to_ascii_lowercase()
-            }
+            yavs_elab::ScopeKind::Package { unit } => unit_name(unit),
             _ => e.hier.path_name(yavs_elab::ScopeId(si as u32), Case::Lrm),
+        };
+        let unit = match sc.kind {
+            yavs_elab::ScopeKind::Package { .. } => p.clone(),
+            _ => match e
+                .hier
+                .scope(e.instance_of(yavs_elab::ScopeId(si as u32)))
+                .kind
+            {
+                yavs_elab::ScopeKind::Instance { entity, .. } => unit_name(entity),
+                _ => String::new(),
+            },
         };
         let path = p.strip_suffix(':').filter(|p| !p.is_empty()).unwrap_or(&p);
         for &o in &sc.objs {
@@ -135,6 +149,7 @@ pub fn toggles(db: &Db, e: &Elaborated, max: u64) -> (Toggles, Vec<Skipped>) {
                     b
                 });
                 st.names.push(Name {
+                    unit: unit.clone(),
                     path: path.to_string(),
                     sig,
                     file: f.path.clone(),
@@ -322,6 +337,8 @@ impl Toggles {
                         text: String::new(),
                         tests: Vec::new(),
                         waivers: Vec::new(),
+                        unit: n.unit.clone(),
+                        process: String::new(),
                     },
                 ));
             }

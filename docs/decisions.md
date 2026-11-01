@@ -2446,6 +2446,13 @@ scalars; the on-disk format is implementation-defined, so it is fixed here (yavs
 
 ## Coverage exclusions (yavs-cov, CLI, #351, user, 2026-10-19)
 
+- **Library, entity and process rows (maintainer, 2026-11-01, #1020):** every database line of version 7 ends
+  in the unit (`library.entity` of the instance, or the package) and, except toggles, the process label: per item,
+  not per path, since one path can be bound to another entity in another test. They are metadata from the
+  design, outside the key, so counts and merging stay as they were. Over a database that lacks them the rows are an
+  error, not a warning: a row that silently excludes nothing would change a gate's total. `--uncovered` keeps one
+  row per item and only names the process in the comment: every process runs at initialisation, so one that never
+  ran is too rare to collapse rows for, and entity and library rows are a user's choice no report can make.
 - **W0111 names a replacement (maintainer, 2026-11-01, #1020):** a stale row with a line names the nearest
   item within five lines of its kind, instance and file that no rule excludes, with the row for it. Rows still
   match by hash only: a guess never excludes anything.

@@ -11,6 +11,9 @@
 //! toggle    <instance|glob> <scalar|glob> [rise|fall]   a signal's scalar, both directions unless one is named
 //! instance  <glob>          that instance and everything below it
 //! unit      <lib.package>   a package's items
+//! library   <glob>          the items of the instances of its entities and of its packages
+//! entity    <glob>          the items of its instances (`name` or `lib.name`), not those below them
+//! process   <instance|glob> <label|glob>   the items of a labelled process
 //! file      <glob|dir>      every item of matching source files
 //! files     <pattern>... [files_exclude <pattern>...]    the same with the keys and matching of
 //! files_exclude <pattern>...                             lint waivers, relative to this file
@@ -83,6 +86,10 @@ enum Rule {
     Toggle(String, String, Option<bool>),
     Instance(String),
     Unit(String),
+    Library(String),
+    Entity(String),
+    /// Instance glob, label glob.
+    Process(String, String),
     /// The older `file` row: its own glob (any case, `*` crosses `/`, any trailing path), or what
     /// a `files` pattern matches.
     File(String),
@@ -134,6 +141,19 @@ impl Rules {
             } else {
                 parse(&text)?
             },
+        })
+    }
+}
+
+impl Rules {
+    /// The first row that needs what a database older than version 7 does not record: its line and
+    /// row type.
+    pub fn needs_units(&self) -> Option<(usize, &'static str)> {
+        self.rows.iter().find_map(|r| match r.rule {
+            Rule::Library(_) => Some((r.line, "library")),
+            Rule::Entity(_) => Some((r.line, "entity")),
+            Rule::Process(..) => Some((r.line, "process")),
+            _ => None,
         })
     }
 }
@@ -311,10 +331,14 @@ pub fn parse(text: &str) -> Result<Vec<Row>, String> {
             ["instance", g] => Rule::Instance(dotted(g)),
             ["unit", u] => Rule::Unit(u.to_string()),
             ["file", g] => Rule::File(g.to_string()),
+            ["library", g] => Rule::Library(g.to_string()),
+            ["entity", g] => Rule::Entity(g.to_string()),
+            ["process", g, label] => Rule::Process(dotted(g), label.to_string()),
             ["files" | "files_exclude", ref rest @ ..] if !rest.is_empty() => files_row(&w, &bad)?,
             [
                 "statement" | "branch" | "condition" | "expression" | "combination" | "toggle"
-                | "instance" | "unit" | "file" | "files" | "files_exclude",
+                | "instance" | "unit" | "file" | "files" | "files_exclude" | "library" | "entity"
+                | "process",
                 ..,
             ] => {
                 return Err(bad("wrong number of fields"));
@@ -431,6 +455,14 @@ fn matches(r: &Rule, k: &Key, e: &Entry, files: Option<&BTreeSet<&str>>) -> bool
                 && (glob(g, &path) || path.match_indices('.').any(|(i, _)| glob(g, &path[..i])))
         }
         Rule::Unit(u) => k.path.eq_ignore_ascii_case(u),
+        Rule::Library(g) => e.unit.split_once('.').is_some_and(|(l, _)| glob(g, l)),
+        Rule::Entity(g) => {
+            k.path.starts_with(':')
+                && (glob(g, &e.unit) || e.unit.split_once('.').is_some_and(|(_, n)| glob(g, n)))
+        }
+        Rule::Process(g, label) => {
+            !e.process.is_empty() && glob(label, &e.process) && glob(g, &path)
+        }
         Rule::File(_) | Rule::Files { .. } => files.is_some_and(|f| f.contains(e.file.as_str())),
     }
 }
@@ -563,6 +595,7 @@ pub fn apply(db: &Database, files: &[Rules]) -> Applied {
                 let mut of = rows.iter().enumerate();
                 of.any(|(o, (_, x))| matches(&x.rule, k, e, taken[o].as_ref()))
             };
+            d.message.push_str(&near_name(db, &r.rule));
             if let Some((at, k, e)) = replacement(db, &r.rule, &others) {
                 let shown = Entry {
                     file: at.0.clone(),
@@ -592,6 +625,53 @@ pub fn apply(db: &Database, files: &[Rules]) -> Applied {
         });
     }
     out
+}
+
+/// The tail of the message of a row that names something the database does not hold: a near name.
+fn near_name(db: &Database, r: &Rule) -> String {
+    let items = db.items.iter();
+    let mut names: BTreeSet<String> = BTreeSet::new();
+    let (name, noun) = match r {
+        Rule::Library(g) => {
+            let l = items.filter_map(|(_, e)| e.unit.split_once('.').map(|x| x.0.to_string()));
+            names.extend(l);
+            (g, "library")
+        }
+        Rule::Entity(g) => {
+            let of = items.filter(|(k, _)| k.path.starts_with(':'));
+            for (_, e) in of {
+                names.insert(e.unit.clone());
+                names.extend(e.unit.split_once('.').map(|x| x.1.to_string()));
+            }
+            (g, "entity")
+        }
+        Rule::Process(_, label) => {
+            names.extend(
+                items
+                    .map(|(_, e)| e.process.clone())
+                    .filter(|p| !p.is_empty()),
+            );
+            (label, "process")
+        }
+        Rule::Unit(u) => {
+            names.extend(
+                items
+                    .filter(|(k, _)| !k.path.starts_with(':'))
+                    .map(|(k, _)| k.path.clone()),
+            );
+            (u, "unit")
+        }
+        Rule::Instance(g) => {
+            names.extend(
+                items
+                    .filter(|(k, _)| k.path.starts_with(':'))
+                    .map(|(k, _)| k.shown()),
+            );
+            (g, "instance")
+        }
+        _ => return String::new(),
+    };
+    yavs_diag::suggest::tail(name, noun, names.iter().map(String::as_str))
 }
 
 /// How many lines from a row's line an item may stand to be named as what replaced it.
@@ -714,7 +794,8 @@ pub fn comment(k: &Key, e: &Entry) -> String {
 }
 
 /// The comment of an item that never ran (`None` for a hit item, and for the rise direction
-/// of a scalar whose fall row already says it never toggled).
+/// of a scalar whose fall row already says it never toggled), with the process it is in: the name
+/// a `process` row takes.
 fn miss_comment(db: &Database, k: &Key, e: &Entry) -> Option<String> {
     let both = both_missed(db, k);
     if e.count > 0 || (k.kind == Kind::Toggle(true) && both) {
@@ -723,6 +804,7 @@ fn miss_comment(db: &Database, k: &Key, e: &Entry) -> Option<String> {
     Some(match k.kind {
         Kind::Toggle(false) if both => format!("never toggled ({}:{})", e.file, e.line),
         Kind::Toggle(r) => format!("never {} ({}:{})", crate::arrow(r), e.file, e.line),
+        _ if !e.process.is_empty() => format!("{}  [process {}]", comment(k, e), e.process),
         _ => comment(k, e),
     })
 }
@@ -904,6 +986,8 @@ mod tests {
                     text: "x;".into(),
                     tests: Vec::new(),
                     waivers: Vec::new(),
+                    unit: "work.e".into(),
+                    process: String::new(),
                 },
             );
         }
@@ -1105,6 +1189,82 @@ mod tests {
     }
 
     #[test]
+    fn library_entity_and_process_rows() {
+        let mut d = db();
+        for (k, e) in d.items.iter_mut() {
+            e.unit = match k.path.as_str() {
+                ":t:u1" => "work.fifo".into(),
+                ":t:u2" => "other.fifo2".into(),
+                _ => "work.pkg".into(),
+            };
+            if k.path == ":t:u1" {
+                e.process = "p_main".into();
+            }
+        }
+        let kept = |t: &str, y: bool| {
+            let rows = if y { parse_yaml(t) } else { parse(t) }.unwrap();
+            let a = apply1(&d, rows);
+            let m: Vec<String> = a.warnings.iter().map(|w| w.message.clone()).collect();
+            let paths = a
+                .kept
+                .items
+                .keys()
+                .map(|k| k.shown())
+                .collect::<BTreeSet<_>>();
+            (paths.into_iter().collect::<Vec<_>>().join(" "), m)
+        };
+        // A library takes its packages too; an entity by either name, not a package.
+        assert_eq!(kept("library work\n", false).0, "t.u2");
+        assert_eq!(kept("library WORK\n", false).0, "t.u2");
+        assert_eq!(kept("entity fifo\n", false).0, "t.u2 work.pkg");
+        assert_eq!(kept("entity work.fi*\n", false).0, "t.u2 work.pkg");
+        assert_eq!(kept("entity pkg\n", false).1.len(), 1);
+        assert_eq!(kept("process t.u1 p_*\n", false).0, "t.u2 work.pkg");
+        assert_eq!(kept("process t.* p_main\n", false).0, "t.u2 work.pkg");
+        for (t, want) in [
+            (
+                "exclude:\n  - {kind: library, library: other, reason: x}\n",
+                "t.u1 work.pkg",
+            ),
+            (
+                "exclude:\n  - {kind: entity, entity: fifo}\n",
+                "t.u2 work.pkg",
+            ),
+            (
+                "exclude:\n  - {kind: process, instance: 't.*', process: p_main}\n",
+                "t.u2 work.pkg",
+            ),
+        ] {
+            assert_eq!(kept(t, true).0, want, "{t}");
+        }
+        // Near names, and rows that are not well formed.
+        let m = kept("library wrok\n", false).1;
+        assert!(
+            m[0].contains("a library with a similar name exists: `work`"),
+            "{m:?}"
+        );
+        let m = kept("entity fifp\n", false).1;
+        assert!(m[0].contains("similar name exists: `fifo"), "{m:?}");
+        let m = kept("process t.u1 p_mian\n", false).1;
+        assert!(
+            m[0].contains("a process with a similar name exists: `p_main`"),
+            "{m:?}"
+        );
+        assert!(parse("library\n").is_err());
+        assert!(parse("process t.u1\n").is_err());
+        assert!(parse("entity a b\n").is_err());
+        assert!(parse_yaml("exclude:\n  - kind: process\n    instance: x\n").is_err());
+        assert!(parse_yaml("exclude:\n  - {kind: entity, instance: x}\n").is_err());
+        assert!(parse("librar x\n").unwrap_err().contains("`library`"));
+        // The process shows in the rows of what never ran.
+        assert!(
+            d.uncovered().contains("  [process p_main]\n"),
+            "{}",
+            d.uncovered()
+        );
+    }
+
+    #[test]
     fn syntax_errors_name_the_line() {
         assert!(parse("frobnicate x\n").unwrap_err().starts_with("line 1:"));
         assert!(
@@ -1264,6 +1424,8 @@ mod tests {
                         text: String::new(),
                         tests: Vec::new(),
                         waivers: Vec::new(),
+                        unit: "work.e".into(),
+                        process: String::new(),
                     },
                 );
             }
