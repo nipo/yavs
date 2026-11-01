@@ -988,7 +988,6 @@ impl Db {
                             return Err(self.unsupported(
                                 name.span,
                                 "aliases of methods of objects not denoted by a simple or expanded name",
-                                "S7",
                             ));
                         }
                     }
@@ -1014,7 +1013,7 @@ impl Db {
             NameRes::Overloads(ds) => ds,
             // `alias a : t is obj.field;`: an object name that is not a plain object.
             NameRes::Value => {
-                return Err(self.unsupported(name.span, "aliases of selected object names", "S3"));
+                return Err(self.unsupported(name.span, "aliases of selected object names"));
             }
             other => return Err(self.report_name(scope, other, name.span, "an aliased name")),
         };
@@ -1871,7 +1870,7 @@ impl Db {
                         Some(self.subtype_indication(scope, si)?)
                     }
                     None => None,
-                    _ => return Err(self.unsupported(o.span, "anonymous interface types", "S7")),
+                    _ => return Err(self.unsupported(o.span, "anonymous interface types")),
                 };
                 let (mode, subtype) = self.view_port(
                     o.class.or(Some(ast::InterfaceClass::Signal)),
@@ -1890,7 +1889,7 @@ impl Db {
                 ));
             }
             Some(ast::Mode::View { .. }) => {
-                return Err(self.unsupported(o.span, "mode views outside port clauses", "S7"));
+                return Err(self.unsupported(o.span, "mode views outside port clauses"));
             }
         };
         // 2019 ports of class variable (6.5.2, LCS-2016-047): checked below to be
@@ -1934,7 +1933,7 @@ impl Db {
                 }
                 return Ok(self.declare_interface(scope, o, role, class, mode, &sts));
             }
-            _ => return Err(self.unsupported(o.span, "anonymous interface types", "S7")),
+            _ => return Err(self.unsupported(o.span, "anonymous interface types")),
         };
         if var_port {
             let t = self.base(subtype);
@@ -2130,7 +2129,7 @@ impl Db {
                         Some(self.subtype_indication(pscope, si)?)
                     }
                     None => None,
-                    _ => return Err(self.unsupported(o.span, "anonymous interface types", "S7")),
+                    _ => return Err(self.unsupported(o.span, "anonymous interface types")),
                 };
                 let (m, st) = self.view_port(o.class, r, *array, st, o.span)?;
                 view_subtype = Some(st);
@@ -2166,7 +2165,7 @@ impl Db {
                 }
                 anon[0]
             }
-            _ => return Err(self.unsupported(o.span, "anonymous interface types", "S7")),
+            _ => return Err(self.unsupported(o.span, "anonymous interface types")),
         };
         // Only library `std` is exempt: its sources declare constant parameters of DIRECTORY
         // and CALL_PATH_VECTOR_PTR (#198). User code gets `E1223` in 2008 and 2019

@@ -1501,14 +1501,15 @@ fn prepare(
         print_hierarchy(&db, &e);
     }
     let none = SourceMap::default();
-    let unsupported = |what: &str| {
-        Diagnostic::error("E0199", format!("{what} is not implemented yet in yavs"))
-            .with_note("this is a limitation of yavs, not an error in the design")
-    };
     let flag = if a.dap.is_some() {
         "--dap"
     } else {
         "--interactive"
+    };
+    let unsupported = |what: &str| {
+        Diagnostic::error("E0199", format!("{what} is not implemented yet in yavs"))
+            .with_note("this is a limitation of yavs, not an error in the design")
+            .with_help(format!("run without `--cov` or without `{flag}`"))
     };
     if a.debugged() {
         // A debugger session runs the interpreter whatever `--tier` says, but a tier this build
@@ -1532,7 +1533,7 @@ fn prepare(
         if a.cov.is_some() {
             out.emit(
                 &none,
-                &unsupported(&format!("`--cov` together with `{flag}` (M8)")),
+                &unsupported(&format!("`--cov` together with `{flag}`")),
             );
             return Err((out, 2));
         }

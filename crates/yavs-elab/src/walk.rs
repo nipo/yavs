@@ -309,16 +309,15 @@ fn not_static_subtype(at: Span, port: Span, decl: &yavs_sem::decl::Decl) -> Box<
     )
 }
 
-fn unsupported(span: Span, what: &str, when: &str) -> Box<Diagnostic> {
+fn unsupported(span: Span, what: &str) -> Box<Diagnostic> {
     Box::new(
         Diagnostic::error(
             codes::NOT_IMPLEMENTED,
-            format!("{what} is not implemented yet in yavs's elaboration"),
+            format!("{what} is not implemented yet in yavs"),
         )
         .with_primary(span, "not supported yet")
-        .with_note(format!(
-            "planned for {when}; this is a limitation of yavs, not an error in the design"
-        )),
+        .with_note("this is a limitation of yavs, not an error in the design")
+        .with_help("write this part of the design another way, or report the construct to the yavs issue tracker if no issue exists yet"),
     )
 }
 
@@ -971,7 +970,6 @@ impl Elab<'_> {
             return Err(unsupported(
                 decl.span,
                 "generic types, subprograms and packages",
-                "slice 3 (with yavs-lower)",
             ));
         };
         let key = decl.name.key().as_str().to_string();
@@ -1048,11 +1046,7 @@ impl Elab<'_> {
                 v
             }
             (_, A::Conv { .. }) => {
-                return Err(unsupported(
-                    decl.span,
-                    "converted generic associations",
-                    "M3",
-                ));
+                return Err(unsupported(decl.span, "converted generic associations"));
             }
         };
         // An array generic of a constrained subtype takes that subtype's bounds, not the
@@ -1112,7 +1106,7 @@ impl Elab<'_> {
         };
         let (attr, prefix, arg) = (*attr, *prefix, args.first().copied());
         let Some((po, sels)) = self.m.name_ref(self.db, prefix, s)? else {
-            return Err(unsupported(span, "implicit signals of this prefix", "M3"));
+            return Err(unsupported(span, "implicit signals of this prefix"));
         };
         let (rs, pshape) = self.m.select(po, &sels, span)?;
         let Some(&(leaf, range)) = rs.first() else {
@@ -1644,11 +1638,7 @@ impl Elab<'_> {
             ) => {
                 let aspan = db.exprs[*actual].span;
                 let Some((ao, asels)) = self.m.name_ref(self.db, *actual, sc)? else {
-                    return Err(unsupported(
-                        aspan,
-                        "converted expression actuals",
-                        "slice 4",
-                    ));
+                    return Err(unsupported(aspan, "converted expression actuals"));
                 };
                 let (al, ashape) = self.m.select(ao, &asels, aspan)?;
                 // An unconstrained formal takes the bounds of a conversion (LRM 5.3.2.2): the
@@ -1961,11 +1951,7 @@ impl Elab<'_> {
             right,
         }) = db.scalar_range(f)
         else {
-            return Err(unsupported(
-                span,
-                "a real port range given by an attribute",
-                "M3",
-            ));
+            return Err(unsupported(span, "a real port range given by an attribute"));
         };
         let mut real = |e: ExprId| match self.m.eval(db, e, Some(s))? {
             Val::Real(x) => Ok(x.to_bits()),
@@ -2689,7 +2675,6 @@ impl Elab<'_> {
                         return Err(unsupported(
                             span,
                             "a subtype of a component's generic type as the actual of an entity's",
-                            "#222",
                         ));
                     }
                     None => None,
@@ -5180,7 +5165,6 @@ impl Model {
                 return Err(unsupported(
                     span,
                     "external names outside the design hierarchy (in a package)",
-                    "M3",
                 ));
             }
         };
@@ -5501,7 +5485,7 @@ impl Model {
             return Ok(Some(obj));
         }
         if o.signal_kind.is_some() {
-            return Err(unsupported(decl.span, "guarded signals in packages", "M3"));
+            return Err(unsupported(decl.span, "guarded signals in packages"));
         }
         let init = match o.default {
             Some(e) => Some(self.eval(db, e, None)?),
@@ -5523,7 +5507,7 @@ impl Model {
                 return Ok((o, sels));
             }
             ObjRoot::ImplicitSignal(_) => {
-                return Err(unsupported(l.span, "implicit signals as targets", "M3"));
+                return Err(unsupported(l.span, "implicit signals as targets"));
             }
         };
         let Some(o) = self.signal_or_package(db, scope, d, l.span)? else {
@@ -5601,7 +5585,6 @@ impl Model {
                 return Err(unsupported(
                     span,
                     "individual association of this unconstrained port",
-                    "M3",
                 ));
             }
         };
@@ -5632,7 +5615,6 @@ impl Model {
                 return Err(unsupported(
                     span,
                     "an individually associated port with only null slices",
-                    "M3",
                 ));
             };
             dims.push(match dir {
@@ -5652,7 +5634,6 @@ impl Model {
             return Err(unsupported(
                 span,
                 "individual association of a port with unconstrained elements",
-                "M3",
             ));
         };
         Ok(Shape::Array {

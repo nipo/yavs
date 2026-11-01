@@ -2463,6 +2463,37 @@ fn failed_unit_reported_once_however_spelled() {
     assert_eq!(all.matches("E1100").count(), 1, "{all}");
 }
 
+/// A not-implemented diagnostic names the construct and the limitation, never an internal
+/// milestone, slice or design document (#996).
+#[test]
+fn not_implemented_names_no_internal_plan() {
+    let tmp = tempdir("notimpl");
+    std::fs::write(
+        tmp.join("t.vhd"),
+        "entity tb is end;\narchitecture a of tb is\n  type t is array (natural range <>) of integer;\nbegin\n  process\n    variable v : t(1 to 4);\n  begin\n    report integer'image(v'range'length);\n    wait;\n  end process;\nend;\n",
+    )
+    .unwrap();
+    let work = format!("--work=work:{}/work", tmp.display());
+    let o = yavs_cmd(&[
+        "analyze",
+        "--std=2008",
+        &work,
+        &format!("{}/t.vhd", tmp.display()),
+    ]);
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(err.contains("error[E1999]"), "{err}");
+    assert!(err.contains("limitation of yavs"), "{err}");
+    for plan in [
+        "milestone",
+        "slice S",
+        "docs/design",
+        "sem.md",
+        "planned for",
+    ] {
+        assert!(!err.contains(plan), "{plan}: {err}");
+    }
+}
+
 fn yavs_cmd(args: &[&str]) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_yavs"))
         .args(["--color", "never"])

@@ -1532,6 +1532,11 @@ fn coverage_with_dap_reports_a_command_limitation() {
     assert!(err.contains("error[E0199]"), "{err}");
     assert!(err.contains("not implemented yet"), "{err}");
     assert!(!err.contains("E9999"), "{err}");
+    // No internal plan in a user message (#996).
+    for plan in ["(M8)", "milestone", "slice ", "docs/design"] {
+        assert!(!err.contains(plan), "{plan}: {err}");
+    }
+    assert!(err.contains("`--cov` together with `--dap`"), "{err}");
 }
 
 /// The exception filters of VS Code stop at reports of those severities; `yavs/find` lists.

@@ -587,11 +587,16 @@ impl Cx {
     }
 
     pub fn unsupported(&mut self, span: Span, what: &str) -> Failed {
-        self.error(
-            NOT_IMPLEMENTED,
-            span,
-            format!("{what} is not lowered to IR yet"),
-        )
+        self.diags.push(
+            Diagnostic::error(
+                NOT_IMPLEMENTED,
+                format!("{what} is not implemented yet in yavs"),
+            )
+            .with_primary(span, "not supported yet")
+            .with_note("this is a limitation of yavs, not an error in the design")
+            .with_help("write this part of the design another way, or report the construct to the yavs issue tracker if no issue exists yet"),
+        );
+        Failed
     }
 
     pub fn ice(&mut self, span: Span, what: &str) -> Failed {

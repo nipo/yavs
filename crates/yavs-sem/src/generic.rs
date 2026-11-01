@@ -701,7 +701,6 @@ impl Db {
                     return Err(self.unsupported(
                         actual_span(other),
                         "this actual in the generic map of a formal package",
-                        "S4",
                     ));
                 }
             };
@@ -1698,7 +1697,6 @@ impl Db {
             self.unsupported(
                 span,
                 "a call mixing the anonymous types of its own subprogram",
-                "S7",
             );
             return None;
         }
@@ -1784,7 +1782,7 @@ impl Db {
                     };
                     let Some((key, span)) = formal_key(f) else {
                         failed = true;
-                        self.unsupported(f.span, "this form of generic formal", "S4");
+                        self.unsupported(f.span, "this form of generic formal");
                         continue;
                     };
                     let named = |db: &Db| -> Vec<usize> {

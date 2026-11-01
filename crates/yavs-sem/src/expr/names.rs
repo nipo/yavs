@@ -28,8 +28,8 @@ pub(crate) enum NameRes {
     /// Nothing visible: report `E1100` (or the conflict) at `ident`.
     Missing(Ident),
     Conflict(Ident, crate::scope::Conflict),
-    /// A construct of a later slice.
-    Unsupported(Span, &'static str, &'static str),
+    /// A construct yavs does not implement.
+    Unsupported(Span, &'static str),
     /// The suffix is not declared in the package region.
     NotInRegion(ScopeId, Span, Symbol),
     /// The name denotes a value computed from an object or call (selection,
@@ -161,7 +161,6 @@ impl Db {
                                     return NameRes::Unsupported(
                                         n.span,
                                         "expanded names into this kind of region",
-                                        "S5",
                                     );
                                 }
                             },
@@ -188,7 +187,6 @@ impl Db {
                                 return NameRes::Unsupported(
                                     n.span,
                                     "expanded names into this kind of region",
-                                    "S5",
                                 );
                             }
                         };
@@ -233,7 +231,7 @@ impl Db {
             ast::NameKind::GenericMap { prefix, args } => {
                 self.call_instance(scope, prefix, args, n.span)
             }
-            _ => NameRes::Unsupported(n.span, "this form of name", "S4"),
+            _ => NameRes::Unsupported(n.span, "this form of name"),
         }
     }
 
@@ -395,7 +393,7 @@ impl Db {
         match r {
             NameRes::Missing(i) => self.undeclared(scope, i),
             NameRes::Conflict(i, c) => self.conflict(i, &c),
-            NameRes::Unsupported(span, what, slice) => self.unsupported(span, what, slice),
+            NameRes::Unsupported(span, what) => self.unsupported(span, what),
             NameRes::NotInRegion(s, span, key) => self.not_in_region(s, span, key),
             NameRes::Error => Reported,
             NameRes::Uninstantiated(d, span) => self.uninstantiated(d, span),
@@ -1905,7 +1903,7 @@ impl Db {
                     ast::Actual::Open(_) => Actual::Open,
                     other => {
                         let sp = actual_span(other).unwrap_or(span);
-                        self.unsupported(sp, "this kind of actual", "S2");
+                        self.unsupported(sp, "this kind of actual");
                         return None;
                     }
                 },
@@ -2057,7 +2055,7 @@ impl Db {
             }
             other => {
                 let sp = actual_span(other).unwrap_or(a.span);
-                self.unsupported(sp, "this kind of actual", "S2");
+                self.unsupported(sp, "this kind of actual");
                 return None;
             }
         };

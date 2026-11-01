@@ -131,7 +131,7 @@ const EXPLAIN: &[(&str, &str)] = &[
     ),
     (
         "E0199",
-        "A command option or combination is not implemented yet. The message names the limitation. This is a limitation of yavs, not an internal compiler error. Exit status 2.",
+        "A command option or combination is not implemented yet. The message names the option or combination; the help line says what to run instead. This is a limitation of yavs, not an internal compiler error. Exit status 2.",
     ),
     // yavs-wave
     (
@@ -371,7 +371,7 @@ const EXPLAIN: &[(&str, &str)] = &[
     // yavs-lower
     (
         "E2001",
-        "The lowering to IR does not handle this construct yet; the message names it.",
+        "The design uses a construct that yavs does not implement yet; the message names it. This is a limitation of yavs, not an error in the design.",
     ),
     // yavs-elab
     (

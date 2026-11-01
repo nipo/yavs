@@ -790,7 +790,7 @@ impl<'a> Fx<'a, '_> {
                 let (t, _) = self.alias_target(d).ok_or(Failed)?;
                 self.sig_expr(t)
             }
-            _ => Err(self.cx.unsupported(span, "this signal (ports, M2 slice 3)")),
+            _ => Err(self.cx.unsupported(span, "this signal")),
         }
     }
 
@@ -5004,13 +5004,9 @@ impl<'a> Fx<'a, '_> {
                 let r = self.dope_range(dope, k, RegTy::I64);
                 self.range_attr(attr, r, Some((dope, k)), span)
             }
-            AttrPrefix::Expr(_) => Err(self.cx.unsupported(
-                span,
-                &format!(
-                    "attribute '{} of an object (implicit signals, M2 slice 4)",
-                    attr.name()
-                ),
-            )),
+            AttrPrefix::Expr(_) => Err(self
+                .cx
+                .unsupported(span, &format!("attribute '{} of an object", attr.name()))),
             AttrPrefix::Entity(d) if attr == SimpleName => {
                 let name = db.decls[d].name.to_string().to_ascii_lowercase();
                 let n = name.len() as i64;

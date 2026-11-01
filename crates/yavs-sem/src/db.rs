@@ -1079,18 +1079,18 @@ impl Db {
         )
     }
 
-    /// A construct a later slice implements (sem.md section 10). Never a silent
-    /// default: analysis of the enclosing unit fails.
-    pub(crate) fn unsupported(&mut self, span: Span, what: &str, slice: &str) -> Reported {
+    /// A construct yavs does not implement. Never a silent default: analysis of the
+    /// enclosing unit fails. User-visible text: no milestones, slices or design documents
+    /// (#996).
+    pub(crate) fn unsupported(&mut self, span: Span, what: &str) -> Reported {
         self.error(
             Diagnostic::error(
                 diag::NOT_IMPLEMENTED,
-                format!("{what} is not implemented yet in yavs's semantic analysis"),
+                format!("{what} is not implemented yet in yavs"),
             )
             .with_primary(span, "not supported yet")
-            .with_note(format!(
-                "planned for slice {slice} of docs/design/sem.md section 10; this is a limitation of yavs, not an error in the design"
-            )),
+            .with_note("this is a limitation of yavs, not an error in the design")
+            .with_help("write this part of the design another way, or report the construct to the yavs issue tracker if no issue exists yet"),
         )
     }
 

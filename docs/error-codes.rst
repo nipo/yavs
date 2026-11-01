@@ -473,7 +473,7 @@ Semantic analysis (E1 and W1)
    * - _`E1910`
      - The construct needs VHDL-2019.
    * - _`E1999`
-     - The design uses a construct that yavs's semantic analysis does not implement yet.
+     - The design uses a construct that yavs does not implement yet.
 
 Elaboration (E2 and W2)
 -----------------------
@@ -485,7 +485,7 @@ Elaboration (E2 and W2)
    * - Code
      - Meaning
    * - _`E2001`
-     - The lowering to IR does not handle this construct yet; the message names it.
+     - The design uses a construct that yavs does not implement yet; the message names it.
    * - _`E2020`
      - A ``-- yavs coverage exclude`` directive is malformed: a missing ``)``, an input without ``=value``, text after the pattern that is not a reason (a reason follows ``:``), an unknown word where ``condition``, ``expression`` or ``row`` may stand, or a ``row`` without a pattern or an ``INPUT = VALUE``.
    * - _`W2020`

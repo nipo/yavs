@@ -254,7 +254,7 @@ fn sequential_block_2019() {
 
 #[test]
 fn unsupported_pieces_say_so() {
-    // A construct analysis does not implement: E1999 naming the slice, never silence.
+    // A construct analysis does not implement: E1999 naming the construct, never silence.
     let (db, _, r) = arch(&format!(
         "{ENT}architecture a of e is\nbegin\n  process begin\n    wait for 1 ns;\n  end process;\nend architecture;\n"
     ));

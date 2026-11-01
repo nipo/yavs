@@ -694,11 +694,11 @@ impl Db {
                 })
             }
             K::Aggregate(_) => {
-                self.unsupported(e.span, "aggregates", "S3");
+                self.unsupported(e.span, "aggregates");
                 self.poison_expr()
             }
             K::New(_) => {
-                self.unsupported(e.span, "allocators", "S6");
+                self.unsupported(e.span, "allocators");
                 self.poison_expr()
             }
             K::Conditional(alts) => self.conditional(scope, e, alts, i.ty),
@@ -1222,7 +1222,7 @@ impl Db {
                 // type; only a bare attribute name is unsupported here (#653).
                 // With interpretations, the type mismatch below is the problem (#822).
                 if !matches!(n.kind, ast::NameKind::Apply { .. }) && is.is_empty() {
-                    self.unsupported(n.span, "this use of a predefined attribute", "S3");
+                    self.unsupported(n.span, "this use of a predefined attribute");
                     return;
                 }
             }
@@ -1893,7 +1893,7 @@ impl Db {
                         suffix,
                     } = &prefix.kind
                     else {
-                        return Err(self.unsupported(prefix.span, "this procedure name", "S6"));
+                        return Err(self.unsupported(prefix.span, "this procedure name"));
                     };
                     let Ok(ts) = self.prefix_types(scope, obj) else {
                         return Err(crate::Reported);

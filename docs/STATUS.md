@@ -2679,7 +2679,7 @@ The GitHub Action that installs a release lives in its own repository, `ru551n/y
 - Negative suite `tests/diag/sem` run by `tests/diag_sem.rs` (exact code, line and column; optional
   rendered `.stderr` snapshots); what still fails is in `tests/diag_sem_xfail.txt` (the
   aggregates and case choices group passes, #45; external names and literals, #49; aliases, #46).
-- A construct the semantic analysis does not implement yet is `E1999`, naming the slice; `E9999` is
+- A construct the semantic analysis does not implement yet is `E1999`, naming the construct; `E9999` is
   only for internal errors (#842).
 - Overload diagnostics (#51): association errors of the only candidate (`E1100` unknown formal,
   `E1310` formal twice, `E1311` missing actual, `E1301` at the first extra argument), procedures

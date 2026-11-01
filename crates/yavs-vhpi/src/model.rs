@@ -411,7 +411,7 @@ impl State {
             ),
             Fault::Unsupported if self.reported.insert(message.clone()) => Some(
                 Diagnostic::warning("W0904", format!("unsupported VHPI call: {message}"))
-                    .with_note("yavs's VHPI object model is not complete until milestone M5"),
+                    .with_note("this part of the VHPI interface is not implemented in yavs"),
             ),
             Fault::Unsupported | Fault::NotFound => None,
         };

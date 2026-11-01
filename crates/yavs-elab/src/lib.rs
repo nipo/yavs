@@ -96,7 +96,7 @@ pub mod codes {
     pub const TIME_BELOW_RESOLUTION: &str = "E2120";
     /// An external name's subtype indication does not match the object it names (LRM 8.7).
     pub const EXTERNAL_MISMATCH: &str = "E2121";
-    /// Not implemented yet in yavs (names the slice or milestone).
+    /// Not implemented yet in yavs (names the construct, no milestone).
     pub const NOT_IMPLEMENTED: &str = "E2199";
     /// Internal error: a broken invariant ("this is a bug in yavs").
     pub const INTERNAL: &str = "E9999";

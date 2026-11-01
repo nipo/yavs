@@ -436,7 +436,6 @@ fn array_of_chars(
         return Err(db.unsupported(
             span,
             "a string literal over an index subtype with unfolded bounds",
-            "S2",
         ));
     };
     let n = elems.len() as i64;

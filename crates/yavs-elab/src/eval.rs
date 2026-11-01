@@ -1830,7 +1830,7 @@ impl Model {
             _ => Err(err(
                 codes::NOT_IMPLEMENTED,
                 span,
-                "signals of this type are not implemented yet",
+                "signals of this type are not implemented yet in yavs",
                 "here",
             )),
         }

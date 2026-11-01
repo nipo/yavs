@@ -1115,7 +1115,7 @@ impl Db {
                 }))
             }
             ast::ArrayIndexes::Anonymous(_) => {
-                Err(self.unsupported(span, "anonymous generic index types", "S7"))
+                Err(self.unsupported(span, "anonymous generic index types"))
             }
         }
     }

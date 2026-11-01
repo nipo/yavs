@@ -56,7 +56,7 @@ through the orchestrator.
 - **Fail early, fail clearly.** Every problem is a `yavs_diag::Diagnostic` reported through
   `Db::report`/`Db::error`, with a code, primary span, labels, notes and help. Never
   `unwrap_or(default)` on anything that comes from the design. A construct a later slice will
-  handle reports `Db::unsupported(span, what, "S<n>")` (code `E1999`, says which slice): never a
+  handle reports `Db::unsupported(span, what)` (code `E1999`, names the construct, no slice or milestone): never a
   silent default, never `todo!()`.
 - **Codes.** Every diagnostic uses a constant from `diag.rs` (ranges in sem.md 8.1). A new code
   gets its constant and its explain text in the same `codes!` entry. Negative tests live in

@@ -125,7 +125,7 @@ Full module table with owners: `CONTRIBUTING.md` "Module map". Entry points and 
 | An alias of a subtype-denoting attribute is a `DeclKind::Subtype` of its mark (`alias_decl`, #914) | LRM 6.6.3, 16.2; sim1 accepts | `docs/design/lrm-checks.md` L166 |
 | In a 1993 file an `in` port takes a static signal name, a conversion of one or a globally static expression, else `E1360` (`check_in_actual_93`, #926) | LRM 1993 1.1.1.2; sim1 and sim2 reject | `docs/design/lrm-checks.md` L168 |
 | A PSL boolean of type `bit` or `std_ulogic` in a 1993 file is `e = '1'` (`psl_bool_93`); the parser marks a checker process (`ProcessStmt::psl`, `Owner::Process::psl`), so a plain condition stays `E1340` (#911) | 1993 has no `??`; sim1 accepts | `docs/design/lrm-checks.md` L160 |
-| Unimplemented constructs report `Db::unsupported(span, what, "S<n>")` (`E1999`; `E9999` is only for internal errors, #842) | Fail early, no `todo!()` | CONTRIBUTING "Conventions" |
+| Unimplemented constructs report `Db::unsupported(span, what)` (names the construct; no slice or milestone, #996) (`E1999`; `E9999` is only for internal errors, #842) | Fail early, no `todo!()` | CONTRIBUTING "Conventions" |
 
 Module-local decisions go in this section and in the matching sem.md section, LRM readings in
 `lrm-checks.md`, in the same commit (root `AGENTS.md` rule 24).
