@@ -69,7 +69,7 @@ const EXPLAIN: &[(&str, &str)] = &[
     ),
     (
         "W0004",
-        "A design unit contains PSL (IEEE 1850) outside the subset yavs runs. yavs runs `default clock is ...;`, clocked `assert`/`assume` directives with `always b`, `never b`, `always a -> b` and `always a -> next[n] b` on VHDL booleans, and `cover {b}`, written as VHDL-2008 statements or in `-- psl` comments. Everything else (property and sequence declarations, SERE sequences, other operators, unclocked directives, vunit/vmode/vprop units) is skipped, so that property is not checked and the simulation is otherwise unaffected. Directives for formal tools only (`restrict`, `restrict_guarantee`, `assume_guarantee`, `fairness`, `strong fairness`, and any directive that calls `nondet` or `nondet_vector`) are skipped without this warning. One warning is given per design unit. Use `-Werror=W0004` to make it an error, or `-Wno-W0004` to silence it.",
+        "A design unit contains PSL (IEEE 1850) outside the subset yavs runs. yavs runs clocked `assert`, `assume` and `cover` over booleans, sequences and the weak temporal operators, with declared sequences and properties, written as VHDL-2008 statements or in `-- psl` comments (the user guide's PSL page lists the subset). Everything else (strong operators, `forall`, unclocked directives, vunit/vmode/vprop units) is skipped, so that property is not checked and the simulation is otherwise unaffected. Directives for formal tools only (`restrict`, `restrict_guarantee`, `assume_guarantee`, `fairness`, `strong fairness`, and any directive that calls `nondet` or `nondet_vector`) are skipped without this warning. One warning is given per design unit. Use `-Werror=W0004` to make it an error, or `-Wno-W0004` to silence it.",
     ),
     // yavs command line
     (
@@ -99,7 +99,7 @@ const EXPLAIN: &[(&str, &str)] = &[
     ),
     (
         "E0121",
-        "The LLVM tier could not compile the design for `--tier=llvm`, or could not start compiling for `--tier=auto`. This is a bug in yavs; `--tier=interp` runs the design.",
+        "A compiled tier could not compile the design for `--tier=clift` or `--tier=llvm`, or could not start compiling for `--tier=auto`. This is a bug in yavs; `--tier=interp` runs the design.",
     ),
     (
         "E0123",
@@ -111,7 +111,7 @@ const EXPLAIN: &[(&str, &str)] = &[
     ),
     (
         "E0125",
-        "`yavs run --profile` was combined with `--dap`. The profiler samples which process is running; a stop at a breakpoint would be counted as time in the stopped process. Profile a run without `--dap`. Exit status 2.",
+        "`yavs run --profile` was combined with a debug session (`--dap`, `--interactive`, `--do`). The profiler samples which process is running; a stop at a breakpoint would be counted as time in the stopped process. Profile a run without them. Exit status 2.",
     ),
     (
         "E0126",

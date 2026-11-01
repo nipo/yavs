@@ -110,7 +110,7 @@ fn parse_hot(args: &[String]) -> Option<Cli> {
     // test `hot_parse_equals_the_whole_command` compares the two.
     let sub = match name {
         "analyze" => analyze::Args::augment_args(
-            clap::Command::new("analyze").about("Analyze one VHDL file into a library"),
+            clap::Command::new("analyze").about("Analyze VHDL files into a library"),
         ),
         "elab" => elab::Common::augment_args(
             clap::Command::new("elab").about("Elaborate a design (no simulation)"),
@@ -153,7 +153,7 @@ enum Command {
         #[arg(required = true)]
         files: Vec<PathBuf>,
     },
-    /// Analyze one VHDL file into a library.
+    /// Analyze VHDL files into a library.
     Analyze(analyze::Args),
     /// Elaborate a design (no simulation).
     Elab(elab::Common),

@@ -25,7 +25,7 @@ Commands
    * - ``yavs parse [OPTIONS] FILES...``
      - Check that VHDL files parse
    * - ``yavs analyze [OPTIONS] --work=NAME:PATH FILE...``
-     - Analyze one VHDL file into a library
+     - Analyze VHDL files into a library
    * - ``yavs elab [OPTIONS] --work=NAME:PATH TOP``
      - Elaborate a design (no simulation)
    * - ``yavs run [OPTIONS] --work=NAME:PATH TOP [+NAME[=VALUE]...]``
@@ -118,7 +118,7 @@ Arguments:
 
 .. program:: yavs analyze
 
-Analyze one VHDL file into a library.
+Analyze VHDL files into a library.
 
 .. code-block:: text
 

@@ -105,13 +105,13 @@ Syntax, command line, waveforms, coverage, debugger, plugins (E0 and W0)
    * - _`E0120`
      - ``yavs run --tier=...`` names a compiled tier that this yavs was built without.
    * - _`E0121`
-     - The LLVM tier could not compile the design for ``--tier=llvm``, or could not start compiling for ``--tier=auto``.
+     - A compiled tier could not compile the design for ``--tier=clift`` or ``--tier=llvm``, or could not start compiling for ``--tier=auto``.
    * - _`E0123`
      - ``yavs cache clean`` could not remove a compilation cache entry of a library directory (permissions, or the directory is in use by a read-only mount).
    * - _`E0124`
      - ``yavs run --profile=FILE`` could not write the profile file (missing directory, permissions, full disk).
    * - _`E0125`
-     - ``yavs run --profile`` was combined with ``--dap``.
+     - ``yavs run --profile`` was combined with a debug session (``--dap``, ``--interactive``, ``--do``).
    * - _`E0126`
      - The directory of the std/ieee units shared by all libraries cannot be used: ``--std-cache`` or ``YAVS_STD_CACHE`` is empty, no user cache directory is known, or (for ``yavs analyze``) the directory cannot be created or written.
    * - _`E0127`
