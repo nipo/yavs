@@ -1,7 +1,7 @@
 Static analysis
 ===============
 
-``yavs lint`` (needs a release newer than 0.11.0) is a static analysis tool, not a style guide or formatter: it
+``yavs lint`` (needs 0.12.0 or later) is a static analysis tool, not a style guide or formatter: it
 reports what can be proved wrong about a design before it is simulated, and it never looks at layout. A default run
 reports definite errors only: the program cannot do what it says, whatever anyone intended. It
 reports what it can derive and nothing it would have to guess, so an empty report means nothing

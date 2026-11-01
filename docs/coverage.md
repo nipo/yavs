@@ -213,9 +213,9 @@ Report options:
 | `--lcov FILE` | an LCOV tracefile: lines and branches (see Exports) |
 | `--sonarqube FILE` | a SonarQube generic coverage report: lines and branches (see Exports). Not validated against a real scanner |
 | `--root DIR` | the prefix stripped from the source paths in every report (default: the current directory) |
-| `--kind=LIST` (newer than 0.11.0) | report only these kinds (`statement`, `branch`, `toggle`, `condition`, `expression`, `combination`, `fsm`, comma separated); `--total` and `--fail-under` then count only them |
-| `--total` (newer than 0.11.0) | print only the total coverage as one percentage such as `74.3%`: the items that ran over all items, after exclusions; cannot be combined with `--uncovered` or `--tests` |
-| `--fail-under=PCT` (newer than 0.11.0) | exit with status 1 when the total is below PCT (`80`, `92.5`); the report is printed as usual and `error[E0114]: coverage 70.0% is below the required 80.0%` follows on standard error. With `--total` the percentage is printed too. `--fail-under=statement:90,branch:80` sets a percentage per kind and names each kind that fails; a plain number may stand beside them (`--fail-under=85,branch:80`) |
+| `--kind=LIST` (0.12.0 or later) | report only these kinds (`statement`, `branch`, `toggle`, `condition`, `expression`, `combination`, `fsm`, comma separated); `--total` and `--fail-under` then count only them |
+| `--total` (0.12.0 or later) | print only the total coverage as one percentage such as `74.3%`: the items that ran over all items, after exclusions; cannot be combined with `--uncovered` or `--tests` |
+| `--fail-under=PCT` (0.12.0 or later) | exit with status 1 when the total is below PCT (`80`, `92.5`); the report is printed as usual and `error[E0114]: coverage 70.0% is below the required 80.0%` follows on standard error. With `--total` the percentage is printed too. `--fail-under=statement:90,branch:80` sets a percentage per kind and names each kind that fails; a plain number may stand beside them (`--fail-under=85,branch:80`) |
 | `--below=PCT` | limit the table of instances and packages to those below PCT, worst first, with a total column and a line counting the rest (`2 of 4 at or above 100.0% left out`), or `no instance or package is below 100.0%`. Counts what the report counts (`--kind`, exclusions), rounded down. Totals and `--fail-under` do not change. Cannot be combined with `--total`, `--uncovered`, `--tests` or `--exclusions` |
 | `--uncovered[=yaml]` | one exclusion row per item that never ran, with file, line and the statement as a comment; `=yaml` prints a YAML exclusion file |
 | `--tests` | one row per item that ran, followed by `# tests:` and the tests that hit it; cannot be combined with `--uncovered` |
@@ -243,7 +243,7 @@ the line and a near name.
 
 ## Coverage in CI
 
-`--fail-under` (a release newer than 0.11.0) makes the coverage a gate and `--total` gives a number for a badge
+`--fail-under` (0.12.0 or later) makes the coverage a gate and `--total` gives a number for a badge
 or a log line. A whole job is in [Continuous integration](ci.rst).
 
 ```yaml
@@ -274,7 +274,7 @@ applies to instances only.
 
 ## Coverage from VUnit
 
-With the `vunit-yavs` package (a release newer than 0.11.0) the test runner collects, merges and checks coverage for you:
+With the `vunit-yavs` package (0.12.0 or later) the test runner collects, merges and checks coverage for you:
 
 ```python
 vu.set_sim_option("enable_coverage", True)      # or pass --yavs-cov=sb to run.py

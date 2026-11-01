@@ -21,15 +21,15 @@ console's commands (`run 10 ns`, `restart`, `vunit_restart`).
 
 A step-by-step tutorial with runnable files (`docs/examples/fifo-debug`) walks through a failing test with this
 extension, Surfer and the console: [debugger tutorial](https://yavs.readthedocs.io/en/latest/debugger-tutorial.html).
-It needs a yavs release newer than 0.11.0.
+It needs yavs 0.12.0 or later.
 
 ## Install
 
-yavs 0.11.0 or newer must be on `PATH` of the test run. The
+yavs 0.12.0 or newer must be on `PATH` of the test run. The
 extension needs VS Code 1.80 or newer.
 
 Download `yavs-debug-<version>.vsix` from the
-[releases of yavs](https://github.com/ru551n/yavs/releases) (the yavs releases after 0.11.0 carry the
+[releases of yavs](https://github.com/ru551n/yavs/releases) (yavs releases from 0.12.0 on carry the
 extension of the same version, 0.1.0 is the release "yavs VS Code debugger 0.1.0"; `SHA256SUMS`
 is next to it) and install it:
 

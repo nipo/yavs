@@ -109,7 +109,7 @@ from a test runner that ended is an error: unset the variable to run without it.
      - ``PORT:SECRET``
      - unset: no hook
      - ``run`` with ``--interactive``, ``--do`` or ``--dap``
-     - unreleased
+     - 0.12.0
 
 Read by vunit-yavs and VUnit
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -141,7 +141,7 @@ Read by vunit-yavs and VUnit
      - a number, at least 1
      - unset
      - ``vunit-yavs``
-     - newer than ``vunit-yavs`` 0.11.0
+     - 0.12.0
    * - ``VUNIT_VHDL_STANDARD``
      - The default standard of the files of a run script (:doc:`mixing-standards`).
      - ``1993``, ``2008``, ``2019``

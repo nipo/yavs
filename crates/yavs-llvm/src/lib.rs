@@ -54,4 +54,4 @@ pub use lazy::ensure as load_library;
 pub use lower::{LlvmGenerator, LlvmTier, compile};
 #[cfg(feature = "llvm")]
 pub use objcache::{cache_stats, set_cache};
-pub use profile::set_run_id;
+pub use profile::{program_digest, set_run_id};

@@ -1,1 +1,0 @@
-A named coverage exclusion takes any operand by its text, such as `(count > 3 = false)`. A pattern may name its inputs, `-- yavs cov exclude 01 (en, count < 15)`, and yavs checks them when analysing: inputs reordered or changed under the directive are an error that says what to write.

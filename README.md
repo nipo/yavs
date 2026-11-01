@@ -20,8 +20,6 @@ yavs is a VHDL simulator written in Rust, for VHDL-1993, 2008 and 2019.
 - [VHPI](https://yavs.readthedocs.io/en/latest/vhpi.html): plugins and C functions called from VHDL.
 - [Platforms](https://yavs.readthedocs.io/en/latest/getting-started.html#installation): Linux x86_64, Linux aarch64 and Windows x86_64, one archive with nothing else to install.
 
-Some of this needs a release newer than 0.11.0: see the [release notes](https://yavs.readthedocs.io/en/latest/release_notes.html).
-
 ## Quickstart
 
 [Install yavs](https://yavs.readthedocs.io/en/latest/getting-started.html#installation), then follow [Getting started](https://yavs.readthedocs.io/en/latest/getting-started.html#your-first-simulation).
@@ -29,20 +27,20 @@ Some of this needs a release newer than 0.11.0: see the [release notes](https://
 ### In GitHub Actions
 
 ```yaml
-- uses: ru551n/yavs-action@main
+- uses: ru551n/yavs-action@v1
   with:
-    version: 0.11.0
+    version: 0.12.0
 ```
 
 [yavs-action](https://github.com/ru551n/yavs-action) installs a release; [Continuous integration](https://yavs.readthedocs.io/en/latest/ci.html) has a whole job.
 
 ## Test frameworks
 
-- [VUnit](https://yavs.readthedocs.io/en/latest/vunit.html): through the `vunit-yavs` package; it needs yavs 0.11.0 or later.
+- [VUnit](https://yavs.readthedocs.io/en/latest/vunit.html): through the `vunit-yavs` package; it needs yavs 0.12.0 or later.
 - [OSVVM](https://yavs.readthedocs.io/en/latest/libraries.html): analyzed from its sources, under VHDL-2008 and VHDL-2019.
-- [UVVM](https://yavs.readthedocs.io/en/latest/libraries.html): analyzed from its sources; some of its testbenches still fail ([#991](https://github.com/ru551n/yavs/issues/991)).
+- [UVVM](https://yavs.readthedocs.io/en/latest/libraries.html): analyzed from its sources; its testbenches that run pass, and a few are skipped (sources absent from the checkout, or over the time limit).
 
-Results per suite are in the [conformance report](https://yavs.readthedocs.io/en/latest/conformance.html) of 2026-10-29.
+Results per suite are in the [conformance report](https://yavs.readthedocs.io/en/latest/conformance.html) of 2026-11-01.
 
 ## Documentation
 

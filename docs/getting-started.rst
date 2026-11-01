@@ -37,10 +37,10 @@ build and no 32-bit build.
 On Windows, compare ``(Get-FileHash yavs-<version>-x86_64-pc-windows-msvc.zip).Hash`` in
 PowerShell with the line of ``SHA256SUMS``, unzip the archive and add its directory to ``PATH``.
 ``yavs --version`` prints the version and the kind of archive on the first line, for example
-``yavs 0.11.0 (compiled tier: cranelift)``, and the copyright notice on the second.
+``yavs 0.12.0 (compiled tier: cranelift)``, and the copyright notice on the second.
 
 Every platform has one archive with everything in it: nothing else needs to be installed. Its
-``yavs`` has the compiled tier built in (:doc:`running-faster`). A release newer than 0.11.0 also carries the VS Code
+``yavs`` has the compiled tier built in (:doc:`running-faster`). A release also carries the VS Code
 extension of the same version (:doc:`debugging`), and ``pip install vunit-yavs`` gets the VUnit package (:doc:`vunit`).
 
 What is in the archive
@@ -197,6 +197,8 @@ Analyze files in dependency order, packages before the units that use them. A li
 
 * After you edit a file, analyze it again before ``run``: ``run`` stops with ``L0034`` for a file
   that changed since it was analyzed.
+* You do not have to analyze what depends on it: ``run`` reads the files of the design again, so
+  every unit is checked against the current version of what it uses (:doc:`migrating`).
 * ``std`` and ``ieee`` (with ``numeric_std``, ``fixed_pkg``, ``float_pkg``, the VITAL and the
   Synopsys packages) are built in; there is nothing to compile for them.
 * A testbench with a free-running clock and no ``finish`` or ``stop`` never ends by itself: add

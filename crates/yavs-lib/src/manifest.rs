@@ -74,6 +74,11 @@ pub enum UnitKind {
 }
 
 impl UnitKind {
+    /// A primary unit: all of them share one name space in a library (13.5).
+    pub(crate) fn primary(self) -> bool {
+        !matches!(self, Self::Architecture | Self::PackageBody)
+    }
+
     pub fn describe(self) -> &'static str {
         match self {
             UnitKind::Entity => "entity",
@@ -605,7 +610,9 @@ impl Manifest {
         let (arena, files) = (&self.arena, &mut self.files);
         self.units.retain(|u| {
             let key = &arena[u.key.0 as usize..u.key.1 as usize];
-            let hit = new.iter().any(|n| n.kind == u.kind && n.key == key);
+            let hit = new.iter().any(|n| {
+                n.key == key && (n.kind == u.kind || n.kind.primary() && u.kind.primary())
+            });
             if hit && !lost.contains(&u.file) {
                 lost.push(u.file);
                 files[u.file as usize].partial = true;
@@ -1026,6 +1033,16 @@ mod tests {
         assert!(m.remove_other_spellings("/x/y.vhd", "/x/y.vhd").is_empty());
         assert_eq!(m.remove_other_spellings("/x/x.vhd", "/x/x.vhd"), [1]);
         assert_eq!(m.files().count(), 1);
+    }
+
+    #[test]
+    fn a_primary_unit_replaces_one_of_another_kind() {
+        let mut m = sample("/x/a.vhd");
+        let gone = m.take_units(&[UnitRecord::new(UnitKind::Entity, "Pkg_A", "2008")]);
+        assert!(gone.is_empty());
+        assert!(m.find(UnitKind::Package, "pkg_a").is_none());
+        // The body is a secondary unit and stays.
+        assert!(m.find(UnitKind::PackageBody, "pkg_a").is_some());
     }
 
     #[test]

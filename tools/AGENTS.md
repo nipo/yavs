@@ -33,7 +33,7 @@ Read the root `AGENTS.md` first. This file is for an agent about to change or ru
 | `cocotb/` | cocotb's own regression over VHPI: venv setup, the yavs makefile and Python runner for cocotb (`tools/cocotb/AGENTS.md`) |
 | `vhpi-conformance/` | VHPI plugin traces on yavs and the reference simulator, diffed (`tools/vhpi-conformance/AGENTS.md`) |
 | `bench/` | Shared performance benchmarks: phase timings, A/B comparison, JSON results (`tools/bench/AGENTS.md`) |
-| `realbench/` | Real-world performance suite: about 30 testbenches of real projects, timed against the reference and between two binaries; plus the opt-in CoreMark workloads on two processors (NEORV32, Microwatt) measured in simulated cycles per second (`tools/realbench/AGENTS.md`, section 7), and `window.py`, a short-window A/B on Cranelift against sim1 (section 8) |
+| `realbench/` | Real-world performance suite: about 30 testbenches of real projects, timed against the reference and between two binaries; plus the opt-in CoreMark workloads on two processors (NEORV32, Microwatt) measured in simulated cycles per second (`tools/realbench/AGENTS.md`, section 7), `window.py`, a short-window A/B on Cranelift against sim1 (section 8), and `perfguard.py`, the by-hand instruction guard of its nine windows (section 8a) |
 | `stepcount/` | Exact instruction counts per function and per source line for a window of a run (ptrace single-stepper in C plus a Python report; `tools/stepcount/AGENTS.md`) |
 | `waveq/` | Waveform equivalence: real designs on yavs and the reference simulators, compared signal by signal (`tools/waveq/AGENTS.md`) |
 | `discrepancies/` | Simulator discrepancy runner and verdict table (`tools/discrepancies/AGENTS.md`, catalogue `docs/design/simulator-discrepancies.md`) |

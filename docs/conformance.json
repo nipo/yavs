@@ -525,7 +525,7 @@
    }
   },
   "discrepancies": {
-   "cases": 237,
+   "cases": 238,
    "output_tail": "",
    "yavs_matches_expected": true
   },
@@ -614,9 +614,9 @@
   }
  },
  "generated": {
-  "commit": "dcf6ff7061",
+  "commit": "0301b104d6",
   "commit_date": "2026-11-01",
-  "version": "0.11.0"
+  "version": "0.12.0"
  },
  "local": {
   "records": {
@@ -2322,6 +2322,13 @@
     "kind": "LRM ambiguity",
     "lrm": "10.5.2.1, 14.7.3 (when a force is an event is not stated)",
     "yavs": "as NVC"
+   },
+   {
+    "case": "reanalysed-unit-dependents",
+    "decided": "agent, 2026-11-01 (#1053, L174)",
+    "kind": "LRM ambiguity (obsolete units must be analysed again; who does it is not said)",
+    "lrm": "13.5",
+    "yavs": "OK"
    },
    {
     "case": "allocator-overload",

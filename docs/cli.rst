@@ -67,7 +67,7 @@ Control a run
 * A testbench that may depend on process order: ``--shuffle`` runs the processes in a random order and prints the
   seed, so the run can be repeated with ``--shuffle=SEED``.
 
-``--assert-summary`` and ``--activity`` need a release newer than 0.11.0.
+``--assert-summary`` and ``--activity`` need 0.12.0 or later.
 
 Waves, coverage and debugging are options of ``run`` too: :doc:`waveforms`, :doc:`coverage`, :doc:`debugging`,
 :doc:`interactive`. Plugins are in :doc:`vhpi`, and speed in :doc:`running-faster`.

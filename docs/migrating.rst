@@ -39,16 +39,16 @@ The same tasks in yavs
    * - Dump waveforms
      - ``--wave=FILE.fst``. The format is FST (:doc:`waveforms`).
    * - Run a command script
-     - ``--do "COMMANDS"`` or ``--do "source FILE"`` (:doc:`interactive`, a release newer than 0.11.0).
+     - ``--do "COMMANDS"`` or ``--do "source FILE"`` (:doc:`interactive`, 0.12.0 or later).
    * - Open a debugger
      - VS Code or another Debug Adapter Protocol client with ``--dap=PORT`` (:doc:`debugging`), or a
-       prompt with ``--interactive`` (a release newer than 0.11.0).
+       prompt with ``--interactive`` (0.12.0 or later).
    * - Check code without simulating
-     - ``yavs lint`` (:doc:`lint`, a release newer than 0.11.0).
+     - ``yavs lint`` (:doc:`lint`, 0.12.0 or later).
    * - Collect coverage
      - ``--cov=LETTERS`` and ``--cov-file=FILE`` on ``run``, then ``yavs cov report`` (:doc:`coverage`).
    * - See why a run does not finish, what failed, what is busy
-     - ``--hang-report``, ``--assert-summary``, ``--activity`` (:doc:`cli`, a release newer than 0.11.0).
+     - ``--hang-report``, ``--assert-summary``, ``--activity`` (:doc:`cli`, 0.12.0 or later).
    * - Silence a warning
      - ``-Wno-CODE``. ``-Werror`` makes warnings errors.
    * - Find out what a message means
@@ -139,6 +139,24 @@ Relaxed mode
 an object with an unconstrained subtype (``W1325``) and a signal parameter's actual that is not a
 static name (``W1361``). Pass it to ``analyze`` and also to ``run`` and ``elab``, which read the files
 again.
+
+A unit analyzed again
+---------------------
+
+Other tools can stop a run when a unit was analyzed before something it depends on was analyzed
+again, and ask you to analyze it again. ``yavs run`` does that itself, as it reads the files of the
+design again: each name means the unit analyzed last, for a package, an entity and an architecture
+alike, and the units that use it are checked against that version. If one no longer fits, the run
+fails with the error of that analysis, at the line that no longer fits.
+
+.. code-block:: bash
+
+    yavs analyze --work=work:build pkg_v1.vhd tb.vhd
+    yavs analyze --work=work:build pkg_v2.vhd   # defines the same package again
+    yavs run --work=work:build tb               # tb uses the package of pkg_v2.vhd
+
+Two files that define the same architecture of an entity are the common way to meet this by accident:
+the instances and configurations that name the architecture all run the one from the file analyzed last.
 
 Process order
 -------------

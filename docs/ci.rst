@@ -49,9 +49,9 @@ version you asked for and puts it on ``PATH``:
 
 .. code-block:: yaml
 
-    - uses: ru551n/yavs-action@main   # write @v1 once that repository has a v1 tag
+    - uses: ru551n/yavs-action@v1
       with:
-        version: 0.11.0
+        version: 0.12.0
 
 Pin the version: it gives the same simulator on every run and keeps your cache valid. Without ``version`` you
 get the newest stable release, which can change your results on the day a release comes out. An unknown
@@ -62,7 +62,7 @@ On other CI systems, download the archive with plain commands:
 
 .. code-block:: bash
 
-    V=0.11.0
+    V=0.12.0
     A=yavs-$V-x86_64-unknown-linux-gnu
     curl -fsSLO https://github.com/ru551n/yavs/releases/download/v$V/$A.tar.gz
     curl -fsSLO https://github.com/ru551n/yavs/releases/download/v$V/SHA256SUMS
@@ -79,7 +79,7 @@ A coverage gate
 .. note::
 
    ``--fail-under``, ``--total`` and ``--kind`` of ``yavs cov report``, and the coverage flags of
-   ``vunit-yavs``, need a release newer than 0.11.0. On 0.11.0 the report prints but does not gate.
+   ``vunit-yavs``, need 0.12.0 or later. On 0.11.0 the report prints but does not gate.
 
 .. code-block:: bash
 
@@ -101,7 +101,7 @@ names the ones that fall short. ``--json``, ``--lcov`` and ``--sonarqube`` write
 A lint step
 -----------
 
-``yavs lint`` (a release newer than 0.11.0) fails a step with a finding of severity error, and writes reports a pipeline can
+``yavs lint`` (0.12.0 or later) fails a step with a finding of severity error, and writes reports a pipeline can
 read (:doc:`lint`):
 
 .. code-block:: bash
@@ -144,12 +144,12 @@ This is the walkthrough project (:doc:`project-walkthrough`) as a job. It needs 
       simulate:
         runs-on: ubuntu-latest
         env:
-          YAVS_VERSION: 0.11.0
+          YAVS_VERSION: 0.12.0
           YAVS_STD_CACHE: ${{ github.workspace }}/.yavs-std
         steps:
           - uses: actions/checkout@v4
 
-          - uses: ru551n/yavs-action@main   # write @v1 once that repository has a v1 tag
+          - uses: ru551n/yavs-action@v1
             with:
               version: ${{ env.YAVS_VERSION }}
 
@@ -175,8 +175,7 @@ This is the walkthrough project (:doc:`project-walkthrough`) as a job. It needs 
           - name: Coverage
             run: |
               yavs cov merge cov/*.ycov -o cov/all.ycov
-              yavs cov report cov/all.ycov --html cov-html
-              # With a release newer than 0.11.0, add --fail-under=85 to make it a gate
+              yavs cov report cov/all.ycov --html cov-html --fail-under=85
 
           - uses: actions/upload-artifact@v4
             if: always()

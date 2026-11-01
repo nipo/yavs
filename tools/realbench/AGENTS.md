@@ -24,6 +24,7 @@ for an agent that tunes performance or measures a performance change on real tes
 | `tests.toml` | One `[[test]]` per testbench: source, path, top, library, generics, why it is in the set, category (field list in its header) |
 | `programs.py` | Builds the program images of the CPU workloads (section 7) from pinned sources into `<cache>/images`; also a command: `programs.py PROGRAM key=value` |
 | `window.py` | Short-window A/B on Cranelift against sim1: minutes, not hours (section 8) |
+| `perfguard.py` | Guard run by hand: window instructions of a commit against a stored reference, pass or fail per test (section 8a) |
 | `cpu/` | The harness's own VHDL and C for the CPU workloads: the Microwatt console, JTAG-socket and testbench replacements and its CoreMark port (source id `@harness` in `tests.toml`) |
 
 `YAVS_BENCH_TIERFLAGS` (extra arguments after `--tier=` of every yavs run cell, e.g. `--tier-heat=1,0,0` to compile every function at its first call) is not part of the cell name: set it for both binaries of a `--compare`.
@@ -107,7 +108,7 @@ numbers of head-to-head 8 (0.206 and 0.571), which the baseline did not reproduc
 | `tools/bench/run.py --ref sim1 --tiers interp,auto --tiny`: sum of yavs / sum of sim1 on the common tests | 2.42 s / 23.48 s | at most 0.105 |
 
 A miss is a finding to chase on a quiet sitting, not a verdict: compare the two builds interleaved on the same cores before blaming the change,
-and name the load. Not covered: whole suites with many testbenches in one library (`d789ead2`, #1029), waves and coverage on, more than one thread.
+and name the load. The head-to-head geomean row covers the 10 h2h designs that existed on 2026-11-01; `rec_pair` (#1052) was added after the bound was set and is judged on its own (`tools/bench/AGENTS.md`). Not covered: whole suites with many testbenches in one library (`d789ead2`, #1029), waves and coverage on, more than one thread.
 
 ## 7. CPU workloads: CoreMark on NEORV32 and Microwatt (category `cpubench`, #924)
 
@@ -164,12 +165,12 @@ export YAVS_REALBENCH_CACHE=~/.cache/yavs-<tag>/rb YAVS_BENCH_VHDL_AI_TEST=/path
 cp ~/.cache/yavs-agents/sims.local.conf tools/sims.local.conf                # untracked
 python3 -I tools/realbench/window.py ../before ../after --bar cycles:0.97   # two checkouts, built with Cranelift
 python3 -I tools/realbench/window.py A/yavs B/yavs:auto+YAVS_SOME_KNOB=1 --tests grlib_leon3mp   # two binaries (tools/build-bench.sh), a knob
-python3 -I tools/realbench/window.py A/yavs B/yavs --rounds 3                # rounds for a cycle verdict; medians
+python3 -I tools/realbench/window.py A/yavs B/yavs --rounds 6                # rounds for a cycle verdict: paired ratios with a 95 percent band
 python3 -I tools/realbench/window.py A/yavs B/yavs --full --tests microwatt_coremark   # the whole run
 python3 -I tools/realbench/window.py --self-test
 ```
 
-With no variant it builds this checkout. A checkout's build stays in `~/.cache/yavs-window-build-<hash>`: delete it when your task ends. `--bar COUNTER:RATIO` is the largest passing ratio to the first variant, per test and on the geomean; repeat it for several counters. Ratios are to the first variant, plus `cyc/sim1` and `ins/sim1`. Counters are the simulation thread (`--no-inherit`, as in the baseline); compile threads are not in them, so a change that compiles more must also run with `--inherit` or wall. `--window T0,T1` replaces the window to calibrate. `--no-sim1` leaves out sim1.
+With no variant it builds this checkout. A checkout's build stays in `~/.cache/yavs-window-build-<hash>`: delete it when your task ends. `--bar COUNTER:RATIO` is the largest passing ratio to the first variant, per test and on the geomean; repeat it for several counters. Ratios are to the first variant, plus `cyc/sim1` and `ins/sim1`. Counters are the simulation thread (`--no-inherit`, as in the baseline); compile threads are not in them, so a change that compiles more must also run with `--inherit` or wall. `--window T0,T1` replaces the window to calibrate. `--no-sim1` leaves out sim1. With `--rounds N` the ratios are taken per round (both variants of a round ran minutes apart, so the host's slow drift is shared) and shown as the geomean with a 95 percent band (`cyc band`, t-quantile of the rounds' spread); the geomean row is the per-round geomean over tests with its own band. A bar is `pass` when the top of the band is at or under it, `KILL` when the bottom is over it, otherwise `undecidable`; cycles, L1i, iTLB and branch misses are `undecidable` below 3 rounds, instructions decide in one. To see the noise of a binary alone, pass it twice (`A/yavs A/yavs`): that is an A/A, and its band is the smallest difference that run can resolve. `--json` keeps the per-round values of each variant (`rounds`, `pairs`) next to the medians.
 
 Total for two variants plus sim1, all nine tests, one round: **541 s** (setup 14 s, next to another timed job on CCD1, 2026-11-01). GRLIB and Microwatt are most of it (193 and 225 s); the other seven take 108 s. Each yavs variant runs two warm-ups to T1, then T1 and T0.
 
@@ -208,7 +209,25 @@ Lengthened after failing: grlib_leon3mp from 100 to 300 us (instructions 0.995 a
 What does not hold, and how to use it:
 
 - **Against sim1 a window gives the run rate, not the whole-run ratio.** sim1's start-up is in its whole run: `neorv32_single_cache` is 1.10 in the window and 0.54 whole, GRLIB 2.59 and 2.10. The window matches the rest of the run after T0 on instructions (within 2.3 percent on all nine). Cycles to sim1 match less well: GRLIB 4.40 against 4.96, neorv32_single_cache 1.29 against 1.17, 6 percent on two others. Publish whole-run ratios from `run.py`, never these.
-- **One round of cycles cannot decide a bar near noise.** A/A cycles moved up to 5.8 percent (9.5 on hdlm_lfsr), so a single-round 3 percent bar kills or passes at random: in one run of a binary against itself, GRLIB passed `cycles:0.97` at 0.942, a false keep. Instructions are good to under 1 percent on seven of nine. Decide on instructions in one run, then ask for `--rounds 3` or more for cycles on the tests near the bar.
+- **One round of cycles cannot decide a bar near noise, and neither can a median of a few rounds (#1055).** Cycles move 20 percent and more between identical runs on this host at load 18 to 25 (GRLIB window of the same binary, instructions equal to 0.5 percent: 147 to 269 G cycles; the run to T0 alone 101 to 177 G), because other jobs share CCD1's L3 and memory. That noise is in time, not in the order: the run to T0 jumps while its instructions stay flat. Until 2026-11-01 the ratio was the median of one variant's rounds over the median of the other's, and with 3 rounds the two medians took different slices of that drift: the same binary against itself read 0.83 on GRLIB (issue #1055), 0.82 again on the first three rounds of a later six-round A/A and 1.08 on the last three. The slice depended on the sitting, so a first variant that read slower in four sittings is what that estimator gives by chance; no order effect reproduces. Measured 2026-11-01 on `0301b104` (Cranelift bench build, one core of CCD1, load 18 to 25) the first-in-round versus second-in-round ratio is 0.925 [0.76, 1.13] on GRLIB, 1.009 [0.99, 1.03] on sc5_fifo_repack and 1.032 [0.99, 1.07] on neorv32_single_cache over 8 rounds each: the bands hold 1.0, no order bias is visible. Warm-up and cache state do not explain it: round 0 is not slower than later rounds, and a run right after a sim1 run is not slower than after a yavs run (0.98 against 0.99 of its round, 4 runs each), so no per-run warm-up was added. Of 30 overlapping 3-round slices of A/A data (GRLIB, sc5_fifo_repack, neorv32_single_cache) the old estimator passed `cycles:0.97` in 8; the paired band passes none (one KILL, 29 `undecidable`).
+- **What a cycle difference can be trusted at, 8 rounds, same sitting:** half-width of the band GRLIB 19.5 percent (its A/A moved 0.62 to 1.20 over 3-round slices; a 3 percent bar needs hundreds of rounds there, so decide GRLIB on instructions, misses per 1000 and, for a large change, cycles at 25 percent or more), sc5_fifo_repack 2.1, neorv32_single_cache 4.3, geomean of the three 6.5. A quiet host narrows the band; the table prints it, so read it instead of this list. Instructions between two copies of one binary differ by up to 0.5 percent on GRLIB (band 1.001 to 1.010), so a 1 percent instruction bar there is at the noise.
 - **Microwatt cycles need `--full`** (about 4.5 minutes per variant, plus two warm-ups).
 - **iTLB ratios mean something only on GRLIB and Microwatt.** Elsewhere the counts are tiny and identical runs differ by up to 6.5 times.
 - Ratios of two cells are from one sitting on one core; the whole-run cells ran in another sitting, CCD1 not quiet. A warm-up reaches T1 only, so the cache holds what ran by then, not what a whole run would compile.
+
+## 8a. Performance guard (`perfguard.py`, #1052): did a commit move the window instructions?
+
+A by-hand check, nothing is scheduled and nothing is posted. It builds a commit with Cranelift only, runs the nine windows of section 8 at `--tier=auto` (`window.py` with one variant and `--no-sim1`, so sim1 is not needed), and compares the instructions of each window (simulation thread) with a reference stored in `~/.cache/yavs-perfguard/reference.json`. Instructions only: cycles need rounds (section 8).
+
+```sh
+export YAVS_BENCH_VHDL_AI_TEST=/path/to/vhdl-ai-test
+python3 -I tools/realbench/perfguard.py check            # origin/main; or a commit: ... check <commit>   (the one command)
+python3 -I tools/realbench/perfguard.py reference [commit]   # the only command that writes the reference
+python3 -I tools/realbench/perfguard.py --self-test
+```
+
+- Exit 0: every test inside its bound. Exit 1: a test moved past its bound, in either direction (less work can be a test that quietly stopped doing it); the table and the text an issue should carry are printed. Exit 2: it could not run (tool, `perf`, source checkout, reference or build missing, a window failed); it never passes by default.
+- Bounds: 3 percent of the reference per test. `hdlm_lfsr` has 15 and `vai_window_gen_interlock` 20, because the compile outcome of `auto` depends on timing (#673). Measured 2026-11-01 by checking the commit the reference was taken from, twice, on a host with load 23 to 43: those two moved by 1.075 and 1.0 (hdlm_lfsr) and 1.070 and 1.135 (vai_window_gen_interlock), the other seven by under 1.1 percent (GRLIB 0.6, Microwatt 0.7). So at 3 percent seven tests can fail only for a real reason; the two noisy ones catch only large moves, and a smaller move there is found by `window.py` with rounds on a quiet host.
+- A build stays in `~/.cache/yavs-window-build-<hash>` and the checkout in `~/.cache/yavs-perfguard/tree` (detached worktree of this repository, moved to each commit): delete both when done. The libraries of the tests are cached in `~/.cache/yavs-perfguard/rb` (`YAVS_REALBENCH_CACHE` overrides).
+- A reference taken with other windows than `WINDOWS` in `window.py` is refused as stale. Refresh it after a change of a window, of `tests.toml` or of a pinned source, and after an intended speed-up (a move down past the bound also fails).
+- Time: about 6 minutes for the nine windows after the build (362 s and 457 s measured), one timing core of 9 to 15 held for the run.

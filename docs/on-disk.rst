@@ -53,6 +53,9 @@ compiled code. The first run of a design notes it, the second stores it, later r
   only the rest again on each run. Measured at about 2.3 times the limit, later runs took 2 to 4 percent fewer
   instructions than the first. At about six times the limit they took 10 to 14 percent more: split such a
   suite into several libraries, each with its own limit.
+* Running an unchanged suite again reuses what is stored. Compiled code keeps growing for some runs, by less
+  each time, as functions become hot enough to compile for the first time; measured on a suite of 120 testbenches
+  it passed 40 MB after eight runs and then grew under 1 MB per run, and it did not reach zero.
 * An entry that is damaged counts as not there. The cache can make a run faster, never wrong: a failure to
   read or write it is not an error.
 * ``--no-cache`` turns it off for one command.

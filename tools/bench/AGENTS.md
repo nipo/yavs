@@ -53,6 +53,7 @@ ones used in `docs/STATUS.md` (performance sections of 2026-10-20 and 2026-10-21
 | `compute_h2h` | row 1, `compute`, `-gN=20000000` | One sequential integer/real loop, no signals |
 | `xor_sig` | `xr`; generics now N=10000000 (was 100000), SIG | One operator on unsigned against a signal or a variable (micro-benchmark) |
 | `xor_types` | `xr2`; generics now N=10000000 (was 100000), K | One operator on unsigned, std_logic_vector, bit_vector or `+` (micro-benchmark, K 0 to 3) |
+| `rec_pair` | new (#1052), CYCLES=400000 | Two processes, one large record variable (65 fields, bits and vectors of 2 to 32 bits, about 100 field statements per cycle) copied from a record signal and driven back, so the cost of a record-field statement shows in routine runs. Self-checking (final state asserted), header for `tools/difftest`. 2026-11-01, `383ac32e`, Cranelift bench build, `--tier=auto`: 51.9 G instructions against sim1's 21.0 G (ratio 2.47, wall 2.24); with the field statements removed it is 12.4 G against 11.5 G (1.07), so the gap is in the record-field statements (about 990 instructions each against about 240). |
 
 Other rows of the 2026-10-21 head-to-head tables map to existing benchmarks: row 3 `uvvm_sb_slv_tb`, `osvvm_axistream`,
 `uvvm_util_rand_tb`, `uvvm_axistream_vvc_tb`, `strings_heavy`, `report_heavy`, `textio_heavy`, `protected_scoreboard`,

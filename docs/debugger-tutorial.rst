@@ -4,7 +4,7 @@ Debugger tutorial
 This tutorial debugs a small FIFO from VS Code, with the waves in Surfer, and then again from a terminal prompt. A test
 fails on purpose. You find out why, one step at a time: each step says what to do and what you should see.
 
-It needs a release of yavs and ``vunit-yavs`` newer than 0.11.0, and:
+It needs yavs and ``vunit-yavs`` 0.12.0 or later, and:
 
 * the yavs VS Code extension of the same release (:doc:`debugging`),
 * the `Surfer <https://surfer-project.org>`__ viewer, 0.6.0 or later, on ``PATH`` (:doc:`waveforms`),

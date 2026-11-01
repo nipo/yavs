@@ -318,11 +318,26 @@ pub fn set_run_id(id: Option<&str>) {
 // ponytail: functions equal in all of that (the same label and size in two architectures) swap
 // places when their order changes; a profile applied to the wrong one only mis-steers the heat.
 pub(crate) fn key(prog: &yavs_ir::Program) -> Option<(yavs_cache::Key, Vec<u32>)> {
-    use std::hash::{Hash, Hasher};
     let id = RUN_ID
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .clone()?;
+    let (digest, order) = identities(prog);
+    let mut k = yavs_cache::KeyBuilder::new(KIND);
+    k.text(&yavs_ir::opt::fingerprint())
+        .text(&id)
+        .part(&digest.to_le_bytes());
+    Some((k.finish(), order))
+}
+
+/// A digest of the identities of `prog`'s functions (see [`key`]): the same for the same program in
+/// every run, whatever order elaboration lowered it in.
+pub fn program_digest(prog: &yavs_ir::Program) -> u64 {
+    identities(prog).0
+}
+
+fn identities(prog: &yavs_ir::Program) -> (u64, Vec<u32>) {
+    use std::hash::{Hash, Hasher};
     let mut count: std::collections::HashMap<u64, u32> = Default::default();
     let mut ident: Vec<(u64, u32)> = Vec::new();
     for (i, f) in prog.funcs.iter().filter(|(_, f)| !f.spare) {
@@ -337,11 +352,7 @@ pub(crate) fn key(prog: &yavs_ir::Program) -> Option<(yavs_cache::Key, Vec<u32>)
     ident.sort_unstable();
     let mut h = std::hash::DefaultHasher::new();
     ident.iter().for_each(|i| i.0.hash(&mut h));
-    let mut k = yavs_cache::KeyBuilder::new(KIND);
-    k.text(&yavs_ir::opt::fingerprint())
-        .text(&id)
-        .part(&h.finish().to_le_bytes());
-    Some((k.finish(), ident.into_iter().map(|i| i.1).collect()))
+    (h.finish(), ident.into_iter().map(|i| i.1).collect())
 }
 
 /// The profile stored under `key`, if any.
