@@ -11,7 +11,7 @@ yavs is a VHDL simulator written in Rust, for VHDL-1993, 2008 and 2019.
 ## What it does
 
 - [VHDL support](https://yavs.readthedocs.io/en/latest/language-support.html): VHDL-1993, 2008 and 2019, mixed in one project, with the IEEE packages built in.
-- [VS Code debugger](https://yavs.readthedocs.io/en/latest/debugging.html): `python run.py lib.tb.test --yavs-debug`, set breakpoints, press F5, no configuration; a [tutorial](https://yavs.readthedocs.io/en/latest/debugger-tutorial.html) walks through it.
+- [VS Code debugger](https://yavs.readthedocs.io/en/latest/debugging.html)
 - [Interactive console](https://yavs.readthedocs.io/en/latest/interactive.html): breakpoints, stepping, `examine`, `force`, `drivers`, `trace x` and `restart` at a `yavs>` prompt or in a script.
 - [Sane error messages, Rust style](https://yavs.readthedocs.io/en/latest/troubleshooting.html)
 - [Live waveforms](https://yavs.readthedocs.io/en/latest/waveforms.html): Surfer follows the run and the debugger's stops; FST files for any viewer.
