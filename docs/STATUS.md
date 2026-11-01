@@ -178,7 +178,7 @@ gc-stress, difftest smoke) and the `auto3` step. Flaky once: #805.
 
 ### CI scope (#1014, 2026-11-01)
 
-`tools/ci-plan.py` picks what `ci.yml` runs from the changed files: prose runs no build, user guide pages and the two packages run only the tests that read them, everything else runs all Linux jobs, and Windows joins for source and build files. `conformance.yml` has a path filter and finishes on every main commit it runs for (`docs/decisions.md` "CI scope").
+`tools/ci-plan.py` picks what `ci.yml` runs from the changed files: prose runs no build, user guide pages and the two packages run only the tests that read them, everything else runs all Linux jobs, and Windows joins for source and build files. `conformance.yml` has a path filter and finishes on every main commit it runs for (`docs/decisions.md` "CI scope"). `cargo test` builds at opt-level 1 with debug assertions and overflow checks on, which took the `check` job from about 29 to 9 minutes on Linux.
 
 ### Conformance report (#780, 2026-10-26)
 
