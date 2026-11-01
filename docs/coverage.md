@@ -208,6 +208,8 @@ fsm tb.dut state spare                # unused state
 fsm tb.dut state spare->*
 ```
 
+A text row cannot hold a character literal with a space or a `#` (`' '`): match it with `*`, or use a YAML file.
+
 Cobertura has no notion of these items and leaves them out; the text and HTML reports show them. The
 items are identified by those names, so an edit keeps them mergeable, and renaming a state makes new ones.
 
