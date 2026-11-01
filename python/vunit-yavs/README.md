@@ -48,6 +48,8 @@ or later (`pip install vunit-yavs` installs it, a pre-release) and yavs 0.11.0 o
 | `--yavs-cov-directives MODE` | `apply` or `ignore`: what `yavs analyze`, `elab` and `run` do with the `-- yavs coverage exclude` comments in the sources (`--coverage-directives`); without it yavs's default, `apply`, which checks them when compiling |
 | `--yavs-cov-html DIR` | `results.merge_coverage()` also writes the HTML coverage report into DIR |
 | `--yavs-cov-fail-under PCT` | `results.merge_coverage()` prints the coverage report and the run exits with status 1 when the total is below PCT percent |
+| `--yavs-cov-exclude FILE` | `results.merge_coverage()` reports without the items this exclusion file lists (`yavs cov report --exclude`); repeatable, and `merge_coverage(exclude=...)` adds more |
+| `--yavs-cov-config FILE` | `results.merge_coverage()` reads exclusion files, root and kinds from this file (`yavs cov report --config`); `merge_coverage(config=...)` wins over it |
 | `--yavs-jobserver` | Lends the CPU slots of `-p N` that no test uses to the running simulations through a token server (below) |
 
 Compiling: consecutive files of one library, standard and flags go to `yavs analyze` in one call. With a VUnit that has

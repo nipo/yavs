@@ -321,6 +321,28 @@ class TestRealYavs(unittest.TestCase):
         self.assertIn(f"\t{COMMA}\n", database)
         self.assertIn("statements ", proc.stdout)
 
+    def test_coverage_exclusions_from_the_command_line(self):
+        rows = self.tempdir / "rows.txt"
+        rows.write_text("instance *\n", encoding="utf-8")
+        config = self.tempdir / "c.yaml"
+        config.write_text("kind: statement\n", encoding="utf-8")
+        proc = self._coverage_run("--yavs-cov-exclude", str(rows), "--yavs-cov-config", str(config))
+        self.assertEqual(proc.returncode, 0, proc.stdout)
+        self.assertIn("excluded (", proc.stdout)
+        # A bad file fails the run after the reports, and the message names it
+        proc = self._coverage_run("--yavs-cov-exclude", str(self.tempdir / "gone.txt"))
+        self.assertEqual(proc.returncode, 1, proc.stdout)
+        self.assertEqual(report(self.xml), {PASS: "passed", COMMA: "passed"})
+        self.assertIn("error[E0112]", proc.stdout)
+        self.assertIn("gone.txt", proc.stdout)
+
+    def test_coverage_exclusions_in_the_call_of_the_run_script(self):
+        rows = self.tempdir / "rows.txt"
+        rows.write_text("instance *\n", encoding="utf-8")
+        proc = self._coverage_run(RUN_PY_COVERAGE_EXCLUDE=str(rows))
+        self.assertEqual(proc.returncode, 0, proc.stdout)
+        self.assertIn("excluded (", proc.stdout)
+
     def test_coverage_below_the_threshold_fails_after_the_reports(self):
         proc = self._coverage_run("--yavs-cov-fail-under=100")
         self.assertEqual(proc.returncode, 1, proc.stdout)

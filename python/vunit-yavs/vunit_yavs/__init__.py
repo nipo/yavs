@@ -118,13 +118,18 @@ def _percentage(text):
 
 class CoverageArgs:  # pylint: disable=too-few-public-methods
     """
-    The coverage command line arguments: --yavs-cov, --yavs-cov-html, --yavs-cov-fail-under
+    The coverage command line arguments: --yavs-cov, --yavs-cov-html, --yavs-cov-fail-under, --yavs-cov-exclude,
+    --yavs-cov-config
     """
 
-    def __init__(self, enabled=False, html=None, fail_under=None):
+    def __init__(  # pylint: disable=too-many-arguments
+        self, enabled=False, html=None, fail_under=None, exclude=None, config=None
+    ):
         self.enabled = enabled
         self.html = html
         self.fail_under = fail_under
+        self.exclude = exclude or []
+        self.config = config
 
 
 class YavsInterface(SimulatorInterface):
@@ -272,6 +277,21 @@ class YavsInterface(SimulatorInterface):
             help="Print the coverage report and exit with status 1 when results.merge_coverage() finds the total "
             "coverage below PCT percent.",
         )
+        group.add_argument(
+            "--yavs-cov-exclude",
+            action="append",
+            default=None,
+            metavar="FILE",
+            help="Leave out the items an exclusion file lists when results.merge_coverage() reports (yavs cov report "
+            "--exclude). Repeatable: the rules of all files add up.",
+        )
+        group.add_argument(
+            "--yavs-cov-config",
+            default=None,
+            metavar="FILE",
+            help="Read exclusion files, root and kinds from a YAML file when results.merge_coverage() reports "
+            "(yavs cov report --config).",
+        )
 
     @classmethod
     def from_args(cls, args, output_path, **kwargs):
@@ -322,6 +342,8 @@ class YavsInterface(SimulatorInterface):
                 enabled=getattr(args, "yavs_cov", False),
                 html=getattr(args, "yavs_cov_html", None),
                 fail_under=getattr(args, "yavs_cov_fail_under", None),
+                exclude=getattr(args, "yavs_cov_exclude", None),
+                config=getattr(args, "yavs_cov_config", None),
             ),
         )
 
@@ -653,13 +675,17 @@ class YavsInterface(SimulatorInterface):
 
         return status
 
-    def merge_coverage(self, file_name, args=None):
+    def merge_coverage(self, file_name, args=None, exclude=None, config=None):
         """
         Merge the coverage databases of all simulations into file_name (".ycov" is added unless it ends so).
 
         args are further arguments for 'yavs cov report', which runs on the merged database when there are
-        any, or --yavs-cov-html or --yavs-cov-fail-under are given. A report that fails, for example a total
-        below --yavs-cov-fail-under, makes the run exit with status 1 once VUnit has written its reports.
+        any, exclude or config are given, or --yavs-cov-html, --yavs-cov-fail-under, --yavs-cov-exclude or
+        --yavs-cov-config are. A report that fails, for example a total below --yavs-cov-fail-under, makes the run
+        exit with status 1 once VUnit has written its reports.
+
+        exclude is an exclusion file or a list of them, added to those of --yavs-cov-exclude; config is a
+        configuration file for 'yavs cov report --config', and wins over --yavs-cov-config.
         """
         databases = []
         for database in sorted(self._coverage_files):
@@ -686,6 +712,13 @@ class YavsInterface(SimulatorInterface):
             report += ["--html", self._coverage.html]
         if self._coverage.fail_under is not None:
             report += [f"--fail-under={self._coverage.fail_under}"]
+        files = [exclude] if isinstance(exclude, (str, os.PathLike)) else list(exclude or [])
+        for path in [*self._coverage.exclude, *files]:
+            report += ["--exclude", str(path)]
+        if config is None:
+            config = self._coverage.config
+        if config is not None:
+            report += ["--config", str(config)]
         if report and subprocess.run([yavs, "cov", "report", str(merged), *report], check=False).returncode != 0:
             # post_run runs before VUnit writes the JUnit report, which an exception here would skip
             atexit.register(_exit_with_failure)
@@ -727,6 +760,23 @@ class YavsInterface(SimulatorInterface):
                 sys.__stdout__.flush()
 
         return callback
+
+
+def _results_forward_coverage_keywords():
+    """
+    VUnit's Results.merge_coverage passes on file_name and args alone; this package's method takes more
+    (exclude, config), so results.merge_coverage must hand its keywords on. Without keywords nothing changes.
+    """
+    from vunit.ui.results import Results  # pylint: disable=import-outside-toplevel
+
+    def merge_coverage(self, file_name, args=None, **keywords):
+        self._simulator_if.merge_coverage(file_name=file_name, args=args, **keywords)  # pylint: disable=protected-access
+
+    merge_coverage.__doc__ = Results.merge_coverage.__doc__
+    Results.merge_coverage = merge_coverage
+
+
+_results_forward_coverage_keywords()
 
 
 def source_map_flags(project):

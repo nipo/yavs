@@ -91,6 +91,12 @@ out stops the run script with one ``error:`` line that says why and what to drop
    * - ``--yavs-cov-fail-under PCT``
      - ``results.merge_coverage()`` prints the coverage report, and the run exits with status 1
        (after VUnit has written its reports) when the total coverage is below PCT percent.
+   * - ``--yavs-cov-exclude FILE``
+     - ``results.merge_coverage()`` reports without the items this exclusion file lists
+       (``yavs cov report --exclude``). Repeatable: the rules of all files add up.
+   * - ``--yavs-cov-config FILE``
+     - ``results.merge_coverage()`` reads exclusion files, root and kinds from this YAML file
+       (``yavs cov report --config``). No file is read without it.
    * - ``--yavs-jobserver``
      - With ``-p N`` above 1: lends the CPU slots that no test uses to the running simulations
        through a token server (:doc:`threads`).
@@ -123,6 +129,17 @@ them into ``coverage.ycov``. With ``--yavs-cov-html``, ``--yavs-cov-fail-under``
 ``yavs cov report`` (``merge_coverage("coverage", args=["--cobertura", "c.xml"])``) it then
 reports on the merged database. The reports, exclusions and numbers are in :doc:`coverage`;
 a CI gate is ``python run.py --yavs-cov --yavs-cov-fail-under 85``.
+
+A run script names its exclusions in the call, and a person adds more on the command line:
+
+.. code-block:: python
+
+   vu.main(post_run=lambda results: results.merge_coverage(
+       "coverage", exclude=["waived.yaml", "generated.txt"], config="coverage.yaml"))
+
+``exclude`` is one file or a list, added after those of ``--yavs-cov-exclude``. ``config`` wins over
+``--yavs-cov-config``. A bad file fails the report with its own error, and the run exits with status 1 after
+VUnit has written its reports. Either argument makes ``merge_coverage`` run the report.
 
 Run scripts you do not write
 ----------------------------

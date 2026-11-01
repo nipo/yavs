@@ -146,7 +146,9 @@ Every simulation writes a database named after its test; `merge_coverage("covera
 into `coverage.ycov`. `python run.py --yavs-cov-html cov-html --yavs-cov-fail-under 85` then also
 writes the HTML report and fails the run (exit status 1, after the test results are written) when
 the total is below 85%. Further arguments for `yavs cov report` go in
-`merge_coverage("coverage", args=["--cobertura", "coverage.xml"])`. Coverage is not available
+`merge_coverage("coverage", args=["--cobertura", "coverage.xml"])`. Exclusions go in
+`merge_coverage("coverage", exclude=["waived.yaml"], config="coverage.yaml")` or on the command line as
+`--yavs-cov-exclude FILE` (repeatable) and `--yavs-cov-config FILE`. Coverage is not available
 under `--yavs-debug`.
 
 ## Combinations

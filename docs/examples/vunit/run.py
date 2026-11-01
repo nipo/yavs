@@ -27,7 +27,7 @@ for width in (3, 5):
 def merge_coverage(results):
     """merge_coverage is an error when no simulation collected coverage"""
     if "--yavs-cov" in sys.argv:
-        results.merge_coverage("coverage", args=["--exclude", str(ROOT / "coverage-exclude.txt")])
+        results.merge_coverage("coverage", exclude=ROOT / "coverage-exclude.txt")
 
 
 vu.main(post_run=merge_coverage)
