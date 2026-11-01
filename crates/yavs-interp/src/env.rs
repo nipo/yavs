@@ -8,7 +8,7 @@
 //! applied in process order when the next cycle first touches the state, the order in which the
 //! kernel commits their reports. `--threads 1` and `--threads N` see the same values.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -414,9 +414,16 @@ struct Shared {
     logs: BTreeMap<u32, Vec<Op>>,
     /// `--assert-summary`: per statement and severity the count and the first message.
     sites: Option<BTreeMap<(u32, Severity), (u64, String)>>,
+    /// `{i}`: the instance name of a process's region, by the region's dotted name.
+    instances: Arc<HashMap<String, String>>,
 }
 
 impl Asserts {
+    /// The table of `{i}` (`Runtime::set_instance_names`).
+    pub(crate) fn set_instances(&self, names: Arc<HashMap<String, String>>) {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).instances = names;
+    }
+
     /// Run `f` on the state as `ctx`'s process sees it, then log `op` for it.
     fn with<T>(&self, ctx: &Ctx<'_>, op: Option<Op>, f: impl FnOnce(&AssertState) -> T) -> T {
         let mut g = self.0.lock().unwrap_or_else(|e| e.into_inner());
@@ -533,7 +540,15 @@ impl Asserts {
         }
         self.with(ctx, Some(Op::Count(s, 1)), |_| ());
         Some(match fmt {
-            Some(f) => f.apply(s, &text, ctx.now().as_fs(), ctx.process_name()),
+            Some(f) => {
+                let instances = self
+                    .0
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .instances
+                    .clone();
+                f.apply(s, &text, ctx.now().as_fs(), ctx.process_name(), &instances)
+            }
             None => text,
         })
     }
@@ -804,7 +819,14 @@ impl Format {
     }
 
     /// The message for a report of severity `s`, text `msg`, at `now_fs` in the process `proc`.
-    fn apply(&self, s: Severity, msg: &str, now_fs: u64, proc: &str) -> String {
+    fn apply(
+        &self,
+        s: Severity,
+        msg: &str,
+        now_fs: u64,
+        proc: &str,
+        instances: &HashMap<String, String>,
+    ) -> String {
         let mut out = String::new();
         for p in &self.parts {
             let Part::Rep {
@@ -829,9 +851,15 @@ impl Format {
                     None => format!("{now_fs} fs"),
                     Some((fs, name)) => format!("{} {name}", fmt_g15(now_fs as f64 / *fs as f64)),
                 },
-                // The instance path, in the LRM's form like `'path_name`: the process without
-                // its label.
-                _ => yavs_diag::colons(yavs_diag::parent(proc)),
+                // The instance, as `'instance_name` of the region around the process (#982), as
+                // sim1. No process around the report: nothing but its name to go by.
+                _ => {
+                    let region = yavs_diag::parent(proc);
+                    match instances.get(region) {
+                        Some(name) => name.clone(),
+                        None => yavs_diag::colons(region),
+                    }
+                }
             };
             let pad = (*width as i64) - v.chars().count() as i64;
             let (l, r) = match align {
@@ -1084,7 +1112,7 @@ mod tests {
     fn format_parse_and_apply() {
         let f = Format::parse("[{S:>8}|{r:*^7}|{t:.ns}|{t}]").expect("valid");
         assert_eq!(
-            f.apply(Severity::Error, "ab", 5000, ":top:p"),
+            f.apply(Severity::Error, "ab", 5000, ":top:p", &HashMap::new()),
             "[   ERROR|**ab***|0.005 ns|5000 fs]"
         );
         for bad in ["{Q}", "{t:.x}", "{s:.ns}", "{t", "{t:<5"] {

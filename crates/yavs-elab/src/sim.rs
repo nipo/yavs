@@ -44,6 +44,9 @@ pub struct Ir {
     pub packages: Vec<yavs_lower::PackageIr>,
     /// Source files of the program's statements, for `std.env` call paths.
     pub sources: yavs_interp::Sources,
+    /// `{i}` of `SetVhdlAssertFormat`: the instance name of the region around each process, by the
+    /// dotted name of that region; empty when the program does not call it (#982).
+    pub instance_names: Arc<HashMap<String, String>>,
     /// The std/ieee revision of the design.
     pub revision: yavs_std::types::Revision,
     /// Bytes of the shared variables area (file objects of packages).
@@ -478,6 +481,15 @@ impl Elaborated {
             }
         }
         let sources = yavs_interp::Sources::of(&program, &db.sources);
+        let formats = program
+            .natives
+            .iter()
+            .any(|(_, n)| n.symbol.contains("setvhdlassertformat"));
+        let instance_names = if formats {
+            self.instance_names(db)
+        } else {
+            HashMap::new()
+        };
         // Slots for the specialised copies the processes may switch to while the simulation runs
         // (one per instance of a process that can have copies at most); the runtime's tables are
         // made for them.
@@ -519,6 +531,7 @@ impl Elaborated {
         }
         self.ir = Some(Ir {
             sources,
+            instance_names: Arc::new(instance_names),
             revision: crate::pkgcall::revision_of(db),
             program: Arc::new(program),
             units,
@@ -828,6 +841,20 @@ impl Elaborated {
     /// `'path_name` (or `'instance_name`) of named entity `d` seen from `region` (LRM 16.2.5,
     /// lower case): a design unit names its instance, an object the region declaring it, a
     /// process label its process.
+    fn instance_names(&self, db: &Db) -> HashMap<String, String> {
+        self.procs
+            .iter()
+            .filter_map(|p| {
+                let region = self.hier.scope(p.scope).parent?;
+                let name = self.hier.instance_name(region, db, crate::Case::Lrm);
+                let name = name.strip_suffix(':').unwrap_or(&name).to_string();
+                let dotted = self.hier.dotted_in(p.scope, crate::Case::Lrm);
+                let key = yavs_diag::parent(&dotted).to_string();
+                Some((key, name))
+            })
+            .collect()
+    }
+
     fn name_of(&self, db: &Db, region: ScopeId, d: yavs_sem::DeclId, instance: bool) -> String {
         use yavs_sem::decl::DeclKind;
         let text = |s: ScopeId| {
@@ -1080,6 +1107,7 @@ impl Elaborated {
                 Ok(())
             },
         )?;
+        rt.set_instance_names(ir.instance_names.clone());
         match &start {
             // The packages hold what elaboration-time calls left; so does the assert state.
             Some(s) => {

@@ -207,3 +207,12 @@ static void register_then_release(const vhpiCbDataT *cb) {
 PLUGIN_EXPORT void released(void) {
   on(vhpiCbStartOfSimulation, "start", register_then_release);
 }
+
+/* text: printed UTF-8 stays, ISO-8859-1 as a VHPI string value is becomes UTF-8 (#984); a property
+ * that only one reference has is an error (#983). */
+PLUGIN_EXPORT void text(void) {
+  vhpi_printf("utf8 W\xc3\xb6rks\n");
+  vhpi_printf("latin1 W\xf6rks\n");
+  int seed = vhpi_get(1100, vhpi_handle(vhpiTool, NULL));
+  vhpi_printf("seed property: %d error %d\n", seed, err());
+}

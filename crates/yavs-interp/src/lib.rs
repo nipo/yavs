@@ -1866,6 +1866,11 @@ impl Runtime {
 
     /// Start from `from`'s VHDL assert state (enables and the like, as code run by `from`
     /// left it): a simulation going on from package state that elaboration-time calls made.
+    /// `{i}` of `SetVhdlAssertFormat`: instance names by the dotted name of the region (#982).
+    pub fn set_instance_names(&self, names: Arc<std::collections::HashMap<String, String>>) {
+        self.asserts.set_instances(names);
+    }
+
     pub fn inherit(&self, from: &Runtime) {
         self.asserts.inherit(&from.asserts);
         let names = from

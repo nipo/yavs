@@ -138,10 +138,24 @@ pub unsafe extern "C" fn yavs_vhpi_write(buf: *const c_char, len: usize) -> c_in
     // SAFETY: the caller passes a buffer of `len` bytes.
     let bytes = unsafe { std::slice::from_raw_parts(buf.cast::<u8>(), len) };
     with_state(|_| ());
+    let text = plugin_text(bytes);
     let mut out = std::io::stdout().lock();
-    match out.write_all(bytes).and_then(|()| out.flush()) {
+    match out.write_all(text.as_bytes()).and_then(|()| out.flush()) {
         Ok(()) => 0,
         Err(_) => -1,
+    }
+}
+
+/// A plugin's text for the terminal, in UTF-8 as VHDL reports are (#984). Strings of VHPI values are
+/// ISO-8859-1, so text that is not UTF-8 is that; a C plugin's UTF-8 text stays as written.
+fn plugin_text(bytes: &[u8]) -> std::borrow::Cow<'_, str> {
+    match std::str::from_utf8(bytes) {
+        Ok(s) => s.into(),
+        Err(_) => bytes
+            .iter()
+            .map(|&b| char::from(b))
+            .collect::<String>()
+            .into(),
     }
 }
 
@@ -152,7 +166,8 @@ pub unsafe extern "C" fn yavs_vhpi_write(buf: *const c_char, len: usize) -> c_in
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn yavs_vhpi_assert(severity: c_int, msg: *const c_char) -> c_int {
     // SAFETY: the shim passes the string it just formatted.
-    let msg = unsafe { CStr::from_ptr(msg) }.to_string_lossy();
+    let msg = unsafe { CStr::from_ptr(msg) };
+    let msg = plugin_text(msg.to_bytes());
     let level = match severity {
         vhpiNote => "Note",
         vhpiWarning => "Warning",

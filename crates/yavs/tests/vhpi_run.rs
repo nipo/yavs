@@ -1704,3 +1704,14 @@ fn vhpi_callback_outlives_the_released_handle() {
     assert!(out.contains("released trigger: 0 count 6"), "{out}{err}");
     assert!(!err.contains("W0903"), "{err}");
 }
+
+/// `vhpi_printf` writes UTF-8 whichever way a plugin's text is encoded (#984), and the random seed
+/// property of one reference, not in the standard's header, is an error (#983).
+#[test]
+fn vhpi_printf_text_is_utf8() {
+    let (code, err, out) = phases("text", &[]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("utf8 W\u{f6}rks"), "{out}");
+    assert!(out.contains("latin1 W\u{f6}rks"), "{out}");
+    assert!(out.contains("seed property: -1 error 1"), "{out}");
+}

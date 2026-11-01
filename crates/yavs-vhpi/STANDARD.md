@@ -182,6 +182,10 @@ yavs run --vhpi=LIB[:ENTRY] [--vhpi=...] TOP
 - Windows: the `.exe` exports the same set. yavs ships no import library; a plugin brings its
   own (built from the generated export list) or resolves the names at run time from the main
   module. An import library made for `yavs.exe` binds only to an executable of that name.
+- `vhpi_printf` and `vhpi_assert` write UTF-8: text that is not valid UTF-8 is taken as ISO-8859-1,
+  the encoding of VHPI string values.
+- Property 1100 (the random seed) is an extension of one reference, not in the standard's header:
+  `vhpi_get` on it is an error.
 - `vhpi_control` with `vhpiStop` or `vhpiFinish` ends the run with status 0 (an extra argument
   after the command is accepted and ignored). `vhpiReset`: `docs/vhpi.md`, "Resetting a
   simulation". Other commands are refused.

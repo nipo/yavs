@@ -104,3 +104,36 @@ fn formats_are_stored_and_applied() {
         assert_eq!(run(&dir, tier, threads), want, "{tier} {threads}");
     }
 }
+
+/// `{i}` is `'instance_name` of the region around the process, without the last colon (#982).
+#[test]
+fn assert_format_i_is_the_instance_name() {
+    let dir = tempdir("assert_format_i");
+    let src = dir.join("h.vhd");
+    std::fs::write(
+        &src,
+        "use std.env.all;\n\
+         entity Leaf is end;\n\
+         architecture Rtl of Leaf is begin\n\
+         p : process variable valid : boolean; begin\n\
+         SetVhdlAssertFormat(error, \"I={i}\", valid);\n\
+         report \"m\" severity error; wait; end process;\n\
+         end;\n\
+         entity Top2 is end;\n\
+         architecture Arch of Top2 is\n\
+         component Leaf is end component;\n\
+         begin\n\
+         U1 : entity work.Leaf;\n\
+         B : block begin\n\
+         G : for I in 1 to 1 generate U2 : Leaf; end generate;\n\
+         end block;\n\
+         end;\n",
+    )
+    .expect("write");
+    let a = yavs(&dir, &["analyze", "--std=2019", "--work=work:lib", "h.vhd"]);
+    assert!(a.status.success(), "{a:?}");
+    let r = yavs(&dir, &["run", "--std=2019", "--work=work:lib", "top2"]);
+    let out = String::from_utf8_lossy(&r.stdout).into_owned() + &String::from_utf8_lossy(&r.stderr);
+    assert!(out.contains("I=:top2(arch):u1@leaf(rtl)"), "{out}");
+    assert!(out.contains("I=:top2(arch):b:g(1):u2@leaf(rtl)"), "{out}");
+}
