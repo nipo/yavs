@@ -187,6 +187,29 @@ fn register_names_from_the_configuration() {
 }
 
 #[test]
+fn loops() {
+    regression_with(
+        "loops.vhd",
+        Some("rule:\n  lint_720:\n    disable: false\n"),
+    );
+}
+
+/// The caret of lint_771 is on the name in the body, with a spec or without one.
+#[test]
+fn a_function_is_reported_at_its_name() {
+    let dir = tempdir("lint");
+    std::fs::write(
+        dir.join("f.vhd"),
+        "package p is\n  function spec (w : natural) return natural;\nend package;\npackage body p is\n  function spec (w : natural) return natural is begin end;\n  function own (w : natural) return natural is begin end;\nend package body;\n",
+    )
+    .unwrap();
+    let o = yavs(&dir, &["lint", "--message-format=short", "f.vhd"]);
+    let text = stderr(&o);
+    assert!(text.contains("f.vhd:5:12: error[lint_771]"), "{text}");
+    assert!(text.contains("f.vhd:6:12: error[lint_771]"), "{text}");
+}
+
+#[test]
 fn flow() {
     regression("flow.vhd");
 }

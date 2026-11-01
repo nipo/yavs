@@ -159,9 +159,9 @@ architecture rtl of flow_loops is
     impure function peek return integer;
   end protected counter;
   type counter is protected body
-    impure function peek return integer is
+    impure function peek return integer is -- expect: lint_771
     begin
-      report "no value"; -- expect: lint_771
+      report "no value";
     end function;
   end protected body counter;
 begin

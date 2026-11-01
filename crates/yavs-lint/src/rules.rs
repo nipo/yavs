@@ -145,7 +145,7 @@ pub static RULES: &[Rule] = &[
         "lint_720",
         A,
         "A signal depends on itself through combinational logic, with no register in the loop.",
-        "Hardware oscillates or settles somewhere nobody chose. A clocked process gives no dependency. Left out so that a cycle is a real one: assignments to and reads of part of an object, anything through an instance, attributes, and assignments with an `after`.",
+        "Hardware oscillates or settles somewhere nobody chose. In a process, a target depends on what its own statement reads, on the conditions around that statement, and on variables through what they hold at that point. A clocked process, one that waits and one that asks about a change (`'event`) give no dependency. Left out so that a cycle is a real one: assignments to and reads of part of an object, what a variable held before a part of it was assigned, anything through an instance, attributes, and assignments with an `after`. A loop only through an `exit` or `next` condition is not found.",
     ),
     rule(
         "lint_730",
@@ -383,7 +383,7 @@ impl Walk<'_> {
         if matches!(s.kind, SubprogramKind::Function { .. }) && !self.ends(stmts, true) {
             self.out.push((
                 "lint_771",
-                self.body_place(decl, *scope, stmts),
+                self.body_name(decl, *scope),
                 format!(
                     "`{}` can reach the end of its body without returning a value, which is an error when it does",
                     decl.name
@@ -515,16 +515,13 @@ impl Walk<'_> {
         }
     }
 
-    /// Where to name a function: the body, if a parameter or statement of it says where it is (the
-    /// declaration in hand may be the spec, in another file).
-    fn body_place(&self, decl: &Decl, scope: ScopeId, stmts: &[StmtId]) -> Span {
-        let first = self.db.scopes[scope]
-            .order
-            .first()
-            .map(|&d| self.db.decls[d].span);
-        first
-            .or_else(|| stmts.first().map(|&s| self.db.stmts[s].span))
-            .unwrap_or_else(|| decl.name_span())
+    /// The name of a function in its body: the declaration in hand may be the spec, in another
+    /// file, and only the body's own declaration has this parameter region.
+    fn body_name(&self, decl: &Decl, scope: ScopeId) -> Span {
+        let own = self.db.decls.iter().find_map(|(_, d)| {
+            matches!(&d.kind, DeclKind::Subprogram(s) if s.scope == Some(scope)).then_some(d)
+        });
+        own.unwrap_or(decl).name_span()
     }
 
     /// The value of `e` as a position, when analysis folded it to an integer, physical or

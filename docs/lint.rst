@@ -10,10 +10,10 @@ provable was found, and a line in it is something to correct.
 
    $ yavs lint src/fifo.vhd
    error[lint_771]: `depth` can reach the end of its body without returning a value, which is an error when it does
-     --> src/fifo.vhd:21:19
+     --> src/fifo.vhd:21:12
       |
    21 |   function depth (w : natural) return natural is
-      |                   ^
+      |            ^^^^^
       |
       = help: `yavs lint --explain lint_771` says what this rule reports
 

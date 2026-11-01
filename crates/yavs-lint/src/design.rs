@@ -6,11 +6,13 @@
 use crate::Config;
 use crate::rules::Raw;
 use serde_json::{Value, json};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use yavs_diag::Span;
+use yavs_sem::attr::PredefAttr;
 use yavs_sem::decl::{Body, DeclKind, ObjClass, ObjRole};
 use yavs_sem::hir::{
-    Actual, ConstValue, Lsp, Mode, ObjRoot, Rhs, Sensitivity, StmtKind, UnitHir, Waveform,
+    Actual, AttrPrefix, ConstValue, ExprKind, Lsp, Mode, ObjRoot, Rhs, Sensitivity, StmtKind,
+    UnitHir, Waveform,
 };
 use yavs_sem::loader::UnitKey;
 use yavs_sem::lsp::{Overlap, Use};
@@ -78,6 +80,28 @@ fn edge_in(db: &Db, e: ExprId) -> Option<yavs_sem::edge::EdgeShape> {
     found
 }
 
+/// Whether `e` asks about a change in time (`a'event`, `a'stable`): no combinational logic does.
+fn tests_time(db: &Db, e: ExprId) -> bool {
+    let mut found = false;
+    db.walk_expr(e, &mut |x| {
+        found |= matches!(
+            &db.exprs[x].kind,
+            ExprKind::Attr {
+                attr: PredefAttr::Event
+                    | PredefAttr::Active
+                    | PredefAttr::LastEvent
+                    | PredefAttr::LastActive
+                    | PredefAttr::Stable
+                    | PredefAttr::Quiet
+                    | PredefAttr::Delayed
+                    | PredefAttr::Transaction,
+                ..
+            }
+        );
+    });
+    found
+}
+
 fn shape<'a>(db: &'a Db, body: &'a [StmtId]) -> Shape<'a> {
     let mut all = Vec::new();
     deep(db, body, &mut all);
@@ -89,11 +113,13 @@ fn shape<'a>(db: &'a Db, body: &'a [StmtId]) -> Shape<'a> {
     }) {
         return Shape::Other;
     }
-    if !exprs_of(db, body)
-        .iter()
-        .any(|(e, _)| edge_in(db, *e).is_some())
-    {
-        return Shape::Combinational;
+    let exprs = exprs_of(db, body);
+    if !exprs.iter().any(|(e, _)| edge_in(db, *e).is_some()) {
+        return if exprs.iter().any(|(e, _)| tests_time(db, *e)) {
+            Shape::Other
+        } else {
+            Shape::Combinational
+        };
     }
     let [only] = body else {
         return Shape::Other;
@@ -139,8 +165,179 @@ fn delayed(rhs: &Rhs<Waveform>) -> bool {
     }
 }
 
-fn delayed_assign(db: &Db, s: StmtId) -> bool {
-    matches!(&db.stmts[s].kind, StmtKind::SignalAssign { rhs, .. } if delayed(rhs))
+/// `lint_720`: for each signal, the signals assigned from it.
+type Edges = HashMap<DeclId, BTreeSet<DeclId>>;
+
+/// `lint_720`: what a variable holds, from the assignment to all of it and from those to its parts.
+type Vars = HashMap<DeclId, [BTreeSet<DeclId>; 2]>;
+
+/// `lint_720` in one combinational process: a target depends on what its statement reads, on the
+/// conditions around it, and on variables through what they hold at that point. `exit` and `next`
+/// add no condition to the statements after them, so a loop only through one is not found. Parts
+/// assigned after the whole (`v := r; v.x := a;`) may leave nothing of it, so it is then forgotten.
+struct Flow<'a> {
+    db: &'a Db,
+    vars: Vars,
+    control: Vec<DeclId>,
+    edges: &'a mut Edges,
+    places: &'a mut HashMap<DeclId, Span>,
+}
+
+impl Flow<'_> {
+    /// A loop runs again, and a variable keeps its value to the next activation of the process, so
+    /// run until nothing more is learnt.
+    fn repeat(&mut self, body: &[StmtId]) {
+        loop {
+            let before = self.vars.clone();
+            self.list(body);
+            merge(&mut self.vars, &before);
+            if self.vars == before {
+                return;
+            }
+        }
+    }
+
+    /// The whole objects `e` reads: signals, and what the variables it names hold. An attribute,
+    /// or a part of a variable, gives nothing, as for a part of a signal.
+    fn expr(&self, e: ExprId, out: &mut BTreeSet<DeclId>) {
+        let db = self.db;
+        let mut reads = Vec::new();
+        db.reads(e, &mut reads);
+        out.extend(
+            reads
+                .iter()
+                .filter(|l| l.path.is_empty())
+                .filter_map(|l| decl(l.root)),
+        );
+        let (mut names, mut prefixes) = (Vec::new(), HashSet::new());
+        db.walk_expr(e, &mut |x| match &db.exprs[x].kind {
+            ExprKind::Obj(_) => names.push(x),
+            ExprKind::Index { prefix, .. }
+            | ExprKind::Slice { prefix, .. }
+            | ExprKind::Field { prefix, .. }
+            | ExprKind::Attr {
+                prefix: AttrPrefix::Expr(prefix),
+                ..
+            } => {
+                prefixes.insert(*prefix);
+            }
+            _ => {}
+        });
+        for x in names {
+            if !prefixes.contains(&x)
+                && let Some(l) = db.lsp(x)
+                && l.path.is_empty()
+                && let Some(held) = decl(l.root).and_then(|d| self.vars.get(&d))
+            {
+                out.extend(held.iter().flatten());
+            }
+        }
+    }
+
+    fn stmt(&self, s: StmtId) -> BTreeSet<DeclId> {
+        let mut out: BTreeSet<DeclId> = self.control.iter().copied().collect();
+        self.db.stmt_exprs(s, &mut |e, u| {
+            if u == Use::Value {
+                self.expr(e, &mut out);
+            }
+        });
+        out
+    }
+
+    fn under(&mut self, conds: BTreeSet<DeclId>, body: &[StmtId], repeat: bool) {
+        let mark = self.control.len();
+        self.control.extend(conds);
+        if repeat {
+            self.repeat(body);
+        } else {
+            self.list(body);
+        }
+        self.control.truncate(mark);
+    }
+
+    fn list(&mut self, body: &[StmtId]) {
+        let db = self.db;
+        for &s in body {
+            match &db.stmts[s].kind {
+                StmtKind::SignalAssign { target, rhs, .. } if !delayed(rhs) => {
+                    let reads = self.stmt(s);
+                    for l in target.lsps.iter().filter(|l| l.path.is_empty()) {
+                        let Some(t) = decl(l.root) else { continue };
+                        self.places.entry(t).or_insert(db.stmts[s].span);
+                        for &r in &reads {
+                            self.edges.entry(r).or_default().insert(t);
+                        }
+                    }
+                }
+                StmtKind::VarAssign { target, .. } => {
+                    let reads = self.stmt(s);
+                    // An aggregate target names several: each keeps what its other parts hold.
+                    let mut named = Vec::new();
+                    match db.lsp(target.expr) {
+                        Some(l) => named.push((decl(l.root), l.path.is_empty())),
+                        None => db.walk_expr(target.expr, &mut |x| {
+                            if let ExprKind::Obj(_) = db.exprs[x].kind {
+                                named.push((db.lsp(x).and_then(|l| decl(l.root)), false));
+                            }
+                        }),
+                    }
+                    for (v, whole) in named {
+                        let Some(v) = v else { continue };
+                        let [all, parts] = self.vars.entry(v).or_default();
+                        all.clear();
+                        if whole {
+                            parts.clear();
+                            all.extend(&reads);
+                        } else {
+                            parts.extend(&reads);
+                        }
+                    }
+                }
+                StmtKind::If { branches, else_ } => {
+                    let start = self.vars.clone();
+                    let mark = self.control.len();
+                    let mut joined = HashMap::new();
+                    for (c, then) in branches.iter() {
+                        let mut conds = BTreeSet::new();
+                        self.expr(*c, &mut conds);
+                        // Each later branch is also decided by the conditions before it.
+                        self.control.extend(conds);
+                        self.vars = start.clone();
+                        self.list(then);
+                        merge(&mut joined, &self.vars);
+                    }
+                    self.vars = start;
+                    if let Some(e) = else_ {
+                        self.list(e);
+                    }
+                    merge(&mut self.vars, &joined);
+                    self.control.truncate(mark);
+                }
+                StmtKind::Case { alts, .. } => {
+                    let conds = self.stmt(s);
+                    let start = self.vars.clone();
+                    let mut joined = HashMap::new();
+                    for (_, then) in alts.iter() {
+                        self.vars = start.clone();
+                        self.under(conds.clone(), then, false);
+                        merge(&mut joined, &self.vars);
+                    }
+                    self.vars = joined;
+                }
+                StmtKind::Loop { body, .. } => self.under(self.stmt(s), body, true),
+                StmtKind::SeqBlock { body, .. } => self.list(body),
+                _ => {}
+            }
+        }
+    }
+}
+
+fn merge(into: &mut Vars, from: &Vars) {
+    for (v, [all, parts]) in from {
+        let held = into.entry(*v).or_default();
+        held[0].extend(all);
+        held[1].extend(parts);
+    }
 }
 
 fn flatten<'a>(
@@ -438,28 +635,32 @@ impl Arch<'_> {
 
     /// `lint_720`: a signal that depends on itself through combinational logic. Parts of objects,
     /// instances and assignments with an `after` give no edge, so a reported cycle is a real one.
+    /// See `Flow` for what a statement of a process depends on.
     fn loops(&mut self) {
         let db = self.db;
-        let mut edges: HashMap<DeclId, Vec<DeclId>> = HashMap::new();
+        let mut edges: Edges = HashMap::new();
         let mut places: HashMap<DeclId, Span> = HashMap::new();
         for c in &self.conc {
-            let combinational = match c.process {
-                Some(body) => {
-                    let mut all = Vec::new();
-                    deep(db, body, &mut all);
-                    matches!(shape(db, body), Shape::Combinational)
-                        && !all.iter().any(|&s| delayed_assign(db, s))
+            if let Some(body) = c.process {
+                if matches!(shape(db, body), Shape::Combinational) {
+                    Flow {
+                        db,
+                        vars: HashMap::new(),
+                        control: Vec::new(),
+                        edges: &mut edges,
+                        places: &mut places,
+                    }
+                    .repeat(body);
                 }
-                // `q <= d when rising_edge (clk)` is a register written as an assignment.
-                None => {
-                    matches!(db.stmts[c.stmt].kind, StmtKind::ConcSignalAssign { .. })
-                        && !c.delayed
-                        && !exprs_of(db, &[c.stmt])
-                            .iter()
-                            .any(|(e, _)| edge_in(db, *e).is_some())
-                }
-            };
-            if !combinational {
+                continue;
+            }
+            // `q <= d when rising_edge (clk)` is a register written as an assignment.
+            if !matches!(db.stmts[c.stmt].kind, StmtKind::ConcSignalAssign { .. })
+                || c.delayed
+                || exprs_of(db, &[c.stmt])
+                    .iter()
+                    .any(|(e, _)| edge_in(db, *e).is_some() || tests_time(db, *e))
+            {
                 continue;
             }
             for t in c.drivers.iter().filter(|l| l.path.is_empty()) {
@@ -467,7 +668,7 @@ impl Arch<'_> {
                 places.entry(t).or_insert(c.span);
                 for r in c.reads.iter().filter(|l| l.path.is_empty()) {
                     if let Some(r) = decl(r.root) {
-                        edges.entry(r).or_default().push(t);
+                        edges.entry(r).or_default().insert(t);
                     }
                 }
             }
@@ -475,14 +676,14 @@ impl Arch<'_> {
         // Depth first, one cycle per back edge found; 0 unseen, 1 on the path, 2 done.
         fn visit(
             n: DeclId,
-            edges: &HashMap<DeclId, Vec<DeclId>>,
+            edges: &Edges,
             state: &mut HashMap<DeclId, u8>,
             path: &mut Vec<DeclId>,
             cycles: &mut Vec<Vec<DeclId>>,
         ) {
             state.insert(n, 1);
             path.push(n);
-            for &m in edges.get(&n).map_or(&[][..], |v| &v[..]) {
+            for &m in edges.get(&n).into_iter().flatten() {
                 match state.get(&m).copied().unwrap_or(0) {
                     0 => visit(m, edges, state, path, cycles),
                     1 => {

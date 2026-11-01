@@ -130,7 +130,7 @@ lint_720
 
 advisory, off by default. A signal depends on itself through combinational logic, with no register in the loop.
 
-Hardware oscillates or settles somewhere nobody chose. A clocked process gives no dependency. Left out so that a cycle is a real one: assignments to and reads of part of an object, anything through an instance, attributes, and assignments with an ``after``.
+Hardware oscillates or settles somewhere nobody chose. In a process, a target depends on what its own statement reads, on the conditions around that statement, and on variables through what they hold at that point. A clocked process, one that waits and one that asks about a change (``'event``) give no dependency. Left out so that a cycle is a real one: assignments to and reads of part of an object, what a variable held before a part of it was assigned, anything through an instance, attributes, and assignments with an ``after``. A loop only through an ``exit`` or ``next`` condition is not found.
 
 lint_730
 --------
