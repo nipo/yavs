@@ -1271,8 +1271,6 @@ pub struct CovWaiver {
     pub want: u32,
     /// `2 * input + value` of the one row a `row` directive waives; `care` and `want` then mean nothing.
     pub row: Option<u32>,
-    /// It addresses inputs by position, so its meaning changes when they are reordered.
-    pub positional: bool,
     /// The directive as written after `exclude` (without the reason), for reports.
     pub rule: String,
     pub reason: String,

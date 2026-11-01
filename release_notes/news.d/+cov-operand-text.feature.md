@@ -1,1 +1,1 @@
-A named coverage exclusion takes any operand by its text, such as `(count > 3 = false)`. A positional one stores its operands in the database, and merging warns (`W0119`) when the operands changed under the directive.
+A named coverage exclusion takes any operand by its text, such as `(count > 3 = false)`. A pattern may name its inputs, `-- yavs cov exclude 01 (en, count < 15)`, and yavs checks them when analysing: inputs reordered or changed under the directive are an error that says what to write.

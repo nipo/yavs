@@ -211,7 +211,7 @@ impl Fsm {
                     waivers: Vec::new(),
                     unit: w.unit.clone(),
                     process: String::new(),
-                    inputs: 0,
+                    operands: Vec::new(),
                 });
                 e.count = e.count.saturating_add(count);
             };

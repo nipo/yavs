@@ -2458,15 +2458,16 @@ scalars; the on-disk format is implementation-defined, so it is fixed here (yavs
   pattern with one symbol set is a valid combination waiver, and `row` also carries the long form. The kind words
   keep their meaning (`condition (a=false)` is combinations), since existing sources rely on it. Waivers live on the
   row (`CovRow::waivers`), its number of inputs too, so the report can print the short form without the source
-  (format 9). `exclude::directive` is the one place that writes the text.
+  (format 9, the inputs themselves since 11). `exclude::directive` is the one place that writes the text.
 - **Operand text of waivers (maintainer, 2026-11-01, #1020):** a named input is any operand's text, compared
-  by `yavs_diag::operand::key` (no comments, blanks or outer parentheses, lower case outside literals). A positional
-  waiver stores its operands in the `.ycov` (version 8). A directive is re-resolved at every run and within a run
-  always fits, so the only place its inputs can "no longer match" is between runs: `W0119` when merged databases
-  hold the same directive (file, line, rule) with other operand keys. A directive that also moved a line is not
-  matched: guessing identity would warn about unrelated directives. Changed text means another hash and so another
-  item, with no requirement hidden from the other run, so it is a warning and `E0137` keeps its meaning; `merge`
-  treats waivers that differ only in stored text as one.
+  by `yavs_diag::operand::key` (no comments, blanks or outer parentheses, lower case outside literals). To catch
+  reordering, a pattern may carry its inputs, `01 (en, count < 15)`, `row -0- (a, b, c)`, checked at analysis with or
+  without `--cov`, `E2022` with expected, found and the directive to write. The list follows the pattern and its
+  entries have no value, so it cannot clash with the named form, whatever the operands hold. The bare pattern stays a
+  full form with no warning (maintainer), unchecked against reordering. This replaces `W0119` and the operands stored
+  per waiver, a first attempt that compared merged databases: it missed a run from edited sources alone, and a
+  directive that moved. Every condition, expression and combination item stores its inputs in full (`Entry::operands`,
+  version 11, replacing the count of version 9): `Key::sig` is cut for display, and a report's suggestion must paste.
 - **Library, entity and process rows (maintainer, 2026-11-01, #1020):** every database line of version 7 ends
   in the unit (`library.entity` of the instance, or the package) and, except toggles, the process label: per item,
   not per path, since one path can be bound to another entity in another test. They are metadata from the

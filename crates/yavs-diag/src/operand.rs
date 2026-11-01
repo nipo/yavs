@@ -1,6 +1,26 @@
 //! The operand of a condition as text that stays the same across formatting: what a named coverage
 //! exclusion and a stored positional one compare.
 
+/// `line` without its `--` comment (a `--` inside a string literal is text).
+pub fn uncommented(line: &str) -> &str {
+    let mut in_str = false;
+    let b = line.as_bytes();
+    for (i, &c) in b.iter().enumerate() {
+        match c {
+            b'"' => in_str = !in_str,
+            b'-' if !in_str && b.get(i + 1) == Some(&b'-') => return &line[..i],
+            _ => {}
+        }
+    }
+    line
+}
+
+/// `text` on one line: no comments, blanks as single spaces. What a directive can hold of an operand.
+pub fn flat(text: &str) -> String {
+    let words = text.lines().flat_map(|l| uncommented(l).split_whitespace());
+    words.collect::<Vec<_>>().join(" ")
+}
+
 /// `text` without comments, blanks that separate nothing and outer parentheses, in lower case except
 /// inside string and character literals and extended identifiers: `(Count>3)` and `count > 3 -- x` are
 /// one operand.
@@ -110,6 +130,12 @@ mod tests {
         ] {
             assert_eq!(key(a), key(b), "{a}");
         }
+    }
+
+    #[test]
+    fn one_line() {
+        assert_eq!(super::flat("a  >\n 3 -- limit\n and  b"), "a > 3 and b");
+        assert_eq!(super::flat("s = \"--\""), "s = \"--\"");
     }
 
     #[test]

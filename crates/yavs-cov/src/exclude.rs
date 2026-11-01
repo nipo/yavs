@@ -767,14 +767,17 @@ fn partner<'a>(db: &'a Database, k: &Key) -> Option<&'a Entry> {
 }
 
 /// The comment that waives this item in the source, written before its decision: a combination or
-/// a condition or expression row in the short form. `None` for other kinds, and for a row of a
-/// database that does not hold its number of inputs.
+/// a condition or expression row in the short form, with the inputs yavs checks at analysis. `None`
+/// for other kinds, and for an item of a database that does not hold its inputs.
 pub fn directive(k: &Key, e: &Entry) -> Option<String> {
+    if e.operands.is_empty() {
+        return None;
+    }
     let spec = match k.kind {
         Kind::Combination(_) => crate::pattern(k),
         Kind::Condition(_) | Kind::Expression(_) => {
             let (i, v) = k.kind.row()?;
-            let n = u32::from(e.inputs);
+            let n = e.operands.len() as u32;
             if i >= n {
                 return None;
             }
@@ -791,7 +794,10 @@ pub fn directive(k: &Key, e: &Entry) -> Option<String> {
         }
         _ => return None,
     };
-    Some(format!("-- yavs cov exclude {spec}"))
+    Some(format!(
+        "-- yavs cov exclude {spec} ({})",
+        e.operands.join(", ")
+    ))
 }
 
 /// An item as an exclusion row, without the trailing comment.
@@ -1039,7 +1045,7 @@ mod tests {
                     waivers: Vec::new(),
                     unit: "work.e".into(),
                     process: String::new(),
-                    inputs: 0,
+                    operands: Vec::new(),
                 },
             );
         }
@@ -1329,30 +1335,37 @@ mod tests {
             kind: Kind::Condition(r),
             ..k.clone()
         };
-        e.inputs = 3;
+        e.operands = vec!["a".into(), "count > 3".into(), "f(b, c)".into()];
+        let rest = "(a, count > 3, f(b, c))";
         assert_eq!(
-            directive(&row(2).clone(), &e).unwrap(),
-            "-- yavs cov exclude row -0-"
+            directive(&row(2), &e).unwrap(),
+            format!("-- yavs cov exclude row -0- {rest}")
         );
         assert_eq!(
             directive(&row(5), &e).unwrap(),
-            "-- yavs cov exclude row --1"
+            format!("-- yavs cov exclude row --1 {rest}")
         );
         let x = Key {
             kind: Kind::Expression(1),
             ..k.clone()
         };
-        assert_eq!(directive(&x, &e).unwrap(), "-- yavs cov exclude row 1--");
-        // An older database has no count, and a row beyond it is not one.
+        assert_eq!(
+            directive(&x, &e).unwrap(),
+            format!("-- yavs cov exclude row 1-- {rest}")
+        );
+        assert_eq!(directive(&k, &e), None, "a statement has none");
+        // A row beyond the inputs is not one, and an older database has no inputs.
         assert_eq!(directive(&row(6), &e), None);
-        e.inputs = 0;
-        assert_eq!(directive(&row(2), &e), None);
         let c = Key {
             kind: Kind::Combination(0b1001),
             sig: format!("a{}b", crate::INPUT_SEP),
-            ..k
+            ..k.clone()
         };
-        assert_eq!(directive(&c, &e).unwrap(), "-- yavs cov exclude 01");
+        e.operands = vec!["a".into(), "b".into()];
+        assert_eq!(directive(&c, &e).unwrap(), "-- yavs cov exclude 01 (a, b)");
+        e.operands.clear();
+        assert_eq!(directive(&row(2), &e), None);
+        assert_eq!(directive(&c, &e), None);
     }
 
     #[test]
@@ -1517,7 +1530,7 @@ mod tests {
                         waivers: Vec::new(),
                         unit: "work.e".into(),
                         process: String::new(),
-                        inputs: 0,
+                        operands: Vec::new(),
                     },
                 );
             }

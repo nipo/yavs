@@ -280,6 +280,9 @@ enum Spec {
     RowNamed(Named),
 }
 
+/// The inputs a pattern says it was written for, with the span of the list.
+type Operands = Option<(Vec<String>, Span)>;
+
 /// A parsed `exclude` directive.
 struct Directive {
     /// The comment.
@@ -287,6 +290,8 @@ struct Directive {
     /// `Some(true)` for `condition`, `Some(false)` for `expression`.
     kind: Option<bool>,
     spec: Spec,
+    /// The inputs a pattern says it was written for, `01 (a, b)`, with the span of the list.
+    operands: Operands,
     /// The spec as written, for reports.
     rule: String,
     reason: String,
@@ -321,8 +326,8 @@ pub fn resolve(db: &Db, file: FileId) -> Checked {
                     .with_help("write it on the line before the construct"),
             ),
             Parsed::Ok(d) => match groups.last_mut() {
-                Some((next, v)) if *next == c.next && c.next.is_some() => v.push(d),
-                _ => groups.push((c.next, vec![d])),
+                Some((next, v)) if *next == c.next && c.next.is_some() => v.push(*d),
+                _ => groups.push((c.next, vec![*d])),
             },
         }
     }
@@ -440,19 +445,18 @@ fn bind(
             _ => None,
         })
         .collect();
-    // Each input as a named exclusion may write it: any formatting.
-    let texts: Vec<String> = dec
+    // Each input as a directive may write it: any formatting.
+    let source: Vec<&str> = dec
         .leaves
         .iter()
         .map(|l| {
             let s = db.exprs[l.expr].span;
-            let t = src
-                .text()
+            src.text()
                 .get(src.text_offset(s.start)..src.text_offset(s.end))
-                .unwrap_or("");
-            yavs_diag::operand::key(t)
+                .unwrap_or("")
         })
         .collect();
+    let texts: Vec<String> = source.iter().map(|t| yavs_diag::operand::key(t)).collect();
     let order = || {
         (0..n)
             .map(|i| {
@@ -520,6 +524,13 @@ fn bind(
             )),
         }
     };
+    if let Some((found, at)) = &d.operands {
+        let keys: Vec<String> = found.iter().map(|o| yavs_diag::operand::key(o)).collect();
+        if keys != texts {
+            let wanted: Vec<String> = source.iter().map(|t| yavs_diag::operand::flat(t)).collect();
+            return vec![stale_operands(d, found, &keys, &texts, &wanted, *at, whole)];
+        }
+    }
     let wrong_length = |len: usize, at: Span| {
         err(
             PATTERN,
@@ -573,7 +584,6 @@ fn bind(
             care: 0,
             want: 0,
             row: Some(2 * i as u32 + u32::from(value)),
-            positional: matches!(d.spec, Spec::RowPattern(..)),
             rule: d.rule.clone(),
             reason: d.reason.clone(),
             at: d.at,
@@ -648,12 +658,70 @@ fn bind(
         care,
         want,
         row: None,
-        positional: matches!(d.spec, Spec::Pattern(..)),
         rule: d.rule.clone(),
         reason: d.reason.clone(),
         at: d.at,
     });
     diags
+}
+
+/// E2022 for a directive whose list of inputs is not the decision's: what it found and expected, and
+/// the directive to write. A symbol follows its input; an input the list did not have gets `-`.
+fn stale_operands(
+    d: &Directive,
+    found: &[String],
+    keys: &[String],
+    texts: &[String],
+    wanted: &[String],
+    at: Span,
+    whole: Span,
+) -> Diagnostic {
+    let mut e = Diagnostic::error(
+        OPERAND,
+        "the inputs this exclusion names no longer match the expression",
+    )
+    .with_primary(at, format!("found: {}", found.join(", ")))
+    .with_secondary(whole, format!("expected: {}", wanted.join(", ")));
+    let (symbols, row) = match &d.spec {
+        Spec::Pattern(p, _) => (p, ""),
+        Spec::RowPattern(p, _) => (p, "row "),
+        _ => return e,
+    };
+    let mut free: Vec<usize> = (0..keys.len()).collect();
+    let mut known = 0;
+    let moved: String = texts
+        .iter()
+        .map(|t| {
+            let j = free
+                .iter()
+                .position(|&j| keys[j] == *t)
+                .map(|k| free.remove(k));
+            known += usize::from(j.is_some());
+            let symbol = j.and_then(|j| symbols.get(j)).copied().unwrap_or(b'-');
+            char::from(symbol)
+        })
+        .collect();
+    if moved.bytes().all(|c| c == b'-') {
+        return e.with_help(format!(
+            "what it waived is gone: write one symbol per input for ({}), or take it out",
+            wanted.join(", ")
+        ));
+    }
+    if known < texts.len() {
+        e = e.with_note(
+            "`-` stands for an input the directive did not name: check that it means what you want",
+        );
+    }
+    let reason = if d.reason.is_empty() {
+        String::new()
+    } else {
+        format!(": {}", d.reason)
+    };
+    e.with_help(format!(
+        "write: -- yavs cov exclude {}{row}{moved} ({}){reason}",
+        kind_word(d.kind),
+        wanted.join(", ")
+    ))
 }
 
 /// Warnings about the waivers of one decision: duplicates, subsumed ones, all combinations.
@@ -725,7 +793,7 @@ enum Parsed {
     /// Not a coverage directive (or a pragma of the old `off`/`on` family).
     Other,
     Err(Box<Diagnostic>),
-    Ok(Directive),
+    Ok(Box<Directive>),
 }
 
 /// Read comment `text`, which starts at byte `start` of `file`.
@@ -896,7 +964,7 @@ fn parse(file: FileId, start: u32, text: &str) -> Parsed {
         }
         let rule = format!("{}({})", kind_word(kind), inner.trim());
         cur.advance(close + 1);
-        (Spec::Named(list), rule)
+        (Spec::Named(list), rule, None)
     } else {
         let tok = cur.pattern();
         if tok.is_empty() {
@@ -928,8 +996,17 @@ fn parse(file: FileId, start: u32, text: &str) -> Parsed {
             }
             sym.push(c);
         }
-        let rule = format!("{}{tok}", kind_word(kind));
-        (Spec::Pattern(sym, span(spec_at, tok.len())), rule)
+        let pattern = Spec::Pattern(sym, span(spec_at, tok.len()));
+        cur.blank();
+        let operands = match operand_list(&mut cur, &span, &fail) {
+            Ok(l) => l,
+            Err(e) => return e,
+        };
+        (
+            pattern,
+            format!("{}{tok}{}", kind_word(kind), written(&operands)),
+            operands,
+        )
     };
     cur.blank();
     let reason = if cur.s.is_empty() {
@@ -945,24 +1022,70 @@ fn parse(file: FileId, start: u32, text: &str) -> Parsed {
             "a reason follows `:`",
         );
     };
-    Parsed::Ok(Directive {
+    Parsed::Ok(Box::new(Directive {
         at: all,
         kind,
         spec: spec.0,
         rule: spec.1,
+        operands: spec.2,
         reason,
-    })
+    }))
 }
 
-/// What follows `row`: a pattern with one symbol that is not `-`, or `INPUT = VALUE`. The cursor ends
-/// at the reason.
+/// What a spec keeps of a list of inputs, for reports.
+fn written(operands: &Operands) -> String {
+    operands
+        .as_ref()
+        .map_or(String::new(), |(l, _)| format!(" ({})", l.join(", ")))
+}
+
+/// The list of inputs after a pattern, if the cursor is at one: `(a, b)`, operands in source order, each
+/// any text. It cannot be a named form, which starts where the pattern would.
+fn operand_list(
+    cur: &mut Cursor<'_>,
+    span: &dyn Fn(usize, usize) -> Span,
+    fail: &dyn Fn(&'static str, String, usize, usize, &str) -> Parsed,
+) -> Result<Operands, Parsed> {
+    if !cur.s.starts_with('(') {
+        return Ok(None);
+    }
+    let at = cur.at;
+    let Some(close) = closing_paren(cur.s) else {
+        return Err(fail(
+            SYNTAX,
+            "missing `)` in the list of inputs".into(),
+            at,
+            cur.s.len(),
+            "this `(` is never closed",
+        ));
+    };
+    let inner = &cur.s[1..close];
+    let list: Vec<String> = top_commas(inner)
+        .iter()
+        .map(|p| p.trim().to_string())
+        .collect();
+    if list.iter().any(String::is_empty) {
+        return Err(fail(
+            SYNTAX,
+            "the list of inputs has an empty entry".into(),
+            at,
+            close + 1,
+            "expected the inputs in source order, such as `(a, count > 3)`",
+        ));
+    }
+    cur.advance(close + 1);
+    Ok(Some((list, span(at, close + 1))))
+}
+
+/// What follows `row`: a pattern with one symbol that is not `-` and maybe its list of inputs, or
+/// `INPUT = VALUE`. The cursor ends at the reason.
 fn row_spec(
     cur: &mut Cursor<'_>,
     kind: Option<bool>,
     spec_at: usize,
     span: &dyn Fn(usize, usize) -> Span,
     fail: &dyn Fn(&'static str, String, usize, usize, &str) -> Parsed,
-) -> Result<(Spec, String), Parsed> {
+) -> Result<(Spec, String, Operands), Parsed> {
     let at = cur.at;
     let colon = outside_literals(cur.s)
         .iter()
@@ -977,6 +1100,34 @@ fn row_spec(
             3,
             "expected a pattern such as `-0-`, or `count > 3 = false`",
         ));
+    }
+    // A pattern alone or before its list: `row 0 = 1` and `row (a) = 1` are not.
+    let n = head
+        .find(|c: char| c.is_whitespace() || c == '(')
+        .unwrap_or(head.len());
+    let (tok, rest) = (&head[..n], head[n..].trim_start());
+    if !tok.is_empty()
+        && tok.bytes().all(|c| matches!(c, b'0' | b'1' | b'-'))
+        && (rest.is_empty() || rest.starts_with('('))
+    {
+        let set = tok.bytes().filter(|c| *c != b'-').count();
+        if set != 1 {
+            let msg = format!(
+                "a row is one input at one value, so its pattern has exactly one `0` or `1`, not {set}"
+            );
+            let Parsed::Err(e) = fail(PATTERN, msg, at, tok.len(), "not one row") else {
+                unreachable!("fail makes an error");
+            };
+            return Err(Parsed::Err(Box::new(e.with_help(
+                "a combination of inputs is written without `row`, such as `01-`",
+            ))));
+        }
+        let pattern = Spec::RowPattern(tok.as_bytes().to_vec(), span(at, tok.len()));
+        cur.advance(tok.len());
+        cur.blank();
+        let operands = operand_list(cur, span, fail)?;
+        let rule = format!("{}row {tok}{}", kind_word(kind), written(&operands));
+        return Ok((pattern, rule, operands));
     }
     let rule = format!("{}row {head}", kind_word(kind));
     let eq = value_sign(head);
@@ -1003,19 +1154,7 @@ fn row_spec(
                     "expected `0`, `1` or `-`",
                 ));
             }
-            let set = head.bytes().filter(|c| *c != b'-').count();
-            if set != 1 {
-                let msg = format!(
-                    "a row is one input at one value, so its pattern has exactly one `0` or `1`, not {set}"
-                );
-                let Parsed::Err(e) = fail(PATTERN, msg, at, head.len(), "not one row") else {
-                    unreachable!("fail makes an error");
-                };
-                return Err(Parsed::Err(Box::new(e.with_help(
-                    "a combination of inputs is written without `row`, such as `01-`",
-                ))));
-            }
-            Spec::RowPattern(head.as_bytes().to_vec(), span(at, head.len()))
+            unreachable!("a pattern of these symbols returned above")
         }
         Some(eq) => {
             let (name, value) = (head[..eq].trim(), head[eq + 1..].trim());
@@ -1059,7 +1198,7 @@ fn row_spec(
         }
     };
     cur.advance(head.len());
-    Ok((spec, rule))
+    Ok((spec, rule, None))
 }
 
 /// The byte offsets and characters of `s` that are outside string and character literals and
@@ -1174,7 +1313,7 @@ impl<'a> Cursor<'a> {
     fn pattern(&mut self) -> &'a str {
         let n = self
             .s
-            .find(|c: char| c.is_whitespace() || c == ':')
+            .find(|c: char| c.is_whitespace() || c == ':' || c == '(')
             .unwrap_or(self.s.len());
         let w = &self.s[..n];
         self.advance(n);
@@ -1188,7 +1327,7 @@ mod tests {
 
     fn directive(text: &str) -> Directive {
         match parse(FileId(0), 0, text) {
-            Parsed::Ok(d) => d,
+            Parsed::Ok(d) => *d,
             Parsed::Err(d) => panic!("{text}: {}", d.message),
             Parsed::Other => panic!("{text}: not a directive"),
         }
@@ -1310,6 +1449,51 @@ mod tests {
         let (c, m) = error("-- yavs cov exclude rwo -0-");
         assert_eq!(c, SYNTAX);
         assert!(m.contains("`row`"), "{m}");
+    }
+
+    #[test]
+    fn a_list_of_inputs_after_a_pattern() {
+        let list = |t: &str| {
+            let d = directive(t);
+            (d.rule, d.operands.map(|x| x.0), d.reason)
+        };
+        let v = |o: &[&str]| Some(o.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        assert_eq!(
+            list("-- yavs cov exclude 01 (en, count < 15): why"),
+            (
+                "01 (en, count < 15)".into(),
+                v(&["en", "count < 15"]),
+                "why".into()
+            )
+        );
+        assert_eq!(
+            list("-- yavs cov exclude row -0-(a, f(b, c), d = ',' )"),
+            (
+                "row -0- (a, f(b, c), d = ',')".into(),
+                v(&["a", "f(b, c)", "d = ','"]),
+                String::new()
+            )
+        );
+        assert_eq!(
+            list("-- yavs cov exclude condition 01 (a = b, c = '1')").1,
+            v(&["a = b", "c = '1'"])
+        );
+        // The bare forms have none, and a named form stays one.
+        assert_eq!(list("-- yavs cov exclude 01").1, None);
+        assert_eq!(list("-- yavs cov exclude row -0-").1, None);
+        assert!(matches!(
+            directive("-- yavs cov exclude (a = b = true)").spec,
+            Spec::Named(..)
+        ));
+        assert!(matches!(
+            directive("-- yavs cov exclude row (a = b) = 1").spec,
+            Spec::RowNamed(..)
+        ));
+        assert_eq!(error("-- yavs cov exclude 01 (a, b").0, SYNTAX);
+        assert_eq!(error("-- yavs cov exclude 01 ()").0, SYNTAX);
+        assert_eq!(error("-- yavs cov exclude 01 (a,,b)").0, SYNTAX);
+        assert_eq!(error("-- yavs cov exclude row -0 (a, b) = 1").0, SYNTAX);
+        assert_eq!(error("-- yavs cov exclude (a = true) (a)").0, SYNTAX);
     }
 
     #[test]

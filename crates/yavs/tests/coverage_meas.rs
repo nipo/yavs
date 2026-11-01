@@ -493,7 +493,7 @@ fn fsm_old_databases_and_no_items() {
     assert!(String::from_utf8_lossy(&o.stderr).contains("E0115"));
     let text = std::fs::read_to_string(tmp.join("a.ycov")).expect("read");
     let (head, rest) = text.split_once('\n').expect("head");
-    assert_eq!(head, "yavs-coverage 10");
+    assert_eq!(head, "yavs-coverage 11");
     let old = Database::parse(&format!("yavs-coverage 9\n{rest}")).expect("parse");
     assert!(!old.legacy);
     assert!(Database::parse(&format!("yavs-coverage 99\n{rest}")).is_err());

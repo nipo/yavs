@@ -578,69 +578,6 @@ fn named_inputs_take_any_operand_text() {
     );
 }
 
-#[test]
-fn a_positional_directive_warns_when_its_inputs_change_under_it() {
-    let tmp = tempdir("positional");
-    assert!(
-        decision(&tmp, "a", "x > 3 or r = '1'", "01")
-            .status
-            .success()
-    );
-    // Another formatting of the same operands: the same meaning, no warning.
-    assert!(decision(&tmp, "b", "x>3 or R='1'", "01").status.success());
-    let o = yavs(
-        &tmp,
-        &["cov", "merge", "a.ycov", "b.ycov", "-o", "same.ycov"],
-    );
-    assert!(
-        o.status.success() && text(&o.stderr).is_empty(),
-        "{}",
-        text(&o.stderr)
-    );
-    // The operands swapped under the directive.
-    assert!(
-        decision(&tmp, "c", "r = '1' or x > 3", "01")
-            .status
-            .success()
-    );
-    let o = yavs(&tmp, &["cov", "merge", "a.ycov", "c.ycov", "-o", "m.ycov"]);
-    let e = text(&o.stderr);
-    assert!(o.status.success(), "a warning, not an error: {e}");
-    assert!(e.contains("warning[W0119]") && e.contains("d.vhd:7"), "{e}");
-    assert!(
-        e.contains("x > 3, r = '1'") && e.contains("r = '1', x > 3"),
-        "{e}"
-    );
-    // It stays in the merged file, and follows -W.
-    let o = yavs(&tmp, &["cov", "report", "m.ycov", "--total"]);
-    assert!(text(&o.stderr).contains("W0119"), "{}", text(&o.stderr));
-    let o = yavs(
-        &tmp,
-        &["cov", "report", "a.ycov", "c.ycov", "-Wno-W0119", "--total"],
-    );
-    assert!(!text(&o.stderr).contains("W0119"), "{}", text(&o.stderr));
-    let o = yavs(
-        &tmp,
-        &["cov", "report", "a.ycov", "c.ycov", "-Werror", "--total"],
-    );
-    assert_eq!(o.status.code(), Some(1));
-    // One run alone has nothing to compare; the named form says what it means.
-    let o = yavs(&tmp, &["cov", "report", "a.ycov", "--total"]);
-    assert!(text(&o.stderr).is_empty(), "{}", text(&o.stderr));
-    assert!(
-        decision(&tmp, "e", "x > 3 or r = '1'", "(r = '1' = true)")
-            .status
-            .success()
-    );
-    assert!(
-        decision(&tmp, "f", "r = '1' or x > 3", "(r = '1' = true)")
-            .status
-            .success()
-    );
-    let o = yavs(&tmp, &["cov", "report", "e.ycov", "f.ycov", "--total"]);
-    assert!(!text(&o.stderr).contains("W0119"), "{}", text(&o.stderr));
-}
-
 /// A waiver on one side only stays the error it was, whatever the operand text.
 #[test]
 fn e0137_is_unchanged_by_the_operand_text() {
@@ -836,7 +773,7 @@ fn row_directive_errors() {
     );
 }
 
-/// E0137 and W0119 hold for rows as for combinations.
+/// E0137 holds for rows as for combinations.
 #[test]
 fn rows_follow_the_merge_rules() {
     let tmp = tempdir("rowmerge");
@@ -864,31 +801,6 @@ fn rows_follow_the_merge_rules() {
         e.contains("error[E0137]") && e.contains("condition x > 3 = 0 of d"),
         "{e}"
     );
-    // Reordered under a positional row.
-    assert!(
-        decision_of(&tmp, "c", "r = '1' or x > 3", "row 0-", "condition")
-            .status
-            .success()
-    );
-    let o = yavs(&tmp, &["cov", "merge", "a.ycov", "c.ycov", "-o", "m.ycov"]);
-    assert!(
-        text(&o.stderr).contains("warning[W0119]"),
-        "{}",
-        text(&o.stderr)
-    );
-    // Not under one named by its text.
-    assert!(
-        decision_of(&tmp, "e", "x > 3 or r = '1'", "row x > 3 = 0", "condition")
-            .status
-            .success()
-    );
-    assert!(
-        decision_of(&tmp, "f", "r = '1' or x > 3", "row x > 3 = 0", "condition")
-            .status
-            .success()
-    );
-    let o = yavs(&tmp, &["cov", "merge", "e.ycov", "f.ycov", "-o", "m.ycov"]);
-    assert!(!text(&o.stderr).contains("W0119"), "{}", text(&o.stderr));
 }
 
 /// Waivers change no counts: the counters of a run are the same with and without the directive.
@@ -975,4 +887,230 @@ fn a_row_directive_waives_an_expression_row() {
         e.contains("error[E2024]") && e.contains("does not fit"),
         "{e}"
     );
+}
+
+/// The directive of a source file, analysed with and without a run.
+fn analyse_directive(tmp: &Path, cond: &str, directive: &str) -> Output {
+    write(
+        tmp,
+        "d.vhd",
+        &format!(
+            "entity d is end entity;\narchitecture a of d is\n  signal x, y : integer := 0;\n  \
+             signal r : bit := '1';\nbegin\n  process begin\n    -- yavs cov exclude {directive}\n    \
+             if {cond} then\n      y <= 1;\n    end if;\n    wait;\n  end process;\nend architecture;\n"
+        ),
+    );
+    yavs(tmp, &["analyze", "--work=work:lib", "d.vhd"])
+}
+
+const COND: &str = "x > 3 or r = '1'";
+
+#[test]
+fn the_list_of_inputs_is_checked_at_analysis() {
+    let tmp = tempdir("listok");
+    for good in [
+        "01 (x > 3, r = '1')",
+        "01(x>3,R='1')",
+        "01 ( (X  >  3) , r='1' ): why",
+        "condition 01 (x > 3, r = '1')",
+        "row -0 (x > 3, r = '1')",
+        "row 1-(x>3, r = '1'): why",
+        "condition row 1- (x > 3, r = '1')",
+    ] {
+        let o = analyse_directive(&tmp, COND, good);
+        assert!(
+            o.status.success() && text(&o.stderr).is_empty(),
+            "{good}: {}",
+            text(&o.stderr)
+        );
+    }
+    // Reordered: both orders named, and the directive to write has the symbols moved with them.
+    for (dir, help) in [
+        (
+            "01 (r = '1', x > 3): why",
+            "write: -- yavs cov exclude 10 (x > 3, r = '1'): why",
+        ),
+        (
+            "row -0 (r = '1', x > 3)",
+            "write: -- yavs cov exclude row 0- (x > 3, r = '1')",
+        ),
+        (
+            "condition 01 (r = '1', x > 3)",
+            "write: -- yavs cov exclude condition 10 (x > 3, r = '1')",
+        ),
+    ] {
+        let o = analyse_directive(&tmp, COND, dir);
+        assert_eq!(o.status.code(), Some(1), "{dir}");
+        let e = text(&o.stderr);
+        assert!(
+            e.contains("error[E2022]") && e.contains("no longer match"),
+            "{e}"
+        );
+        assert!(e.contains("found: r = '1', x > 3"), "{e}");
+        assert!(e.contains("expected: x > 3, r = '1'"), "{e}");
+        assert!(e.contains(help), "{dir}: {e}");
+        // What it says to write is accepted.
+        let fixed = e
+            .lines()
+            .find_map(|l| l.split("write: -- yavs cov exclude ").nth(1))
+            .expect("help");
+        assert!(
+            analyse_directive(&tmp, COND, fixed).status.success(),
+            "{fixed}"
+        );
+    }
+    // Text changed or an input added: the input it did not name is `-`, and it says so.
+    for dir in [
+        "01 (x > 4, r = '1')",
+        "01 (x > 3)",
+        "01- (x > 3, r = '1', y = 1)",
+    ] {
+        let o = analyse_directive(&tmp, COND, dir);
+        let e = text(&o.stderr);
+        assert_eq!(o.status.code(), Some(1), "{dir}");
+        assert!(
+            e.contains("error[E2022]") && e.contains("expected: x > 3, r = '1'"),
+            "{dir}: {e}"
+        );
+        assert!(e.contains("write: -- yavs cov exclude "), "{dir}: {e}");
+    }
+    let e = text(&analyse_directive(&tmp, COND, "01 (x > 4, r = '1')").stderr);
+    assert!(
+        e.contains("-1 (x > 3, r = '1')") && e.contains("did not name"),
+        "{e}"
+    );
+    // What it waived is gone.
+    let e = text(&analyse_directive(&tmp, COND, "row 0- (x > 4, r = '1')").stderr);
+    assert!(e.contains("what it waived is gone"), "{e}");
+    // A list that fits with a pattern that does not is the pattern's error.
+    let e = text(&analyse_directive(&tmp, COND, "010 (x > 3, r = '1')").stderr);
+    assert!(e.contains("error[E2021]"), "{e}");
+    // Malformed.
+    for dir in ["01 (x > 3", "01 ()", "01 (x > 3,)"] {
+        let e = text(&analyse_directive(&tmp, COND, dir).stderr);
+        assert!(e.contains("error[E2020]"), "{dir}: {e}");
+    }
+    // Under ignore nothing is read.
+    write(&tmp, "x", "");
+    let bad = analyse_directive(&tmp, COND, "01 (r = '1', x > 3)");
+    assert_eq!(bad.status.code(), Some(1));
+    let o = yavs(
+        &tmp,
+        &[
+            "analyze",
+            "--work=work:lib",
+            "--coverage-directives=ignore",
+            "d.vhd",
+        ],
+    );
+    assert!(o.status.success(), "{}", text(&o.stderr));
+}
+
+/// An operand that holds `=`, a comma or a parenthesis, in the list and in the named form.
+#[test]
+fn the_list_and_the_named_form_do_not_clash() {
+    let tmp = tempdir("listnamed");
+    let cond = "f(x, 1) = 2 or s = \"a,)\" or c = ','";
+    let wrap = |dir: &str| {
+        format!(
+            "entity d is end entity;\narchitecture a of d is\n  signal x : integer := 0;\n  signal s : string(1 to 3) := \"abc\";\n  signal c : character := 'a';\n  function f(a, b : integer) return integer is begin return a + b; end function;\nbegin\n  process begin\n    -- yavs cov exclude {dir}\n    if {cond} then\n      null;\n    end if;\n    wait;\n  end process;\nend architecture;\n"
+        )
+    };
+    for dir in [
+        "0-- (f(x, 1) = 2, s = \"a,)\", c = ',')",
+        "row 0-- (F(x,1)=2, s = \"a,)\", C = ',')",
+        "(f(x, 1) = 2 = false)",
+        "(s = \"a,)\" = false, c = ',' = true)",
+    ] {
+        write(&tmp, "d.vhd", &wrap(dir));
+        let o = yavs(&tmp, &["analyze", "--work=work:lib", "d.vhd"]);
+        assert!(
+            o.status.success() && text(&o.stderr).is_empty(),
+            "{dir}: {}",
+            text(&o.stderr)
+        );
+    }
+    // Case in a literal counts.
+    write(
+        &tmp,
+        "d.vhd",
+        &wrap("0-- (f(x, 1) = 2, s = \"A,)\", c = ',')"),
+    );
+    let o = yavs(&tmp, &["analyze", "--work=work:lib", "d.vhd"]);
+    assert!(
+        text(&o.stderr).contains("error[E2022]"),
+        "{}",
+        text(&o.stderr)
+    );
+}
+
+/// The short forms without the list are full forms: no warning, also under -Werror.
+#[test]
+fn the_bare_forms_are_accepted_without_a_warning() {
+    let tmp = tempdir("bare");
+    for (dir, kind) in [
+        ("01", "combination"),
+        ("row 0-", "condition"),
+        ("condition 00", "combination"),
+    ] {
+        let o = analyse_directive(&tmp, COND, dir);
+        assert!(
+            o.status.success() && text(&o.stderr).is_empty(),
+            "{dir}: {}",
+            text(&o.stderr)
+        );
+        let o = yavs(&tmp, &["analyze", "-Werror", "--work=work:lib", "d.vhd"]);
+        assert!(o.status.success(), "{dir}: {}", text(&o.stderr));
+        let o = yavs(
+            &tmp,
+            &[
+                "run",
+                "--work=work:lib",
+                "--cov=a.ycov",
+                &format!("--cov-kind={kind}"),
+                "d",
+            ],
+        );
+        assert!(
+            o.status.success() && text(&o.stderr).is_empty(),
+            "{dir}: {}",
+            text(&o.stderr)
+        );
+        let db =
+            yavs_cov::Database::parse(&std::fs::read_to_string(tmp.join("a.ycov")).expect("read"))
+                .expect("parse");
+        assert!(db.items.values().any(|e| !e.waivers.is_empty()), "{dir}");
+        let o = yavs(&tmp, &["cov", "report", "a.ycov", "--exclusions"]);
+        assert!(text(&o.stdout).contains("(in the source)"), "{dir}");
+        assert!(text(&o.stderr).is_empty(), "{dir}: {}", text(&o.stderr));
+    }
+}
+
+/// What a report suggests is the checked form, and it can be pasted before the decision as it is.
+#[test]
+fn a_suggestion_can_be_pasted() {
+    let tmp = tempdir("paste");
+    for cond in [COND, "x > 3\n      or -- limit\n      r = '1'"] {
+        let o = decision_of(&tmp, "a", cond, "(r = '1' = true)", "condition,combination");
+        assert!(o.status.success(), "{}", text(&o.stderr));
+        let db =
+            yavs_cov::Database::parse(&std::fs::read_to_string(tmp.join("a.ycov")).expect("read"))
+                .expect("parse");
+        let mut seen = 0;
+        for (k, e) in &db.items {
+            let Some(d) = yavs_cov::exclude::directive(k, e) else {
+                continue;
+            };
+            seen += 1;
+            assert!(d.contains(" (x > 3, r = '1')"), "{d}");
+            let dir = d.strip_prefix("-- yavs cov exclude ").expect("prefix");
+            let o = analyse_directive(&tmp, cond, dir);
+            assert!(
+                o.status.success() && !text(&o.stderr).contains("error"),
+                "{d}: {}",
+                text(&o.stderr)
+            );
+        }
+        assert!(seen >= 5, "{seen}");
+    }
 }

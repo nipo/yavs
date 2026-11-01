@@ -250,6 +250,7 @@ The short forms are the same exclusions:
 
 ```vhdl
 -- yavs cov exclude 01: impossible handshake       -- one symbol per input, in source order
+-- yavs cov exclude 01 (valid, ready)              -- the same, and yavs checks the inputs
 -- yavs cov exclude (valid=false, ready=true)      -- named inputs; the others are unrestricted
 -- yavs cov exclude (count > 3 = false)            -- any operand, by its text
 -- yavs cov exclude 1--: reset handled elsewhere   -- for: if reset or (valid and ready) then
@@ -267,12 +268,13 @@ A pattern waives combinations. With the word `row` in front it waives one `condi
 
 ```vhdl
 -- yavs cov exclude row -0-: never low in practice     -- one symbol per input, exactly one `0` or `1`
+-- yavs cov exclude row -0- (valid, count < 15, ready) -- the same, and yavs checks the inputs
 -- yavs cov exclude row count < 15 = 0                 -- any operand by its text; value 0, 1, false or true
 if valid and count < 15 and ready then
 ```
 
 `condition row ...` and `expression row ...` say which kind you mean and fit the same constructs as the
-kind words below. `row -0-` is what a report suggests for a missed row. A pattern without `row` always means
+kind words below. A report suggests the form with the inputs, `row -0- (valid, count < 15, ready)`, for a missed row. A pattern without `row` always means
 combinations, even with one symbol set, and `-- yavs coverage exclude condition (valid=false)` keeps meaning the
 combinations with `valid` false: the word `condition` there says which decision, not which kind of requirement.
 
@@ -284,12 +286,15 @@ combinations with `valid` false: the word `condition` there says which decision,
   follows the last `=`, so `(en = '1' = true)` is the operand `en = '1'`. Case, blanks and outer parentheses do not
   count, so `(COUNT>3 = false)` is the same input; case in a string, character literal or extended identifier does.
   Text that is two inputs, or not an input, is an error that lists the inputs, with a near one if there is one.
-- A positional directive (a pattern, or `row` with a pattern) stores the text of its operands in the `.ycov`. When merged databases show the same
-  directive with other operands (they were reordered or replaced under it), that is warning `W0119`, naming both
-  lists, since a position now means another input. Formatting alone does not count. This compares runs, so one
-  database has nothing to compare, and a directive that also moved to another line is not recognised as the same one.
-  Those decisions are different items with their own requirements, so it is a warning and not `E0137`. A named
-  directive stores nothing and never warns: reordering does not change what it means.
+- A pattern may be followed by its inputs in source order: `01 (en, count < 15)`, `row -0- (a, b, c)`, then the reason.
+  yavs compares them with the decision when it analyses the file, with or without `--cov`: inputs that no longer match,
+  in order or text, are the error `E2022`, which shows what it found and expected and the directive to write, with the
+  symbols moved to follow their inputs. Case, blanks, comments and outer parentheses do not count; case in a string,
+  character literal or extended identifier does. The list cannot be read as the named form, which starts with `(` where
+  a pattern would stand, and its entries have no value, so `=` in one is operand text.
+- A pattern without the list, `01` or `row -0-`, is a full form with no warning. Nothing checks it against reordering:
+  if the operands are reordered, its positions mean other inputs, and yavs cannot tell. Write the list, or the named form,
+  which does not depend on the order, where that matters. `--coverage-directives=ignore` reads none of these.
 - Consecutive comments (comments and blank lines may stand between them) apply to the construct
   that follows. Before an `if` they apply to its condition only, not to its `elsif`s or nested
   decisions; a comment right before an `elsif` applies to that condition. A directive before a
@@ -540,7 +545,6 @@ warning into an error, or when the total is below `--fail-under`; a malformed op
 | `W0113` | a `coverage on` without a preceding `coverage off` |
 | `W0114` | an excluded item did run |
 | `W0115` | a signal was left out of toggle coverage because of `--cov-toggle-max` |
-| `W0119` | merged databases disagree about the operands under a positional `-- yavs coverage exclude` directive |
 | `W0120` | something looks like a state machine but is not one `--cov-kind=fsm` measures |
 
 **Tiers and threads.** Counts are the same in every tier and at any `--threads`.

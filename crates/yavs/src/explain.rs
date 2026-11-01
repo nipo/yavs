@@ -226,10 +226,6 @@ const EXPLAIN: &[(&str, &str)] = &[
         "An exclusion file given to `yavs cov report --exclude` cannot be read or has a malformed row or entry (a `.yaml` or `.yml` file is read as YAML, any other as text rows); the note names the line. Rows start with `statement`, `branch`, `condition`, `expression`, `combination`, `toggle`, `instance`, `unit`, `file`, `files`, `files_exclude`, `library`, `entity` or `process`; a YAML entry has the same word as its `kind`. A `library`, `entity` or `process` row over a database written by an older yavs is this error too: such a database does not record those names, so run the simulations again.",
     ),
     (
-        "W0119",
-        "Databases that are merged disagree about what a positional `-- yavs coverage exclude` directive at one place means: its positions were other operands in another run, so the operands were reordered or replaced under it. The waiver of each run still applies to its own decision. Check it, run the simulations again from one source, or use the named form, which does not depend on the order. Formatting alone does not count.",
-    ),
-    (
         "E0138",
         "The file of `yavs cov report --config` or `yavs cov rank --config` cannot be read or is not a coverage configuration file. It is YAML with the keys `exclude`, `root` and `kind`; the note names the line. Nothing is ever read as a configuration without this option.",
     ),
@@ -247,7 +243,7 @@ const EXPLAIN: &[(&str, &str)] = &[
     ),
     (
         "E2022",
-        "A named exclusion (`(valid=false, ready=true)`) names something that is not exactly one input of the expression: an unknown name, a name that is several inputs, or an input given twice. An input is named by its text in the source, in any formatting: `(valid=false)`, `(count > 3 = false)`, `(f(a, b) = true)`, and so is the input of `row count > 3 = 0`. The note lists the inputs; an operand that appears twice can only be addressed by its position.",
+        "A named exclusion (`(valid=false, ready=true)`) names something that is not exactly one input of the expression: an unknown name, a name that is several inputs, or an input given twice. An input is named by its text in the source, in any formatting: `(valid=false)`, `(count > 3 = false)`, `(f(a, b) = true)`, and so is the input of `row count > 3 = 0`. The list after a pattern, `01 (en, count < 15)`, is checked too: inputs that no longer match in order or text are this error, with what it found and expected and the directive to write. Case in a literal or extended identifier counts; other case and blanks do not. The note lists the inputs; an operand that appears twice can only be addressed by its position.",
     ),
     (
         "E2023",

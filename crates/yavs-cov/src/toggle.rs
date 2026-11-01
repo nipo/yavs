@@ -339,7 +339,7 @@ impl Toggles {
                         waivers: Vec::new(),
                         unit: n.unit.clone(),
                         process: String::new(),
-                        inputs: 0,
+                        operands: Vec::new(),
                     },
                 ));
             }
