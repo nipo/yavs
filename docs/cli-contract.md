@@ -526,7 +526,10 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   while the run waits for a debugger, analyses or elaborates. For a parent that holds a pipe to the child and may die
   without a word (SIGKILL, TerminateProcess, a crash): the kernel closes the pipe on Linux and on Windows alike, so no
   signal, process group or polling is involved. Waveform and coverage files are not finished (a Ctrl-C does that). Bytes that
-  arrive on the way are dropped, so the design cannot read standard input (`textio` `input`). Not with `--interactive`
+  arrive on the way are dropped. Standard input is taken for the watcher alone: file descriptor 0 and the Win32 standard input
+  handle point at the null device for the design (`textio` `input` is at its end) and for every library, plugin or embedded
+  interpreter, because on Windows a pending read of a pipe in one thread makes `GetFileType` on the same handle in
+  another block, which hung the start-up of an embedded Python. Not with `--interactive`
   (clap usage error, exit 2). With `--dap=stdio` it does nothing: the protocol stream is standard input, and its end
   already ends the session. Not covered: a child that was started with an inherited terminal or `/dev/null` as standard
   input (nothing closes), and processes yavs starts itself (`--surfer`'s viewer). #940.

@@ -291,6 +291,62 @@ pub fn divert_stdout() -> std::io::Result<std::fs::File> {
     Ok(own.into())
 }
 
+/// Give the caller a private duplicate of standard input and point file descriptor 0 (and the
+/// Win32 standard input handle) at the null device. On Windows a synchronous read of a pipe in
+/// one thread blocks `GetFileType` and the like on the same handle in every other, so an embedded
+/// Python that sets up `sys.stdin`, or a plugin that asks what fd 0 is, would hang for as long as
+/// the caller waits for the pipe to close (#940).
+pub fn divert_stdin() -> std::io::Result<std::fs::File> {
+    #[cfg(unix)]
+    let own = {
+        use std::os::fd::{AsFd, AsRawFd};
+        unsafe extern "C" {
+            fn dup2(old: i32, new: i32) -> i32;
+        }
+        let own = std::io::stdin().as_fd().try_clone_to_owned()?;
+        let null = std::fs::File::open("/dev/null")?;
+        // SAFETY: both descriptors are open; dup2 replaces descriptor 0 atomically.
+        if unsafe { dup2(null.as_raw_fd(), 0) } < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        own
+    };
+    #[cfg(windows)]
+    let own = {
+        use std::os::windows::io::{AsHandle, IntoRawHandle};
+        unsafe extern "C" {
+            fn _open_osfhandle(handle: isize, flags: i32) -> i32;
+            fn _get_osfhandle(fd: i32) -> isize;
+            fn _dup2(old: i32, new: i32) -> i32;
+            fn _close(fd: i32) -> i32;
+        }
+        unsafe extern "system" {
+            fn SetStdHandle(which: u32, handle: *mut std::ffi::c_void) -> i32;
+        }
+        let own = std::io::stdin().as_handle().try_clone_to_owned()?;
+        let null = std::fs::File::open("NUL")?.into_raw_handle();
+        // SAFETY: the null device handle is open and handed to the C runtime, which owns it
+        // from here; the runtime re-points descriptor 0 at a duplicate of it, and the Win32
+        // standard input handle (what Rust's `stdin` reads) follows explicitly.
+        let tmp = unsafe { _open_osfhandle(null as isize, 0) };
+        if tmp < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        let moved = unsafe { _dup2(tmp, 0) };
+        let err = std::io::Error::last_os_error();
+        unsafe { _close(tmp) };
+        if moved < 0 {
+            return Err(err);
+        }
+        let h = unsafe { _get_osfhandle(0) };
+        if unsafe { SetStdHandle(-10i32 as u32, h as *mut std::ffi::c_void) } == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        own
+    };
+    Ok(own.into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

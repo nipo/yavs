@@ -516,7 +516,7 @@ Arguments:
 
 .. option:: --exit-on-stdin-close
 
-   End the run (exit status 130) when standard input is closed or ends, for a parent that holds a pipe to it and may die without a word (SIGKILL, a crash): the run does not outlive it, even while it waits for a debugger. Reads standard input, so not with ``--interactive``; with ``--dap=stdio`` the protocol stream plays this part. Waveform and coverage files are not finished.
+   End the run (exit status 130) when standard input is closed or ends, for a parent that holds a pipe to it and may die without a word (SIGKILL, a crash): the run does not outlive it, even while it waits for a debugger. Takes standard input for itself (the design and every library see the null device), so not with ``--interactive``; with ``--dap=stdio`` the protocol stream plays this part. Waveform and coverage files are not finished.
 
    Cannot be combined with ``--interactive``.
 

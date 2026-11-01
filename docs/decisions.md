@@ -12997,7 +12997,10 @@ index (machine written; a damaged index says to re-analyze).
   process group kill (does not cover SIGKILL), `PR_SET_PDEATHSIG` and a parent pid poll (Unix only, `unsafe`
   or polling, and the signal follows the creating thread, not the process), a Windows-only job object. Cost:
   the design cannot read standard input in such a run; waveform and coverage files are not finished (status
-  130, as a second Ctrl-C). Not covered: a viewer that `--surfer` started keeps running. The VS Code extension
+  130, as a second Ctrl-C). Standard input is diverted: the watcher gets a private duplicate and fd 0 and the
+  Win32 handle point at the null device (`yavs_vhpi::divert_stdin`, as `divert_stdout`), because a blocked
+  synchronous read of the pipe made `GetFileType` on it hang in an embedded Python's start-up on Windows
+  (CI, 2026-11-01). Not covered: a viewer that `--surfer` started keeps running. The VS Code extension
   needs nothing: it uses `--dap=stdio`, whose stream ending already ends the session. (maintainer request, #940.)
 - **Foreign scalar copy-back (#937):** `ForeignArg::ScalarRef` carries the formal's base type and its static
   `(low, high)` (none when the bounds are known at run time: the base type's range then applies), so an `out`

@@ -237,9 +237,9 @@ pub struct RunArgs {
     dap: Option<yavs_dap::Transport>,
     /// End the run (exit status 130) when standard input is closed or ends, for a parent that
     /// holds a pipe to it and may die without a word (SIGKILL, a crash): the run does not outlive
-    /// it, even while it waits for a debugger. Reads standard input, so not with `--interactive`;
-    /// with `--dap=stdio` the protocol stream plays this part. Waveform and coverage files are
-    /// not finished.
+    /// it, even while it waits for a debugger. Takes standard input for itself (the design and
+    /// every library see the null device), so not with `--interactive`; with `--dap=stdio` the
+    /// protocol stream plays this part. Waveform and coverage files are not finished.
     #[arg(long, conflicts_with = "interactive")]
     exit_on_stdin_close: bool,
     /// Run from a `yavs>` prompt: stops at time 0, then takes console commands (`help` lists
@@ -1674,8 +1674,12 @@ pub fn run(
         a.wave = Some(dir.join(format!("{unit}.fst")).display().to_string());
         a.wave_default = true;
     }
-    if a.exit_on_stdin_close && a.dap != Some(yavs_dap::Transport::Stdio) {
-        exit_when_stdin_ends(!a.common.load.is_empty() || !a.vhpi.is_empty());
+    if a.exit_on_stdin_close
+        && a.dap != Some(yavs_dap::Transport::Stdio)
+        && let Err(err) = exit_when_stdin_ends(!a.common.load.is_empty() || !a.vhpi.is_empty())
+    {
+        eprintln!("error: cannot watch standard input for `--exit-on-stdin-close`: {err}");
+        return ExitCode::from(2);
     }
     // First: a token server that is not `<port>:<secret>` or refuses the secret stops the run before
     // any work; one that cannot be reached is a warning, below, and the run has one thread.
@@ -2308,16 +2312,18 @@ fn exit_after_signal(code: u8, keep_exit: bool) -> ! {
     std::process::exit(code.into())
 }
 
-/// `--exit-on-stdin-close`: a thread that reads standard input to its end and then ends the process
-/// as a signal would (status 130). Whatever arrives on the way is dropped.
+/// `--exit-on-stdin-close`: standard input goes to the null device for everything else (a plugin
+/// or foreign library must not touch the pipe, see `yavs_vhpi::divert_stdin`) and a thread reads
+/// the real one to its end, then ends the process as a signal would (status 130). Whatever
+/// arrives on the way is dropped.
 // ponytail: no orderly stop (wave and coverage files stay unfinished); route it through
 // `SimControl::stop` like Ctrl-C if a parent that dies mid-run should leave them complete.
-fn exit_when_stdin_ends(keep_exit: bool) {
+fn exit_when_stdin_ends(keep_exit: bool) -> Result<(), std::io::Error> {
+    let mut stdin = yavs_vhpi::divert_stdin()?;
     std::thread::Builder::new()
         .name("stdin-watch".into())
         .spawn(move || {
             let mut buf = [0u8; 256];
-            let mut stdin = std::io::stdin();
             loop {
                 match stdin.read(&mut buf) {
                     Ok(n) if n > 0 => {}
@@ -2331,8 +2337,8 @@ fn exit_when_stdin_ends(keep_exit: bool) {
                 "yavs: standard input closed (the parent ended): stopping the run"
             );
             exit_after_signal(130, keep_exit)
-        })
-        .expect("cannot start the thread of --exit-on-stdin-close");
+        })?;
+    Ok(())
 }
 
 /// The first Ctrl-C/SIGTERM sets `flag` and ends the run between cycles; the second writes out

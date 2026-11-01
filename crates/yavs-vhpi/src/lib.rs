@@ -32,7 +32,8 @@ mod value;
 
 pub use model::Control;
 pub use plugin::{
-    ForeignLib, LoadError, PluginSpec, bind_foreign, divert_stdout, load, load_foreign,
+    ForeignLib, LoadError, PluginSpec, bind_foreign, divert_stdin, divert_stdout, load,
+    load_foreign,
 };
 pub use sim::VhpiObserver;
 pub use yavs_ffi::ArgLayout;

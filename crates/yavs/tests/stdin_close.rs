@@ -70,3 +70,54 @@ fn not_with_interactive() {
     assert_eq!(o.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&o.stderr).contains("cannot be used with"));
 }
+
+const READER: &str = r#"
+use std.textio.all;
+entity rd is end;
+architecture a of rd is begin
+  process begin
+    assert endfile(input) report "standard input is not at its end" severity failure;
+    report "stdin is empty";
+    wait;
+  end process;
+end;
+"#;
+
+/// With the flag the pipe belongs to the watcher alone (#940): the design, a plugin or an embedded
+/// interpreter that looks at standard input finds the null device, instead of blocking on a pipe
+/// the parent keeps open (on Windows that hung an embedded Python's start-up).
+#[test]
+fn the_design_sees_the_null_device_not_the_pipe() {
+    let tmp = common::tempdir("stdin_null");
+    let src = tmp.join("rd.vhd");
+    std::fs::write(&src, READER).expect("write");
+    let lib = format!("--work=work:{}", tmp.join("lib").display());
+    let st = yavs(&["analyze", "--std=2008", &lib, &src.display().to_string()])
+        .status()
+        .expect("analyze");
+    assert!(st.success());
+
+    let mut child = yavs(&["run", &lib, "--exit-on-stdin-close", "rd"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn");
+    let _pipe = child.stdin.take(); // open until the run is over
+    let t = Instant::now();
+    let status = loop {
+        if let Some(s) = child.try_wait().expect("wait") {
+            break s;
+        }
+        if t.elapsed() > Duration::from_secs(30) {
+            child.kill().expect("kill");
+            panic!("the run blocks on standard input although the parent holds the pipe");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    let out = child.wait_with_output().expect("output");
+    let text =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+    assert!(status.success(), "{text}");
+    assert!(text.contains("stdin is empty"), "{text}");
+}
