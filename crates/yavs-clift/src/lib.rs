@@ -155,6 +155,7 @@ impl yavs_llvm::Generator for First {
             return Err(lower::NOT_CACHED.into());
         }
         self.jit.finalize()?;
+        self.jit.flush_routes();
         let mut out = yavs_llvm::native::Compiled {
             run: frame.map(|(cid, _)| self.jit.entry(cid)),
             nregs: f.reg_ty.len(),

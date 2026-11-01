@@ -41,6 +41,43 @@ The file is the same however it is spelled (#1016): a named file that reached th
 
 Every path yavs writes is dotted through `yavs_diag::dotted`: reports, errors, hierarchy, hang report, activity, profile, coverage reports, JSON. The kernel holds the dotted names; `'path_name`, `'instance_name`, `{i}`, VHPI names, the coverage database and `dataId` keep colons. Both forms are accepted as input. `tools/difftest` normalises the process path.
 
+### Compiled code of an unchanged suite (#1035, 2026-11-01)
+
+`obj/` grew about 10 MB per warm pass of Open Logic for a reason not found until now. Two causes, found by tracing every store
+access and dumping every Cranelift body by key, per command line, over passes with one seed:
+
+- **A key that was not stable.** The body of a function says which native callees it calls directly (and inlines) and which
+  through `Mem::ntab`, and that followed what the policy compiled with it in this run, a function of the samples. Of 13995
+  function and command line pairs, 808 had more than one body over three passes; 792 of those differ in the callees called
+  directly. Each body stayed in the store and was read only by a run that happened to take the same choice. Both routes call the same
+  code, so no result depends on it: pass and fail per test case were the same in every pass of every series. Now the first route of a function
+  is kept (`yavs-clift` `cache.rs` `Routes`, one small entry per program), and those pairs are 53 of 13058. Copies of a process
+  are named by `Program::copy_tag`.
+- **New functions, not new versions.** What is left is functions compiled for the first time in a later pass: warm runs pay less for
+  a link and share the price of a compile among runs (#757), and a function near a threshold is hot in some runs only. It
+  settles: new entries of a pass fall as below, and nothing else in the cache writes new entries by the sixth pass.
+  Still not zero: at pass 10, 22 new objects and under 1 MB. **So an unchanged suite does not reach "writes nothing": it reaches about one percent of the store per pass and falling.**
+
+Whole suite, `--seed` fixed, `-p 3`, Cranelift bench builds, untimed on CCD0, user instructions (compile threads included):
+
+| pass | before: instructions, objects, MB of `obj/` | after |
+|---|---:|---:|
+| 1 | 2513 G, 948, 11 | 2499 G, 1056, 11 |
+| 2 | 2066 G, 1226, 20 | 2012 G, 1242, 17 |
+| 3 | 2045 G, 1538, 33 | 1990 G, 1489, 24 |
+| 4 | 2052 G, 1739, 44 | 2004 G, 1672, 31 |
+| 5 | 2032 G, 1836, 49 | 2003 G, 1768, 34 |
+| 8 | 2050 G, 2142, 78 | 1996 G, 1946, 41 |
+| 10 | 2055 G, 2325, 95 | 2000 G, 1991, 42 |
+
+Objects include one `prof` per command line that ran 100 ms and now one `route` per program (136). Misses of `clif` per pass, traced: 435, 213,
+255, 119 of about 16000 lookups after, 421, 167, 250, 216 before. The analysed units write nothing after the first pass, the stage entries (`sem`, `low`, `init`, `ecall`) nothing after
+the second, `ir` is rewritten less and less (a run that optimised a function the entry lacks; 107, then 57).
+
+Tried and not taken: a list of compiled functions per program instead of per library directory. `Worker::cached` goes by name and size, so a function of the same
+name in another design looks like a link, which is compiled outside the budget. Per program the store is half the size (24 MB, 1165 objects at pass 11),
+at 1.9 percent more instructions cold and 1 percent warm (2547 G; 2010 to 2033 G): those compiles pay for themselves.
+
 ### Size of the compilation cache (#1027, 2026-11-01)
 
 A suite with many testbenches in one library now gets warm: warm runs of a suite of 122 testbenches (6867 test cases, 1258
@@ -61,9 +98,8 @@ its instructions are.
 | after | 92.0 s, 2532 G | 68.6 s, 2064 G | 71.8 s, 2061 G |
 | after | 107.4 s, 2533 G | 79.5 s, 2047 G | 82.1 s, 2074 G |
 
-Disk: the testbench library's cache is 1.2 GB (was about 220 MB). The limit is in `docs/on-disk.rst`. `obj/` still grows by
-about 10 MB per pass here, also with a fixed seed, for a reason not yet found (#1035); bounded by its limit, and entries
-unused for an hour go first. Warm passes with a fixed seed: 2061 G, 2060 G, 2076 G, the same as with the runner's seeds.
+Disk: the testbench library's cache is 1.2 GB (was about 220 MB). The limit is in `docs/on-disk.rst`. Growth of `obj/` over
+warm passes: next section (#1035). Warm passes with a fixed seed: 2061 G, 2060 G, 2076 G, the same as with the runner's seeds.
 
 A suite larger than the limit, measured by building with a smaller limit (instructions of cold, then later passes): about 2.3
 times over, 512 MiB: 2512 G, then 2419 G and 2465 G, and 2526 G, then 2371 to 2422 G. About 6 times over, 200 MiB: 2529 G, then

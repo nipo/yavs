@@ -131,6 +131,9 @@ pub struct Jit {
     /// The functions the policy compiles with the one being compiled: other callees get no variant
     /// of their own here (they are called through `Mem::ntab`); none: all (`compile`).
     allowed: Option<HashSet<FuncId>>,
+    /// Under the policy (`allowed`): how each function called its native callees the first time it
+    /// was made, which makes it the same body, and the same key in the cache, every run (#1035).
+    routes: crate::cache::Routes,
     /// The frame-mode code `f<id>` defined so far: a function is defined once (a compile that
     /// failed for a probe of the cache may have defined it).
     frames: HashMap<FuncId, ClifId>,
@@ -335,6 +338,7 @@ impl Jit {
             via_ntab: flag("YAVS_CLIFT_NTAB", "0") == "1",
             perfmap: (flag("YAVS_CLIFT_PERFMAP", "0") == "1").then(Vec::new),
             allowed: None,
+            routes: Default::default(),
             frames: HashMap::new(),
             cached_only: false,
             missed: false,
@@ -412,7 +416,7 @@ impl Jit {
     /// Make the native-frame variant of `id` if it can have one; whether it has one.
     pub fn make_native(&mut self, prog: &Program, id: FuncId) -> bool {
         matches!(
-            self.native_of(prog, id),
+            self.native_of(prog, id, false),
             NatVar::Direct(_) | NatVar::Indirect
         )
     }
@@ -420,6 +424,11 @@ impl Jit {
     /// Compile only these functions' variants as dependencies from now on (`Generator::tree`).
     pub fn allow(&mut self, ids: &[FuncId]) {
         self.allowed = Some(ids.iter().copied().collect());
+    }
+
+    /// Store the routes of the functions made since the last call.
+    pub fn flush_routes(&mut self) {
+        self.routes.flush();
     }
 
     /// `native_set` of `id` alone.
@@ -431,14 +440,14 @@ impl Jit {
     }
 
     /// The native-frame variant of `id`, made on first use.
-    fn native_of(&mut self, prog: &Program, id: FuncId) -> NatVar {
+    fn native_of(&mut self, prog: &Program, id: FuncId, forced: bool) -> NatVar {
         if !self.native_on {
             return NatVar::No;
         }
         if let Some(r) = self.natives.get(&id) {
             return r.clone().map_or(NatVar::No, NatVar::Direct);
         }
-        if self.allowed.as_ref().is_some_and(|a| !a.contains(&id)) {
+        if !forced && self.allowed.as_ref().is_some_and(|a| !a.contains(&id)) {
             return NatVar::Indirect;
         }
         // A function calling itself, directly or not, calls through `Mem::ntab`.
@@ -605,6 +614,12 @@ impl Jit {
                 })),
             ))
         };
+        let tag = prog.copy_tag(id).unwrap_or(u64::from(id.0));
+        let route = self
+            .allowed
+            .is_some()
+            .then(|| self.routes.get(prog, tag, native))
+            .flatten();
         let mut nats: HashMap<FuncId, Option<Rc<NatInfo>>> = HashMap::new();
         for i in &f.code {
             let (Inst::Call { func, args, .. } | Inst::CallProt { func, args, .. }) = *i else {
@@ -619,7 +634,12 @@ impl Jit {
                 nats.insert(func, None);
                 continue;
             }
-            match self.native_of(prog, func) {
+            let stored = route.as_ref().and_then(|r| r.get(&func.0).copied());
+            if stored == Some(false) {
+                nats.insert(func, None);
+                continue;
+            }
+            match self.native_of(prog, func, stored == Some(true)) {
                 NatVar::Direct(n) => nats.insert(func, Some(n)),
                 NatVar::Indirect => nats.insert(func, None),
                 NatVar::No if native => return Err(format!("{func} has no native variant")),
@@ -839,6 +859,11 @@ impl Jit {
         }
         // The instances of a process with equal code (`Program::copy_of` of data the code does not
         // read) are one function, as the LLVM tier's twins.
+        let fresh_route = (self.allowed.is_some() && route.is_none()).then(|| {
+            nats.iter()
+                .map(|(g, n)| (g.0, n.is_some()))
+                .collect::<Vec<_>>()
+        });
         let body = (!native && prog.base_of(id) != id).then(|| {
             let names: Vec<(u32, u32)> = ctx
                 .func
@@ -860,6 +885,9 @@ impl Jit {
             // twins do the same).
             crate::cache::note_hit();
             self.module.clear_context(&mut ctx);
+            if let Some(r) = fresh_route {
+                self.routes.add(tag, native, r.into_iter());
+            }
             return Ok((c, stepped, None));
         }
         let fid = self
@@ -895,6 +923,9 @@ impl Jit {
                 );
             }
             return Err(format!("Cranelift: {e} (a bug in yavs)"));
+        }
+        if let Some(r) = fresh_route {
+            self.routes.add(tag, native, r.into_iter());
         }
         if let Some(v) = ctx
             .compiled_code()

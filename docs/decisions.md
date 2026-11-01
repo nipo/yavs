@@ -13323,3 +13323,13 @@ code in the compilation cache" and the 512 notes.
   `--yavs-cov-kind` or `--yavs-cov=LETTERS`; a simulation with coverage on and no kind fails before yavs starts, naming the sim
   option and both flags).
 - The VS Code extension and the CI action have no coverage input in this repository: `--cov` with a debug session stays `E0199`.
+
+## Cranelift: a function keeps its first route (yavs-clift, #1035, 2026-11-01)
+
+The body of a function says how it reaches its native callees: directly (so Cranelift may inline them) or through `Mem::ntab`. The tier chose by what the policy compiled with the function, which follows the samples, so one function of an unchanged design had several bodies, each its own key and entry, read only by a run that took the same choice. Both routes run the same code, so results do not depend on it. The LLVM tier does not have this: its callees are always reached through the table.
+
+- **Decision: under the policy, a function keeps the route it was first made with** (`cache::Routes`, a `route` entry per program): a callee the route names direct is made even when the policy did not bring it, a callee it names through the table is not called directly even when it was made. A run with no route takes the policy's choice and stores it; the first line for a function wins over parallel runs. `--tier=clift` makes every variant and has no routes.
+- **Why not a route from the program alone:** calling every callee through the table loses the inlining, and calling every callee directly compiles callees the run never reaches (26 variants, 112 ms of a 120 ms compile, in `Generator::tree`'s row of `crates/yavs-clift/AGENTS.md`). A stored choice costs one small entry.
+- **A wrong line cannot give a wrong result.** The entry is keyed by `yavs_llvm::program_digest` (names, kinds and sizes of the functions, as for the run-to-run profile): another program with the same digest only mis-steers calls.
+- **Ceilings:** a cycle entered at another function can make a second body. A route is not improved later: if a callee becomes hot only in a later run, the function keeps calling it through the table (measured: no cost, warm instructions fell). An unchanged suite still adds functions compiled for the first time for some runs (`docs/STATUS.md` "Compiled code of an unchanged suite"), since a warm run may compile what a cold one could not pay for; this is the policy working, not a key.
+- **Not taken:** one list of compiled functions per program. The list goes by name and size, so a function of another design looks like a link and is compiled outside the budget, which is half of what the store holds but pays for itself: per program, 1.9 percent more instructions cold and 1 percent warm.
