@@ -2,7 +2,8 @@
 """
 yavs lint over the libraries a corpus run built, default rules only: no internal error anywhere, and
 the findings are exactly those of tools/corpus/lint.expected (every definite finding on the corpora
-is confirmed real; a new one is a false finding or a reason to add it to the list).
+is confirmed real; a new one is a false finding or a reason to add it to the list). A file that lint
+cannot read again is listed too, as `<manifest> analysis <file>`: it was not checked.
 
   tools/corpus/lint.py OUT [--bless]
 
@@ -49,8 +50,10 @@ def main():
             maps = [f"--map={x}:{manifest / x}" for x in libs if x != lib]
             cmd = ["yavs", "lint", "--message-format=short", "--color=never", f"--work={lib}:{manifest / lib}"]
             r = subprocess.run(cmd + maps + keep, capture_output=True, text=True, check=False)
-            if r.returncode == 3 or "E9999" in r.stderr:
-                internal.append(f"{manifest.name} {lib}: {r.stderr[-400:]}")
+            unread = re.findall(r"^(.+?):\d+:\d+: error\[E\d+\]", r.stderr, re.M)
+            if r.returncode not in (0, 1, 2) or "E9999" in r.stderr or (r.returncode == 2 and not unread):
+                internal.append(f"{manifest.name} {lib}: status {r.returncode}: {r.stderr[-400:]}")
+            found.update(f"{manifest.name} analysis {relative(f)}" for f in unread)
             for m in re.finditer(r"^(.+?):(\d+):\d+: \w+\[(lint_\d+)\]", r.stderr, re.M):
                 found.add(f"{manifest.name} {m[3]} {relative(m[1])}:{m[2]}")
     for i in internal:

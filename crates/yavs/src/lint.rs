@@ -221,8 +221,12 @@ fn read_file(path: &Path) -> Result<String, Box<Diagnostic>> {
 /// The configuration and waivers named or found, with their errors naming the file.
 fn load_settings(a: &Args) -> Result<(Config, Waivers, PathBuf), Box<Diagnostic>> {
     let cwd = std::env::current_dir().unwrap_or_default();
+    // In the message: the short format, which CI reads, prints no notes.
     let bad = |p: &Path, e: String| {
-        Box::new(Diagnostic::error("E0134", format!("invalid file `{}`", p.display())).with_note(e))
+        Box::new(Diagnostic::error(
+            "E0134",
+            format!("invalid file `{}`: {e}", p.display()),
+        ))
     };
     let config = a
         .config

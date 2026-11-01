@@ -280,8 +280,8 @@ fn exclude_in_the_configuration() {
     );
 }
 
-/// lint_782 names what analysis rejects first (E1403), so the run says so with that code, and the
-/// rule stays only for a configuration to name.
+/// lint_782 and lint_006 name what analysis rejects first (E1403, E0002), so the run says so with
+/// that code, and the rules stay only for a configuration to name.
 #[test]
 fn what_analysis_rejects_first() {
     let dir = tempdir("lint");
@@ -296,13 +296,14 @@ fn what_analysis_rejects_first() {
             "entity t is end entity;\narchitecture s of t is begin end architecture;\nconfiguration c of t is\n  for no_such\n  end for;\nend configuration;\n",
             "E1002",
         ),
+        ("context.vhd", "library ieee;\n", "E0002"),
     ] {
         std::fs::write(dir.join(name), source).unwrap();
         let o = yavs(&dir, &["lint", "--message-format=short", name]);
         assert!(stderr(&o).contains(code), "{}", stderr(&o));
         assert_eq!(status(&o), 2);
     }
-    let cfg = "rule:\n  lint_751:\n    disable: true\n  lint_782:\n    disable: true\n";
+    let cfg = "rule:\n  lint_006:\n    disable: true\n  lint_751:\n    disable: true\n  lint_782:\n    disable: true\n";
     std::fs::write(dir.join("yavs-lint.yaml"), cfg).unwrap();
     let o = yavs(&dir, &["lint", "--list-rules"]);
     assert_eq!(status(&o), 0, "a configuration may name it");
@@ -613,4 +614,18 @@ fn usage() {
     let o = yavs(&dir, &["lint", "--work=std:x", "a.vhd"]);
     assert_eq!(status(&o), 2);
     assert!(stderr(&o).contains("E0102"), "{}", stderr(&o));
+    // The short format, which prints no notes, still names what is wrong.
+    let bad = "rule:\n  lint_100:\n    disable: true\n";
+    std::fs::write(dir.join("bad.yaml"), bad).unwrap();
+    let o = yavs(
+        &dir,
+        &[
+            "lint",
+            "--message-format=short",
+            "--config=bad.yaml",
+            "a.vhd",
+        ],
+    );
+    assert_eq!(status(&o), 2);
+    assert!(stderr(&o).contains("`lint_100`"), "{}", stderr(&o));
 }
