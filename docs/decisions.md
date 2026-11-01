@@ -2603,7 +2603,10 @@ scalars; the on-disk format is implementation-defined, so it is fixed here (yavs
 
 - `--json` (schema version 1, documented in `docs/coverage.md`), `--lcov` and `--sonarqube`. They leave excluded items out,
   like Cobertura, and follow `--kind` and `--root`. LCOV and SonarQube hold branch arms only, not condition rows: their
-  formats name lines and branches. UCIS was dropped by the maintainer. The LCOV and SonarQube exports are labelled unvalidated: no real consumer has read them.
+  formats name lines and branches. UCIS was dropped by the maintainer. The SonarQube export is labelled unvalidated: no real scanner has read it.
+  The LCOV export was read by lcov 1.16 (`--summary`, `--list`, `-a`, `genhtml`) with line and branch totals equal to those of `--json`
+  counted per source line and summed over instances (#1020, 2026-11-01); that found two defects, fixed: a loop whose body never ran got `-` (not evaluated) instead of 0, and a file with branches and no `DA` line (`--kind=branch`, excluded statements) was dropped by lcov, so a line with arms and
+  no statement now gets a `DA` from its most evaluated decision.
 
 ## Embedded sources in the coverage database (yavs-cov, CLI, vunit-yavs, #1020, user 2026-11-01)
 

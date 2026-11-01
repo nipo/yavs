@@ -741,7 +741,12 @@ fn exports_follow_exclusions_kinds_and_root() {
             .iter()
             .all(|i| i["kind"] == "branch")
     );
-    assert!(!l.contains("\nDA:"), "{l}");
+    // LCOV drops a file without a `DA` record, so a branch line has one without its statement.
+    let da: Vec<&str> = l.lines().filter_map(|r| r.strip_prefix("DA:")).collect();
+    for r in l.lines().filter_map(|r| r.strip_prefix("BRDA:")) {
+        let at = r.split(',').next().expect("line");
+        assert!(da.iter().any(|d| d.split(',').next() == Some(at)), "{l}");
+    }
     // `--root`: a file outside it keeps its full path.
     std::fs::create_dir_all(tmp.join("sub")).expect("dir");
     let (j, l, s) = run(&["--root", "sub"]);

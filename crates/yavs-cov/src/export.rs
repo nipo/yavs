@@ -44,8 +44,19 @@ fn lines(db: &Database) -> BTreeMap<&str, BTreeMap<u32, Line>> {
     files
 }
 
+impl Line {
+    /// The count of a `DA` record: the most executed statement on the line, else (the statement
+    /// is left out by `--kind` or an exclusion) the most evaluated decision, as the sum of its
+    /// arms. LCOV drops a file without any `DA` record, so a line with branches needs one.
+    fn da(&self) -> Option<u64> {
+        self.hits
+            .or_else(|| self.arms.values().map(|a| a.values().sum::<u64>()).max())
+    }
+}
+
 impl Database {
-    /// The LCOV tracefile: a line per statement line (`DA`), a branch per arm (`BRDA`). Toggles,
+    /// The LCOV tracefile: a line per statement line, or per line with arms when its statement is
+    /// left out (`DA`), a branch per arm (`BRDA`). Toggles,
     /// conditions, expressions, combinations, instances and tests have no place in it.
     pub fn lcov(&self) -> String {
         let mut s = String::new();
@@ -54,8 +65,9 @@ impl Database {
             let (mut brf, mut brh) = (0, 0);
             for (n, l) in &ls {
                 for (block, arms) in l.arms.values().enumerate() {
-                    // `-` is a decision that never ran, 0 an arm it did not take.
-                    let ran = arms.values().any(|&c| c > 0);
+                    // `-` is a decision that never ran, 0 an arm it did not take (a loop whose
+                    // body never ran still evaluated its condition).
+                    let ran = l.da().is_some_and(|h| h > 0) || arms.values().any(|&c| c > 0);
                     for (arm, c) in arms {
                         brf += 1;
                         brh += usize::from(*c > 0);
@@ -66,7 +78,7 @@ impl Database {
             }
             let (mut lf, mut lh) = (0, 0);
             for (n, l) in &ls {
-                if let Some(h) = l.hits {
+                if let Some(h) = l.da() {
                     lf += 1;
                     lh += usize::from(h > 0);
                     let _ = writeln!(s, "DA:{n},{h}");
@@ -258,15 +270,22 @@ mod tests {
     use crate::{Database, Detail, Entry, Key, Kind};
 
     fn db() -> Database {
+        db_with(&[])
+    }
+
+    fn db_with(more: &[(Kind, u64, u32, u64, &str)]) -> Database {
         let mut d = Database::default();
-        for (kind, hash, line, count, text) in [
+        for &(kind, hash, line, count, text) in [
             (Kind::Statement, 1, 3, 2, "x := 1;"),
             (Kind::Statement, 2, 4, 0, "y := 1;"),
             (Kind::Branch(0), 3, 5, 4, "if a"),
             (Kind::Branch(1), 3, 5, 0, "else"),
             (Kind::Branch(0), 4, 9, 0, "if b"),
             (Kind::Branch(1), 4, 9, 0, "(no arm taken)"),
-        ] {
+        ]
+        .iter()
+        .chain(more)
+        {
             let key = Key {
                 path: ":t".into(),
                 kind,
@@ -296,9 +315,28 @@ mod tests {
         assert_eq!(
             db().lcov(),
             "TN:\nSF:a&b.vhd\nBRDA:5,0,0,4\nBRDA:5,0,1,0\nBRDA:9,0,0,-\nBRDA:9,0,1,-\n\
-             DA:3,2\nDA:4,0\nLF:2\nLH:1\nBRF:4\nBRH:1\nend_of_record\n"
+             DA:3,2\nDA:4,0\nDA:5,4\nDA:9,0\nLF:4\nLH:2\nBRF:4\nBRH:1\nend_of_record\n"
         );
         assert_eq!(Database::default().lcov(), "");
+    }
+
+    /// A loop whose body never ran still evaluated its condition (`0`, not `-`); a line whose
+    /// statement is not in the report still gets a `DA` record from its arms, as LCOV drops a
+    /// file without one.
+    #[test]
+    fn lcov_loop_never_entered_and_lines_without_a_statement() {
+        let s = db_with(&[
+            (Kind::Statement, 5, 12, 1, "while c loop"),
+            (Kind::Branch(0), 5, 12, 0, "loop body"),
+            (Kind::Branch(0), 6, 20, 3, "if d"),
+            (Kind::Branch(1), 6, 20, 1, "else"),
+        ])
+        .lcov();
+        assert!(s.contains("BRDA:12,0,0,0\n"), "{s}");
+        assert!(s.contains("DA:12,1\n"), "{s}");
+        assert!(s.contains("BRDA:20,0,0,3\nBRDA:20,0,1,1\n"), "{s}");
+        assert!(s.contains("DA:20,4\n"), "{s}");
+        assert!(s.contains("LF:6\nLH:4\nBRF:7\nBRH:3\n"), "{s}");
     }
 
     #[test]

@@ -333,9 +333,15 @@ this schema is what a tool should read, and its `version` goes up when a field c
 Beside `items`, `unmeasured` lists what looks like a state machine and is not measured: `file`, `line` and `text`.
 Rows of `assert` and `wait until` conditions (`--cov-kind=assert`) are `condition` items.
 
-**LCOV** (`--lcov FILE`) has `DA` per line with a statement and `BRDA` per branch arm, summed over instances. It
-cannot hold toggles, conditions, expressions, combinations, state machines, instances or tests. This export is **not validated**: it
-follows the tracefile format of the LCOV documentation and no LCOV tool has read it here.
+**LCOV** (`--lcov FILE`) has `DA` per line with a statement and `BRDA` per branch arm, summed over instances. A line
+whose statement is left out (`--kind=branch`, an exclusion) still gets a `DA` from its most evaluated decision, as
+LCOV drops a file without any. A `BRDA` count of `-` is a decision whose line never ran, `0` an arm that was not taken.
+It cannot hold toggles, conditions, expressions, combinations, state machines, instances or tests. The tracefile was
+checked with lcov 1.16: `lcov --summary`, `--list` and `-a` (merging two tracefiles gives the totals of `yavs cov merge`)
+and `genhtml --branch-coverage` read it. Its totals match `--json` once lines are counted per source line (a line
+with several statements counts once) and arms are summed over instances; the `--json` totals count per item and per
+instance, so they are higher for a design with repeated instances. A relative `SF` path is
+resolved from the directory genhtml runs in, so run it from the `--root` directory (the working directory by default).
 
 **SonarQube** (`--sonarqube FILE`) is the generic coverage format of SonarSource's documentation, for
 `sonar.coverageReportPaths`: a `lineToCover` per line, with its branches. It cannot hold what LCOV cannot, and neither lists what was not measured as a state machine. This export is
