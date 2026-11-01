@@ -362,6 +362,11 @@ Compiled tiers: Cranelift
      - any value
      - unset
      - ``run``
+   * - ``YAVS_CLIFT_HUGE``
+     - ``0``: compiled code stays out of the huge-page arena.
+     - ``0``, ``1``
+     - ``1``
+     - ``run``
    * - ``YAVS_CLIFT_INLINE``
      - Largest body that is inlined. ``0``: none.
      - a number

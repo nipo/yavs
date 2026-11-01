@@ -246,6 +246,10 @@ impl Jit {
         ] {
             b.symbol(n, p);
         }
+        #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+        if let Some(p) = crate::hugearena::provider() {
+            b.memory_provider(p);
+        }
         let mut module = JITModule::new(b);
         let mut imp = |name: &str, params: &[Type], ret: Option<Type>| {
             let mut s = module.make_signature();

@@ -11,6 +11,8 @@
 
 #[cfg(feature = "clift")]
 mod cache;
+#[cfg(all(feature = "clift", target_os = "linux", target_arch = "x86_64"))]
+mod hugearena;
 #[cfg(feature = "clift")]
 mod lower;
 
