@@ -60,7 +60,10 @@ impl Fx<'_, '_> {
         Ok(())
     }
 
-    /// `e`, or the first operand of the predefined `and`s it is made of that is an edge idiom.
+    /// `e`, or the first operand of the predefined `and`s it is made of that is an edge idiom,
+    /// when nothing to its left can do anything but read: the wait skips the evaluations without
+    /// an edge, in which a false edge test stops at its short-circuit but what stands left of it
+    /// still runs (#1022).
     fn edge_conjunct(&self, e: ExprId) -> Option<ExprId> {
         let db = self.db;
         if db.edge_shape(e).is_some() {
@@ -78,10 +81,45 @@ impl Fx<'_, '_> {
         if !db.decls[*callee].implicit || db.decls[*callee].name.key().as_str() != "\"and\"" {
             return None;
         }
-        args.iter().find_map(|a| match a.actual {
-            Actual::Expr(x) => self.edge_conjunct(x),
-            _ => None,
-        })
+        for a in args {
+            let Actual::Expr(x) = a.actual else {
+                return None;
+            };
+            if let Some(found) = self.edge_conjunct(x) {
+                return Some(found);
+            }
+            if !self.only_reads(x) {
+                return None;
+            }
+        }
+        None
+    }
+
+    /// Whether evaluating `e` has no effect and cannot fail: names, constants and predefined
+    /// relations and logic on them. A user function may report or keep state, `ieee` ones warn on
+    /// metavalues, an index or arithmetic may fail.
+    fn only_reads(&self, e: ExprId) -> bool {
+        use yavs_sem::decl::Body;
+        use yavs_sem::implicit::Family as F;
+        let db = self.db;
+        let mut ok = true;
+        db.walk_expr(e, &mut |x| {
+            ok &= db.exprs[x].value.is_some()
+                || match &db.exprs[x].kind {
+                    ExprKind::Obj(_) | ExprKind::Const(_) => true,
+                    ExprKind::Call { callee, .. } => {
+                        db.decls[*callee].kind.subprogram().is_some_and(|sp| {
+                            matches!(&sp.body, Body::Implicit(op) if matches!(
+                                op.family,
+                                F::Eq | F::Neq | F::Lt | F::Le | F::Gt | F::Ge | F::And | F::Or
+                                    | F::Nand | F::Nor | F::Xor | F::Xnor | F::Not
+                            ))
+                        })
+                    }
+                    _ => false,
+                };
+        });
+        ok
     }
 
     /// The level `x = '1'` / `'0'` of a `wait until` that waits on `x` alone and is resumed by
