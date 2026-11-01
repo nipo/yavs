@@ -194,7 +194,7 @@ Not implemented, so the run or the analysis stops with an error that names the c
 - Attributes of a range attribute other than `'left`, `'right`, `'low`, `'high` and `'ascending`,
   such as `t'range'length` or any attribute of `t'reverse_range`. These are reported as not
   implemented (`E1999`), with a note that says it is a limitation of yavs.
-- `std.env` PSL state functions (see LCS-050). `SetVhdlAssertFormat` changes the message text of a report only: the `** Severity: time:` line around it stays.
+- `std.env` PSL state functions (see LCS-050). `SetVhdlAssertFormat` (`{s}`, `{S}`, `{r}`, `{t}`, `{i}`, with an alignment and width such as `{r: <10}` and a time unit such as `{t:.ns}`; `GetVhdlAssertFormat` returns it, and an invalid format gives `Valid => false`) changes the message text of a report only: the `** Severity: time:` line around it stays.
 - Range records known only at run time (LCS-099).
 - PSL outside [the subset](psl.md).
 
