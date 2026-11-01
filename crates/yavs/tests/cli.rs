@@ -2350,6 +2350,118 @@ fn file_loaded_on_demand_is_not_analyzed_again() {
     }
 }
 
+/// How a file is spelled does not change the verdict: `th` loads the package from the library's
+/// record, and naming its file through `..` or a symlink kept it as naming it plainly did, with or
+/// without the cache (E1301 only without it, #1016).
+#[test]
+fn file_loaded_on_demand_is_one_file_however_spelled() {
+    let t = tempfile::tempdir().unwrap();
+    let dir = t.path();
+    std::fs::create_dir(dir.join("sub")).unwrap();
+    let yavs = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_yavs"))
+            .current_dir(dir)
+            .args(["--color", "never"])
+            .args(args)
+            .output()
+            .expect("run")
+    };
+    for (name, text) in [
+        ("cmd.vhd", "package cmd is type t is (a, b); end package;"),
+        (
+            "fetch.vhd",
+            "use work.cmd.all;
+             package fetch_pkg is function fetch return t; end package;
+             package body fetch_pkg is
+               function fetch return t is begin return a; end;
+             end package body;",
+        ),
+        (
+            "sup.vhd",
+            "use work.fetch_pkg.all;
+             package sup is procedure get; end package;
+             package body sup is
+               procedure get is
+                 variable v : work.cmd.t;
+               begin
+                 v := fetch;
+               end;
+             end package body;",
+        ),
+        (
+            "th.vhd",
+            "use work.sup.all;
+             entity th is end;
+             architecture a of th is begin end;",
+        ),
+    ] {
+        std::fs::write(dir.join(name), text).unwrap();
+    }
+    let mut spellings = vec!["sub/../cmd.vhd".to_string()];
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(dir, dir.join("link")).unwrap();
+        spellings.push("link/cmd.vhd".to_string());
+    }
+    for spelled in &spellings {
+        for extra in [&[][..], &["--no-cache"][..]] {
+            let lib = format!("--work=work:w{}{}", spelled.len(), extra.len());
+            let analyze = |files: &[&str]| {
+                let mut args = vec!["analyze", "--std=2008", &lib];
+                args.extend(extra);
+                args.extend(files);
+                yavs(&args)
+            };
+            let o = analyze(&["cmd.vhd", "fetch.vhd", "sup.vhd", "th.vhd"]);
+            assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+            let o = analyze(&["th.vhd", spelled, "sup.vhd"]);
+            assert!(
+                o.status.success(),
+                "{spelled} {extra:?}: {}",
+                String::from_utf8_lossy(&o.stderr)
+            );
+        }
+    }
+}
+
+/// A unit that failed on demand is reported once, however its file is named next (#1016).
+#[test]
+fn failed_unit_reported_once_however_spelled() {
+    let t = tempfile::tempdir().unwrap();
+    let dir = t.path();
+    std::fs::create_dir(dir.join("sub")).unwrap();
+    let yavs = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_yavs"))
+            .current_dir(dir)
+            .args(["--color", "never", "--message-format", "short"])
+            .args(args)
+            .output()
+            .expect("run")
+    };
+    let bad = dir.join("bad.vhd");
+    std::fs::write(
+        &bad,
+        "package bad is constant c : integer := 1; end package;",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("u.vhd"),
+        "use work.bad.all; package u is constant e : integer := c; end package;",
+    )
+    .unwrap();
+    let work = "--work=work:w";
+    let o = yavs(&["analyze", "--std=2008", work, "bad.vhd", "u.vhd"]);
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    std::fs::write(
+        &bad,
+        "package bad is constant c : nonesuch := 1; end package;",
+    )
+    .unwrap();
+    let o = yavs(&["lint", "--std=2008", work, "u.vhd", "sub/../bad.vhd"]);
+    let all = String::from_utf8_lossy(&o.stderr).to_string() + &String::from_utf8_lossy(&o.stdout);
+    assert_eq!(all.matches("E1100").count(), 1, "{all}");
+}
+
 fn yavs_cmd(args: &[&str]) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_yavs"))
         .args(["--color", "never"])

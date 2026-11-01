@@ -33,6 +33,8 @@ A message that names two different types, subtypes, subprograms or other declara
 
 A file of a closure analyzes all its units, so an unused architecture may load a package on demand before the closure reaches the package's own file. That file keeps the loaded units instead of analyzing them again. Types that print the same name now show where each is declared.
 
+The file is the same however it is spelled (#1016): a named file that reached the loaded unit through `..` or a symlink kept it only on a cache hit, and without the cache a second copy rejected valid code. Known gap: the analysed-unit cache still keys on the spelling, so units analyzed by relative name miss on the first two runs of a closure; a file analyzed by two spellings leaves a dropped unit under the old entry, which reports `L0034` instead of `L0031`. Neither changes a verdict.
+
 ### Dotted paths (#975, 2026-10-31)
 
 `{i}` of `SetVhdlAssertFormat` is `'instance_name` of the region around the process, without the last colon (#982, 2026-11-01; test `assert_format_i_is_the_instance_name`).

@@ -34,6 +34,10 @@ test cases of the same testbench, reuse it. Short tests then mostly skip analysi
 * The analyzed ``std`` and ``ieee`` packages are kept once per user (:doc:`on-disk`).
 * Analyze the files of one library and standard in one ``analyze`` call rather than one call per
   file: the call shares its work.
+* Analyze by absolute path if you can. ``elab`` and ``run`` look up what ``analyze`` kept under the
+  absolute path of each file, so units analyzed under a relative name (``file.vhd``, ``./file.vhd``)
+  are analyzed again on the first two runs of each design. The results are the same; only the time
+  differs. The third run reuses its own entry either way.
 
 Threads
 -------

@@ -847,19 +847,21 @@ impl Db {
         }
     }
 
-    /// Whether this session already analyzed unit `key` of `lib` from `path`; `known`: the session
-    /// knew the file before it was named now, so a failed unit failed from it.
+    /// Whether this session already analyzed unit `key` of `lib` from the file `path` names, however
+    /// it is spelled (#1016); `known`: the session knew the file by this spelling before it was
+    /// named now, so a failed unit failed from it.
     fn analyzed_from(&self, lib: LibId, key: UnitKey, path: &Path, known: bool) -> bool {
         match self.libs[lib].units.get(&key) {
             Some(UnitSlot::Done(u)) => {
-                let from = &self.sources.get(self.units[*u].file).path;
-                from.as_str() == path.as_os_str()
-                    || matches!(
-                        (std::path::absolute(from), std::path::absolute(path)),
-                        (Ok(a), Ok(b)) if a == b
-                    )
+                same_file(Path::new(&self.sources.get(self.units[*u].file).path), path)
             }
-            Some(UnitSlot::Failed) => known,
+            Some(UnitSlot::Failed) => {
+                known
+                    || self
+                        .files
+                        .keys()
+                        .any(|(l, p)| *l == lib && p != path && same_file(p, path))
+            }
             _ => false,
         }
     }
@@ -1108,6 +1110,11 @@ impl Db {
         rec.weak = unit.weak_refs.clone();
         rec
     }
+}
+
+/// Whether two paths name one file: `..` and symlinks count, which `std::path::absolute` leaves.
+fn same_file(a: &Path, b: &Path) -> bool {
+    a == b || matches!((a.canonicalize(), b.canonicalize()), (Ok(a), Ok(b)) if a == b)
 }
 
 fn lib_kind(k: UnitKind) -> LibKind {

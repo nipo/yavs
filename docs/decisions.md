@@ -5503,6 +5503,7 @@ library testbench analysed the whole closure from source (3.4 times sim1). The u
 to keep analysed units in the library directories, keyed on their source, the build and their
 dependencies; this overrides "no incremental compilation cache" for analysis too. Decisions:
 
+- **The key holds the path as spelled, on purpose (#1016).** An entry stores the file's path as text (the source map, so what diagnostics print, and the file step of a replay), so a key of the absolute path would replay another spelling's text. `elab` and `run` take paths from the manifest (absolute, `std::path::absolute`), so a unit analyzed by relative name is a miss for them: only time, never a result. Whether two paths name one file for the session is `loader.rs` `same_file` (`canonicalize`), not the key.
 - **One entry per design unit**, `<lib dir>/yavs-cache/units/unit-<key>.img`, written by `analyze` when it
   analyses the unit from source (also a dependency it had to analyse, into that library's directory, and
   `std`/`ieee` units into the shared store, see "Shared std/ieee units", before 2026-10-26 into the work library's), read by `analyze`, `elab` and `run`; `elab` and `run` never
