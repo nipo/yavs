@@ -19,7 +19,7 @@ VUNIT_SIMULATOR=yavs python run.py
 ```
 
 The [guide](https://yavs.readthedocs.io/en/latest/vunit.html) goes from installing to running, debugging and
-coverage. `yavs` is found on `PATH`, or in the directory named by `VUNIT_YAVS_PATH`. It needs VUnit 5.0.0.dev16
+coverage, and the [debugger tutorial](https://yavs.readthedocs.io/en/latest/debugger-tutorial.html) debugs a failing test with `--yavs-debug`, `--yavs-surfer` and `--yavs-interactive`. `yavs` is found on `PATH`, or in the directory named by `VUNIT_YAVS_PATH`. It needs VUnit 5.0.0.dev16
 or later (`pip install vunit-yavs` installs it, a pre-release) and yavs 0.11.0 or later.
 
 ## Options
@@ -40,7 +40,7 @@ or later (`pip install vunit-yavs` installs it, a pre-release) and yavs 0.11.0 o
 | Command line | What it does |
 |---|---|
 | `--yavs-debug[=PORT]` | Runs the selected test under `yavs run --dap=PORT` (default 4711, `0` picks a free port) and prints where to attach; write the port as `--yavs-debug=PORT` |
-| `--yavs-interactive` | Runs the selected test at the yavs console: a `yavs>` prompt at time 0 (below) |
+| `--yavs-interactive` | Runs the selected test at the yavs console: a `yavs>` prompt at time 0 (below). Not with `--yavs-debug`: one of them drives the run |
 | `--yavs-surfer[=HOST:PORT]` | Shows the waves of the one selected test in Surfer 0.6.0 or later while it runs (`yavs run --surfer`); strictly opt-in. Combines with `--yavs-debug` and `--yavs-interactive`, where the cursor follows the stops |
 | `--yavs-max-threads N` | `yavs.max_threads` for every test that does not set it (environment variable `VUNIT_YAVS_MAX_THREADS` for run scripts with a command line of their own) |
 | `--yavs-lint` | After compiling, runs `yavs lint` on every library of the project that is not external; a finding of severity error fails the compile step. To leave out VUnit's own libraries, put `exclude: ['**/vunit/vhdl/**']` in `yavs-lint.yaml` |
@@ -51,7 +51,7 @@ or later (`pip install vunit-yavs` installs it, a pre-release) and yavs 0.11.0 o
 | `--yavs-jobserver` | Lends the CPU slots of `-p N` that no test uses to the running simulations through a token server (below) |
 
 Compiling: consecutive files of one library, standard and flags go to `yavs analyze` in one call. With a VUnit that has
-`--batch-compile` and `--parallel-compile`, those flags work with yavs too (several files per call, several calls at once).
+`--batch-compile` and `--parallel-compile` (5.0.0.dev16 does not have them), those flags work with yavs too (several files per call, several calls at once).
 
 Without `yavs.max_threads` or `--yavs-max-threads` no thread count is passed, and yavs runs with
 its default, unless the token server runs (`--threads=min(N, 4)` for `-p N`, below). An explicit `--threads` in `yavs.sim_flags` comes after the cap and wins.
@@ -127,10 +127,6 @@ regression, a few long tests on a machine of idle slots, gets faster on designs 
 run in parallel well. If the server cannot start (a blocked local socket) the run warns and every
 simulation uses one thread.
 
-## Licence
-
-Mozilla Public License 2.0 (https://mozilla.org/MPL/2.0/), see the header of each file.
-
 ## The console
 
 ```sh
@@ -154,3 +150,7 @@ which behave as in VUnit's other simulator interfaces. They are also in the Debu
 The yavs `restart` goes back to time 0 with the design as loaded; `vunit_restart` compiles first. Init files are
 files of console commands; `$vunit_tb_path` and `$vunit_tb_name` are replaced as VUnit defines them. When you `quit`,
 the test is reported as usual. A session that compiled at `vunit_compile` and failed keeps the old design loaded.
+
+## Licence
+
+Mozilla Public License 2.0 (https://mozilla.org/MPL/2.0/), see the header of each file.

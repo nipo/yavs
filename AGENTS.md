@@ -47,7 +47,7 @@ to, and those documents win over your memory.
 | `crates/yavs-vhpi` | VHPI C ABI and plugin loading; vendored IEEE `vhpi_user.h` |
 | `crates/yavs-wave` | FST waveform sink |
 | `crates/yavs-dap` | Debug Adapter Protocol server (`yavs run --dap`) |
-| `crates/yavs-cov` | Code coverage: counters to a mergeable database, text and Cobertura reports |
+| `crates/yavs-cov` | Code coverage: counters to a mergeable database, text, HTML and Cobertura reports |
 | `crates/yavs-lint` | `yavs lint`: rules over the analysed HIR, certainty classes, configuration, waivers, reports |
 | `crates/yavs-llvm` | LLVM 21 ORC JIT tier, behind the `llvm` feature (not a default feature; not shipped in the release archives, build it from source) |
 | `crates/yavs-clift` | Cranelift tier (#481), behind the `clift` feature (off by default; the compiled tier of the release archives); shares `yavs-llvm`'s `rt` module |

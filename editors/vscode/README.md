@@ -96,10 +96,10 @@ The design on the command line is the design that is debugged; `args` must not c
 `yavs run --dap=PORT` listens on `127.0.0.1:PORT`, prints `yavs: DAP listening on
 127.0.0.1:PORT` and `yavs: waiting for a debugger on port PORT` on standard error, and holds the
 simulation until a client attaches. This lets a script or a test runner start the run and VS Code
-join it. Use the configuration (the snippet "yavs: Attach to yavs" inserts it):
+join it. Run "yavs: Attach" from the command palette, or use this configuration (the snippet "yavs: Attach" inserts it):
 
 ```json
-{ "type": "yavs", "request": "launch", "name": "Attach to yavs", "port": 4711 }
+{ "type": "yavs", "request": "attach", "name": "yavs: Attach", "port": 4711 }
 ```
 
 Set breakpoints, start the configuration with F5, and the run continues to the first one.
@@ -108,8 +108,8 @@ Set breakpoints, start the configuration with F5, and the run continues to the f
 
 - Line breakpoints, with a condition (a VHDL boolean expression over locals and visible
   signals) and a hit condition (`3`, `>= 3`, `% 3`). A breakpoint on a line without a statement
-  moves to the next line that has one. Function calls and attributes in conditions are not
-  supported: such a breakpoint shows as unverified with the reason.
+  moves to the next line that has one. Attributes and function calls other than `to_integer` in
+  conditions are not supported: such a breakpoint shows as unverified with the reason.
 - Continue, pause, step over, into and out. The call stack lists one thread per process.
 - The Variables view shows locals, the signals and ports around the process, the generics of its
   instance and a Hierarchy scope. Records expand by field, large arrays in pages. "Set Value"
@@ -138,6 +138,7 @@ Commands in the palette, available only while a `yavs` session runs:
 | yavs: Clear signal value breakpoints | remove those |
 | yavs: Show Drivers | in the context menu of a signal in the Variables view: each driver, its value and source line, in the Debug Console |
 | yavs: Find Signals or Variables... | search the hierarchy with a pattern; what you pick is added to the wave, or else examined |
+| Add to Wave | in the context menu of the Variables and Watch views and of a selection or word in a VHDL file, in a session with Surfer: adds the signal or process variable, with its history since time 0 |
 | yavs: Force a signal..., Deposit a signal value..., Release a forced signal... | also in the context menu of a signal in the Variables view; the target may be a field, an element or a slice |
 
 Values are VHDL literals of the target's type: `'1'`, `42`, `16#FF#`, `"01ZX"`, `x"A5"`, `10 ns`,
@@ -147,7 +148,11 @@ release ends any force.
 
 ## Waveforms
 
-The debugger runs with the same recorder as `--wave`. Add `--wave=out.fst` to `args` (or to the
+Set `surfer` in the launch configuration (`--surfer` for an attach session, `--yavs-surfer` with a test runner) to see the
+waves in [Surfer](https://surfer-project.org) 0.6.0 or later while the session runs: the cursor follows the stops, and its
+"go to declaration" opens the file. See [waveforms](https://yavs.readthedocs.io/en/latest/waveforms.html).
+
+Without Surfer, the debugger runs with the same recorder as `--wave`. Add `--wave=out.fst` to `args` (or to the
 `yavs run` of an attach session) and open the file in a waveform viewer; under the debugger yavs
 writes the file out at every stop, so it holds the completed time steps up to the stop. The
 server can also stream waves to a client (`yavs/waveSubscribe`); this extension does not use it.
