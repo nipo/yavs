@@ -821,7 +821,7 @@ yavs lint [FILE|DIR ...] [--recursive] [--work=NAME:PATH] [--map=NAME:PATH ...] 
 - Configuration: `--config`, else `yavs-lint.yaml` in the working directory or an ancestor. Waivers: `--waivers`,
   else `yavs-lint-waivers.yaml` next to the configuration or in the working directory or an ancestor. Not a contract
   with test runners; `analyze`, `elab` and `run` never read them.
-- A waiver's `rule` and `files` are one word or a list. A pattern is relative to the waiver file and covers a file or a directory above it, like `exclude`; it also matches the path as reported, and a bare name that file anywhere. A pattern that covers no file of the run and no VHDL file under the waiver file is warning `W0132`.
+- A waiver's `rule`, `files` and `files_exclude` are one word or a list. It applies to a file `files` matches (no `files`: every file) and `files_exclude` does not; `files_exclude` wins. A pattern is relative to the waiver file and covers a file or a directory above it, like `exclude`; it also matches the path as reported, and a bare name that file anywhere. A pattern that covers no file of the run and no VHDL file under the waiver file is warning `W0132`.
 
 ## 6. Waves and the runner's debug option
 

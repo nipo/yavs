@@ -328,6 +328,8 @@ struct Waiver {
     rules: Vec<String>,
     /// The line of the pattern in the waiver file, and the pattern. Empty: every file.
     files: Vec<(usize, String)>,
+    /// What `files` does not cover after all: it wins.
+    files_exclude: Vec<(usize, String)>,
     /// Empty: the whole file.
     lines: Vec<usize>,
 }
@@ -387,6 +389,7 @@ impl Waivers {
                 let mut w = Waiver {
                     rules: Vec::new(),
                     files: Vec::new(),
+                    files_exclude: Vec::new(),
                     lines: Vec::new(),
                 };
                 for (l, key, v) in fields {
@@ -407,6 +410,11 @@ impl Waivers {
                                 w.files.push((l, normalize(&s)));
                             }
                         }
+                        ("files_exclude", v @ (Node::Scalar(_) | Node::Seq(_))) => {
+                            for s in one_or_list(l, &key, v)? {
+                                w.files_exclude.push((l, normalize(&s)));
+                            }
+                        }
                         ("reason", Node::Scalar(_)) => {}
                         ("lines", Node::Seq(lines)) => {
                             for n in lines {
@@ -422,13 +430,13 @@ impl Waivers {
                                 }
                             }
                         }
-                        ("rule" | "files" | "reason" | "lines", _) => {
+                        ("rule" | "files" | "files_exclude" | "reason" | "lines", _) => {
                             return Err(format!("line {l}: `{key}` has the wrong form"));
                         }
                         _ => {
-                            let keys = ["rule", "files", "lines", "reason"];
+                            let keys = ["rule", "files", "files_exclude", "lines", "reason"];
                             return Err(format!(
-                                "line {l}: unknown key `{key}` in a waiver (expected rule, files, lines or reason){}",
+                                "line {l}: unknown key `{key}` in a waiver (expected rule, files, files_exclude, lines or reason){}",
                                 near(&key, "key", keys.into_iter())
                             ));
                         }
@@ -451,13 +459,17 @@ impl Waivers {
         self.0.iter().any(|w| {
             (w.rules.iter().any(|r| r == rule || r == "*"))
                 && (w.files.is_empty() || w.files.iter().any(|(_, p)| found.matches(p)))
+                && !w.files_exclude.iter().any(|(_, p)| found.matches(p))
                 && (w.lines.is_empty() || w.lines.contains(&line))
         })
     }
 
     /// Every pattern, with its line in the waiver file.
     pub fn patterns(&self) -> Vec<(usize, &str)> {
-        let all = self.0.iter().flat_map(|w| &w.files);
+        let all = self
+            .0
+            .iter()
+            .flat_map(|w| w.files.iter().chain(&w.files_exclude));
         all.map(|(l, p)| (*l, p.as_str())).collect()
     }
 }
@@ -676,6 +688,26 @@ mod tests {
         assert!(!w.waives("/q/src/legacy/a.vhd", at, "lint_770", 1));
         let files = ["/p/gen/a.vhd".to_string()];
         assert_eq!(unmatched(w.patterns(), &files, at), [(3, "src/legacy/")]);
+        let w = Waivers::parse(
+            "waivers:\n  - rule: lint_770\n    files: src\n    files_exclude:\n      - src/keep\n      - '*/skip.vhd'\n",
+        )
+        .unwrap();
+        assert!(w.waives("/p/src/a.vhd", at, "lint_770", 1));
+        assert!(
+            !w.waives("/p/src/keep/a.vhd", at, "lint_770", 1),
+            "exclude wins"
+        );
+        assert!(
+            !w.waives("/p/src/skip.vhd", at, "lint_770", 1),
+            "exclude wins"
+        );
+        let w = Waivers::parse("waivers:\n  - rule: lint_770\n    files_exclude: [src/keep]\n")
+            .unwrap();
+        assert!(
+            w.waives("/elsewhere/a.vhd", at, "lint_770", 1),
+            "no files: every file"
+        );
+        assert!(!w.waives("/p/src/keep/a.vhd", at, "lint_770", 1));
         let w = Waivers::parse("waivers:\n  - rule: lint_770\n    files: '**/third/**'\n").unwrap();
         assert!(w.waives("/elsewhere/third/a.vhd", at, "lint_770", 1));
     }
@@ -688,6 +720,7 @@ mod tests {
         assert!(Waivers::parse("waive: []\n").is_err());
         assert!(Waivers::parse("waivers:\n  - rule: lint_770\n    files: []\n").is_err());
         assert!(Waivers::parse("waivers:\n  - rule: []\n").is_err());
+        assert!(Waivers::parse("waivers:\n  - rule: lint_770\n    files_exclude: []\n").is_err());
         assert!(Waivers::parse("waivers:\n  - rule: [lint_770, no_such]\n").is_err());
         assert!(Waivers::parse("waivers:\n").unwrap().0.is_empty());
     }

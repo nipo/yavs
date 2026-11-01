@@ -450,12 +450,41 @@ fn waivers_of_directories_and_lists_of_rules() {
     );
     let (found, _, text) = left(&dir, &args);
     assert_eq!(found, ["fresh.vhd"], "{text}");
-    // Block form, and a rule the entry does not name is not waived.
+    // The same in dashed lists, nested in the entry.
+    waivers(
+        "waivers:\n  - rule:\n      - lint_771\n      - lint_770\n    files:\n      - src/legacy\n      - 'third/*.vhd'\n    reason: x\n",
+    );
+    let (found, _, text) = left(&dir, &args);
+    assert_eq!(found, ["fresh.vhd"], "{text}");
+    // A rule the entry does not name is not waived.
     waivers(
         "waivers:\n  - rule:\n      - lint_771\n      - lint_772\n    files:\n      - src\n      - third\n",
     );
     let (found, _, text) = left(&dir, &args);
     assert_eq!(found.len(), 3, "{text}");
+    // `files_exclude` wins over `files`, dashed or in brackets, a directory or a pattern.
+    for form in [
+        "files_exclude:\n      - src/new\n",
+        "files_exclude: [src/new]\n",
+        "files_exclude:\n      - 'src/new/*.vhd'\n",
+        "files_exclude: src/new\n",
+    ] {
+        waivers(&format!(
+            "waivers:\n  - rule: lint_770\n    files:\n      - src\n      - third\n    {form}"
+        ));
+        let (found, _, text) = left(&dir, &args);
+        assert_eq!(found, ["fresh.vhd"], "{form}: {text}");
+    }
+    // Without `files`, every file except those.
+    waivers("waivers:\n  - rule: lint_770\n    files_exclude:\n      - src/legacy\n");
+    let (found, _, text) = left(&dir, &args);
+    assert_eq!(found, ["old.vhd"], "{text}");
+    // A single word in `files`, as an existing waiver file has it.
+    waivers(
+        "waivers:\n  - rule: lint_770\n    files: 'third/lib.vhd'\n    lines: [4]\n    reason: x\n",
+    );
+    let (found, _, text) = left(&dir, &args);
+    assert_eq!(found, ["fresh.vhd", "old.vhd"], "{text}");
 
     // Relative to the waiver file: from another directory, and for the absolute paths a library records.
     waivers("waivers:\n  - rule: lint_770\n    files: ['src/legacy/**/*.vhd', third]\n");
@@ -484,6 +513,15 @@ fn waivers_of_directories_and_lists_of_rules() {
     let mut strict = args.clone();
     strict.push("-Werror");
     assert_eq!(left(&dir, &strict).1, 1);
+    waivers("waivers:\n  - rule: lint_770\n    files: src\n    files_exclude: [no_such]\n");
+    let text = left(&dir, &args).2;
+    assert!(
+        text.contains("W0132") && text.contains("`no_such`"),
+        "{text}"
+    );
+    waivers(
+        "waivers:\n  - rule: lint_770\n    files: [src, thrid]\n  - rule: lint_770\n    files: third/lib.vhd\n",
+    );
     // A file on disk that this run did not read is no stale pattern.
     let (found, _, text) = left(&dir, &["src/new/fresh.vhd"]);
     assert!(found.is_empty(), "{text}");

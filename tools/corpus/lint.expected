@@ -10,8 +10,12 @@ vests-1993 analysis vests/vhdl-93/ashenden/compliant/ch_01_tb_01_02.vhd
 vests-1993 analysis vests/vhdl-93/ashenden/compliant/ch_05_tb_05_08.vhd
 vests-1993 analysis vests/vhdl-93/ashenden/compliant/ch_05_tb_05_09.vhd
 vests-1993 analysis vests/vhdl-93/ashenden/compliant/ch_05_tb_05_11.vhd
+vests-1993 analysis vests/vhdl-93/ashenden/compliant/ch_13_fg_13_01.vhd
+vests-1993 analysis vests/vhdl-93/ashenden/compliant/ch_13_fg_13_06.vhd
 vests-1993 analysis vests/vhdl-93/ashenden/compliant/ch_13_fg_13_12.vhd
 vests-1993 analysis vests/vhdl-93/ashenden/compliant/ch_15_latch-b.vhd
+vests-1993 analysis vests/vhdl-93/ashenden/compliant/ch_16_fg_16_09.vhd
+vests-1993 analysis vests/vhdl-93/ashenden/compliant/ch_18_fg_18_01.vhd
 vests-1993 lint_741 vests/vhdl-93/billowitch/compliant/tc1988.vhd:129
 vests-1993 lint_741 vests/vhdl-93/billowitch/compliant/tc1988.vhd:130
 vests-1993 lint_741 vests/vhdl-93/billowitch/compliant/tc1988.vhd:131

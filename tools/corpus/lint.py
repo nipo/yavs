@@ -48,7 +48,7 @@ def main():
         libs = sorted(p.name for p in manifest.iterdir() if (p / "yavs-lib.toml").exists())
         for lib in libs:
             maps = [f"--map={x}:{manifest / x}" for x in libs if x != lib]
-            cmd = ["yavs", "lint", "--message-format=short", "--color=never", f"--work={lib}:{manifest / lib}"]
+            cmd = ["yavs", "lint", "--no-cache", "--message-format=short", "--color=never", f"--work={lib}:{manifest / lib}"]
             r = subprocess.run(cmd + maps + keep, capture_output=True, text=True, check=False)
             unread = re.findall(r"^(.+?):\d+:\d+: error\[E\d+\]", r.stderr, re.M)
             if r.returncode not in (0, 1, 2) or "E9999" in r.stderr or (r.returncode == 2 and not unread):
