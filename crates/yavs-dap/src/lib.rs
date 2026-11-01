@@ -3068,15 +3068,13 @@ fn one_run(
         stop,
     };
     let (db, e) = (&*db_arc, &*e_arc);
-    let Some(ir) = &e.ir else {
-        return Err(Box::new(
-            Diagnostic::error("E9999", "internal compiler error: this is a bug in yavs")
-                .with_note("the design was not lowered before the DAP server started"),
-        ));
-    };
+    // A design with nothing to run has no lowered program; its session has an empty one (#995).
+    let program =
+        e.ir.as_ref()
+            .map_or_else(Default::default, |ir| ir.program.clone());
     let sh = Arc::new(Shared {
         link: link.clone(),
-        design: Design::new(db, e, &ir.program, &link.source_map),
+        design: Design::new(db, e, &program, &link.source_map),
         session: OnceLock::new(),
         interrupt: OnceLock::new(),
         stopped: AtomicBool::new(false),
@@ -3092,7 +3090,7 @@ fn one_run(
         watches: OnceLock::new(),
         hits: OnceLock::new(),
         ops: Mutex::new(Vec::new()),
-        prog: ir.program.clone(),
+        prog: program.clone(),
         nodes: Mutex::new(Vec::new()),
         conds: Mutex::new(HashMap::new()),
         wave: Arc::default(),
@@ -3106,7 +3104,7 @@ fn one_run(
         activity: OnceLock::new(),
         deposits: Mutex::new(HashMap::new()),
     });
-    let session = DebugSession::new(&ir.program, Box::new(Front(sh.clone())));
+    let session = DebugSession::new(&program, Box::new(Front(sh.clone())));
     let _ = sh.session.set(session.clone());
     // Stops inside a process need one thread (ir.md 3.4).
     let cfg_run = Config {

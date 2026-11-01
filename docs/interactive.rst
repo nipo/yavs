@@ -20,6 +20,8 @@ elaborates the design, stops at time 0 before any process has run, and waits at 
     yavs> restart
     yavs> quit
 
+A design with no process has a session too: ``run`` ends at time 0, and its signals can be examined.
+
 The prompt has line editing and history. Ctrl-C pauses a running simulation and returns to the
 prompt; at the prompt it drops the line. ``exit`` is ``quit``, and so is Ctrl-D at an empty prompt or the end of piped
 input.

@@ -76,6 +76,62 @@ fn a_script_to_the_end_equals_a_batch_run() {
     assert_eq!(console.status.code(), Some(0));
 }
 
+/// A design with nothing to run still has a session: no process, signals only, generate blocks,
+/// empty instances, and a package signal. `run` ends at time 0 as a plain run does (#995).
+#[test]
+fn a_design_with_nothing_to_run_has_a_session() {
+    for (name, src, signal) in [
+        (
+            "empty",
+            "entity t is end; architecture a of t is begin end;",
+            None,
+        ),
+        (
+            "signals",
+            "entity t is end; architecture a of t is signal s : integer := 7; begin end;",
+            Some("s"),
+        ),
+        (
+            "generate",
+            "entity t is end; architecture a of t is begin
+               g : for i in 0 to 1 generate signal s : bit; begin end generate;
+               h : if false generate end generate;
+             end;",
+            None,
+        ),
+        (
+            "instances",
+            "entity sub is end; architecture a of sub is begin end;
+             entity t is end; architecture a of t is begin u : entity work.sub; end;",
+            None,
+        ),
+        (
+            "package",
+            "package p is signal s : integer := 3; end package;
+             use work.p.all;
+             entity t is end; architecture a of t is begin end;",
+            None,
+        ),
+    ] {
+        let d = tempdir_with(&format!("nothing-{name}"), src);
+        let plain = run(&d, "t", &[]);
+        assert_eq!(plain.status.code(), Some(0), "{name}: {}", stderr(&plain));
+        let o = script(&d, "t", "run; quit");
+        assert_eq!(o.status.code(), Some(0), "{name}: {}", stderr(&o));
+        assert_eq!(stdout(&o), stdout(&plain), "{name}");
+        let o = run(&d, "t", &["--interactive"]);
+        assert_eq!(o.status.code(), Some(0), "{name}: {}", stderr(&o));
+        // The commands that look at a stop answer; the end of the script ends the session.
+        let o = script(&d, "t", "where; waits; activity; restart; run");
+        assert_eq!(o.status.code(), Some(0), "{name}: {}", stderr(&o));
+        if let Some(s) = signal {
+            let o = script(&d, "t", &format!("examine {s}; quit"));
+            assert_eq!(o.status.code(), Some(0), "{name}: {}", stderr(&o));
+            assert!(stdout(&o).contains('7'), "{name}: {}", stdout(&o));
+        }
+    }
+}
+
 #[test]
 fn run_examine_where() {
     let d = setup("run");

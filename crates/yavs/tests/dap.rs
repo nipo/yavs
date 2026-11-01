@@ -212,6 +212,34 @@ fn script_case_within(name: &str, extra: &[&str], secs: u64) {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A design with no process runs under a client: the session starts and ends (#995).
+#[test]
+fn design_without_a_process() {
+    let dir = tempdir("dap-noproc");
+    std::fs::write(
+        dir.join("t.vhd"),
+        "entity t is end; architecture a of t is signal s : bit; begin end;",
+    )
+    .expect("write");
+    let ok = yavs()
+        .current_dir(&dir)
+        .args(["analyze", "--work=work:lib", "t.vhd"])
+        .status()
+        .expect("yavs")
+        .success();
+    assert!(ok, "analyze failed");
+    let mut child = spawn(&dir, "t", &["--dap=stdio"]);
+    let _watchdog = Watchdog::new(child.id(), 60);
+    let mut c = stdio_client(&mut child);
+    c.request("initialize", json!({"adapterID": "yavs"}));
+    c.request("launch", json!({}));
+    c.request("configurationDone", json!({}));
+    c.event("terminated");
+    drop(c.w);
+    let status = child.wait().expect("wait");
+    assert_eq!(status.code(), Some(0));
+}
+
 /// A script that waits for an event that never comes fails with its transcript, not by hanging
 /// (#971): `hang.script` stops on entry and then waits for a second stop.
 #[test]
