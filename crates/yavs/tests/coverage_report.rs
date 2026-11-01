@@ -761,6 +761,55 @@ fn exports_follow_exclusions_kinds_and_root() {
     assert!(text(&o.stderr).contains("E0110"), "{}", text(&o.stderr));
 }
 
+/// The toggle rows printed for some bits of a signal take those bits out, and no other; every
+/// bit missed gets one row with `*`.
+#[test]
+fn printed_toggle_rows_take_out_only_the_missed_bits() {
+    let tmp = tempdir("paste_bits");
+    let src = "entity t is end entity;\narchitecture a of t is\n  signal v : bit_vector(3 downto 0);\n  signal w : bit_vector(1 downto 0);\nbegin\n  process begin\n    v(1 downto 0) <= \"11\";\n    wait for 1 ns;\n    v(1 downto 0) <= \"00\";\n    wait;\n  end process;\nend architecture;\n";
+    std::fs::write(tmp.join("t.vhd"), src).expect("write");
+    let lib = format!("--work=work:{}/lib", tmp.display());
+    assert!(yavs(&tmp, &["analyze", &lib, "t.vhd"]).status.success());
+    let o = yavs(
+        &tmp,
+        &[
+            "run",
+            lib.as_str(),
+            "t",
+            "--cov=a.ycov",
+            "--cov-kind=toggle",
+        ],
+    );
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    let detailed = text(&yavs(&tmp, &["cov", "report", "a.ycov", "--detailed"]).stdout);
+    assert!(detailed.contains("v(2..3) rise (0->1)"), "{detailed}");
+    let rows: Vec<&str> = detailed
+        .lines()
+        .map(str::trim)
+        .filter(|l| l.starts_with("toggle t "))
+        .collect();
+    for want in [
+        "toggle t v(2) rise",
+        "toggle t v(3) fall",
+        "toggle t w(*) rise",
+        "toggle t w(*) fall",
+    ] {
+        assert!(rows.contains(&want), "{want}: {detailed}");
+    }
+    assert!(!rows.iter().any(|r| r.contains("v(*)")), "{detailed}");
+    std::fs::write(tmp.join("ex.txt"), rows.join("\n")).expect("write");
+    let o = yavs(&tmp, &["cov", "report", "a.ycov", "--exclude", "ex.txt"]);
+    // v(0..1) both ways, nothing missed, nothing else gone.
+    let out = text(&o.stdout);
+    assert!(out.contains("every item is covered"), "{out}");
+    assert!(
+        out.lines()
+            .any(|l| l.split_whitespace().eq(["toggle", "4", "4", "0", "100.0%"])),
+        "{out}"
+    );
+    assert!(!text(&o.stderr).contains("W0111"), "{}", text(&o.stderr));
+}
+
 #[test]
 fn a_database_of_another_format_version_says_so() {
     let tmp = tempdir("db_version");

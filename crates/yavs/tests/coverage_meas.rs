@@ -349,6 +349,32 @@ fn fsm_not_detected_is_visible() {
     );
     let rep = String::from_utf8_lossy(&o.stdout);
     assert!(rep.contains("fsm:\n"), "{rep}");
+    // The printed row excludes that state and nothing else.
+    let row = rep
+        .lines()
+        .find_map(|l| l.split("`--exclude` file: ").nth(1))
+        .expect("a printed row")
+        .to_string();
+    assert!(row.starts_with("fsm "), "{row}");
+    std::fs::write(tmp.join("one.txt"), format!("{row}\n")).expect("write");
+    let items = |args: &[&str]| {
+        let o = yavs(
+            &tmp,
+            &[&["cov", "report", "a.ycov", "--kind=fsm"][..], args].concat(),
+        );
+        let t = String::from_utf8_lossy(&o.stdout).into_owned();
+        let line = t
+            .lines()
+            .find(|l| l.starts_with("fsm"))
+            .unwrap_or("")
+            .to_string();
+        line.split_whitespace()
+            .nth(1)
+            .unwrap_or("0")
+            .parse::<u32>()
+            .unwrap_or(0)
+    };
+    assert_eq!(items(&["--exclude", "one.txt"]), items(&[]) - 1, "{row}");
     // The exports: JSON holds the machines and what was not measured, LCOV and SonarQube neither.
     let o = yavs(
         &tmp,

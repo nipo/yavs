@@ -292,19 +292,24 @@ under `--yavs-debug`.
 Every export leaves excluded items out, follows `--kind`, and has its paths after `--root`.
 
 **JSON** (`--json FILE`) holds every kind and the tests. The database itself is private to yavs and can change;
-this schema is what a tool should read, and its `version` goes up when a field changes meaning or goes away.
+this schema is what a tool should read, and its `version` goes up when a field changes meaning or goes away. On
+`tests/cli/cov_report.vhd`, cut short at `...`:
 
-```json
+```
 {
   "version": 1,
-  "tests": ["tb(test=a)"],
+  "tests": ["cov_report"],
   "totals": [
     {"kind": "statement", "items": 23, "hit": 19, "missed": 4, "coverage": 82.6},
+    {"kind": "branch", "items": 16, "hit": 10, "missed": 6, "coverage": 62.5},
     {"kind": "total", "items": 39, "hit": 29, "missed": 10, "coverage": 74.3}
   ],
   "items": [
-    {"kind": "statement", "instance": "tb.u1", "file": "tb.vhd", "line": 26, "column": 7, "hits": 0, "tests": [], "statement": "n <= 0;"}
-  ]
+    {"kind": "statement", "instance": "cov_report", "file": "cov_report.vhd", "line": 39, "column": 21, "hits": 1, "tests": ["cov_report"], "statement": "v := 2;"},
+    {"kind": "branch", "instance": "cov_report", "file": "cov_report.vhd", "line": 53, "column": 18, "hits": 2, "tests": ["cov_report"], "arm": 0, "arm_text": "when sel < 4"},
+    ...
+  ],
+  "unmeasured": []
 }
 ```
 
@@ -378,9 +383,12 @@ In `--detailed`, a table lists each state and transition of an instance, and wha
 ```
 fsm:
   Line  Item                 Hits  Status
-  ----  -------------------  ----  ------
-  16    state: spare            0  MISSED
-  55    state: busy -> done     0  MISSED
+  ----  -------------------  ----  -------
+  16    one: done               1  covered
+  16    one: idle               2  covered
+  16    one: spare              0  MISSED
+      exclude with this row in an `--exclude` file: fsm cov_fsm.u_far one spare
+  ...
 ```
 
 An exclusion row names the instance, the signal and the state or transition, and `*` matches in all three:
