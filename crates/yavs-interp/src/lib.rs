@@ -2863,7 +2863,7 @@ pub fn call_native(
         let Some(fun) = m.rt.natives.get(native.0 as usize).copied().flatten() else {
             return Err(Fault::Runtime(format!(
                 "native subprogram `{}` is not implemented in yavs yet",
-                n.symbol
+                yavs_ir::native_shown(&n.symbol)
             )));
         };
         let mut cells = Vec::with_capacity(args.len());

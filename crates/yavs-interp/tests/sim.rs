@@ -1926,8 +1926,7 @@ fn natives() {
     assert_eq!(
         e.kind,
         ErrorKind::Runtime(
-            "native subprogram `yavs.env.pslassertfailed.void.r_boolean` is not implemented in yavs yet"
-                .into()
+            "native subprogram `std.env.PslAssertFailed` is not implemented in yavs yet".into()
         )
     );
     let mut pb = ProgramBuilder::new();

@@ -188,7 +188,7 @@ fn errors() {
     let mut l = Libraries::new();
     assert_eq!(
         snap(&l.add_spec("oops").unwrap_err(), t.path()),
-        "error[L0020]: invalid library mapping `oops`\n  |\n  = help: expected NAME:PATH, e.g. `ieee:/opt/yavs/lib/ieee`\n"
+        "error[L0020]: invalid library mapping `oops`\n  |\n  = help: expected NAME:PATH, e.g. `work:build/work`\n"
     );
 }
 

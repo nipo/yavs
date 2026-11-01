@@ -329,7 +329,7 @@ The 2019 `standard.vhdl` lists 350 such commented declarations (counted as lines
 ## 4. Out of scope: declared, not implemented
 
 These rows of section 1 have a symbol, so a design that names them elaborates, but calling one is
-a run-time error naming the symbol (`native subprogram ... is not implemented in yavs yet`).
+a run-time error naming the subprogram (`native subprogram ... is not implemented in yavs yet`).
 
 | Native symbol | Why |
 |---|---|

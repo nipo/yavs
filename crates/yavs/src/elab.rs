@@ -344,7 +344,13 @@ fn parse_threads(s: &str) -> Result<usize, String> {
     match s.trim().parse::<usize>() {
         Ok(0) => Err("the number of threads must be at least 1".into()),
         Ok(n) => Ok(n),
-        Err(e) => Err(format!("`{s}` is not a number of threads: {e}")),
+        Err(_) if s.trim() == "auto" => Err(
+            "`auto` is not implemented yet (#901): give a number of threads, such as `--threads=4`"
+                .into(),
+        ),
+        Err(_) => Err(format!(
+            "`{s}` is not a number of threads: give a whole number of at least 1, such as `--threads=4`"
+        )),
     }
 }
 
@@ -352,14 +358,20 @@ fn parse_max_deltas(s: &str) -> Result<u32, String> {
     match s.trim().parse::<u32>() {
         Ok(0) => Err("the limit must be at least 1".into()),
         Ok(n) => Ok(n),
-        Err(e) => Err(format!("`{s}` is not a number of delta cycles: {e}")),
+        Err(_) => Err(format!(
+            "`{s}` is not a number of delta cycles: give a whole number of at least 1"
+        )),
     }
 }
 
 fn heat(s: &str) -> Result<[u32; 3], String> {
     let v: Vec<u32> = s
         .split(',')
-        .map(|v| v.trim().parse::<u32>().map_err(|e| format!("`{v}`: {e}")))
+        .map(|v| {
+            v.trim()
+                .parse::<u32>()
+                .map_err(|_| format!("`{v}` is not a whole number"))
+        })
         .collect::<Result<_, _>>()?;
     v.try_into()
         .map_err(|_| format!("expected BASE,PER_INSTR,PERIOD, found `{s}`"))

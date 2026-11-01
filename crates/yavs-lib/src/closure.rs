@@ -31,7 +31,7 @@ impl Libraries {
             }
             _ => Err(Box::new(
                 err("L0020", format!("invalid library mapping `{spec}`"))
-                    .with_help("expected NAME:PATH, e.g. `ieee:/opt/yavs/lib/ieee`"),
+                    .with_help("expected NAME:PATH, e.g. `work:build/work`"),
             )),
         }
     }

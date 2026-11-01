@@ -10,7 +10,8 @@ share CPU cores through the token server. Most designs do not gain: measure firs
 What threads do
 ---------------
 
-``yavs run --threads=N`` lets one simulation use N threads. The default is 1.
+``yavs run --threads=N`` lets one simulation use N threads. The default is 1. There is no
+``--threads=auto`` yet (issue 901): N is a whole number of at least 1.
 
 * Only the evaluation of VHDL processes is shared. Analysis, elaboration and most of the rest of a run
   stay on one thread.

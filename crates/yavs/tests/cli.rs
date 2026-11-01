@@ -1553,6 +1553,29 @@ fn top_level_not_found() {
     assert_eq!(yavs(&["run", &lib, "good.a"]).0, 0);
 }
 
+/// `--threads` says what it takes, in words (#997).
+#[test]
+fn threads_words() {
+    let run = |value: &str| {
+        let o = Command::new(env!("CARGO_BIN_EXE_yavs"))
+            .args(["run", "--std=2008", "--work=work:lib", value, "t"])
+            .output()
+            .expect("run");
+        assert_eq!(o.status.code(), Some(2));
+        String::from_utf8_lossy(&o.stderr).into_owned()
+    };
+    let auto = run("--threads=auto");
+    assert!(
+        auto.contains("`auto` is not implemented yet (#901)"),
+        "{auto}"
+    );
+    assert!(auto.contains("`--threads=4`"), "{auto}");
+    assert!(!auto.contains("invalid digit"), "{auto}");
+    let word = run("--threads=many");
+    assert!(word.contains("`many` is not a number of threads"), "{word}");
+    assert!(!word.contains("invalid digit"), "{word}");
+}
+
 /// `--message-format=json` prints nothing but JSON objects, one per line, also when `analyze`
 /// stops at one file of several (#839); `--threads=0` and a unit-less `--stop-time` are usage
 /// errors that say what to write.

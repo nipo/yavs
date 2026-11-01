@@ -4978,7 +4978,7 @@ impl Machine {
         let Some(fun) = self.rt.natives.get(native.0 as usize).copied().flatten() else {
             return rt_err_f!(
                 "native subprogram `{}` is not implemented in yavs yet",
-                n.symbol
+                yavs_ir::native_shown(&n.symbol)
             );
         };
         if (self.pkg_init.is_some() || self.init_reports.is_some())
@@ -7064,7 +7064,7 @@ impl Machine {
                     else {
                         return rt_err_f!(
                             "native subprogram `{}` is not implemented in yavs yet",
-                            Self::native_symbol(prog, native)
+                            yavs_ir::native_shown(Self::native_symbol(prog, native))
                         );
                     };
                     let cells = &mut cells[..usize::from(len)];

@@ -572,6 +572,31 @@ static OPTIMISED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::n
 static RESTARTED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Count a call abandoned and run again with a function optimised ([`ElabRaw::restartable`]).
+/// What a message calls the subprogram of native symbol `symbol`: its VHDL name, not the symbol
+/// (`yavs.env.pslassertfailed.void.r_boolean` is `std.env.PslAssertFailed`).
+pub fn native_shown(symbol: &str) -> String {
+    // The symbols are in lower case; these are the only ones with no native behind them (#997).
+    const SPELLED: [&str; 6] = [
+        "PslAssertFailed",
+        "PslIsCovered",
+        "SetPslCoverAssert",
+        "GetPslCoverAssert",
+        "PslIsAssertCovered",
+        "ClearPslState",
+    ];
+    let Some(rest) = symbol.strip_prefix("yavs.") else {
+        return symbol.to_string();
+    };
+    let mut parts = rest.split('.');
+    match (parts.next(), parts.next()) {
+        (Some(pkg @ ("env" | "textio" | "standard")), Some(name)) => {
+            let spelled = SPELLED.iter().find(|s| s.eq_ignore_ascii_case(name));
+            format!("std.{pkg}.{}", spelled.copied().unwrap_or(name))
+        }
+        _ => rest.to_string(),
+    }
+}
+
 pub fn note_restart() {
     RESTARTED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 }
