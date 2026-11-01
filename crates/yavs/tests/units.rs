@@ -263,10 +263,18 @@ impl Env {
                 }
             }
         }
-        // Paths with a backslash (Windows) are escaped in the text.
-        let tmp = self.tmp.display().to_string();
-        out.replace(&tmp.replace('\\', "\\\\"), "T")
-            .replace(&tmp, "T")
+        // Paths with a backslash (Windows) are escaped in the text. `real` holds the resolved
+        // spelling, which differs from the directory as spelled when that holds a Windows short
+        // name (`RUNNER~1`) or a link.
+        let resolved = yavs_diag::files::resolve(&self.tmp);
+        let spelled: &std::path::Path = &self.tmp;
+        for dir in [spelled, &resolved] {
+            let dir = dir.display().to_string();
+            out = out
+                .replace(&dir.replace('\\', "\\\\"), "T")
+                .replace(&dir, "T");
+        }
+        out
     }
 }
 
