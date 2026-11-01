@@ -13232,8 +13232,15 @@ index (machine written; a damaged index says to re-analyze).
 - Database version 10: `f0`/`f1` lines and `unmeasured` lines; older versions still read.
 
 
+## Release waits for the conformance run of its tag (#1017, 2026-11-01)
+
+- **Decision (agent, following the user policy that user-facing bugs are fixed at once; the maintainer left the choice between "stop the release" and "document that it does not"):** `release.yml` has a `conformance` job that `publish` needs. On a tag it polls (`tools/release/conformance_gate.py wait TAG SHA`) for the `conformance.yml` run of that tag on that commit, up to 15 minutes for it to appear and 130 for it to finish, and fails unless it succeeded. That run regenerates the report at the tagged commit and, only on a tag, fails when the committed `docs/conformance.md` differs (and when the cocotb regression fails, which also blocks the release). A run on `main` is no evidence: it succeeds with a warning when the report is stale (`continue-on-error`), so the gate looks at runs with event `push` and branch equal to the tag only.
+- Why wait instead of re-running the check inside `release.yml`: the conformance run needs the corpora and a release build, about 10 to 40 minutes; the tag run exists anyway and runs next to the release builds.
+- A failed gate leaves the tag in place and publishes nothing; the next patch version follows (RELEASING.md). A dry run (`workflow_dispatch`) only lists the conformance runs of the commit, since no tag run exists to wait for.
+- Evidence: against the real runs, the gate refuses `v0.11.0` (its tag run failed, the main run of the same commit was green) and passes `v0.10.0`. Not exercised by a real tag; the first release shows the Actions side (the `actions: read` permission, the tag-run lookup).
+
 ## Conformance runs nightly (CI, #1033, 2026-11-01)
 
 - **Decision (maintainer, 2026-11-01):** "conformance does not need to be run on every push, it can run nightly". `conformance.yml` has no trigger on pushes to `main` and no `paths` filter. It runs nightly at 04:41 UTC on `main`, on a release tag and by hand (`gh workflow run conformance.yml --ref main`, which RELEASING.md uses for the report of the exact release commit; the run's `headSha` is checked).
 - A red nightly opens an issue labelled `conformance-nightly`, or comments on the open one, with the run link (the `report` job, `issues: write` on that job only), because nobody watches a scheduled run. It is not required for merging and was not before. The nightly always runs: skipping an unchanged `main` was left out to keep the workflow small.
-- Consequence: a commit that makes the committed `docs/conformance.md` stale is noticed at the next nightly (a warning in the run, not an issue) or by the tag run (a failure); a release still needs a current report first (RELEASING.md step 1). #1017 (the release does not wait for that run) is separate and still open.
+- Consequence: a commit that makes the committed `docs/conformance.md` stale is noticed at the next nightly (a warning in the run, not an issue) or by the tag run (a failure); a release still needs a current report first (RELEASING.md step 1). The release waits for it: see "Release waits for the conformance run of its tag".

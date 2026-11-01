@@ -25,6 +25,7 @@ Read the root `AGENTS.md` first. This file is for an agent about to change or ru
 | `ci-plan.py` | What `ci.yml` runs for the changed files (the `plan` job, `docs/decisions.md` "CI scope"); `--selftest` holds the rules |
 | `conformance/` | The conformance report generator: runs the evidence suites, writes `docs/conformance.md` and `.json` (`tools/conformance/AGENTS.md`) |
 | `release/bump.py X.Y.Z`, `release/bump.py --check [X.Y.Z]` | Set or check the one version of yavs, vunit-yavs and the VS Code extension in every spot (root `RELEASING.md`); `--check` is the `versions` job of `ci.yml` and `release.yml` |
+| `release/conformance_gate.py wait TAG SHA`, `list SHA`, `--selftest` | The release gate (#1017): `release.yml` waits for the `conformance.yml` run of the tag and fails unless it passed; `list` shows the runs of a commit (dry run) |
 | `claim <take|release|list|stale|core|build>` | Issue claims on GitHub for multi-agent work, plus host-local core and build locks (root `AGENTS.md` section 3a; `claim selftest` checks the comment parser) |
 | `suites/` | Drivers that simulate an external library's own testbenches on yavs (`tools/suites/AGENTS.md`) |
 | `corpus/` | Analysis corpus manifests, runner, report (`tools/corpus/AGENTS.md`) |

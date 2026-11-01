@@ -37,14 +37,14 @@ the tag's version. A new version spot goes into the `SPOTS` table of `bump.py`.
 
 1. Everything for the release is on `main` and CI is green. The committed conformance report is
    current (`tools/conformance/AGENTS.md`; the `conformance` workflow fails a tag whose report is
-   stale). The `conformance` workflow runs nightly, not on a push (`docs/decisions.md` "Conformance runs
+   stale, and `release.yml` publishes nothing until that run of the tag has passed). The `conformance` workflow runs nightly, not on a push (`docs/decisions.md` "Conformance runs
    nightly"), so for a report of the exact commit run `gh workflow run conformance.yml --ref main`
    and use its artifact, after checking that the run's `headSha` is that commit. Main need not be
    quiet for this: runs on `main` are not cancelled by a newer push.
 2. A dry run on `main`, if the release flow changed since the last release:
    `gh workflow run release.yml --ref main -f dry_run=true -f checks=true`. It builds and tests
    everything and keeps the files as workflow artifacts; it creates no release and publishes
-   nothing.
+   nothing Its `conformance` job only lists the conformance runs of the commit: a dry run has no tag run to wait for.
 3. The release commit:
    - `python3 -I tools/release/bump.py X.Y.Z`, then read `git diff`;
    - `uvx towncrier build --config release_notes/towncrier.toml --version X.Y.Z --yes`, and rename
@@ -61,7 +61,8 @@ the tag's version. A new version spot goes into the `SPOTS` table of `bump.py`.
 
    Commit as `release: yavs X.Y.Z`, push to `main`, wait for CI.
 4. Tag that commit `vX.Y.Z` and push the tag. `release.yml` checks the versions, runs the CI
-   checks, builds the archives, tests `vunit-yavs` on all three platforms and the extension against
+   checks, waits for the `conformance` run of the tag (a red one, a stale report included, stops the
+   release before anything is published: the tag stays, release the next patch version), builds the archives, tests `vunit-yavs` on all three platforms and the extension against
    the archives of this run, creates the GitHub pre-release with every file, then uploads the wheel
    and sdist to PyPI.
 5. Approve the `pypi` environment if it has a reviewer. Check the release page, `SHA256SUMS` and

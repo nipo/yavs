@@ -9,7 +9,8 @@
 # - the vunit-yavs wheel and sdist, tested on every platform against the archives of this run;
 #   the VS Code extension (.vsix, vscode.yml) tested against the Linux x86_64 archive of this run;
 # - the committed conformance report (docs/conformance.md and .json) as
-#   yavs-<version>-conformance.md and .json;
+#   yavs-<version>-conformance.md and .json, published only when the conformance run of the tag
+#   passed (it regenerates the report at the tagged commit; job `conformance`, #1017);
 # - one SHA256SUMS over everything, one GitHub pre-release with notes from
 #   release_notes/<version>.md, and the wheel and sdist on PyPI (trusted publishing, environment
 #   `pypi`).
@@ -56,6 +57,30 @@ jobs:
   checks:
     if: github.event_name == 'push' || inputs.checks
     uses: ./.github/workflows/ci.yml
+
+  # The conformance run of this tag (conformance.yml: it regenerates the report at the tagged commit and
+  # fails the run when the committed docs/conformance.md differs) must pass before anything is published
+  # (#1017). A run on main proves nothing here: it only warns about a stale report. A dry run lists the
+  # runs of the commit and never fails on them.
+  conformance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    permissions:
+      contents: read
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v5
+      - run: python3 -I tools/release/conformance_gate.py --selftest
+      - name: The conformance run of the tag passed
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            python3 -I tools/release/conformance_gate.py wait "$GITHUB_REF_NAME" "$GITHUB_SHA"
+          else
+            python3 -I tools/release/conformance_gate.py list "$GITHUB_SHA"
+          fi
 
   build:
     needs: [versions, checks]
@@ -231,7 +256,7 @@ jobs:
       yavs_artifact: yavs-x86_64-unknown-linux-gnu
 
   publish:
-    needs: [build, python-dist, vunit-yavs, vscode]
+    needs: [conformance, build, python-dist, vunit-yavs, vscode]
     if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-24.04
     permissions:
@@ -262,7 +287,7 @@ jobs:
 
           The test runner package \`vunit-yavs\` $version is on PyPI (\`pip install vunit-yavs==$version\`); its wheel and sdist are attached too. The VS Code debugger extension: \`code --install-extension yavs-debug-$version.vsix\`. Verify every download with \`SHA256SUMS\`.
           NOTES
-          # The committed report of the tagged commit; the conformance workflow fails a tag whose report is stale.
+          # The committed report of the tagged commit; the `conformance` job above has waited for the conformance run of the tag, which fails when this report is stale.
           for ext in md json; do
             test -s "docs/conformance.$ext" || { echo "docs/conformance.$ext is missing"; exit 1; }
             cp "docs/conformance.$ext" "dist/yavs-$version-conformance.$ext"
