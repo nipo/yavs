@@ -51,6 +51,7 @@ Full module table with owners: `CONTRIBUTING.md` "Module map". Entry points and 
 
 | Decision | Why | Source |
 |---|---|---|
+| `analyze_file` keeps a unit this session already loaded on demand from that file (`analyzed_from`): a file analyzes all its units, so an architecture the design does not use may load a package whose own file the closure lists later, and a second analysis made a second copy of its types (#991) | One unit, one analysis per session | `loader.rs` `analyze_file_with` |
 | The parsed-file cache is keyed by (library, path): a file analyzed into several libraries is parsed once per library, because units are taken out of the cache when analyzed | #290 | `loader.rs` `parse_into_cache` |
 | LRM policy: clear LRM wins and fails early; unclear: permissive, accept what the reference simulators accept, warn only where they differ (user, 2026-10-18) | Most designs elaborate | `docs/design/sem.md` "LRM interpretation policy", `docs/design/lrm-checks.md` |
 | Mixed 2008/2019 files: each file parsed with its own standard, design analyzed against the newest; illegal under it `E1007`, changed meaning `W1008` once per construct (user, 2026-10-18) | External test runners and verification libraries from 2019 testbenches | `docs/plan.md` "Test-runner integration", sem.md 0.1 |

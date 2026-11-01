@@ -740,6 +740,7 @@ impl Db {
                 self.lib_by_key.insert(name.key, Some(l));
                 l
             };
+        let known = self.files.contains_key(&(lib, path.to_path_buf()));
         let keys = match self.warm_file(lib, path, rev, hash) {
             Some(keys) => keys,
             None => {
@@ -753,7 +754,15 @@ impl Db {
                     .collect()
             }
         };
-        for &k in &keys {
+        // A unit an earlier file of this session loaded on demand from this file stays: analyzing
+        // it again makes a second copy of its types, which the units already bound to the first
+        // cannot use (#991).
+        let loaded: Vec<UnitKey> = keys
+            .iter()
+            .copied()
+            .filter(|&k| self.analyzed_from(lib, k, path, known))
+            .collect();
+        for &k in keys.iter().filter(|k| !loaded.contains(k)) {
             self.libs[lib].units.insert(
                 k,
                 UnitSlot::NotLoaded {
@@ -774,6 +783,9 @@ impl Db {
             .collect();
         for (i, &k) in keys.iter().enumerate() {
             self.later_in_file.retain(|&(_, x)| x != k);
+            if keys[..i].contains(&k) && loaded.contains(&k) {
+                continue;
+            }
             // A unit of the same name earlier in the file is replaced by this one (13.5).
             if keys[..i].contains(&k) {
                 ids.retain(|&u| self.units[u].key != k);
@@ -813,6 +825,23 @@ impl Db {
             return Err(Reported);
         }
         Ok(ids.into_iter().map(|u| self.unit_record(u)).collect())
+    }
+
+    /// Whether this session already analyzed unit `key` of `lib` from `path`; `known`: the session
+    /// knew the file before it was named now, so a failed unit failed from it.
+    fn analyzed_from(&self, lib: LibId, key: UnitKey, path: &Path, known: bool) -> bool {
+        match self.libs[lib].units.get(&key) {
+            Some(UnitSlot::Done(u)) => {
+                let from = &self.sources.get(self.units[*u].file).path;
+                from.as_str() == path.as_os_str()
+                    || matches!(
+                        (std::path::absolute(from), std::path::absolute(path)),
+                        (Ok(a), Ok(b)) if a == b
+                    )
+            }
+            Some(UnitSlot::Failed) => known,
+            _ => false,
+        }
     }
 
     /// Analyze a whole closure in compile order (`yavs_lib::closure`).

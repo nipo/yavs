@@ -35,3 +35,39 @@ fn failed_file_hides_its_units() {
         .collect();
     assert_eq!(db.error_count(), errors, "cascades stay silent: {msgs:?}");
 }
+
+/// A package analyzed again from another file in one session is a new package (13.5), so a type of
+/// the old and of the new one have one printed name: the message says what tells them apart.
+#[test]
+fn types_with_one_name_say_what_differs() {
+    let tmp = tempfile::tempdir().expect("scratch dir");
+    let dir = tmp.path();
+    let file = |name: &str, text: &str| {
+        let p = dir.join(name);
+        std::fs::write(&p, text).expect("write");
+        p
+    };
+    let p = "package p is\n  type t is (a, b);\nend package;\n";
+    let first = file("p1.vhd", p);
+    let holder = file(
+        "holder.vhd",
+        "use work.p.all;\npackage holder is\n  signal s : t;\nend package;\n",
+    );
+    let second = file("p2.vhd", p);
+    let user = file(
+        "user.vhd",
+        "use work.p.all;\nentity e is\nend entity;\narchitecture a of e is\n  signal x : t;\nbegin\n  x <= work.holder.s;\nend architecture;\n",
+    );
+    let mut db = Db::new(Options::new(LangRev::Vhdl2008, default_stdlib()));
+    for f in [&first, &holder, &second] {
+        assert!(db.analyze_file("work", f, LangRev::Vhdl2008).is_ok());
+    }
+    assert!(db.analyze_file("work", &user, LangRev::Vhdl2008).is_err());
+    let d = db.diagnostics().last().expect("a diagnostic");
+    assert_eq!(d.code, "E1300", "{}", d.message);
+    assert!(
+        d.notes.iter().any(|n| n.contains("two different types")),
+        "{:?}",
+        d.notes
+    );
+}

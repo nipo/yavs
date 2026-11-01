@@ -1372,6 +1372,8 @@ impl Db {
             for &c in calls.iter().take(MAX_CANDIDATE_LABELS) {
                 d = self.candidate_label(d, c);
             }
+            let ts: Vec<TypeId> = std::iter::once(t).chain(is.iter().map(|i| i.ty)).collect();
+            d = self.same_name_note(d, &ts);
             self.report(d);
             return;
         }
@@ -1401,7 +1403,33 @@ impl Db {
         {
             d = d.with_help(h);
         }
+        d = self.same_name_note(d, &ts);
         self.report(d);
+    }
+
+    /// Two types of `ts` that print the same: say what tells them apart, where each is declared
+    /// (`names` qualifies them as far as a name can).
+    pub(crate) fn same_name_note(&self, d: Diagnostic, ts: &[TypeId]) -> Diagnostic {
+        let names = self.type_names(ts);
+        let same = |i: usize, j: usize| ts[i] != ts[j] && names[i].eq_ignore_ascii_case(&names[j]);
+        let Some((i, j)) = (0..ts.len())
+            .flat_map(|i| (i + 1..ts.len()).map(move |j| (i, j)))
+            .find(|&(i, j)| same(i, j))
+        else {
+            return d;
+        };
+        let name = &names[i];
+        d.with_secondary(
+            self.decls[self.types[ts[i]].decl].span,
+            format!("one `{name}` is declared here"),
+        )
+        .with_secondary(
+            self.decls[self.types[ts[j]].decl].span,
+            format!("another `{name}` is declared here"),
+        )
+        .with_note(format!(
+            "these are two different types named `{name}`: they differ in the declaration or the analysis of its design unit they come from"
+        ))
     }
 
     /// 8.3: how to turn a value of type `from` into the expected type `to`: a type

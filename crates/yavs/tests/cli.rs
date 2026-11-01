@@ -1945,6 +1945,110 @@ fn architecture_named_before_it_is_analyzed() {
     assert!(o.status.success() && out.contains("behavioral"), "{out}");
 }
 
+/// A file of the closure that an earlier file loaded on demand (through an architecture the
+/// design does not use) is not analyzed again: a second copy of its package rejected the body of
+/// a package bound to the first (E1301, E1300) or, without the cache, found nothing to analyze
+/// (E1002). The package's signal stays one signal (#991).
+#[test]
+fn file_loaded_on_demand_is_not_analyzed_again() {
+    let t = tempfile::tempdir().unwrap();
+    // Relative names: a run then analyzes the body from source and sees the two copies.
+    let yavs = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_yavs"))
+            .current_dir(t.path())
+            .args(["--color", "never"])
+            .args(args)
+            .output()
+            .expect("run")
+    };
+    for (name, text) in [
+        (
+            "cmd.vhd",
+            "package cmd is
+               type t is record x : integer; end record;
+               signal s : integer := 0;
+             end package;",
+        ),
+        (
+            "fetch.vhd",
+            "use work.cmd.all;
+             package fetch_pkg is function fetch return t; end package;
+             package body fetch_pkg is
+               function fetch return t is begin return (x => 1); end;
+             end package body;",
+        ),
+        (
+            "sup.vhd",
+            "use work.fetch_pkg.all;
+             package sup is procedure get; end package;
+             package body sup is
+               procedure get is
+                 variable v : work.cmd.t;
+               begin
+                 v := fetch;
+               end;
+             end package body;",
+        ),
+        (
+            "user.vhd",
+            "use work.sup.all;
+             entity user is end;
+             architecture a of user is begin end;",
+        ),
+        (
+            "th.vhd",
+            "entity th is end;
+             architecture unused of th is begin u : entity work.user; end;
+             architecture used of th is begin end;",
+        ),
+        (
+            "writer.vhd",
+            "use work.cmd.all;
+             entity writer is end;
+             architecture a of writer is begin s <= 42; end;",
+        ),
+        (
+            "reader.vhd",
+            "use work.cmd.all;
+             entity reader is end;
+             architecture a of reader is begin
+               process begin
+                 wait for 1 ns;
+                 report \"s=\" & integer'image(s);
+                 wait;
+               end process;
+             end;",
+        ),
+        (
+            "top.vhd",
+            "entity top is end;
+             architecture a of top is begin
+               t : entity work.th(used);
+               w : entity work.writer;
+               r : entity work.reader;
+             end;",
+        ),
+    ] {
+        std::fs::write(t.path().join(name), text).unwrap();
+        let o = yavs(&["analyze", "--std=2008", "--work=work:w", name]);
+        assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    }
+    for extra in [None, Some("--no-cache")] {
+        let mut args = vec!["run", "--std=2008", "--work=work:w", "top"];
+        args.extend(extra);
+        let o = yavs(&args);
+        let all = format!(
+            "{}{}",
+            String::from_utf8_lossy(&o.stdout),
+            String::from_utf8_lossy(&o.stderr)
+        );
+        assert!(
+            o.status.success() && all.contains("s=42"),
+            "{extra:?}: {all}"
+        );
+    }
+}
+
 fn yavs_cmd(args: &[&str]) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_yavs"))
         .args(["--color", "never"])
