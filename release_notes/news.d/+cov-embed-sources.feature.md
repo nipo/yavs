@@ -1,1 +1,0 @@
-`yavs run --cov-embed-sources` stores the source text in the coverage database, so `yavs cov report --html` works with no checkout; the source text then travels with the database. `vunit-yavs` has `--yavs-cov-embed-sources` and the sim option `yavs.cov_embed_sources`.

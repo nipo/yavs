@@ -25,8 +25,8 @@ VS Code
 -------
 
 The VS Code extension adds a ``yavs`` debugger. Download ``yavs-debug-<version>.vsix`` from the
-`releases of yavs <https://github.com/ru551n/yavs/releases>`_ (releases after 0.11.0 carry the extension of the same
-version; until then, the release titled "yavs VS Code debugger"; ``SHA256SUMS`` is attached) and install it:
+`releases of yavs <https://github.com/ru551n/yavs/releases>`_ (from 0.12.0 on they carry the extension of the same
+version; before that, the release titled "yavs VS Code debugger"; ``SHA256SUMS`` is attached) and install it:
 
 .. code-block:: bash
 

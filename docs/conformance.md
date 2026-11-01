@@ -1,15 +1,15 @@
 # yavs conformance report
 
-Generated: yavs 0.11.0 at commit `dcf6ff7061` (2026-11-01) by `tools/conformance/run.py`; do not edit by hand.
+Generated: yavs 0.12.0 at commit `0301b104d6` (2026-11-01) by `tools/conformance/run.py`; do not edit by hand.
 
 yavs is checked by running the test suites of VHDL libraries, a VHDL language test suite and real designs on it, and by comparing its output
-with two established open-source VHDL simulators, called sim1 and sim2 here. Each suite judges its own tests. Over the suites below, 14980 of 15081
+with two established open-source VHDL simulators, called sim1 and sim2 here. Each suite judges its own tests. Over the suites below, 14981 of 15082
 tests pass; every failure is tracked as an issue. This is evidence, not a proof of correctness.
 
 | Project or suite | What it is | Passed / total |
 | --- | --- | ---: |
 | Differential testbenches | small testbenches of this repository; output must equal sim1's, at 1 and 4 threads | 606/606 |
-| Known simulator differences | one reproducer per case where simulators disagree | 237/237 |
+| Known simulator differences | one reproducer per case where simulators disagree | 238/238 |
 | sim1's regression tests | a reference simulator's own self-checking tests (runnable ones) | 1016/1070 |
 | sim2's regression tests | a reference simulator's own self-checking tests (runnable ones) | 463/504 |
 | VESTs | VHDL-1993 language test suite | 3694/3694 |
@@ -84,8 +84,8 @@ Not passing: sim1: 54; sim2: 41 (the classes of each are in `docs/conformance.js
 ### Known simulator differences
 
 [`docs/design/simulator-discrepancies.md`](https://github.com/ru551n/yavs/blob/main/docs/design/simulator-discrepancies.md) lists every case where the references disagree with each other, with the language reference or with yavs:
-237 catalogued behaviours, each with a reproducer under `tests/discrepancies/<case>/`. CI runs every reproducer on yavs and fails when yavs's output
-differs from the recorded one (matches). Kinds: LRM clear 150, LRM ambiguity 80, reference bug 5, library availability 1, other 1.
+238 catalogued behaviours, each with a reproducer under `tests/discrepancies/<case>/`. CI runs every reproducer on yavs and fails when yavs's output
+differs from the recorded one (matches). Kinds: LRM clear 150, LRM ambiguity 81, reference bug 5, library availability 1, other 1.
 
 Policy (`docs/plan.md`): where the language reference is clear, yavs follows it even against all references; where it is unclear yavs is permissive
 and follows the majority of the references that run the construct. The verdicts of each reference are in the catalogue; the table gives the clause, the kind,
@@ -213,6 +213,7 @@ and yavs's verdict.
 | [`view-individual-driven-elements`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/view-individual-driven-elements) | 6.5.2, 14.7.2 | LRM clear | OK |
 | [`force-resolved-composite-member`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/force-resolved-composite-member) | 10.5.2.1 | LRM clear | REJECT |
 | [`force-twice`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/force-twice) | 10.5.2.1, 14.7.3 (when a force is an event is not stated) | LRM ambiguity | as NVC |
+| [`reanalysed-unit-dependents`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/reanalysed-unit-dependents) | 13.5 | LRM ambiguity | OK |
 | [`allocator-overload`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/allocator-overload) | 9.3.7, 12.5 | LRM clear | OK |
 | [`static-intermediate-outside-integer`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/static-intermediate-outside-integer) | 9.3.6, 5.2.3.1 | LRM clear | OK |
 | [`static-intermediate-generate-parameter`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/static-intermediate-generate-parameter) | 9.4.3, 5.2.3.1 | LRM clear | FATAL |

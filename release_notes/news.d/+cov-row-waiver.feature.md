@@ -1,1 +1,0 @@
-In-source coverage exclusions waive one condition or expression row: `-- yavs cov exclude row -0-` or `row count < 15 = 0`. The row leaves the totals, shows in the exclusion report and is kept in the database.

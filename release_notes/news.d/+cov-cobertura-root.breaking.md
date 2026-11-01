@@ -1,1 +1,0 @@
-`yavs cov report --cobertura` follows `--root` like every other report, so by default its paths are now relative to the current directory instead of as stored in the database; pass `--root` if your CI service needs another base. A line whose statement is left out by `--kind` or an exclusion no longer shows `hits="0"` when its branches ran.

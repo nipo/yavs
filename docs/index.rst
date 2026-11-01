@@ -59,7 +59,7 @@ Where to start:
 * Looking something up: :doc:`cli-reference`, :doc:`console-reference`, :doc:`error-codes`, :doc:`environment`.
 
 This guide describes the current development version. What is not in a release yet is under "Unreleased" in
-the :doc:`release_notes`, and pages say when a feature needs a release newer than 0.11.0.
+the :doc:`release_notes`.
 
 .. toctree::
    :caption: Get started

@@ -10,7 +10,7 @@ test, collecting coverage and sharing CPU cores. :doc:`vunit-yavs` is the refere
 Install
 -------
 
-``vunit-yavs`` adds yavs to VUnit as a simulator. You need yavs 0.11.0 or later on ``PATH`` (:ref:`installation`):
+``vunit-yavs`` adds yavs to VUnit as a simulator. You need yavs 0.12.0 or later on ``PATH`` (:ref:`installation`):
 
 .. code-block:: bash
 
@@ -18,9 +18,6 @@ Install
 
 This also installs VUnit 5.0.0.dev16 or later, a pre-release, which ``pip`` picks up for this package. If yavs
 is not on ``PATH``, set ``VUNIT_YAVS_PATH`` to its directory.
-
-Features described as newer than 0.11.0 on this page need a release of both yavs and ``vunit-yavs`` after that
-version.
 
 A run script
 ------------
@@ -104,7 +101,7 @@ therefore watches the pipe the runner keeps to its standard input (``--exit-on-s
 closes, which also happens when only ``python run.py`` is killed, even with SIGKILL, on Linux and Windows. The waves and
 coverage files of such a run are not finished.
 
-Newer than 0.11.0, there are two more ways to look at one test:
+There are two more ways to look at one test:
 
 * ``--yavs-interactive`` runs it at the yavs console, with ``vunit_help`` and the other ``vunit_*`` commands
   (:doc:`interactive`).
@@ -116,7 +113,7 @@ combines with either, and the cursor then follows the stops. :doc:`debugger-tuto
 Collect coverage
 ----------------
 
-Newer than 0.11.0, the package collects, merges and checks coverage:
+The package collects, merges and checks coverage:
 
 .. code-block:: bash
 

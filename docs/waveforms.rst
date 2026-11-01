@@ -55,7 +55,7 @@ steps, so a viewer that reloads the file shows the run up to the breakpoint (:do
 Watching in Surfer
 ------------------
 
-``--surfer`` needs a release newer than 0.11.0. It shows the waveform in the `Surfer <https://surfer-project.org>`__ viewer (0.6.0 or later) while the run writes it:
+``--surfer`` needs 0.12.0 or later. It shows the waveform in the `Surfer <https://surfer-project.org>`__ viewer (0.6.0 or later) while the run writes it:
 
 .. code-block:: sh
 

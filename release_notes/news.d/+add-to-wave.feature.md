@@ -1,1 +1,0 @@
-In VS Code, "Add to Wave" in the context menu of the Variables and Watch views and of a selection in a VHDL file adds a signal or a process variable to the waveforms of a `--surfer` session; `wave add` at the console takes process variables too.

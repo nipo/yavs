@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.12.0 (2026-11-01)
 
 - Breaking: no coverage kind is on by default. `--yavs-cov` becomes `--yavs-cov=LETTERS` (`s` statement, `b` branch,
   `c` condition, `e` expression, `t` toggle, `f` fsm, `a` assert, `m` combination; for example `--yavs-cov=sbt`), and
@@ -51,6 +51,7 @@
   hook.
 - `-g/--gui` is refused at the start with a message that points to `--yavs-debug`: yavs has no
   graphical debugger and no `yavs run --gui` any more.
+- Needs yavs 0.12.0 or later. All changes: the yavs 0.12.0 release notes.
 
 ## 0.11.0 (2026-10-29)
 

@@ -1,7 +1,7 @@
 Interactive debugger
 ====================
 
-``yavs run --interactive`` (needs a release newer than 0.11.0) runs a simulation from a terminal prompt, without an editor. It
+``yavs run --interactive`` (needs 0.12.0 or later) runs a simulation from a terminal prompt, without an editor. It
 elaborates the design, stops at time 0 before any process has run, and waits at ``yavs>``:
 
 .. code-block:: text

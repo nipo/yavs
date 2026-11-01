@@ -39,16 +39,16 @@ The same tasks in yavs
    * - Dump waveforms
      - ``--wave=FILE.fst``. The format is FST (:doc:`waveforms`).
    * - Run a command script
-     - ``--do "COMMANDS"`` or ``--do "source FILE"`` (:doc:`interactive`, a release newer than 0.11.0).
+     - ``--do "COMMANDS"`` or ``--do "source FILE"`` (:doc:`interactive`, 0.12.0 or later).
    * - Open a debugger
      - VS Code or another Debug Adapter Protocol client with ``--dap=PORT`` (:doc:`debugging`), or a
-       prompt with ``--interactive`` (a release newer than 0.11.0).
+       prompt with ``--interactive`` (0.12.0 or later).
    * - Check code without simulating
-     - ``yavs lint`` (:doc:`lint`, a release newer than 0.11.0).
+     - ``yavs lint`` (:doc:`lint`, 0.12.0 or later).
    * - Collect coverage
      - ``--cov=LETTERS`` and ``--cov-file=FILE`` on ``run``, then ``yavs cov report`` (:doc:`coverage`).
    * - See why a run does not finish, what failed, what is busy
-     - ``--hang-report``, ``--assert-summary``, ``--activity`` (:doc:`cli`, a release newer than 0.11.0).
+     - ``--hang-report``, ``--assert-summary``, ``--activity`` (:doc:`cli`, 0.12.0 or later).
    * - Silence a warning
      - ``-Wno-CODE``. ``-Werror`` makes warnings errors.
    * - Find out what a message means

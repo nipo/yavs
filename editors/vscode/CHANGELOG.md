@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.12.0 (2026-11-01)
 
 - Vectors show on one line in the Variables view, Watch and hover; `help` in the Debug Console has command names in bold; Tab in the Debug Console takes what the list has in common and opens the list when none is open.
 - Force and Release no longer ask for `in` or `out`; a value for a bit-like target needs no quotes (`1`, `0101`).
@@ -12,6 +12,7 @@
 - A Watch takes a field, an element, a slice, `.all` and expressions; the Variables view expands access values and lists the variables of a protected object.
 - The problem matcher `$yavs` puts the diagnostics of a yavs task in the Problems view.
 - The extension is released with yavs and carries its version (one release with every artifact).
+- Needs yavs 0.12.0 or later. All changes: the yavs 0.12.0 release notes.
 
 ## 0.1.0
 
