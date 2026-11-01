@@ -160,9 +160,9 @@ All performance work has Cranelift as the base (maintainer rule, tracker #1046).
 Each test runs a fixed simulated-time window after start-up under `perf stat` (cycles, instructions, L1i, iTLB and branch misses), all cells of a test on one core of 9 to 15. A window is the counters of a run to T1 minus those of a run to T0, so start-up cancels. It needs no change to the simulator. Whole-run test checks do not apply at a window's stop: pass is an exit status of 0 or the test's own `exit_code`, and the console must equal the first variant's (against a reference: the same set of lines).
 
 ```sh
-export YAVS_REALBENCH_CACHE=~/.cache/yavs-<tag>/rb YAVS_BENCH_VHDL_AI_TEST=~/git/vhdl-ai-test
+export YAVS_REALBENCH_CACHE=~/.cache/yavs-<tag>/rb YAVS_BENCH_VHDL_AI_TEST=/path/to/vhdl-ai-test
 cp ~/.cache/yavs-agents/sims.local.conf tools/sims.local.conf                # untracked
-python3 -I tools/realbench/window.py ~/git/rsim-w-before ~/git/rsim-w-after --bar cycles:0.97   # two checkouts, built with Cranelift
+python3 -I tools/realbench/window.py ../before ../after --bar cycles:0.97   # two checkouts, built with Cranelift
 python3 -I tools/realbench/window.py A/yavs B/yavs:auto+YAVS_SOME_KNOB=1 --tests grlib_leon3mp   # two binaries (tools/build-bench.sh), a knob
 python3 -I tools/realbench/window.py A/yavs B/yavs --rounds 3                # rounds for a cycle verdict; medians
 python3 -I tools/realbench/window.py A/yavs B/yavs --full --tests microwatt_coremark   # the whole run
@@ -199,7 +199,7 @@ Verdict per test:
 | sc5_fifo_repack | holds | holds | branch holds; L1i and iTLB do not |
 | sc5_timestamp | holds | holds; A/A 5.5 percent, needs rounds | none: counts too small |
 | fletcher_bufferreader | holds | holds | branch holds; L1i is unstable (1.16 to 1.75 in windows); iTLB does not |
-| hdlm_lfsr | **does not hold**: identical runs differ by 12 percent (6 in another sitting), whole runs too, the compile outcome varies (#673) | same | L1i, branch hold; iTLB has no signal |
+| hdlm_lfsr | the window stands in for the run, but one run cannot decide: `auto`'s compile outcome varies (#673), identical runs differ by 12 percent (6 in another sitting), whole runs too (22.90 and 24.36 G) | same | L1i, branch hold; iTLB has no signal |
 | neorv32_single_cache | holds | holds | L1i (just), branch hold; iTLB does not |
 | microwatt_coremark | holds, near the tolerance | **does not hold reliably**: 1.07, 1.09, 1.11 against 1.153, under-reporting the loss; later windows (800 to 1300 us, 1500 to 2000 us) gave 1.08, 1.06 | L1i, iTLB, branch within tolerance, all below the whole run |
 
@@ -208,7 +208,7 @@ Lengthened after failing: grlib_leon3mp from 100 to 300 us (instructions 0.995 a
 What does not hold, and how to use it:
 
 - **Against sim1 a window gives the run rate, not the whole-run ratio.** sim1's start-up is in its whole run: `neorv32_single_cache` is 1.10 in the window and 0.54 whole, GRLIB 2.59 and 2.10. The window matches the rest of the run after T0 on instructions (within 2.3 percent on all nine). Cycles to sim1 match less well: GRLIB 4.40 against 4.96, neorv32_single_cache 1.29 against 1.17, 6 percent on two others. Publish whole-run ratios from `run.py`, never these.
-- **One round of cycles cannot decide a bar near noise.** A/A cycles moved up to 5.8 percent (9.5 on hdlm_lfsr), so a single-round 3 percent bar kills or passes at random: the A/A geomean here failed `cycles:0.97`. Instructions are good to under 1 percent on seven of nine. Decide on instructions in one run, then ask for `--rounds 3` or more for cycles on the tests near the bar.
+- **One round of cycles cannot decide a bar near noise.** A/A cycles moved up to 5.8 percent (9.5 on hdlm_lfsr), so a single-round 3 percent bar kills or passes at random: in one run of a binary against itself, GRLIB passed `cycles:0.97` at 0.942, a false keep. Instructions are good to under 1 percent on seven of nine. Decide on instructions in one run, then ask for `--rounds 3` or more for cycles on the tests near the bar.
 - **Microwatt cycles need `--full`** (about 4.5 minutes per variant, plus two warm-ups).
 - **iTLB ratios mean something only on GRLIB and Microwatt.** Elsewhere the counts are tiny and identical runs differ by up to 6.5 times.
 - Ratios of two cells are from one sitting on one core; the whole-run cells ran in another sitting, CCD1 not quiet. A warm-up reaches T1 only, so the cache holds what ran by then, not what a whole run would compile.
