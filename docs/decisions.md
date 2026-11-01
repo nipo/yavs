@@ -13323,3 +13323,14 @@ code in the compilation cache" and the 512 notes.
   `--yavs-cov-kind` or `--yavs-cov=LETTERS`; a simulation with coverage on and no kind fails before yavs starts, naming the sim
   option and both flags).
 - The VS Code extension and the CI action have no coverage input in this repository: `--cov` with a debug session stays `E0199`.
+
+
+## Kernel cost per delta: attribution, and no fix passed its bar (#1049, lane E of #1046, 2026-11-01)
+
+Written by Claude. Base 383ac32e, Cranelift `--tier=auto`, the windows of `tools/realbench/window.py`, instructions per delta by symbol against sim1 (sim1's counts over yavs's delta count; its own delta count was not taken), `tools/stepcount` for exact lines.
+
+- **Bar, fixed before any code:** instructions down at least 5 percent on at least two of `sc5_fifo_repack`, `sc5_timestamp`, `hdlm_lfsr`, `fletcher_bufferreader`, `fletcher_bufferwriter_512`, none up over 1 percent.
+- **Where the gap is, instructions per delta, yavs against sim1:** cycle layer 1248 and 733 on timestamp, 3416 and 2505 on the reader, 19531 and 7802 on the writer. On `sc5_fifo_repack` (12117, 10968) and `hdlm_lfsr` (1624, 1289) the kernel is near level and the excess is process code. The share of kernel in cycles did not by itself mean the gap was there: sim1 spends similar amounts in its own run time.
+- **Causes ranked, ceiling then estimate of a fix, percent of the test's total:** wake and finish pass per changed signal (ceiling 14 to 32, estimate 1 to 3, the lines are flat after earlier rounds); fixed cost per delta (timestamp 11, 5; others under 2); bit drives from compiled code (`sc5_fifo_repack` 8 to 12, 4 to 5; `hdlm_lfsr` 7.7, at most 4.5); the clock edge path (timestamp 13, 5; `hdlm_lfsr` 4, under 2); wide planes compared at commit and at finish (writer 20, 3 to 7; reader 3, 1).
+- **Verdict: killed before coding.** No candidate reaches the bar on two tests. These are estimates from counted lines, not measured prototypes, and `hdlm_lfsr` could not decide a 5 percent bar anyway: identical runs differ by up to 12 percent (#673).
+- **Next, if a single test bar is accepted:** wide planes (writer), then fixed delta and clock edge cost (timestamp and small clocked designs).
