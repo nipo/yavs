@@ -552,13 +552,36 @@ pub fn apply(db: &Database, files: &[Rules]) -> Applied {
             }
         }
         if items.is_empty() && !said {
-            out.warnings.push(Diagnostic::warning(
+            let mut d = Diagnostic::warning(
                 STALE,
                 format!(
                     "{exfile}:{}: the exclusion matches nothing in the coverage database",
                     r.line
                 ),
-            ));
+            );
+            let others = |k: &Key, e: &Entry| {
+                let mut of = rows.iter().enumerate();
+                of.any(|(o, (_, x))| matches(&x.rule, k, e, taken[o].as_ref()))
+            };
+            if let Some((at, k, e)) = replacement(db, &r.rule, &others) {
+                let shown = Entry {
+                    file: at.0.clone(),
+                    ..e.clone()
+                };
+                d = d
+                    .with_note(format!(
+                        "line {} of {} now holds `{}` ({}): it probably replaced the excluded one",
+                        e.line,
+                        at.0,
+                        comment(k, e),
+                        k.shown(),
+                    ))
+                    .with_help(format!(
+                        "if the requirement is still waived, the row is now: {}",
+                        head(k, &shown)
+                    ));
+            }
+            out.warnings.push(d);
         }
         out.uses.push(Use {
             origin: format!("{exfile}:{}", r.line),
@@ -569,6 +592,63 @@ pub fn apply(db: &Database, files: &[Rules]) -> Applied {
         });
     }
     out
+}
+
+/// How many lines from a row's line an item may stand to be named as what replaced it.
+const NEAR_LINES: u32 = 5;
+
+/// Whether `a` and `b` are one source file: one path may be the tail of the other, since the rows of
+/// `--uncovered` show paths relative to a root and the database holds them as they were analysed.
+fn same_file(a: &str, b: &str) -> bool {
+    let (a, b) = (normalize(a), normalize(b));
+    Path::new(&a).ends_with(&b) || Path::new(&b).ends_with(&a)
+}
+
+/// The item nearest to the line of a stale row that is of its kind and instance, is in its file and no
+/// rule excludes: what probably replaced the hashed statement. A row without a line has none. It is
+/// only named, never matched.
+fn replacement<'a, 'r>(
+    db: &'a Database,
+    r: &'r Rule,
+    excluded: &dyn Fn(&Key, &Entry) -> bool,
+) -> Option<(&'r (String, u32), &'a Key, &'a Entry)> {
+    let (g, at, word, arm) = match r {
+        Rule::Item {
+            kind,
+            glob,
+            arm,
+            at: Some(at),
+            ..
+        } => {
+            let word = match kind {
+                ItemKind::Statement => "statement",
+                ItemKind::Branch => "branch",
+                ItemKind::Condition => "condition",
+                ItemKind::Expression => "expression",
+                ItemKind::Combination => "combination",
+            };
+            (glob, at, word, *arm)
+        }
+        Rule::Combination {
+            glob, at: Some(at), ..
+        } => (glob, at, "combination", 0),
+        _ => return None,
+    };
+    let arm_of = |k: &Key| match k.kind {
+        Kind::Branch(a) | Kind::Condition(a) | Kind::Expression(a) => a,
+        _ => 0,
+    };
+    db.items
+        .iter()
+        .filter(|(k, e)| {
+            k.kind.name() == word
+                && e.line.abs_diff(at.1) <= NEAR_LINES
+                && same_file(&at.0, &e.file)
+                && glob(g, &k.shown())
+                && !excluded(k, e)
+        })
+        .min_by_key(|(k, e)| (e.line.abs_diff(at.1), arm_of(k) != arm, *k))
+        .map(|(k, e)| (at, k, e))
 }
 
 /// W0111 for a pattern that covers no source file of the database, with a near file or directory.
@@ -975,6 +1055,53 @@ mod tests {
             let e = parse_config(t).unwrap_err();
             assert!(e.contains(want), "{t:?}: {e}");
         }
+    }
+
+    #[test]
+    fn a_stale_row_names_what_probably_replaced_it() {
+        let d = db();
+        // The hash is gone, the row's line is one from a statement of the instance.
+        let stale = "statement :t:u1 000000000000.0 a.vhd:9\n";
+        let a = apply1(&d, parse(stale).unwrap());
+        assert_eq!(a.warnings.len(), 1);
+        let w = &a.warnings[0];
+        assert_eq!(w.code, STALE);
+        let note = &w.notes[0];
+        assert!(
+            note.contains("line 10 of a.vhd now holds `x;` (t.u1)"),
+            "{note}"
+        );
+        let help = &w.help[0];
+        assert!(
+            help.ends_with("statement t.u1 abcdef012345.0 a.vhd:10"),
+            "{help}"
+        );
+        // Nothing of that kind, instance or file near: the plain warning. No line: the same.
+        for row in [
+            "statement :t:u1 000000000000.0 a.vhd:90",
+            "statement :t:u1 000000000000.0 other.vhd:10",
+            "statement :t:u9 000000000000.0 a.vhd:10",
+            "expression :t:u1 000000000000.0 0 a.vhd:10",
+            "statement :t:u1 000000000000.0",
+        ] {
+            let a = apply1(&d, parse(row).unwrap());
+            assert_eq!(a.warnings.len(), 1, "{row}");
+            assert!(a.warnings[0].notes.is_empty(), "{row}");
+        }
+        // An item another rule excludes is not what replaced it.
+        let t = format!("{stale}statement :t:u1 abcdef012345.0\n");
+        let a = apply1(&d, parse(&t).unwrap());
+        assert!(a.warnings.iter().all(|w| w.notes.is_empty()));
+        // Hash matching stays: the replacement is named, not excluded.
+        assert_eq!(apply1(&d, parse(stale).unwrap()).excluded.len(), 0);
+        // A branch prefers its own arm.
+        let a = apply1(
+            &d,
+            parse("branch :t:u1 000000000000.0.2 a.vhd:11\n").unwrap(),
+        );
+        assert!(a.warnings[0].notes[0].contains("line 11"));
+        assert!(same_file("src/a.vhd", "/p/src/a.vhd") && same_file("c:\\p\\a.vhd", "p/a.vhd"));
+        assert!(!same_file("src/a.vhd", "/p/ssrc/a.vhd"));
     }
 
     #[test]

@@ -279,3 +279,56 @@ fn a_bad_configuration_is_e0138() {
         "{e}"
     );
 }
+
+/// An edited statement: its row goes stale, and W0111 says what stands there now.
+#[test]
+fn w0111_names_the_edited_statement() {
+    let tmp = database("replaced");
+    let rows = missed(&tmp);
+    let row = rows
+        .iter()
+        .find(|r| r.starts_with("statement ") && r.contains("v := 0;"))
+        .expect("row");
+    let (head, _) = row.split_once("   # ").expect("comment");
+    write(&tmp, "ex.txt", &format!("{head}\n"));
+    let src = std::fs::read_to_string(tmp.join("cov_report.vhd")).expect("read");
+    assert_eq!(src.matches("v := 0;").count(), 1);
+    write(&tmp, "cov_report.vhd", &src.replace("v := 0;", "v := 7;"));
+    for args in [
+        vec!["analyze", "--work=work:lib", "cov_report.vhd"],
+        vec![
+            "run",
+            "--work=work:lib",
+            "--cov=b.ycov",
+            "--cov-kind=statement,branch",
+            "cov_report",
+        ],
+    ] {
+        let o = yavs(&tmp, &args);
+        assert!(o.status.success(), "{}", text(&o.stderr));
+    }
+    let o = yavs(
+        &tmp,
+        &["cov", "report", "b.ycov", "--exclude", "ex.txt", "--total"],
+    );
+    let e = text(&o.stderr);
+    assert!(
+        e.contains("warning[W0111]") && e.contains("ex.txt:1"),
+        "{e}"
+    );
+    assert!(e.contains("now holds `v := 7;`"), "{e}");
+    assert!(e.contains("it probably replaced the excluded one"), "{e}");
+    assert!(e.contains("the row is now: statement "), "{e}");
+    // The new row excludes it, and the warning is gone.
+    let help = e
+        .lines()
+        .find(|l| l.contains("the row is now: "))
+        .expect("help");
+    let new = help.split("the row is now: ").nth(1).expect("row");
+    write(&tmp, "ex.txt", &format!("{new}\n"));
+    let o = yavs(
+        &tmp,
+        &["cov", "report", "b.ycov", "--exclude", "ex.txt", "--total"],
+    );
+    assert!(text(&o.stderr).is_empty(), "{}", text(&o.stderr));
+}

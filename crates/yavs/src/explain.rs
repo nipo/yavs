@@ -275,7 +275,7 @@ const EXPLAIN: &[(&str, &str)] = &[
     ),
     (
         "W0111",
-        "A row of the exclusion file matches nothing in the coverage database: the statement changed (its text hash with it), was removed, or the instance path is wrong.",
+        "A row of the exclusion file matches nothing in the coverage database: the statement changed (its text hash with it), was removed, or the instance path is wrong. A row with a `file:line` also names the statement of its kind and instance at or near that line, which probably replaced the excluded one, and the row that would exclude it: that statement is only named, never excluded, so check it and copy the row. A pattern of `files` or `files_exclude` that covers no source file of the database is this warning too.",
     ),
     (
         "W0112",

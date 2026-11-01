@@ -348,6 +348,16 @@ there to read (a stale line is warning `W0110`). `yavs cov report --uncovered DB
 
 In YAML, quote values that start with `*` or contain `: `.
 
+When a statement is edited its hash changes, so a row for it matches nothing and warning `W0111` says so. A
+row with a line also names what stands at or near that line now, of the same kind and instance, with the row
+that would exclude it. It is never excluded on its own: read it, and copy the row if the exclusion still holds:
+
+```
+warning[W0111]: ex.txt:1: the exclusion matches nothing in the coverage database
+  = note: line 25 of src/fsm.vhd now holds `count <= 1;` (tb.dut): it probably replaced the excluded one
+  = help: if the requirement is still waived, the row is now: statement tb.dut 4d2f0a91c3be.0 src/fsm.vhd:25
+```
+
 ## Which tests cover what
 
 Each database names its test: `--cov-test=NAME`, by default the enabled test case of a
@@ -408,7 +418,7 @@ warning into an error, or when the total is below `--fail-under`; a malformed op
 | `E0114` | the total coverage is below `--fail-under` (the report was printed) |
 | `E0115` | `--total` or `--fail-under` has no item to count: the database holds none of the `--kind`s |
 | `W0110` | an exclusion row's line number is stale (the statement is still matched by its hash) |
-| `W0111` | an exclusion row matches nothing |
+| `W0111` | an exclusion row matches nothing, with the statement that probably replaced it (see Excluding code) |
 | `W0112` | a `coverage off` region is never closed, so it excludes the rest of the file |
 | `W0113` | a `coverage on` without a preceding `coverage off` |
 | `W0114` | an excluded item did run |

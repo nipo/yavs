@@ -2445,6 +2445,9 @@ scalars; the on-disk format is implementation-defined, so it is fixed here (yavs
 
 ## Coverage exclusions (yavs-cov, CLI, #351, user, 2026-10-19)
 
+- **W0111 names a replacement (maintainer, 2026-11-01, #1020):** a stale row with a line names the nearest
+  item within five lines of its kind, instance and file that no rule excludes, with the row for it. Rows still
+  match by hash only: a guess never excludes anything.
 - **Configuration file (maintainer, 2026-11-01, #1020):** explicit `--config FILE` on `cov report` and `cov
   rank`, never discovered. Contents: `exclude`, `root`, `kind`, what says what a project counts. Outputs stay on
   the command line, and so does `--fail-under`, a gate of the job rather than of the project; `cov merge`
