@@ -9,6 +9,7 @@ mod config;
 mod design;
 mod report;
 mod rules;
+mod testbench;
 
 pub use config::{Config, Waivers, find_up, unmatched};
 pub use report::{Entry, Reports};
@@ -82,15 +83,30 @@ pub struct Finding {
     pub severity: Severity,
     pub span: Span,
     pub message: String,
+    /// The other places it is about: every driver, every signal on a loop.
+    pub related: Vec<Span>,
 }
 
 /// What a run found: the findings of the enabled rules in `units` in source order, and the design
 /// facts when `facts` asks for them. A rule beyond the definite class costs a walk of its own, which
 /// a default run does not take. Instances of generics carry the spans of the generic, so a finding
-/// is reported once per place.
-pub fn lint(db: &Db, units: &[UnitId], cfg: &Config, facts: bool) -> (Vec<Finding>, Value) {
-    let (mut found, facts) = rules::check(db, units, cfg, facts);
-    found.retain(|(id, _, _)| rule(id).is_some_and(|r| cfg.enabled(r)));
+/// is reported once per place. `base` is the directory of the configuration file: what
+/// `testbench_files` is relative to.
+pub fn lint(
+    db: &Db,
+    units: &[UnitId],
+    cfg: &Config,
+    base: &std::path::Path,
+    facts: bool,
+) -> (Vec<Finding>, Value) {
+    let (mut found, mut related, facts) = rules::check(db, units, cfg, facts);
+    let mut kinds = std::collections::HashMap::new();
+    let mut kind = |file: yavs_diag::FileId| {
+        *kinds
+            .entry(file)
+            .or_insert_with(|| testbench::kind(db, file, units, cfg, base))
+    };
+    found.retain(|(id, span, _)| rule(id).is_some_and(|r| cfg.enabled_in(r, kind(span.file))));
     // The message too: one place can hold two findings of a rule, and a rule's order is not stable.
     found.sort_by(|a, b| {
         (a.1.file.0, a.1.start, a.1.end, a.0, &a.2)
@@ -103,8 +119,9 @@ pub fn lint(db: &Db, units: &[UnitId], cfg: &Config, facts: bool) -> (Vec<Findin
             let rule = rule(id).expect("kept above");
             Finding {
                 rule,
-                severity: cfg.severity(rule),
+                severity: cfg.severity_in(rule, kind(span.file)),
                 span,
+                related: related.remove(&(span, message.clone())).unwrap_or_default(),
                 message,
             }
         })

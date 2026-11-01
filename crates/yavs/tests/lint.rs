@@ -186,6 +186,215 @@ fn register_names_from_the_configuration() {
     assert_eq!(status(&o), 2, "`suffixes` belongs to lint_602 alone");
 }
 
+const ADVISORY: &str = "rule:\n  group:\n    advisory:\n      disable: false\n";
+
+#[test]
+fn latches() {
+    regression_with(
+        "latches.vhd",
+        Some("rule:\n  lint_600:\n    disable: false\n"),
+    );
+}
+
+#[test]
+fn drivers() {
+    regression_with(
+        "drivers.vhd",
+        Some("rule:\n  lint_601:\n    disable: false\n"),
+    );
+}
+
+#[test]
+fn clock_and_reset_domains() {
+    regression_with(
+        "domains.vhd",
+        Some(
+            "rule:\n  lint_700:\n    disable: false\n  lint_701:\n    disable: false\n  lint_702:\n    disable: false\n  lint_703:\n    disable: false\n",
+        ),
+    );
+}
+
+#[test]
+fn state_machines_and_others() {
+    regression_with(
+        "machines.vhd",
+        Some(
+            "rule:\n  lint_710:\n    disable: false\n  lint_711:\n    disable: false\n  lint_712:\n    disable: false\n  lint_713:\n    disable: false\n",
+        ),
+    );
+}
+
+#[test]
+fn instances_recursion_and_sensitivity() {
+    regression_with(
+        "connected.vhd",
+        Some(
+            "rule:\n  lint_730:\n    disable: false\n  lint_750:\n    disable: false\n  lint_760:\n    disable: false\n  lint_001:\n    disable: false\n  lint_002:\n    disable: false\n",
+        ),
+    );
+}
+
+/// Every driver and every signal of a loop is a place of its own, not text in the message.
+#[test]
+fn the_other_places_of_a_finding() {
+    let dir = tempdir("lint");
+    std::fs::write(dir.join("yavs-lint.yaml"), ADVISORY).unwrap();
+    std::fs::write(
+        dir.join("r.vhd"),
+        "library ieee; use ieee.std_logic_1164.all;\nentity r is port (a, b : in std_logic); end entity;\narchitecture x of r is\n  signal q, y, z : std_logic;\nbegin\n  q <= a;\n  q <= b;\n  y <= z;\n  z <= y;\nend architecture;\n",
+    )
+    .unwrap();
+    let o = yavs(&dir, &["lint", "--sarif=r.sarif", "r.vhd"]);
+    let text = stderr(&o);
+    assert!(text.contains("error[lint_601]"), "{text}");
+    assert!(text.contains("7 |   q <= b;"), "{text}");
+    assert!(text.contains("also here"), "{text}");
+    assert!(!text.contains("lines 6"), "{text}");
+    let sarif: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.join("r.sarif")).unwrap()).unwrap();
+    let results = sarif["runs"][0]["results"].as_array().unwrap();
+    let related = |rule: &str| {
+        let r = results.iter().find(|r| r["ruleId"] == rule).unwrap();
+        r["relatedLocations"].as_array().unwrap().len()
+    };
+    assert_eq!(related("lint_601"), 1);
+    assert_eq!(related("lint_720"), 1);
+}
+
+/// The message of lint_790 says which branch of a generate a signal could move to.
+#[test]
+fn a_generate_branch_is_named() {
+    let dir = tempdir("lint");
+    std::fs::write(
+        dir.join("yavs-lint.yaml"),
+        "rule:\n  lint_790:\n    disable: false\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("r.vhd"),
+        "entity r is generic (g : boolean := true; n : natural := 1); end entity;\narchitecture x of r is\n  signal s1, s2, s3, s4, y1, y2, y3, y4 : bit;\nbegin\n  e1 : if g generate\n    y1 <= s1;\n  elsif not g generate\n    y2 <= s2;\n  else generate\n    y3 <= s3;\n  end generate;\n  c1 : case n generate\n    when 1 | 2 =>\n      y4 <= s4;\n    when others =>\n  end generate;\nend architecture;\n",
+    )
+    .unwrap();
+    let o = yavs(&dir, &["lint", "--message-format=short", "r.vhd"]);
+    let text = stderr(&o);
+    for (name, place) in [
+        ("s1", "inside generate `e1`"),
+        ("s2", "inside an elsif branch of generate `e1`"),
+        ("s3", "inside the else branch of generate `e1`"),
+        ("s4", "inside the `when 1 | 2` branch of generate `c1`"),
+    ] {
+        assert!(
+            text.contains(&format!("`{name}` is only used {place}")),
+            "{name}: {text}"
+        );
+    }
+}
+
+/// `rtl:` and `testbench:` choose rules per kind of file: what the project lists first, then what
+/// the code and the name say.
+#[test]
+fn testbench_and_rtl_blocks() {
+    let dir = tempdir("lint");
+    std::fs::create_dir_all(dir.join("verify")).unwrap();
+    let body = "entity E is port (a : in bit); end entity;\narchitecture x of E is\n  signal q : bit;\nbegin\n  process (a) begin\n    if a = '1' then\n      q <= a;\n    end if;\n  end process;\nend architecture;\n";
+    let file = |name: &str, unit: &str, head: &str| {
+        std::fs::write(dir.join(name), format!("{head}{}", body.replace('E', unit))).unwrap();
+    };
+    file("adder.vhd", "adder", "");
+    file("tb_named.vhd", "named", "");
+    file("verify/listed.vhd", "listed", "");
+    file("marked.vhd", "marked", "-- yavs: testbench\n");
+    file(
+        "using.vhd",
+        "using",
+        "package bitvis_helpers is end package;\n",
+    );
+    file(
+        "commented.vhd",
+        "commented",
+        "-- osvvm is only named here\n",
+    );
+    std::fs::write(
+        dir.join("noports.vhd"),
+        "entity noports is end entity;\narchitecture x of noports is\n  signal q, a : bit;\nbegin\n  process (a) begin\n    if a = '1' then\n      q <= a;\n    end if;\n  end process;\nend architecture;\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("yavs-lint.yaml"),
+        "testbench_files: ['verify/**']\nrtl:\n  rule:\n    lint_600:\n      disable: false\ntestbench:\n  rule:\n    lint_600:\n      disable: true\n",
+    )
+    .unwrap();
+    let files = [
+        "adder.vhd",
+        "tb_named.vhd",
+        "verify/listed.vhd",
+        "marked.vhd",
+        "using.vhd",
+        "commented.vhd",
+        "noports.vhd",
+    ];
+    let mut args = vec!["lint", "--message-format=short"];
+    args.extend(files);
+    let o = yavs(&dir, &args);
+    let text = stderr(&o);
+    let with: Vec<&&str> = files.iter().filter(|f| text.contains(**f)).collect();
+    assert_eq!(with, [&"adder.vhd", &"commented.vhd"], "{text}");
+
+    // A library named as one.
+    std::fs::write(
+        dir.join("yavs-lint.yaml"),
+        "testbench_libraries: [tb_lib]\nrtl:\n  rule:\n    lint_600:\n      disable: false\n",
+    )
+    .unwrap();
+    let o = yavs(
+        &dir,
+        &[
+            "lint",
+            "--work=tb_lib:lib",
+            "--message-format=short",
+            "adder.vhd",
+        ],
+    );
+    assert_eq!(findings(&stderr(&o)), Vec::new(), "{}", stderr(&o));
+    let o = yavs(&dir, &["lint", "--message-format=short", "adder.vhd"]);
+    assert_eq!(findings(&stderr(&o)).len(), 1, "{}", stderr(&o));
+
+    // A wrong key names itself.
+    std::fs::write(dir.join("yavs-lint.yaml"), "testbench:\n  rules: {}\n").unwrap();
+    let o = yavs(&dir, &["lint", "adder.vhd"]);
+    assert_eq!(status(&o), 2);
+    assert!(stderr(&o).contains("`rules`"), "{}", stderr(&o));
+}
+
+/// A naming rule with no list says nothing, and a list can hold a regular expression.
+#[test]
+fn register_names_only_when_asked() {
+    let dir = tempdir("lint");
+    std::fs::write(
+        dir.join("r.vhd"),
+        "entity r is port (clk, d : in bit); end entity;\narchitecture a of r is\n  signal a_p1, b_p12, c_comb, r_x, wire : bit;\nbegin\n  wire <= d;\n  process (clk) begin\n    if clk'event and clk = '1' then\n      a_p1 <= d;\n      b_p12 <= d;\n      c_comb <= d;\n      r_x <= d;\n    end if;\n  end process;\nend architecture;\n",
+    )
+    .unwrap();
+    let run = |cfg: &str| {
+        std::fs::write(dir.join("yavs-lint.yaml"), cfg).unwrap();
+        let o = yavs(&dir, &["lint", "--message-format=short", "r.vhd"]);
+        (status(&o), findings(&stderr(&o)), stderr(&o))
+    };
+    let (_, found, text) =
+        run("rule:\n  lint_602:\n    disable: false\n  lint_603:\n    disable: false\n");
+    assert_eq!(found, Vec::new(), "{text}");
+    let (_, found, text) =
+        run("rule:\n  lint_602:\n    disable: false\n    suffixes: ['re:_P[0-9]+']\n");
+    let lines: Vec<usize> = found.iter().map(|f| f.0).collect();
+    // `wire` is combinational: no register, whatever its name.
+    assert_eq!(lines, [10, 11], "{text}");
+    let (_, found, text) = run("rule:\n  lint_603:\n    disable: false\n    prefixes: ['r_']\n");
+    assert_eq!(found.len(), 3, "{text}");
+    let (status, _, text) = run("rule:\n  lint_602:\n    disable: false\n    suffixes: ['re:(']\n");
+    assert_eq!(status, 2, "{text}");
+    assert!(text.contains("not a regular expression"), "{text}");
+}
+
 #[test]
 fn loops() {
     regression_with(

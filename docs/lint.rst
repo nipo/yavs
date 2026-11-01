@@ -84,7 +84,8 @@ which rules run and how a finding counts. A rule's own setting wins over its cla
        severity: error
 
 ``lint_602`` takes ``suffixes`` and ``lint_603`` takes ``prefixes``, lists in which ``*`` and ``?``
-are allowed. An unknown key or rule is an error naming it, with status 2. ``-Wno-RULE``, ``-Werror`` and
+are allowed, or a regular expression after ``re:`` (``re:_p[0-9]+``), matched without regard to case.
+With no list these two rules say nothing. An unknown key or rule is an error naming it, with status 2. ``-Wno-RULE``, ``-Werror`` and
 ``-Werror=RULE`` do the same for one run; ``-Werror`` makes a finding of severity warning an error.
 
 To leave files out, list them under ``exclude``: paths or globs, relative to the configuration file,
@@ -97,6 +98,38 @@ An excluded file is still read when another file needs it:
      - generated                # a directory
      - 'src/**/old_*.vhd'       # `*` and `?` stop at `/`, `**` does not
      - '**/vunit/vhdl/**'       # a test runner's own libraries, wherever they are installed
+
+Testbenches and hardware
+------------------------
+
+A testbench is written to other rules than hardware: a signal driven from two places is often how it
+works. The blocks ``rtl:`` and ``testbench:`` hold a ``rule:`` section each, which wins over the
+top-level one for files of that kind. With neither block, files are not told apart.
+
+.. code-block:: yaml
+
+   testbench_files:
+     - 'tb_*.vhd'           # a bare name: that file in any directory
+     - 'verify/**'          # relative to this file, and below any directory
+   testbench_libraries:
+     - tb_lib
+   testbench:
+     rule:
+       lint_601:
+         disable: true
+   rtl:
+     rule:
+       lint_600:
+         disable: false
+
+A file is a testbench, in this order, when ``testbench_files`` or ``testbench_libraries`` names it, when
+it has the comment ``-- yavs: testbench`` in its first 2000 characters, when its code names
+``vunit_lib``, ``osvvm``, ``uvvm_util``, ``bitvis`` or ``runner_cfg``, when it declares an entity with
+no ports, or when its file name starts with ``tb_`` or ends in ``_tb``, or a directory on its path is
+``test``, ``tests``, ``tb``, ``testbench``, ``testbenches``, ``sim``, ``bench`` or ``verification``. The
+last three are inferences and can be wrong: list the files to decide it yourself. The run does not say
+which files it took for testbenches. ``suffixes`` and ``prefixes`` hold for the whole run, wherever they
+are set.
 
 Waivers
 -------

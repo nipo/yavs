@@ -72,8 +72,8 @@ pub static RULES: &[Rule] = &[
     rule(
         "lint_600",
         X,
-        "A combinational process does not assign a signal on every path, inferring a latch.",
-        "The signal keeps its value on the path that does not assign it, which a synthesis tool builds as a latch. A process is taken as combinational when it tests no edge and has no `wait` or procedure call. A signal assigned first has a default and is not reported. A signal assigned in part or inside a loop is not judged.",
+        "A combinational process does not assign a signal on every path, or reads a variable on a path that has not assigned it, inferring a latch.",
+        "The signal or variable keeps its value on that path, which a synthesis tool builds as a latch. A process is taken as combinational when it tests no edge and has no `wait` or procedure call. A signal assigned first has a default and is not reported. A signal assigned in part or inside a loop is not judged, nor is a variable with an initial value, or one a loop assigns when read in that loop. A branch only a generic or constant decides counts as taken. Two conditions that are always equal are still two paths, so a finding on a variable can need a second reading.",
     ),
     rule(
         "lint_601",
@@ -85,13 +85,13 @@ pub static RULES: &[Rule] = &[
         "lint_602",
         P,
         "A signal assigned by a clocked process does not have a register suffix (set `suffixes`).",
-        "A naming convention. `suffixes` lists what is accepted, `*` and `?` allowed; the default is `_q`, `_r`, `_reg`.",
+        "A naming convention. `suffixes` lists what is accepted, `*` and `?` allowed, or a regular expression after `re:`. With no list the rule says nothing, as a convention is the project's to choose.",
     ),
     rule(
         "lint_603",
         P,
         "A signal assigned by a clocked process does not have a register prefix (set `prefixes`).",
-        "A naming convention. `prefixes` lists what is accepted, `*` and `?` allowed; the default is `r_`.",
+        "A naming convention. `prefixes` lists what is accepted, `*` and `?` allowed, or a regular expression after `re:`. With no list the rule says nothing, as a convention is the project's to choose.",
     ),
     rule(
         "lint_700",
@@ -228,9 +228,16 @@ pub static RULES: &[Rule] = &[
 ];
 
 pub(crate) type Raw = (&'static str, Span, String);
+/// The other places a finding is about (`lint_601`, `lint_720`), by its place and message.
+pub(crate) type Related = std::collections::HashMap<(Span, String), Vec<Span>>;
 
 /// What every rule finds in `units`, with no configuration applied.
-pub(crate) fn check(db: &Db, units: &[UnitId], cfg: &Config, facts: bool) -> (Vec<Raw>, Value) {
+pub(crate) fn check(
+    db: &Db,
+    units: &[UnitId],
+    cfg: &Config,
+    facts: bool,
+) -> (Vec<Raw>, Related, Value) {
     let mut w = Walk {
         db,
         out: Vec::new(),
@@ -243,16 +250,17 @@ pub(crate) fn check(db: &Db, units: &[UnitId], cfg: &Config, facts: bool) -> (Ve
     }
     let mut out = w.out;
     let mut arches = Vec::new();
+    let mut related = Related::new();
     if facts || cfg.beyond_definite() {
         for &u in units {
-            let f = crate::design::architecture(db, u, cfg, &mut out);
+            let f = crate::design::architecture(db, u, cfg, &mut out, &mut related);
             if !f.is_null() {
                 arches.push(f);
             }
         }
     }
     let files: std::collections::HashSet<_> = units.iter().map(|&u| db.units[u].file).collect();
-    if crate::rule("lint_005").is_some_and(|r| cfg.enabled(r)) {
+    if crate::rule("lint_005").is_some_and(|r| cfg.enabled_anywhere(r)) {
         for &file in &files {
             library_work(db, file, &mut out);
         }
@@ -263,7 +271,7 @@ pub(crate) fn check(db: &Db, units: &[UnitId], cfg: &Config, facts: bool) -> (Ve
     } else {
         Value::Null
     };
-    (out, facts)
+    (out, related, facts)
 }
 
 /// `lint_005`: the syntax of the file is the only place that says what its context clauses wrote.

@@ -4,19 +4,19 @@
 //! judged only in a shape that says what it is; anything else is left alone.
 
 use crate::Config;
-use crate::rules::Raw;
+use crate::rules::{Raw, Related};
 use serde_json::{Value, json};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use yavs_diag::Span;
 use yavs_sem::attr::PredefAttr;
-use yavs_sem::decl::{Body, DeclKind, ObjClass, ObjRole};
+use yavs_sem::decl::{Body, DeclKind, ObjClass, ObjRole, SubprogramKind};
 use yavs_sem::hir::{
-    Actual, AttrPrefix, ConstValue, ExprKind, Lsp, Mode, ObjRoot, Rhs, Sensitivity, StmtKind,
-    UnitHir, Waveform,
+    Actual, AttrPrefix, Choice, ConstValue, ExprKind, LoopScheme, Lsp, Mode, ObjRoot, Rhs,
+    Sensitivity, StmtKind, UnitHir, Waveform,
 };
 use yavs_sem::loader::UnitKey;
 use yavs_sem::lsp::{Overlap, Use};
-use yavs_sem::types::TypeKind;
+use yavs_sem::types::{RangeC, TypeKind};
 use yavs_sem::{Db, DeclId, ExprId, ScopeId, StmtId, TypeId, UnitId};
 
 /// A concurrent statement as its equivalent process.
@@ -165,6 +165,169 @@ fn delayed(rhs: &Rhs<Waveform>) -> bool {
     }
 }
 
+/// Whether a condition reads no signal or variable and calls nothing impure: analysis may not have
+/// folded it (a generic), but it cannot change while the design runs.
+fn before_the_run(db: &Db, c: ExprId) -> bool {
+    let mut fixed = true;
+    db.walk_expr(c, &mut |x| match &db.exprs[x].kind {
+        ExprKind::Obj(d) => {
+            fixed &=
+                matches!(&db.decls[*d].kind, DeclKind::Object(o) if o.class == ObjClass::Constant);
+        }
+        ExprKind::Call { callee, .. } => {
+            fixed &= matches!(
+                db.decls[*callee].kind.subprogram().map(|s| &s.kind),
+                Some(SubprogramKind::Function { pure: true })
+            );
+        }
+        ExprKind::External(_) | ExprKind::Deref { .. } => fixed = false,
+        _ => {}
+    });
+    fixed
+}
+
+/// The prefixes of attributes under `x` itself, in a slice's or a choice's range too (`v'range`):
+/// names there give a property of the object, not its value.
+fn attribute_prefixes(db: &Db, x: ExprId, out: &mut HashSet<ExprId>) {
+    let mut range = |r: &RangeC| {
+        if let RangeC::Attr {
+            prefix: AttrPrefix::Expr(p),
+            ..
+        } = r
+        {
+            out.insert(*p);
+        }
+    };
+    match &db.exprs[x].kind {
+        ExprKind::Slice { range: r, .. } => range(r),
+        ExprKind::Aggregate { assocs, .. } => {
+            for c in assocs.iter().flat_map(|a| a.choices.iter()) {
+                if let Choice::Range(r) = c {
+                    range(r);
+                }
+            }
+        }
+        ExprKind::Attr {
+            prefix: AttrPrefix::Expr(p),
+            ..
+        } => {
+            out.insert(*p);
+        }
+        _ => {}
+    }
+}
+
+/// The variables with no initial value that an expression reads as a value (`v'length` does not).
+fn variables_read(db: &Db, e: ExprId, out: &mut Vec<(DeclId, Span)>) {
+    let mut attr_prefix = HashSet::new();
+    db.walk_expr(e, &mut |x| {
+        attribute_prefixes(db, x, &mut attr_prefix);
+        if let ExprKind::Obj(d) = &db.exprs[x].kind
+            && !attr_prefix.contains(&x)
+            && let DeclKind::Object(o) = &db.decls[*d].kind
+            && o.class == ObjClass::Variable
+            && o.role == ObjRole::Plain
+            && o.default.is_none()
+            && !matches!(
+                db.types[db.base(o.subtype)].kind,
+                TypeKind::Access { .. } | TypeKind::Protected { .. } | TypeKind::File { .. }
+            )
+        {
+            out.push((*d, db.exprs[x].span));
+        }
+    });
+}
+
+/// `lint_600` of variables: walks `list` with what every path so far assigned, and notes the first
+/// read of a variable some path has not assigned. Part of a variable counts as all of it: filling
+/// `v(0)` and reading it in the next iteration is ordinary code, and proving it needs more.
+fn kept_variables(
+    db: &Db,
+    list: &[StmtId],
+    assigned: &mut HashSet<DeclId>,
+    out: &mut HashMap<DeclId, Span>,
+) {
+    let meet = |paths: Vec<&[StmtId]>, assigned: &mut HashSet<DeclId>, out: &mut _| {
+        let mut all: Option<HashSet<DeclId>> = None;
+        for p in paths {
+            let mut one = assigned.clone();
+            kept_variables(db, p, &mut one, out);
+            all = Some(match all {
+                Some(a) => a.intersection(&one).copied().collect(),
+                None => one,
+            });
+        }
+        all
+    };
+    for &s in list {
+        let mut exprs = Vec::new();
+        db.stmt_exprs(s, &mut |e, u| {
+            if u == Use::Value {
+                exprs.push(e);
+            }
+        });
+        let mut reads = Vec::new();
+        exprs
+            .iter()
+            .for_each(|e| variables_read(db, *e, &mut reads));
+        for (d, span) in reads {
+            if !assigned.contains(&d) {
+                let at = out.entry(d).or_insert(span);
+                if span.start < at.start {
+                    *at = span;
+                }
+            }
+        }
+        match &db.stmts[s].kind {
+            StmtKind::VarAssign { target, .. } => match db.lsp(target.expr) {
+                Some(l) => assigned.extend(decl(l.root)),
+                None => db.walk_expr(target.expr, &mut |x| {
+                    if let ExprKind::Obj(d) = db.exprs[x].kind {
+                        assigned.insert(d);
+                    }
+                }),
+            },
+            StmtKind::If { branches, else_ } => {
+                // Each condition is read before its branch, and the reads above took them all.
+                let mut paths: Vec<&[StmtId]> = branches.iter().map(|(_, b)| &b[..]).collect();
+                // A condition no signal decides leaves no path that skips the branch.
+                let whole = else_.is_some() || branches.iter().all(|(c, _)| before_the_run(db, *c));
+                paths.extend(else_.iter().map(|e| &e[..]));
+                if let Some(all) = meet(paths, assigned, out)
+                    && whole
+                {
+                    *assigned = all;
+                }
+            }
+            StmtKind::Case { alts, .. } => {
+                if let Some(all) = meet(alts.iter().map(|(_, b)| &b[..]).collect(), assigned, out) {
+                    *assigned = all;
+                }
+            }
+            // A `for` loop runs and is unrolled; a `while` loop may not run at all.
+            StmtKind::Loop { scheme, body, .. } => {
+                let mut one = assigned.clone();
+                kept_variables(db, body, &mut one, &mut HashMap::new());
+                // An iteration may read what an earlier one assigned, whichever branch that took.
+                let mut inside = assigned.clone();
+                let mut stmts = Vec::new();
+                deep(db, body, &mut stmts);
+                for &x in &stmts {
+                    if let StmtKind::VarAssign { target, .. } = &db.stmts[x].kind {
+                        inside.extend(db.lsp(target.expr).and_then(|l| decl(l.root)));
+                    }
+                }
+                kept_variables(db, body, &mut inside, out);
+                if matches!(scheme, LoopScheme::For { .. }) {
+                    *assigned = one;
+                }
+            }
+            StmtKind::SeqBlock { body, .. } => kept_variables(db, body, assigned, out),
+            _ => {}
+        }
+    }
+}
+
 /// `lint_720`: for each signal, the signals assigned from it.
 type Edges = HashMap<DeclId, BTreeSet<DeclId>>;
 
@@ -210,18 +373,17 @@ impl Flow<'_> {
                 .filter_map(|l| decl(l.root)),
         );
         let (mut names, mut prefixes) = (Vec::new(), HashSet::new());
-        db.walk_expr(e, &mut |x| match &db.exprs[x].kind {
-            ExprKind::Obj(_) => names.push(x),
-            ExprKind::Index { prefix, .. }
-            | ExprKind::Slice { prefix, .. }
-            | ExprKind::Field { prefix, .. }
-            | ExprKind::Attr {
-                prefix: AttrPrefix::Expr(prefix),
-                ..
-            } => {
-                prefixes.insert(*prefix);
+        db.walk_expr(e, &mut |x| {
+            attribute_prefixes(db, x, &mut prefixes);
+            match &db.exprs[x].kind {
+                ExprKind::Obj(_) => names.push(x),
+                ExprKind::Index { prefix, .. }
+                | ExprKind::Slice { prefix, .. }
+                | ExprKind::Field { prefix, .. } => {
+                    prefixes.insert(*prefix);
+                }
+                _ => {}
             }
-            _ => {}
         });
         for x in names {
             if !prefixes.contains(&x)
@@ -450,23 +612,30 @@ fn flatten<'a>(
     }
 }
 
-fn line(db: &Db, span: Span) -> usize {
-    db.sources.get(span.file).line_col(span.start).0
-}
-
 fn name(db: &Db, d: DeclId) -> String {
     db.decls[d].name.to_string()
 }
 
-fn show(db: &Db, l: &Lsp) -> String {
-    let file = db.sources.get(l.span.file);
+fn line(db: &Db, span: Span) -> usize {
+    db.sources.get(span.file).line_col(span.start).0
+}
+
+fn span_text(db: &Db, span: Span) -> String {
+    let file = db.sources.get(span.file);
     file.try_text()
         .ok()
-        .and_then(|t| t.get(file.text_offset(l.span.start)..file.text_offset(l.span.end)))
-        .map_or_else(
-            || decl(l.root).map_or_else(String::new, |d| name(db, d)),
-            str::to_string,
-        )
+        .and_then(|t| t.get(file.text_offset(span.start)..file.text_offset(span.end)))
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn show(db: &Db, l: &Lsp) -> String {
+    let text = span_text(db, l.span);
+    if text.is_empty() {
+        decl(l.root).map_or_else(String::new, |d| name(db, d))
+    } else {
+        text
+    }
 }
 
 struct Arch<'a> {
@@ -475,10 +644,17 @@ struct Arch<'a> {
     conc: Vec<Conc<'a>>,
     scopes: Vec<ScopeId>,
     out: &'a mut Vec<Raw>,
+    related: &'a mut Related,
 }
 
 /// The rules of one architecture. Returns its design facts.
-pub(crate) fn architecture(db: &Db, u: UnitId, cfg: &Config, out: &mut Vec<Raw>) -> Value {
+pub(crate) fn architecture(
+    db: &Db,
+    u: UnitId,
+    cfg: &Config,
+    out: &mut Vec<Raw>,
+    related: &mut Related,
+) -> Value {
     let unit = &db.units[u];
     let UnitHir::Architecture { stmts, .. } = &unit.hir else {
         return Value::Null;
@@ -491,6 +667,7 @@ pub(crate) fn architecture(db: &Db, u: UnitId, cfg: &Config, out: &mut Vec<Raw>)
         conc,
         scopes,
         out,
+        related,
     };
     a.drivers();
     a.undriven();
@@ -548,19 +725,19 @@ impl Arch<'_> {
             lines.sort_by_key(|x| x.0);
             lines.dedup_by_key(|x| x.0);
             if let Some(first) = lines.first() {
-                let at: Vec<String> = lines.iter().map(|l| line(db, l.1).to_string()).collect();
                 found.push((
                     first.1,
                     format!(
-                        "Signal `{}` is assigned by {} concurrent statements (lines {})",
+                        "Signal `{}` is assigned by {} concurrent statements",
                         name(db, d),
                         lines.len(),
-                        at.join(", ")
                     ),
+                    lines.iter().map(|l| l.1).collect::<Vec<_>>(),
                 ));
             }
         }
-        for (span, m) in found {
+        for (span, m, others) in found {
+            self.related.insert((span, m.clone()), others);
             self.push("lint_601", span, m);
         }
     }
@@ -712,14 +889,17 @@ impl Arch<'_> {
                 .find_map(|d| places.get(d))
                 .copied()
                 .unwrap_or(db.decls[cycle[0]].span);
-            self.push(
-                "lint_720",
-                span,
-                format!(
-                    "Combinational loop: {} depends on itself with no register in the way",
-                    names.join(" -> ")
-                ),
+            let m = format!(
+                "Combinational loop: {} depends on itself with no register in the way",
+                names.join(" -> ")
             );
+            let on_it = cycle
+                .iter()
+                .filter_map(|d| places.get(d))
+                .copied()
+                .collect();
+            self.related.insert((span, m.clone()), on_it);
+            self.push("lint_720", span, m);
         }
     }
 
@@ -820,6 +1000,13 @@ impl Arch<'_> {
                         paths.push(e);
                         meet(paths, out);
                     }
+                    // A generic decides whether the branch exists: no path of the design skips it.
+                    StmtKind::If {
+                        branches,
+                        else_: None,
+                    } if branches.iter().all(|(c, _)| before_the_run(db, *c)) => {
+                        meet(branches.iter().map(|(_, b)| &b[..]).collect(), out);
+                    }
                     StmtKind::Case { alts, .. } => {
                         meet(alts.iter().map(|(_, b)| &b[..]).collect(), out);
                     }
@@ -866,6 +1053,17 @@ impl Arch<'_> {
                         ),
                     ));
                 }
+            }
+            let mut read_first = HashMap::new();
+            kept_variables(db, body, &mut HashSet::new(), &mut read_first);
+            for (d, span) in read_first {
+                found.push((
+                    span,
+                    format!(
+                        "Variable `{}` is read on a path that has not assigned it: it keeps its value from the last run of this combinational process, which infers a latch",
+                        name(db, d)
+                    ),
+                ));
             }
         }
         for (span, m) in found {
@@ -1008,14 +1206,14 @@ impl Arch<'_> {
     }
 }
 
-fn range_exprs(r: &yavs_sem::types::RangeC) -> Vec<ExprId> {
+fn range_exprs(r: &RangeC) -> Vec<ExprId> {
     match r {
-        yavs_sem::types::RangeC::Explicit { left, right, .. } => vec![*left, *right],
-        yavs_sem::types::RangeC::Attr {
+        RangeC::Explicit { left, right, .. } => vec![*left, *right],
+        RangeC::Attr {
             prefix: yavs_sem::hir::AttrPrefix::Expr(e),
             ..
         } => vec![*e],
-        yavs_sem::types::RangeC::Attr { .. } => Vec::new(),
+        RangeC::Attr { .. } => Vec::new(),
     }
 }
 
@@ -1202,8 +1400,15 @@ impl Uses {
                     for e in exprs {
                         self.expr(db, e, at);
                     }
-                    for alt in alts {
-                        let r = self.open(format!("generate{label}"), false, at);
+                    for (i, alt) in alts.iter().enumerate() {
+                        let name = if alt.cond.is_none() {
+                            format!("the else branch of generate{label}")
+                        } else if i > 0 {
+                            format!("an elsif branch of generate{label}")
+                        } else {
+                            format!("generate{label}")
+                        };
+                        let r = self.open(name, false, at);
                         self.scope(db, alt.scope, r, true);
                         self.region(db, &alt.body, r);
                     }
@@ -1212,8 +1417,24 @@ impl Uses {
                     for e in exprs {
                         self.expr(db, e, at);
                     }
-                    for (_, alt) in alts {
-                        let r = self.open(format!("generate{label}"), false, at);
+                    for (choices, alt) in alts {
+                        let shown: Vec<String> = choices
+                            .choices
+                            .iter()
+                            .map(|c| match c {
+                                Choice::Expr(e) => span_text(db, db.exprs[*e].span),
+                                Choice::Range(RangeC::Explicit { left, right, .. }) => format!(
+                                    "{} .. {}",
+                                    span_text(db, db.exprs[*left].span),
+                                    span_text(db, db.exprs[*right].span)
+                                ),
+                                Choice::Others => "others".to_string(),
+                                _ => "...".to_string(),
+                            })
+                            .collect();
+                        let name =
+                            format!("the `when {}` branch of generate{label}", shown.join(" | "));
+                        let r = self.open(name, false, at);
                         self.scope(db, alt.scope, r, true);
                         self.region(db, &alt.body, r);
                     }
@@ -1221,6 +1442,46 @@ impl Uses {
                 _ => self.statements(db, &[s], at),
             }
         }
+    }
+}
+
+/// One entry of `suffixes` or `prefixes`: a pattern, or with `re:` a regular expression, tried on
+/// the lower case name. Anchored at the end for a suffix, at the start for a prefix.
+struct Affix {
+    text: String,
+    regex: Option<regex::Regex>,
+}
+
+impl Affix {
+    fn new(text: &str) -> Affix {
+        let regex = text.strip_prefix("re:").map(|r| {
+            regex::Regex::new(&format!("(?i){r}")).expect("checked when the configuration was read")
+        });
+        Affix {
+            text: text.to_string(),
+            regex,
+        }
+    }
+
+    fn fits(&self, name: &str, front: bool) -> bool {
+        // ponytail: `*` in an affix is the whole-name glob, so `_p*` matches `x_p1` and
+        // `x_p1_y` alike; anchor it per affix if that ever matters.
+        if let Some(r) = &self.regex {
+            return r.find_iter(name).any(|m| {
+                if front {
+                    m.start() == 0
+                } else {
+                    m.end() == name.len()
+                }
+            });
+        }
+        let a = self.text.to_ascii_lowercase();
+        let p = if front {
+            format!("{a}**")
+        } else {
+            format!("**{a}")
+        };
+        crate::config::glob(p.as_bytes(), name.as_bytes())
     }
 }
 
@@ -1257,6 +1518,16 @@ impl Arch<'_> {
     /// reset domains and crossings of the design facts.
     fn domains(&mut self, cfg: &Config) -> (Value, Value, Value) {
         let db = self.db;
+        let affixes = |rule: &str| -> Vec<Affix> {
+            cfg.option_list(rule)
+                .iter()
+                .map(|a| Affix::new(a))
+                .collect()
+        };
+        let naming = [
+            ("lint_602", "suffix", affixes("lint_602"), false),
+            ("lint_603", "prefix", affixes("lint_603"), true),
+        ];
         type Regs = HashMap<DeclId, Vec<usize>>;
         // clock/reset index per register; each clock or reset is one entry of `clocks`/`resets`.
         let (mut clocks, mut resets): (Vec<Lsp>, Vec<Lsp>) = (Vec::new(), Vec::new());
@@ -1320,38 +1591,21 @@ impl Arch<'_> {
                     continue;
                 }
                 let n = name(db, d).to_ascii_lowercase();
-                // ponytail: `*` in an affix is the whole-name glob, so `_p*` matches `x_p1` and
-                // `x_p1_y` alike; anchor it per affix if that ever matters.
-                for (rule, opt, fallback, front) in [
-                    ("lint_602", "suffixes", &["_q", "_r", "_reg"][..], false),
-                    ("lint_603", "prefixes", &["r_"][..], true),
-                ] {
-                    let listed = cfg.option_list(rule);
-                    let affixes: Vec<String> = if listed.is_empty() {
-                        fallback.iter().map(|s| s.to_string()).collect()
-                    } else {
-                        listed.iter().map(|s| s.to_ascii_lowercase()).collect()
-                    };
-                    let fits = affixes.iter().any(|a| {
-                        let p = if front {
-                            format!("{a}**")
-                        } else {
-                            format!("**{a}")
-                        };
-                        crate::config::glob(p.as_bytes(), n.as_bytes())
-                    });
-                    if !fits {
-                        found.push((
-                            rule,
-                            l.span,
-                            format!(
-                                "Registered signal `{}` does not have the {} {}",
-                                name(db, d),
-                                &opt[..opt.len() - 2],
-                                affixes.join(" or ")
-                            ),
-                        ));
+                for (rule, opt, affixes, front) in &naming {
+                    // A naming convention is the project's: none listed, nothing to check.
+                    if affixes.is_empty() || affixes.iter().any(|a| a.fits(&n, *front)) {
+                        continue;
                     }
+                    let listed: Vec<&str> = affixes.iter().map(|a| a.text.as_str()).collect();
+                    found.push((
+                        *rule,
+                        l.span,
+                        format!(
+                            "Registered signal `{}` does not have the {opt} {}",
+                            name(db, d),
+                            listed.join(" or ")
+                        ),
+                    ));
                 }
             }
             // `lint_702`
@@ -1495,6 +1749,20 @@ impl Arch<'_> {
         let mut found = Vec::new();
         for (ty, lits, signals) in types {
             if signals.is_empty() || signals.iter().any(|d| named.contains(d)) {
+                continue;
+            }
+            // A state machine has a register: some signal of the type is assigned under a clock.
+            let registered = self.conc.iter().any(|c| {
+                c.process.is_some_and(|b| {
+                    exprs_of(db, b)
+                        .iter()
+                        .any(|(e, _)| edge_in(db, *e).is_some())
+                }) && c
+                    .drivers
+                    .iter()
+                    .any(|l| decl(l.root).is_some_and(|d| signals.contains(&d)))
+            });
+            if !registered {
                 continue;
             }
             let of_type = |e: ExprId| match db.exprs[e].kind {

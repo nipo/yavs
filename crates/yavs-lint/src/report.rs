@@ -13,6 +13,8 @@ pub struct Entry {
     pub column: usize,
     pub error: bool,
     pub message: String,
+    /// The other places it is about, as file, line and column.
+    pub related: Vec<(String, usize, usize)>,
 }
 
 /// What a run found: every file looked at, and the findings in order.
@@ -187,6 +189,12 @@ impl Reports<'_> {
                             "region": { "startLine": e.line, "startColumn": e.column },
                         },
                     }],
+                    "relatedLocations": e.related.iter().map(|(file, line, column)| json!({
+                        "physicalLocation": {
+                            "artifactLocation": { "uri": uri(file) },
+                            "region": { "startLine": line, "startColumn": column },
+                        },
+                    })).collect::<Vec<Value>>(),
                 })
             })
             .collect();

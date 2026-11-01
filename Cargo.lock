@@ -2232,6 +2232,7 @@ dependencies = [
 name = "yavs-lint"
 version = "0.11.0"
 dependencies = [
+ "regex",
  "saphyr-parser",
  "serde_json",
  "yavs-diag",

@@ -73,3 +73,37 @@ begin
     assert q(i) = '0';
   end generate;
 end architecture;
+
+entity scope_names is
+end entity;
+
+-- A name of something else is not a use, and one declared twice is left to its own declaration.
+architecture rtl of scope_names is
+  type rec_t is record
+    s : bit;
+  end record;
+  signal r : rec_t;
+  signal s : bit; -- expect: lint_790
+  signal x, y : bit;
+  signal twice : bit;
+  signal listed_last, kept : bit; -- expect: lint_790, lint_790
+  component c is
+    port (s : in bit);
+  end component;
+begin
+  y <= r.s;
+  g : if true generate
+    x <= s;
+    kept <= listed_last;
+  end generate;
+
+  h : if true generate
+    p : process is
+      variable twice : bit;
+    begin
+      twice := x;
+      wait;
+    end process;
+  end generate;
+  x <= twice;
+end architecture;

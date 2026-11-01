@@ -1,0 +1,1 @@
+`yavs lint`: `lint_600` also reports a variable read before a path assigned it, and leaves a branch a generic decides; `lint_601` and `lint_720` show every place as a location, also in SARIF; `lint_710` and `lint_711` need a register; `lint_790` names the generate branch.

@@ -105,6 +105,13 @@ fn layer(line: usize, name: &str, n: &Node) -> Result<Layer, String> {
                 let Node::Scalar(s) = n else {
                     return Err(format!("line {l}: `{name}.{key}` must be a list of words"));
                 };
+                if let Some(r) = s.strip_prefix("re:")
+                    && let Err(e) = regex::Regex::new(r)
+                {
+                    return Err(format!(
+                        "line {l}: `{s}` in `{name}.{key}` is not a regular expression: {e}"
+                    ));
+                }
                 out.list.push(s.clone());
             }
             continue;
@@ -153,6 +160,35 @@ pub struct Config {
     rules: Vec<(&'static str, Layer)>,
     /// `exclude`: paths or globs of what is not checked, relative to the configuration file.
     exclude: Vec<String>,
+    /// `testbench_files`: patterns of the files that are testbenches.
+    testbench_files: Vec<String>,
+    /// `testbench_libraries`: the libraries that hold testbenches, folded.
+    testbench_libraries: Vec<String>,
+    /// The `rule:` sections of `rtl:` and `testbench:`, which win for files of that kind.
+    kinds: [Option<Box<Config>>; 2],
+}
+
+/// Which rule block of the configuration applies to a file.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    Rtl = 0,
+    Testbench = 1,
+}
+
+/// The words of a list of strings in the configuration.
+fn words(l: usize, key: &str, v: Node) -> Result<Vec<String>, String> {
+    let items = match v {
+        Node::Seq(items) => items,
+        Node::Scalar(s) if s.is_empty() => Vec::new(),
+        _ => return Err(format!("line {l}: `{key}` must be a list")),
+    };
+    items
+        .into_iter()
+        .map(|n| match n {
+            Node::Scalar(s) => Ok(s),
+            _ => Err(format!("line {l}: `{key}` must be a list of words")),
+        })
+        .collect()
 }
 
 impl Config {
@@ -160,30 +196,68 @@ impl Config {
     pub fn parse(text: &str) -> Result<Config, String> {
         let mut cfg = Config::default();
         for (l, key, v) in top(text)? {
-            if key == "exclude" {
-                let items = match v {
-                    Node::Seq(items) => items,
-                    Node::Scalar(s) if s.is_empty() => Vec::new(),
-                    _ => return Err(format!("line {l}: `exclude` must be a list")),
-                };
-                for n in items {
-                    let Node::Scalar(s) = n else {
-                        return Err(format!(
-                            "line {l}: `exclude` must be a list of paths or globs"
-                        ));
-                    };
-                    cfg.exclude
-                        .push(normalize(&s).trim_end_matches('/').to_owned());
+            match key.as_str() {
+                "exclude" => {
+                    for s in words(l, &key, v)? {
+                        cfg.exclude
+                            .push(normalize(&s).trim_end_matches('/').to_owned());
+                    }
                 }
-                continue;
+                "testbench_files" => {
+                    let files = words(l, &key, v)?;
+                    cfg.testbench_files = files.iter().map(|s| normalize(s)).collect();
+                }
+                "testbench_libraries" => {
+                    let libraries = words(l, &key, v)?;
+                    cfg.testbench_libraries =
+                        libraries.iter().map(|s| s.to_ascii_lowercase()).collect();
+                }
+                "rtl" | "testbench" => {
+                    let Node::Map(fields) = v else {
+                        return Err(format!("line {l}: `{key}` must be a map"));
+                    };
+                    let mut block = Config::default();
+                    for (l, field, v) in fields {
+                        if field != "rule" {
+                            return Err(format!(
+                                "line {l}: unknown key `{field}` in `{key}` (expected `rule`){}",
+                                near(&field, "key", ["rule"].into_iter())
+                            ));
+                        }
+                        block.rules_section(l, &v)?;
+                    }
+                    let at = if key == "rtl" {
+                        Kind::Rtl
+                    } else {
+                        Kind::Testbench
+                    };
+                    cfg.kinds[at as usize] = Some(Box::new(block));
+                }
+                "rule" => cfg.rules_section(l, &v)?,
+                _ => {
+                    let keys = [
+                        "rule",
+                        "exclude",
+                        "testbench_files",
+                        "testbench_libraries",
+                        "rtl",
+                        "testbench",
+                    ];
+                    return Err(format!(
+                        "line {l}: unknown key `{key}` (expected `rule`, `exclude`, `testbench_files`, `testbench_libraries`, `rtl` or `testbench`){}",
+                        near(&key, "key", keys.into_iter())
+                    ));
+                }
             }
-            if key != "rule" {
-                return Err(format!(
-                    "line {l}: unknown key `{key}` (expected `rule` or `exclude`){}",
-                    near(&key, "key", ["rule", "exclude"].into_iter())
-                ));
-            }
-            let Node::Map(rules) = &v else {
+        }
+        Ok(cfg)
+    }
+
+    /// One `rule:` section, at the top level or of a kind of file.
+    fn rules_section(&mut self, l: usize, v: &Node) -> Result<(), String> {
+        let cfg = self;
+        {
+            let Node::Map(rules) = v else {
                 return Err(format!("line {l}: `rule` must be a map"));
             };
             for (l, id, v) in rules {
@@ -224,7 +298,7 @@ impl Config {
                 }
             }
         }
-        Ok(cfg)
+        Ok(())
     }
 
     fn layers(&self, r: &Rule) -> [Layer; 3] {
@@ -247,20 +321,79 @@ impl Config {
         self.exclude.iter().any(|p| place.covered_by(p))
     }
 
-    /// The list a rule's own settings give (`suffixes`, `prefixes`), empty when not set.
+    /// The list a rule's own settings give (`suffixes`, `prefixes`), empty when not set. The
+    /// top level first, then a kind of file: one list for the whole run.
     pub(crate) fn option_list(&self, id: &str) -> &[String] {
-        self.rules
+        let own = self
+            .rules
             .iter()
             .rev()
             .find(|(r, _)| *r == id)
-            .map_or(&[], |x| &x.1.list)
+            .map_or(&[][..], |x| &x.1.list[..]);
+        if !own.is_empty() {
+            return own;
+        }
+        self.kinds
+            .iter()
+            .flatten()
+            .map(|k| k.option_list(id))
+            .find(|l| !l.is_empty())
+            .unwrap_or(&[])
     }
 
     /// Whether anything but the definite class runs.
     pub(crate) fn beyond_definite(&self) -> bool {
         crate::RULES
             .iter()
-            .any(|r| r.certainty != Certainty::Definite && self.enabled(r))
+            .any(|r| r.certainty != Certainty::Definite && self.enabled_anywhere(r))
+    }
+
+    /// Whether files are told apart at all: a rule block for a kind of file exists.
+    pub(crate) fn has_kinds(&self) -> bool {
+        self.kinds.iter().any(Option::is_some)
+    }
+
+    /// Whether `testbench_files` covers the file: a pattern like those of `exclude`, a bare name
+    /// wherever the file is, and a relative path below any directory.
+    pub(crate) fn testbench_file(&self, file: &Path, base: &Path) -> bool {
+        let place = Place::new(file, base);
+        let name = place.absolute.rsplit('/').next().unwrap_or_default();
+        self.testbench_files.iter().any(|p| {
+            place.covered_by(p)
+                || (!p.contains('/') && glob(p.as_bytes(), name.as_bytes()))
+                || glob(format!("**/{p}").as_bytes(), place.absolute.as_bytes())
+        })
+    }
+
+    pub(crate) fn testbench_library(&self, library: &str) -> bool {
+        self.testbench_libraries.iter().any(|l| l == library)
+    }
+
+    /// Whether this rule runs for some kind of file.
+    pub(crate) fn enabled_anywhere(&self, r: &Rule) -> bool {
+        self.enabled(r)
+            || [Kind::Rtl, Kind::Testbench]
+                .iter()
+                .any(|k| self.enabled_in(r, Some(*k)))
+    }
+
+    fn kind_layers(&self, r: &Rule, kind: Option<Kind>) -> Option<[Layer; 3]> {
+        let block = self.kinds[kind? as usize].as_ref()?;
+        Some(block.layers(r))
+    }
+
+    /// Whether this rule runs for a file of this kind: its block wins over the top level.
+    pub(crate) fn enabled_in(&self, r: &Rule, kind: Option<Kind>) -> bool {
+        self.kind_layers(r, kind)
+            .and_then(|ls| ls.iter().find_map(|l| l.disable))
+            .map_or_else(|| self.enabled(r), |disable| !disable)
+    }
+
+    /// The severity of the rule's findings in a file of this kind.
+    pub(crate) fn severity_in(&self, r: &Rule, kind: Option<Kind>) -> Severity {
+        self.kind_layers(r, kind)
+            .and_then(|ls| ls.iter().find_map(|l| l.severity))
+            .unwrap_or_else(|| self.severity(r))
     }
 
     /// Whether this configuration runs the rule.
@@ -597,6 +730,23 @@ mod tests {
     }
 
     #[test]
+    fn testbench_file_patterns() {
+        let cfg = Config::parse(
+            "testbench_files:\n  - 'tb_*.vhd'\n  - 'test/**'\n  - '**/verify/*.vhd'\n  - 'sim/*.vhd'\n",
+        )
+        .unwrap();
+        let base = Path::new("/p");
+        let is = |f: &str| cfg.testbench_file(Path::new(f), base);
+        assert!(is("/p/modules/fifo/test/tb_fifo.vhd"));
+        assert!(!is("/p/modules/fifo/src/fifo.vhd"));
+        assert!(is("/p/test/a.vhd"));
+        assert!(is("/p/modules/fifo/test/a.vhd"));
+        assert!(is("/p/a/b/verify/thing.vhd"));
+        assert!(is("/p/sim/harness.vhd"));
+        assert!(!is("/p/sim/deep/harness.vhd"));
+    }
+
+    #[test]
     fn unknown_names_are_errors_that_name_them() {
         for (text, needle) in [
             ("vsg_rs: {}\n", "unknown key `vsg_rs`"),
@@ -621,7 +771,7 @@ mod tests {
     #[test]
     fn unknown_names_suggest_a_near_one() {
         let cfg = |t: &str| Config::parse(t).err().expect("rejected");
-        assert!(cfg("rul:\n  global: {}\n").contains("a key with a similar name exists: `rule`"));
+        assert!(cfg("exclud:\n").contains("a key with a similar name exists: `exclude`"));
         assert!(
             cfg("rule:\n  lint_770:\n    disabel: true\n")
                 .contains("a setting with a similar name exists: `disable`")

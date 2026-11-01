@@ -453,7 +453,7 @@ pub fn run(a: Args, format: MessageFormat, color: bool, encoding: Encoding) -> E
     let mut entries = Vec::new();
     let mut waived = 0usize;
     let analysis_errors = out.errors;
-    let (found, facts) = yavs_lint::lint(&db, &units, &cfg, a.facts.is_some());
+    let (found, facts) = yavs_lint::lint(&db, &units, &cfg, &base, a.facts.is_some());
     for f in found {
         let file = db.sources.get(f.span.file);
         let (line, column) = file.line_col(f.span.start);
@@ -464,12 +464,15 @@ pub fn run(a: Args, format: MessageFormat, color: bool, encoding: Encoding) -> E
         if !out.keeps(f.rule.id) {
             continue;
         }
-        let d = Diagnostic::new(f.severity, f.rule.id, f.message.clone())
+        let mut d = Diagnostic::new(f.severity, f.rule.id, f.message.clone())
             .with_primary(f.span, "")
             .with_help(format!(
                 "`yavs lint --explain {}` says what this rule reports",
                 f.rule.id
             ));
+        for &other in f.related.iter().filter(|o| **o != f.span) {
+            d = d.with_secondary(other, "also here");
+        }
         let before = out.errors;
         out.emit(&db.sources, &d);
         entries.push(yavs_lint::Entry {
@@ -478,6 +481,16 @@ pub fn run(a: Args, format: MessageFormat, color: bool, encoding: Encoding) -> E
             line,
             column,
             error: out.errors > before,
+            related: f
+                .related
+                .iter()
+                .filter(|o| **o != f.span)
+                .map(|o| {
+                    let file = db.sources.get(o.file);
+                    let (line, column) = file.line_col(o.start);
+                    (file.path.clone(), line, column)
+                })
+                .collect(),
             message: f.message,
         });
     }
