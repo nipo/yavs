@@ -2638,7 +2638,8 @@ impl<'a> Opt<'a> {
         let mut hits: Vec<bool> = local.iter().map(|&r| r == Run::Hit).collect();
         loop {
             let mut moved = false;
-            for b in 0..nb {
+            // (Last block first: a hit reaches the blocks before it in one sweep.)
+            for b in (0..nb).rev() {
                 if hits[b] || local[b] != Run::Falls {
                     continue;
                 }
@@ -2738,42 +2739,33 @@ impl<'a> Opt<'a> {
             .map(|pc| self.code[pc] == Inst::Stmt && (pinned[pc] || ahead[pc]))
             .collect();
         let process = self.f.kind == FuncKind::Process;
-        let walk = |din: &[bool], at: &mut [bool]| -> Vec<bool> {
-            let mut out = vec![false; nb];
-            for b in 0..nb {
-                let mut d = din[b];
-                for pc in self.range(b) {
-                    let i = &self.code[pc];
-                    if kept[pc] {
-                        at[pc] = d;
-                        d = false;
-                    } else if process && matches!(i, Inst::Suspend { .. }) && !is_dead(i) {
-                        d = false;
-                    } else if !is_wait(i) && leaves(i) {
-                        d = true;
-                    }
-                }
-                out[b] = d;
-            }
-            out
-        };
         let mut din = vec![false; nb];
         let mut at = vec![false; self.code.len()];
-        loop {
-            let out = walk(&din, &mut at);
-            let mut moved = false;
-            for b in (0..nb).filter(|&b| out[b]) {
+        // A block is walked again only when its start turns dirty, which happens once: a chain
+        // of a thousand `elsif`s is not a thousand walks of the whole function.
+        let mut work: Vec<usize> = (0..nb).collect();
+        while let Some(b) = work.pop() {
+            let mut d = din[b];
+            for pc in self.range(b) {
+                let i = &self.code[pc];
+                if kept[pc] {
+                    at[pc] = d;
+                    d = false;
+                } else if process && matches!(i, Inst::Suspend { .. }) && !is_dead(i) {
+                    d = false;
+                } else if !is_wait(i) && leaves(i) {
+                    d = true;
+                }
+            }
+            if d {
                 let mut k = 0;
                 while let Some(s) = self.succ(b, k) {
                     k += 1;
                     if !din[s] {
                         din[s] = true;
-                        moved = true;
+                        work.push(s);
                     }
                 }
-            }
-            if !moved {
-                break;
             }
         }
         for pc in 0..self.code.len() {
