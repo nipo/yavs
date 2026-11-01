@@ -2115,7 +2115,6 @@ dependencies = [
 name = "yavs-cov"
 version = "0.11.0"
 dependencies = [
- "saphyr-parser",
  "yavs-diag",
  "yavs-elab",
  "yavs-ir",
@@ -2147,6 +2146,7 @@ version = "0.11.0"
 dependencies = [
  "annotate-snippets",
  "postcard",
+ "saphyr-parser",
  "serde",
  "strsim",
  "tempfile",
@@ -2234,7 +2234,6 @@ name = "yavs-lint"
 version = "0.11.0"
 dependencies = [
  "regex",
- "saphyr-parser",
  "serde_json",
  "yavs-diag",
  "yavs-sem",

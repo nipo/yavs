@@ -88,6 +88,36 @@ fn yaml_blocks(page: &str) -> Vec<String> {
 }
 
 /// `docs/lint.rst`: its commands on files of those names, its configurations as printed.
+/// Every key of the two lint files' schemas, and of the coverage files', is described on a page.
+#[test]
+fn the_schema_keys_are_on_their_pages() {
+    let page = |name: &str| std::fs::read_to_string(docs().join(name)).unwrap();
+    let lint = page("lint.rst");
+    for shape in [&yavs_lint::CONFIG, &yavs_lint::WAIVERS] {
+        for key in shape.keys() {
+            let leaf = key.rsplit('.').next().unwrap();
+            assert!(
+                lint.contains(&format!("``{leaf}``")) || lint.contains(&format!("``{key}``")),
+                "docs/lint.rst does not describe the key `{key}`"
+            );
+        }
+    }
+    let coverage = page("coverage.md");
+    let shapes = [
+        &yavs_cov::exclude::EXCLUSION_FILE,
+        &yavs_cov::exclude::CONFIG_FILE,
+    ];
+    for shape in shapes {
+        for key in shape.keys() {
+            let leaf = key.rsplit('.').next().unwrap();
+            assert!(
+                coverage.contains(&format!("`{leaf}`")),
+                "docs/coverage.md does not describe the key `{key}`"
+            );
+        }
+    }
+}
+
 #[test]
 fn lint_page() {
     let e = Env::new("docs_lint");

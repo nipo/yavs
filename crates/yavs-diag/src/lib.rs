@@ -35,6 +35,7 @@ pub mod operand;
 mod path;
 mod shared;
 pub mod suggest;
+pub mod yaml;
 
 pub use path::{colons, depth, dotted, parent};
 pub use shared::{Buffer, Slice, sharing};

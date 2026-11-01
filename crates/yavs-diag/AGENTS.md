@@ -11,12 +11,12 @@ Read the root `AGENTS.md` first. This file is for an agent about to change `crat
 - Does not: decide codes for other crates (each stage defines its `pub const`s next to the code
   that reports them), print anything, count errors, or carry runtime stack traces (the kernel's
   `SimError::trace` does that; the CLI prints runtime errors itself).
-- Depends on: `annotate-snippets`, `strsim` (the "did you mean" matcher). Called by: `yavs-syntax`, `yavs-sem`, `yavs-lib`,
+- Depends on: `annotate-snippets`, `strsim` (the "did you mean" matcher), `saphyr-parser` (the YAML reader of `yaml.rs`). Called by: `yavs-syntax`, `yavs-sem`, `yavs-lib`,
   `yavs-ir`, `yavs-interp`, `yavs-lower`, `yavs-elab`, `yavs-vhpi`, `yavs` (CLI). Keep it a leaf.
 
 ## 2. Map
 
-Everything is in `src/lib.rs` (about 530 lines) except `src/shared.rs`, `src/path.rs`, `src/suggest.rs`, `src/files.rs` and `src/operand.rs`.
+Everything is in `src/lib.rs` (about 530 lines) except `src/shared.rs`, `src/path.rs`, `src/suggest.rs`, `src/files.rs`, `src/operand.rs` and `src/yaml.rs`.
 
 | Item | Role |
 |---|---|
@@ -30,6 +30,7 @@ Everything is in `src/lib.rs` (about 530 lines) except `src/shared.rs`, `src/pat
 | `operand::{key, flat, uncommented, char_literal}` (`operand.rs`) | The operand of a condition as text: compared across formatting, and on one line for a directive |
 | `files::{glob, normalize, Place, Found}` (`files.rs`) | How a pattern in a configuration or exclusion file names source files: the one matching of `yavs lint`'s `exclude` and waivers and of coverage exclusion files |
 | `suggest::{similar, suggest, tail, help, distance}` (`suggest.rs`) | The one "did you mean" helper (rule 35): every name lookup in every crate uses it (`yavs_sem::suggest` re-exports it); `tail` is the one-string form for configuration errors |
+| `yaml::{read, Shape, MapShape, Field, Rest, TaggedShape, Node}` (`yaml.rs`) | The one reader and schema check of every YAML file yavs reads (lint configuration and waivers, coverage exclusion and configuration files): a file is a `Shape`, `read` reports every unknown key and wrong type with its line and a near name through `suggest::tail`; converters read the checked `Node` tree and need no type checks of their own |
 | `Buffer`, `Slice`, `sharing` (`shared.rs`) | Shared immutable bytes (a mapped cache entry) and ranges of them that a deserializer run under `sharing` hands out instead of copies; used by the compilation cache (`docs/decisions.md` "Zero-copy cache entries") |
 
 ## 3. Design decisions that bind this module

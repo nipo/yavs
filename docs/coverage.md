@@ -637,6 +637,13 @@ there to read (a stale line is warning `W0110`). `yavs cov report --uncovered DB
 
 In YAML, quote values that start with `*` or contain `: `.
 
+A YAML exclusion file has one key, `exclude`, a list of entries. An entry has `kind` and the keys its
+kind lists above; `reason` (free text, shown with the excluded item) is allowed on every kind. The file
+is checked against that fixed list before it is used, and so is the configuration file above (`exclude`,
+`root`, `kind`): an unknown key or kind, a value of the wrong type or a missing key is an error, with its
+line and a near name, and every problem of the file is listed in one run (`E0112`; `E0138` for the
+configuration file).
+
 `--uncovered` prints one row per item, since that is what can be checked and kept, and adds the process to the
 comment (`# y <= 11;  [process decode]`) so a `process` row is easy to write; a process, entity or library that
 never ran at all has no row of its own. These three rows need names only databases of this release record: over

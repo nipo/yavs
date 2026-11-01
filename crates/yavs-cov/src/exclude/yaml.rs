@@ -14,13 +14,18 @@
 //! A `file` entry has `file`, or `files` and `files_exclude` (one word or a list each), the keys
 //! of a lint waiver.
 //!
-//! Every value is read as the text it was written as, so `no`, `on` and a hash of digits only
-//! stay strings. The parser is `saphyr-parser` (events with line numbers), not a data model.
+//! Both files are declared as schemas here (`EXCLUSION_FILE`, `CONFIG_FILE`) and read and checked by
+//! `yavs_diag::yaml`, which reports every problem at once; what is left in this module turns the
+//! checked tree into rows. Every value is read as the text it was written as, so `no`, `on` and a
+//! hash of digits only stay strings.
 
 use super::{ItemKind, Row, Rule, direction, item_rule};
-use saphyr_parser::{Event, Parser};
 use yavs_diag::files::normalize;
-use yavs_diag::suggest::tail;
+use yavs_diag::yaml::{self, Field, Node, Rest, Shape, TaggedShape, Value};
+
+fn err(line: usize, m: &str) -> String {
+    format!("line {line}: {m}")
+}
 
 /// The kinds of exclusion an entry may have.
 pub(super) const KINDS: [&str; 13] = [
@@ -39,190 +44,209 @@ pub(super) const KINDS: [&str; 13] = [
     "process",
 ];
 
-enum Node {
-    Scalar(String),
-    Seq(Vec<(usize, Node)>),
-    Map(Vec<(usize, String, Node)>),
+macro_rules! field {
+    ($k:expr, $shape:expr) => {
+        Field {
+            key: $k,
+            shape: $shape,
+            required: false,
+        }
+    };
+    ($k:expr, $shape:expr, needed) => {
+        Field {
+            key: $k,
+            shape: $shape,
+            required: true,
+        }
+    };
 }
 
-type Events<'a> = Parser<'a, saphyr_parser::StrInput<'a>>;
+/// The fields of an entry of each kind: `kind` first, then what it needs, then what it may have.
+static ENTRY: TaggedShape = TaggedShape {
+    tag: "kind",
+    noun: "exclusion kind",
+    variants: &[
+        ("statement", &ITEM),
+        ("branch", &ITEM),
+        (
+            "condition",
+            &[
+                field!("kind", &Shape::Word, needed),
+                field!("instance", &Shape::Word, needed),
+                field!("hash", &Shape::Word, needed),
+                field!("row", &Shape::Word, needed),
+                field!("line", &Shape::Text),
+                field!("reason", &Shape::Text),
+            ],
+        ),
+        (
+            "expression",
+            &[
+                field!("kind", &Shape::Word, needed),
+                field!("instance", &Shape::Word, needed),
+                field!("hash", &Shape::Word, needed),
+                field!("row", &Shape::Word, needed),
+                field!("line", &Shape::Text),
+                field!("reason", &Shape::Text),
+            ],
+        ),
+        (
+            "combination",
+            &[
+                field!("kind", &Shape::Word, needed),
+                field!("instance", &Shape::Word, needed),
+                field!("hash", &Shape::Word, needed),
+                field!("pattern", &Shape::Word, needed),
+                field!("line", &Shape::Text),
+                field!("reason", &Shape::Text),
+            ],
+        ),
+        (
+            "toggle",
+            &[
+                field!("kind", &Shape::Word, needed),
+                field!("instance", &Shape::Word, needed),
+                field!("signal", &Shape::Word, needed),
+                field!("direction", &Shape::Text),
+                field!("reason", &Shape::Text),
+            ],
+        ),
+        (
+            "fsm",
+            &[
+                field!("kind", &Shape::Word, needed),
+                field!("instance", &Shape::Word, needed),
+                field!("signal", &Shape::Word, needed),
+                field!("item", &Shape::Word, needed),
+                field!("reason", &Shape::Text),
+            ],
+        ),
+        (
+            "instance",
+            &[
+                field!("kind", &Shape::Word, needed),
+                field!("instance", &Shape::Word, needed),
+                field!("reason", &Shape::Text),
+            ],
+        ),
+        (
+            "unit",
+            &[
+                field!("kind", &Shape::Word, needed),
+                field!("unit", &Shape::Word, needed),
+                field!("reason", &Shape::Text),
+            ],
+        ),
+        (
+            "file",
+            &[
+                field!("kind", &Shape::Word, needed),
+                field!("file", &Shape::Text),
+                field!("files", &Shape::OneOrList(&Shape::Word)),
+                field!("files_exclude", &Shape::OneOrList(&Shape::Word)),
+                field!("reason", &Shape::Text),
+            ],
+        ),
+        (
+            "library",
+            &[
+                field!("kind", &Shape::Word, needed),
+                field!("library", &Shape::Word, needed),
+                field!("reason", &Shape::Text),
+            ],
+        ),
+        (
+            "entity",
+            &[
+                field!("kind", &Shape::Word, needed),
+                field!("entity", &Shape::Word, needed),
+                field!("reason", &Shape::Text),
+            ],
+        ),
+        (
+            "process",
+            &[
+                field!("kind", &Shape::Word, needed),
+                field!("instance", &Shape::Word, needed),
+                field!("process", &Shape::Word, needed),
+                field!("reason", &Shape::Text),
+            ],
+        ),
+    ],
+};
 
-fn err(line: usize, m: &str) -> String {
-    format!("line {line}: {m}")
-}
+/// The fields of a `statement` or `branch` entry.
+const ITEM: [Field; 5] = [
+    field!("kind", &Shape::Word, needed),
+    field!("instance", &Shape::Word, needed),
+    field!("hash", &Shape::Word, needed),
+    field!("line", &Shape::Text),
+    field!("reason", &Shape::Text),
+];
 
-/// The next event with its 1-based line.
-fn next<'a>(p: &mut Events<'a>) -> Result<(Event<'a>, usize), String> {
-    match p.next() {
-        Some(Ok((ev, sp))) => Ok((ev, sp.start.line())),
-        Some(Err(e)) => Err(err(e.marker().line(), e.info())),
-        None => Err("unexpected end of the YAML stream".into()),
+/// An exclusion file in YAML form.
+pub static EXCLUSION_FILE: Shape = Shape::Map(&yaml::MapShape {
+    what: "the exclusion file",
+    fields: &[field!("exclude", &Shape::List(&Shape::Tagged(&ENTRY)))],
+    rest: Rest::Unknown,
+});
+
+/// `exclude` of a coverage configuration file: exclusion files, not exclusions.
+fn exclusion_files(n: &Node, path: &str) -> Option<String> {
+    let words = |items: &[Node]| {
+        !items.is_empty()
+            && items
+                .iter()
+                .all(|i| matches!(&i.value, Value::Scalar(s) if !s.is_empty()))
+    };
+    match &n.value {
+        Value::Scalar(s) if !s.is_empty() => None,
+        Value::Seq(items) if items.iter().any(|i| matches!(i.value, Value::Map(_))) => {
+            Some(format!(
+                "`{path}` lists exclusion files; this looks like an exclusion file itself: pass it with `--exclude`"
+            ))
+        }
+        Value::Seq(items) if words(items) => None,
+        _ => Some(format!("`{path}` must be a word or a list of them")),
     }
 }
 
-fn node<'a>(p: &mut Events<'a>, ev: Event<'a>, line: usize) -> Result<Node, String> {
-    match ev {
-        Event::Scalar(v, ..) => Ok(Node::Scalar(v.to_string())),
-        Event::SequenceStart(..) => {
-            let mut v = Vec::new();
-            loop {
-                let (ev, l) = next(p)?;
-                if matches!(ev, Event::SequenceEnd) {
-                    return Ok(Node::Seq(v));
-                }
-                v.push((l, node(p, ev, l)?));
-            }
-        }
-        Event::MappingStart(..) => {
-            let mut v: Vec<(usize, String, Node)> = Vec::new();
-            loop {
-                let (ev, l) = next(p)?;
-                let key = match ev {
-                    Event::MappingEnd => return Ok(Node::Map(v)),
-                    Event::Scalar(k, ..) => k.to_string(),
-                    _ => return Err(err(l, "a key must be a plain word")),
-                };
-                if v.iter().any(|(_, k, _)| *k == key) {
-                    return Err(err(l, &format!("duplicate key `{key}`")));
-                }
-                let (ev, vl) = next(p)?;
-                v.push((l, key, node(p, ev, vl)?));
-            }
-        }
-        Event::Alias(_) => Err(err(line, "aliases are not supported")),
-        _ => Err(err(line, "unexpected YAML structure")),
-    }
-}
+/// A coverage configuration file (`yavs cov report --config`).
+pub static CONFIG_FILE: Shape = Shape::Map(&yaml::MapShape {
+    what: "the configuration file",
+    fields: &[
+        field!("exclude", &Shape::Custom(exclusion_files)),
+        field!("root", &Shape::Word),
+        field!(
+            "kind",
+            &Shape::OneOrList(&Shape::Choice("kind", &ITEM_KINDS))
+        ),
+    ],
+    rest: Rest::Unknown,
+});
 
-/// The root node of a YAML document, if it has one.
-fn document(text: &str) -> Result<Option<Node>, String> {
-    let mut p = Parser::new_from_str(text);
-    let mut root = None;
-    loop {
-        let (ev, l) = next(&mut p)?;
-        match ev {
-            Event::StreamStart | Event::DocumentStart(_) | Event::DocumentEnd => {}
-            Event::StreamEnd => break,
-            ev if root.is_none() => root = Some((l, node(&mut p, ev, l)?)),
-            _ => return Err(err(l, "more than one YAML document")),
-        }
-    }
-    Ok(root.map(|r: (usize, Node)| r.1))
-}
-
-/// Parse a YAML exclusion file; the error names the line.
+/// Parse a YAML exclusion file; the error names the line of every problem the schema finds.
 pub fn parse(text: &str) -> Result<Vec<Row>, String> {
-    let Some(root) = document(text)? else {
-        return Ok(Vec::new());
-    };
-    let Node::Map(top) = root else {
-        return Err(err(1, "expected a top-level `exclude:` list"));
-    };
-    let mut rows = Vec::new();
-    for (kl, key, v) in top {
-        if key != "exclude" {
-            return Err(err(
-                kl,
-                &format!(
-                    "unknown key `{key}` (expected `exclude`){}",
-                    tail(&key, "key", ["exclude"].into_iter())
-                ),
-            ));
-        }
-        match v {
-            Node::Seq(items) => {
-                for (il, item) in items {
-                    rows.push(entry(il, item)?);
-                }
-            }
-            // `exclude:` with every entry commented out
-            Node::Scalar(s) if s.is_empty() => {}
-            _ => return Err(err(kl, "`exclude` must be a list of entries")),
-        }
-    }
-    Ok(rows)
+    let root = yaml::read(text, &EXCLUSION_FILE)?;
+    let items = root.get("exclude").map_or(&[][..], Node::items);
+    items.iter().map(entry).collect()
 }
 
-fn entry(line: usize, n: Node) -> Result<Row, String> {
-    let Node::Map(fields) = n else {
-        return Err(err(
-            line,
-            "an entry must be a map with `kind:` and its fields",
-        ));
-    };
+/// One entry of a checked exclusion file: its keys are the kind's, so what is left to refuse is
+/// what no schema says (`file` against `files`, the form of a hash).
+fn entry(n: &Node) -> Result<Row, String> {
+    let line = n.line;
     let mut get: Vec<(usize, &str, &str)> = Vec::new();
     // `files` and `files_exclude`, of a `file` entry: one word or a list.
     let mut lists: Vec<(usize, &str, Vec<String>)> = Vec::new();
-    let is_file = fields
-        .iter()
-        .any(|(_, k, v)| k == "kind" && matches!(v, Node::Scalar(s) if s == "file"));
-    for (l, k, v) in &fields {
-        match v {
-            Node::Scalar(_) | Node::Seq(_) if is_file && (k == "files" || k == "files_exclude") => {
-                lists.push((*l, k, words(*l, k, v)?));
-            }
-            Node::Scalar(s) => get.push((*l, k, s)),
-            _ => return Err(err(*l, &format!("`{k}` must be a single value"))),
+    for e in n.entries() {
+        match e.key.as_str() {
+            "files" | "files_exclude" => lists.push((e.line, &e.key, e.value.words())),
+            _ => get.push((e.line, &e.key, e.value.text())),
         }
     }
     let find = |k: &str| get.iter().find(|f| f.1 == k).map(|f| f.2);
-    let kind = find("kind").ok_or_else(|| err(line, "missing `kind`"))?;
-    let (allowed, need): (&[&str], &[&str]) = match kind {
-        "statement" | "branch" => (
-            &["kind", "instance", "hash", "line", "reason"],
-            &["instance", "hash"],
-        ),
-        "condition" | "expression" => (
-            &["kind", "instance", "hash", "row", "line", "reason"],
-            &["instance", "hash", "row"],
-        ),
-        "combination" => (
-            &["kind", "instance", "hash", "pattern", "line", "reason"],
-            &["instance", "hash", "pattern"],
-        ),
-        "toggle" => (
-            &["kind", "instance", "signal", "direction", "reason"],
-            &["instance", "signal"],
-        ),
-        "fsm" => (
-            &["kind", "instance", "signal", "item", "reason"],
-            &["instance", "signal", "item"],
-        ),
-        "instance" => (&["kind", "instance", "reason"], &["instance"]),
-        "unit" => (&["kind", "unit", "reason"], &["unit"]),
-        "file" => (&["kind", "file", "reason"], &[]),
-        "library" => (&["kind", "library", "reason"], &["library"]),
-        "entity" => (&["kind", "entity", "reason"], &["entity"]),
-        "process" => (
-            &["kind", "instance", "process", "reason"],
-            &["instance", "process"],
-        ),
-        _ => {
-            let l = get.iter().find(|f| f.1 == "kind").map_or(line, |f| f.0);
-            let kinds = KINDS.into_iter();
-            return Err(err(
-                l,
-                &format!(
-                    "unknown exclusion kind `{kind}`{}",
-                    tail(kind, "kind", kinds)
-                ),
-            ));
-        }
-    };
-    for (l, k, _) in &get {
-        if !allowed.contains(k) {
-            let tail = tail(k, "key", allowed.iter().copied());
-            return Err(err(
-                *l,
-                &format!("unknown key `{k}` for kind `{kind}`{tail}"),
-            ));
-        }
-    }
-    for k in need {
-        if find(k).is_none_or(str::is_empty) {
-            return Err(err(line, &format!("kind `{kind}` needs `{k}`")));
-        }
-    }
+    let kind = find("kind").unwrap_or_default();
     if kind == "file" && find("file").is_some_and(str::is_empty) {
         return Err(err(line, "kind `file` needs `file`"));
     }
@@ -312,70 +336,15 @@ const ITEM_KINDS: [&str; 6] = [
     "combination",
 ];
 
-/// Parse a coverage configuration file; the error names the line.
+/// Parse a coverage configuration file; the error names the line of every problem.
 pub fn parse_config(text: &str) -> Result<Config, String> {
-    let mut cfg = Config::default();
-    let Some(root) = document(text)? else {
-        return Ok(cfg);
-    };
-    let Node::Map(top) = root else {
-        return Err(err(
-            1,
-            "expected a map with the keys `exclude`, `root` and `kind`",
-        ));
-    };
-    for (l, key, v) in &top {
-        match (key.as_str(), v) {
-            ("exclude", Node::Seq(items)) if items.iter().any(|i| matches!(i.1, Node::Map(_))) => {
-                return Err(err(
-                    *l,
-                    "`exclude` lists exclusion files; this looks like an exclusion file itself: \
-                     pass it with `--exclude`",
-                ));
-            }
-            ("exclude", v) => cfg.exclude = words(*l, key, v)?,
-            ("root", Node::Scalar(s)) if !s.is_empty() => cfg.root = Some(s.clone()),
-            ("root", _) => return Err(err(*l, "`root` must be one directory")),
-            ("kind", v) => {
-                cfg.kind = words(*l, key, v)?;
-                if let Some(k) = cfg.kind.iter().find(|k| !ITEM_KINDS.contains(&k.as_str())) {
-                    let near = tail(k, "kind", ITEM_KINDS.into_iter());
-                    return Err(err(
-                        *l,
-                        &format!(
-                            "unknown kind `{k}` (expected {}){near}",
-                            ITEM_KINDS.join(", ")
-                        ),
-                    ));
-                }
-            }
-            _ => {
-                let near = tail(key, "key", ["exclude", "root", "kind"].into_iter());
-                return Err(err(
-                    *l,
-                    &format!("unknown key `{key}` (expected `exclude`, `root` or `kind`){near}"),
-                ));
-            }
-        }
-    }
-    Ok(cfg)
-}
-
-/// A value that is one word or a list of them, none empty.
-fn words(line: usize, key: &str, v: &Node) -> Result<Vec<String>, String> {
-    let bad = || err(line, &format!("`{key}` must be a word or a list of them"));
-    let out = match v {
-        Node::Scalar(s) if !s.is_empty() => vec![s.clone()],
-        Node::Seq(items) if !items.is_empty() => items
-            .iter()
-            .map(|(_, n)| match n {
-                Node::Scalar(s) if !s.is_empty() => Ok(s.clone()),
-                _ => Err(bad()),
-            })
-            .collect::<Result<_, _>>()?,
-        _ => return Err(bad()),
-    };
-    Ok(out)
+    let root = yaml::read(text, &CONFIG_FILE)?;
+    let words = |key: &str| root.get(key).map(Node::words).unwrap_or_default();
+    Ok(Config {
+        exclude: words("exclude"),
+        root: words("root").pop(),
+        kind: words("kind"),
+    })
 }
 
 /// `s` as a YAML double-quoted scalar.

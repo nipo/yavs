@@ -1011,6 +1011,27 @@ fn unknown_keys_are_errors_listing_all_of_them() {
     assert!(stderr(&o).contains("E0134"), "{}", stderr(&o));
 }
 
+/// Only `yavs lint` reads the two files: a broken one beside the design changes nothing for the
+/// commands that analyse and run it.
+#[test]
+fn only_lint_reads_its_files() {
+    let dir = tempdir("lint");
+    std::fs::write(
+        dir.join("e.vhd"),
+        "entity e is end entity;\narchitecture a of e is\nbegin\n  process begin report \"ran\"; wait; end process;\nend architecture;\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("yavs-lint.yaml"), "indent: [\nrule: 5\n").unwrap();
+    std::fs::write(dir.join("yavs-lint-waivers.yaml"), "waivers: nonsense\n").unwrap();
+    let o = yavs(&dir, &["analyze", "--work=w:out/w", "e.vhd"]);
+    assert_eq!(status(&o), 0, "{}", stderr(&o));
+    let o = yavs(&dir, &["run", "--work=w:out/w", "e"]);
+    assert_eq!(status(&o), 0, "{}", stderr(&o));
+    assert!(!stderr(&o).contains("yavs-lint"), "{}", stderr(&o));
+    let o = yavs(&dir, &["lint", "--work=w:out/w"]);
+    assert_eq!(status(&o), 2, "lint does read them: {}", stderr(&o));
+}
+
 /// Rules off for whole directories and patterns, from any working directory and in a library run.
 #[test]
 fn waivers_of_directories_and_lists_of_rules() {

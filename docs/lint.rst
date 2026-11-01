@@ -235,6 +235,85 @@ the waiver file gets the warning W0132, as it may be a typing mistake or a renam
 an error, because a shared waiver file may name generated files that do not exist yet; ``-Werror``
 makes it one.
 
+The two files, key by key
+-------------------------
+
+Both files are checked against one declared list of keys, value types and nesting before anything is
+read from them, and so are the coverage exclusion and configuration files (:doc:`coverage`), by the same
+reader. A key, a rule or a rule group that is not in the tables is an error, E0134 for these two files,
+and so is a value of the wrong type or a missing required key. Every problem of a file is listed with its
+line in one run, and a name close to a real one gets a suggestion. A key is written exactly as in the
+tables; a value is read as the text it was written as, so ``no`` and ``on`` are words, and ``true`` and
+``false`` are the only booleans. A key with no value counts as an empty list where a list is expected.
+
+``yavs-lint.yaml``:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 28 22 50
+
+   * - Key
+     - Value
+     - Meaning
+   * - ``rule``
+     - map
+     - Which rules run and how a finding counts, below.
+   * - ``rule.global``
+     - map
+     - The ``global`` section: ``disable`` and ``severity`` for every rule.
+   * - ``rule.group``
+     - map
+     - The ``group`` section: one key per class (``definite``, ``advisory``, ``experimental``, ``policy``), each with ``disable`` and ``severity``.
+   * - ``rule.lint_NNN``
+     - map
+     - One key per rule id (:doc:`lint-rules`), each with ``disable`` and ``severity``; ``lint_602`` also ``suffixes``, ``lint_603`` also ``prefixes``.
+   * - ``disable``
+     - ``true`` or ``false``
+     - Turns the rule, class or all rules off or on.
+   * - ``severity``
+     - ``error`` or ``warning``
+     - How a finding counts.
+   * - ``suffixes``, ``prefixes``
+     - list of words
+     - The patterns of ``lint_602`` and ``lint_603``; ``re:`` starts a regular expression, which must be valid.
+   * - ``exclude``
+     - list of words
+     - Paths and globs of files and directories that are not checked.
+   * - ``file_list``
+     - list of paths
+     - Files to check, with ``$NAME`` expanded. An entry that is a map with settings is refused.
+   * - ``testbench_files``, ``testbench_libraries``
+     - list of words
+     - What marks a testbench.
+   * - ``rtl``, ``testbench``
+     - map
+     - A ``rule`` section for files of that kind.
+
+``yavs-lint-waivers.yaml`` has one key, ``waivers``, a list of maps:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 28 22 50
+
+   * - Key
+     - Value
+     - Meaning
+   * - ``rule``
+     - word or list; required
+     - Rule ids, or ``*``. An id that is not a rule is an error.
+   * - ``files``
+     - word or list
+     - Where the waiver applies; none means every file.
+   * - ``files_exclude``
+     - word or list
+     - Files it does not apply to; wins over ``files``.
+   * - ``lines``
+     - list of whole numbers
+     - Lines it applies to; none means the whole file.
+   * - ``reason``
+     - word
+     - Free text, for the reader.
+
 Reports
 -------
 

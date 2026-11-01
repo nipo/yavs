@@ -31,7 +31,7 @@ use yavs_diag::files::{Found, normalize};
 use yavs_diag::{Diagnostic, dotted};
 
 mod yaml;
-pub use yaml::{Config, parse as parse_yaml, parse_config};
+pub use yaml::{CONFIG_FILE, Config, EXCLUSION_FILE, parse as parse_yaml, parse_config};
 
 /// An excluded item moved to another line than the row says.
 pub const MOVED: &str = "W0110";
@@ -1197,7 +1197,7 @@ mod tests {
                 "kind: statment\n",
                 "a kind with a similar name exists: `statement`",
             ),
-            ("root: [a, b]\n", "line 1: `root` must be one directory"),
+            ("root: [a, b]\n", "line 1: `root` must be a word"),
             ("exclude: []\n", "`exclude` must be a word or a list"),
             ("- a\n", "line 1: expected a map"),
             (
@@ -1455,7 +1455,7 @@ mod tests {
         let err = |t: &str| parse_yaml(t).unwrap_err();
         assert!(
             err("exclude:\n  - kind: statment\n")
-                .contains("a kind with a similar name exists: `statement`")
+                .contains("with a similar name exists: `statement`")
         );
         assert!(
             err("exclude:\n  - kind: instance\n    instanse: x\n")
@@ -1485,8 +1485,8 @@ mod tests {
                 "unknown key",
             ),
             (
-                "exclude:\n  - kind: instance\n    hash: x\n",
-                "line 3:",
+                "exclude:\n  - kind: instance\n    instance: x\n    hash: x\n",
+                "line 4:",
                 "unknown key",
             ),
             (
@@ -1503,15 +1503,49 @@ mod tests {
             ("excludes: []\n", "line 1:", "unknown key"),
             ("exclude: 5\n", "line 1:", "list"),
             ("exclude:\n  - [a]\n", "line 2:", "map"),
-            ("exclude:\n  - kind: [a]\n", "line 2:", "single value"),
+            ("exclude:\n  - kind: [a]\n", "line 2:", "must be a word"),
             ("exclude:\n  - kind: file\n    file: *x\n", "line 3:", ""),
             ("exclude:\n  - kind: file\n    file: [\n", "line", ""),
-            ("- a\n", "line 1:", "top-level"),
+            ("- a\n", "line 1:", "top level"),
             ("exclude: []\n---\nexclude: []\n", "line", "document"),
         ] {
             let e = parse_yaml(t).unwrap_err();
             assert!(e.starts_with(line) && e.contains(what), "{t:?}: {e}");
         }
+    }
+
+    #[test]
+    fn every_problem_of_a_yaml_file_is_listed() {
+        let e = parse_yaml(
+            "exclud: 1\nexclude:\n  - kind: statment\n  - kind: instance\n    instanse: x\n    hash: [a]\n  - kind: unit\n",
+        )
+        .unwrap_err();
+        let lines: Vec<&str> = e.lines().collect();
+        assert_eq!(lines.len(), 6, "{e}");
+        assert!(lines[0].starts_with("line 1: unknown key `exclud`"), "{e}");
+        assert!(
+            lines[1].starts_with("line 3: unknown exclusion kind `statment`"),
+            "{e}"
+        );
+        assert!(
+            lines[2].starts_with("line 4: kind `instance` needs `instance`"),
+            "{e}"
+        );
+        assert!(
+            lines[3].contains("unknown key `instanse` for kind `instance`"),
+            "{e}"
+        );
+        assert!(
+            lines[4].contains("unknown key `hash` for kind `instance`"),
+            "{e}"
+        );
+        assert!(
+            lines[5].starts_with("line 7: kind `unit` needs `unit`"),
+            "{e}"
+        );
+        let e = parse_config("exlude: a\nkind: [statement, branh]\nroot: [a]\n").unwrap_err();
+        assert_eq!(e.lines().count(), 3, "{e}");
+        assert!(e.contains("`kind` must be one of"), "{e}");
     }
 
     #[test]

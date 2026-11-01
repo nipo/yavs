@@ -1,0 +1,1 @@
+Every YAML file yavs reads (`yavs-lint.yaml`, `yavs-lint-waivers.yaml`, coverage exclusion files and `yavs cov report --config`) is checked against a declared list of keys, value types and nesting, and all problems of a file are reported together with their lines and a suggestion for a near name. `docs/lint.rst` lists the keys of both lint files.

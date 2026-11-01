@@ -1,123 +1,253 @@
-//! `yavs-lint.yaml` (`rule`, `exclude`, `file_list`) and `yavs-lint-waivers.yaml`. A key, rule id or
-//! rule group the file names and nothing reads is an error, all of them reported together; so is a
-//! bad value of a known key.
-//! Values are read as the text they were written as.
+//! `yavs-lint.yaml` (`rule`, `exclude`, `file_list`) and `yavs-lint-waivers.yaml`. Both are
+//! declared as a schema (`CONFIG`, `WAIVERS`) and checked by `yavs_diag::yaml` before anything is
+//! read from them: a key, rule id or rule group the schema does not have is an error, all of them
+//! reported together, and so is a value of the wrong type. What reads the checked tree below relies
+//! on that. Values are read as the text they were written as.
 
 use crate::{Certainty, Rule};
-use saphyr_parser::{Event, Parser};
 use std::path::{Path, PathBuf};
 use yavs_diag::Severity;
 use yavs_diag::files::{Found, Place, glob, normalize};
 use yavs_diag::suggest::tail as near;
+use yavs_diag::yaml::{self, Field, MapShape, Node, Rest, Shape, Value};
 
-enum Node {
-    Scalar(String),
-    Seq(Vec<Node>),
-    Map(Vec<(usize, String, Node)>),
-    /// Valid YAML this reader does not follow: fine under a key that is ignored, a bad form elsewhere.
-    Alias,
+const CLASSES: [Certainty; 4] = [
+    Certainty::Definite,
+    Certainty::Advisory,
+    Certainty::Experimental,
+    Certainty::Policy,
+];
+
+/// A regular expression after `re:`, as `lint_602` and `lint_603` take.
+fn pattern(n: &Node, path: &str) -> Option<String> {
+    let Value::Scalar(s) = &n.value else {
+        return Some(format!("`{path}` must be a list of words"));
+    };
+    let r = s.strip_prefix("re:")?;
+    let e = regex::Regex::new(r).err()?.to_string();
+    // The last line of the error says what is wrong; the others draw the pattern.
+    let why = e.lines().last().unwrap_or_default();
+    let why = why.strip_prefix("error: ").unwrap_or(why);
+    Some(format!(
+        "`{s}` in `{path}` is not a regular expression: {why}"
+    ))
 }
 
-/// A key, rule or rule group the file names and nothing here reads: an error (E0134).
-struct Unknown {
-    line: usize,
-    /// `key`, `rule` or `rule group`.
-    what: &'static str,
-    name: String,
-    /// Where it is, such as `rule.group`; empty at the top level.
-    section: String,
-    /// `; a key with a similar name exists: ...`, or empty.
-    near: String,
-}
-
-impl Unknown {
-    /// `line 3: unknown rule `lnt_771` in `rule`; a rule with a similar name exists: `lint_771``.
-    fn message(&self) -> String {
-        let inside = if self.section.is_empty() {
-            String::new()
-        } else {
-            format!(" in `{}`", self.section)
-        };
-        format!(
-            "line {}: unknown {} `{}`{inside}{}",
-            self.line, self.what, self.name, self.near
-        )
+/// One entry of `file_list`: a path or glob, or a map from one to its settings, of which only
+/// empty ones are taken. Settings of one file are refused, never dropped.
+fn file_entry(n: &Node, path: &str) -> Option<String> {
+    match &n.value {
+        Value::Scalar(_) => None,
+        Value::Map(entries) => entries.iter().find_map(|e| {
+            let empty = match &e.value.value {
+                Value::Scalar(s) => s.is_empty(),
+                Value::Map(m) => m.is_empty(),
+                _ => false,
+            };
+            (!empty).then(|| {
+                let pattern = &e.key;
+                format!(
+                    "settings for one `{path}` entry are not implemented: list `{pattern}` as a plain path, and use a waiver to turn a rule off for it"
+                )
+            })
+        }),
+        _ => Some(format!("a `{path}` entry must be a path")),
     }
 }
 
-/// Every unknown name of a file as one error, one line each, so that one run shows them all.
-fn unknown_error(unknown: &[Unknown]) -> Result<(), String> {
-    if unknown.is_empty() {
-        return Ok(());
+/// A rule id or `*`, in a waiver.
+fn waived_rule(n: &Node, path: &str) -> Option<String> {
+    let id = n.text();
+    if !matches!(n.value, Value::Scalar(_)) || id.is_empty() {
+        return Some(format!("`{path}` must be a word or a list of them"));
     }
-    let lines: Vec<String> = unknown.iter().map(Unknown::message).collect();
-    Err(lines.join("\n"))
+    (id != "*" && crate::rule(id).is_none())
+        .then(|| format!("unknown rule `{id}` in `{path}`{}", near_rule(id)))
 }
 
-type Events<'a> = Parser<'a, saphyr_parser::StrInput<'a>>;
+/// The tail of an error about the unknown rule `id`.
+fn near_rule(id: &str) -> String {
+    crate::similar_rule(id).map_or_else(String::new, |r| {
+        format!("; {}", yavs_diag::suggest::help(&[(r.into(), "rule")]))
+    })
+}
 
-fn next<'a>(p: &mut Events<'a>) -> Result<(Event<'a>, usize), String> {
-    match p.next() {
-        Some(Ok((ev, sp))) => Ok((ev, sp.start.line())),
-        Some(Err(e)) => Err(format!("line {}: {}", e.marker().line(), e.info())),
-        None => Err("unexpected end of the YAML stream".into()),
+/// The settings of a rule, a class or `global`: on or off, and the severity.
+macro_rules! layer {
+    ($($more:expr),*) => {
+        Shape::Map(&MapShape {
+            what: "a rule",
+            fields: &[
+                Field { key: "disable", shape: &Shape::Bool, required: false },
+                Field { key: "severity", shape: &Shape::Choice("severity", &["error", "warning"]), required: false },
+                $($more),*
+            ],
+            rest: Rest::Unknown,
+        })
+    };
+}
+
+static LAYER: Shape = layer!();
+static LAYER_SUFFIXES: Shape = layer!(Field {
+    key: "suffixes",
+    shape: &Shape::List(&Shape::Custom(pattern)),
+    required: false,
+});
+static LAYER_PREFIXES: Shape = layer!(Field {
+    key: "prefixes",
+    shape: &Shape::List(&Shape::Custom(pattern)),
+    required: false,
+});
+
+fn rule_layer(id: &str) -> Option<&'static Shape> {
+    crate::rule(id).map(|r| match r.id {
+        "lint_602" => &LAYER_SUFFIXES,
+        "lint_603" => &LAYER_PREFIXES,
+        _ => &LAYER,
+    })
+}
+
+fn rule_tail(id: &str) -> String {
+    let tail = near_rule(id);
+    if tail.is_empty() {
+        near(id, "key", ["global", "group"].into_iter())
+    } else {
+        tail
     }
 }
 
-fn node<'a>(p: &mut Events<'a>, ev: Event<'a>, line: usize) -> Result<Node, String> {
-    match ev {
-        Event::Scalar(v, ..) => Ok(Node::Scalar(v.to_string())),
-        Event::SequenceStart(..) => {
-            let mut v = Vec::new();
-            loop {
-                let (ev, l) = next(p)?;
-                if matches!(ev, Event::SequenceEnd) {
-                    return Ok(Node::Seq(v));
-                }
-                v.push(node(p, ev, l)?);
-            }
-        }
-        Event::MappingStart(..) => {
-            let mut v: Vec<(usize, String, Node)> = Vec::new();
-            loop {
-                let (ev, l) = next(p)?;
-                let key = match ev {
-                    Event::MappingEnd => return Ok(Node::Map(v)),
-                    Event::Scalar(k, ..) => k.to_string(),
-                    _ => return Err(format!("line {l}: a key must be a plain word")),
-                };
-                if v.iter().any(|(_, k, _)| *k == key) {
-                    return Err(format!("line {l}: duplicate key `{key}`"));
-                }
-                let (ev, vl) = next(p)?;
-                v.push((l, key, node(p, ev, vl)?));
-            }
-        }
-        Event::Alias(_) => Ok(Node::Alias),
-        _ => Err(format!("line {line}: expected a value")),
-    }
+fn group_layer(name: &str) -> Option<&'static Shape> {
+    CLASSES.iter().any(|c| c.name() == name).then_some(&LAYER)
 }
 
-/// The document's top-level map (empty for an empty file).
-fn top(text: &str) -> Result<Vec<(usize, String, Node)>, String> {
-    let mut p = Parser::new_from_str(text);
-    let mut root = None;
-    loop {
-        let (ev, l) = next(&mut p)?;
-        match ev {
-            Event::StreamStart | Event::DocumentStart(_) | Event::DocumentEnd => {}
-            Event::StreamEnd => break,
-            ev if root.is_none() => root = Some((l, node(&mut p, ev, l)?)),
-            _ => return Err(format!("line {l}: more than one YAML document")),
-        }
-    }
-    match root {
-        None => Ok(Vec::new()),
-        Some((_, Node::Map(m))) => Ok(m),
-        Some((_, Node::Scalar(s))) if s.is_empty() => Ok(Vec::new()),
-        Some((l, _)) => Err(format!("line {l}: expected a map at the top level")),
-    }
+fn group_tail(name: &str) -> String {
+    near(name, "rule group", CLASSES.iter().map(|c| c.name()))
 }
+
+/// A `rule:` section: `global`, `group`, and a rule id for each rule.
+static RULES: Shape = Shape::Map(&MapShape {
+    what: "the rules",
+    fields: &[
+        Field {
+            key: "global",
+            shape: &LAYER,
+            required: false,
+        },
+        Field {
+            key: "group",
+            shape: &Shape::Map(&MapShape {
+                what: "the groups",
+                fields: &[],
+                rest: Rest::Names {
+                    noun: "rule group",
+                    known: group_layer,
+                    near: group_tail,
+                },
+            }),
+            required: false,
+        },
+    ],
+    rest: Rest::Names {
+        noun: "rule",
+        known: rule_layer,
+        near: rule_tail,
+    },
+});
+
+/// `rtl:` and `testbench:`: the rules for files of that kind.
+static KIND: Shape = Shape::Map(&MapShape {
+    what: "the block",
+    fields: &[Field {
+        key: "rule",
+        shape: &RULES,
+        required: false,
+    }],
+    rest: Rest::Unknown,
+});
+
+/// `yavs-lint.yaml`.
+pub static CONFIG: Shape = Shape::Map(&MapShape {
+    what: "the configuration",
+    fields: &[
+        Field {
+            key: "rule",
+            shape: &RULES,
+            required: false,
+        },
+        Field {
+            key: "exclude",
+            shape: &Shape::List(&Shape::Word),
+            required: false,
+        },
+        Field {
+            key: "file_list",
+            shape: &Shape::List(&Shape::Custom(file_entry)),
+            required: false,
+        },
+        Field {
+            key: "testbench_files",
+            shape: &Shape::List(&Shape::Word),
+            required: false,
+        },
+        Field {
+            key: "testbench_libraries",
+            shape: &Shape::List(&Shape::Word),
+            required: false,
+        },
+        Field {
+            key: "rtl",
+            shape: &KIND,
+            required: false,
+        },
+        Field {
+            key: "testbench",
+            shape: &KIND,
+            required: false,
+        },
+    ],
+    rest: Rest::Unknown,
+});
+
+/// `yavs-lint-waivers.yaml`.
+pub static WAIVERS: Shape = Shape::Map(&MapShape {
+    what: "the waiver file",
+    fields: &[Field {
+        key: "waivers",
+        shape: &Shape::List(&Shape::Map(&MapShape {
+            what: "a waiver",
+            fields: &[
+                Field {
+                    key: "rule",
+                    shape: &Shape::OneOrList(&Shape::Custom(waived_rule)),
+                    required: true,
+                },
+                Field {
+                    key: "files",
+                    shape: &Shape::OneOrList(&Shape::Word),
+                    required: false,
+                },
+                Field {
+                    key: "files_exclude",
+                    shape: &Shape::OneOrList(&Shape::Word),
+                    required: false,
+                },
+                Field {
+                    key: "lines",
+                    shape: &Shape::List(&Shape::Count),
+                    required: false,
+                },
+                Field {
+                    key: "reason",
+                    shape: &Shape::Text,
+                    required: false,
+                },
+            ],
+            rest: Rest::Unknown,
+        })),
+        required: false,
+    }],
+    rest: Rest::Unknown,
+});
 
 /// `disable` and `severity` as set at one level.
 #[derive(Clone, Default)]
@@ -128,76 +258,24 @@ struct Layer {
     list: Vec<String>,
 }
 
-fn layer(
-    line: usize,
-    section: &str,
-    name: &str,
-    n: &Node,
-    unknown: &mut Vec<Unknown>,
-) -> Result<Layer, String> {
-    let Node::Map(fields) = n else {
-        return Err(format!(
-            "line {line}: the settings of `{name}` must be a map"
-        ));
-    };
+/// The settings of one level, from a node `LAYER` has checked.
+fn layer(n: &Node) -> Layer {
     let mut out = Layer::default();
-    for (l, key, v) in fields {
-        if matches!(
-            (name, key.as_str()),
-            ("lint_602", "suffixes") | ("lint_603", "prefixes")
-        ) {
-            let Node::Seq(items) = v else {
-                return Err(format!("line {l}: `{name}.{key}` must be a list"));
-            };
-            for n in items {
-                let Node::Scalar(s) = n else {
-                    return Err(format!("line {l}: `{name}.{key}` must be a list of words"));
-                };
-                if let Some(r) = s.strip_prefix("re:")
-                    && let Err(e) = regex::Regex::new(r)
-                {
-                    return Err(format!(
-                        "line {l}: `{s}` in `{name}.{key}` is not a regular expression: {e}"
-                    ));
-                }
-                out.list.push(s.clone());
+    for e in n.entries() {
+        let text = e.value.text();
+        match e.key.as_str() {
+            "disable" => out.disable = Some(matches!(text, "true" | "True")),
+            "severity" => {
+                out.severity = Some(if text.eq_ignore_ascii_case("error") {
+                    Severity::Error
+                } else {
+                    Severity::Warning
+                });
             }
-            continue;
-        }
-        if !matches!(key.as_str(), "disable" | "severity") {
-            let keys = ["disable", "severity", "suffixes", "prefixes"];
-            unknown.push(Unknown {
-                line: *l,
-                what: "key",
-                name: key.clone(),
-                section: format!("{section}.{name}"),
-                near: near(key, "setting", keys.into_iter()),
-            });
-            continue;
-        }
-        let text = match v {
-            Node::Scalar(s) => s.as_str(),
-            _ => return Err(format!("line {l}: `{name}.{key}` must be a single value")),
-        };
-        let bad = || format!("line {l}: `{name}.{key}` has the invalid value `{text}`");
-        if key == "disable" {
-            out.disable = Some(match text {
-                "true" | "True" => true,
-                "false" | "False" => false,
-                _ => return Err(bad()),
-            });
-        } else {
-            out.severity = Some(match text.to_ascii_lowercase().as_str() {
-                "error" => Severity::Error,
-                "warning" => Severity::Warning,
-                other => {
-                    let tail = near(other, "severity", ["error", "warning"].into_iter());
-                    return Err(bad() + &tail);
-                }
-            });
+            _ => out.list.extend(e.value.words()),
         }
     }
-    Ok(out)
+    out
 }
 
 /// Which rules run, and at which severity. A rule's own setting wins over its class's, which wins
@@ -217,8 +295,6 @@ pub struct Config {
     kinds: [Option<Box<Config>>; 2],
     /// `file_list`: the path or glob of each entry, as written.
     file_list: Vec<String>,
-    /// What the file names and nothing reads, in the order of the file; `parse` fails on any.
-    unknown: Vec<Unknown>,
 }
 
 /// Which rule block of the configuration applies to a file.
@@ -228,159 +304,80 @@ pub enum Kind {
     Testbench = 1,
 }
 
-/// The words of a list of strings in the configuration.
-fn words(l: usize, key: &str, v: Node) -> Result<Vec<String>, String> {
-    let items = match v {
-        Node::Seq(items) => items,
-        Node::Scalar(s) if s.is_empty() => Vec::new(),
-        _ => return Err(format!("line {l}: `{key}` must be a list")),
-    };
-    items
-        .into_iter()
-        .map(|n| match n {
-            Node::Scalar(s) => Ok(s),
-            _ => Err(format!("line {l}: `{key}` must be a list of words")),
-        })
-        .collect()
-}
-
 impl Config {
-    /// Read a `yavs-lint.yaml`; the error names the line of each unknown name or bad value.
+    /// Read a `yavs-lint.yaml`; the error names the line of every problem: an unknown key, rule
+    /// or rule group, or a value of the wrong type (`CONFIG` says what is there).
     pub fn parse(text: &str) -> Result<Config, String> {
+        Ok(Self::from_node(&yaml::read(text, &CONFIG)?))
+    }
+
+    /// The settings of a checked tree: every key in it is declared by `CONFIG`.
+    fn from_node(root: &Node) -> Config {
         let mut cfg = Config::default();
-        for (l, key, v) in top(text)? {
-            match key.as_str() {
+        for e in root.entries() {
+            let v = &e.value;
+            match e.key.as_str() {
                 "exclude" => {
-                    for s in words(l, &key, v)? {
+                    for s in v.words() {
                         cfg.exclude
                             .push(normalize(&s).trim_end_matches('/').to_owned());
                     }
                 }
                 "testbench_files" => {
-                    let files = words(l, &key, v)?;
-                    cfg.testbench_files = files.iter().map(|s| normalize(s)).collect();
+                    cfg.testbench_files = v.words().iter().map(|s| normalize(s)).collect();
                 }
                 "testbench_libraries" => {
-                    let libraries = words(l, &key, v)?;
                     cfg.testbench_libraries =
-                        libraries.iter().map(|s| s.to_ascii_lowercase()).collect();
+                        v.words().iter().map(|s| s.to_ascii_lowercase()).collect();
                 }
                 "rtl" | "testbench" => {
-                    let Node::Map(fields) = v else {
-                        return Err(format!("line {l}: `{key}` must be a map"));
-                    };
                     let mut block = Config::default();
-                    for (l, field, v) in fields {
-                        if field != "rule" {
-                            cfg.unknown.push(Unknown {
-                                line: l,
-                                what: "key",
-                                near: near(&field, "key", ["rule"].into_iter()),
-                                name: field,
-                                section: key.clone(),
-                            });
-                            continue;
-                        }
-                        block.rules_section(l, &format!("{key}.rule"), &v)?;
+                    if let Some(rules) = v.get("rule") {
+                        block.rules_section(rules);
                     }
-                    cfg.unknown.append(&mut block.unknown);
-                    let at = if key == "rtl" {
+                    let at = if e.key == "rtl" {
                         Kind::Rtl
                     } else {
                         Kind::Testbench
                     };
                     cfg.kinds[at as usize] = Some(Box::new(block));
                 }
-                "rule" => cfg.rules_section(l, "rule", &v)?,
+                "rule" => cfg.rules_section(v),
                 "file_list" => {
-                    let Node::Seq(items) = v else {
-                        return Err(format!("line {l}: `file_list` must be a list of files"));
-                    };
-                    for n in items {
-                        file_list_entry(l, n, &mut cfg.file_list)?;
+                    for n in v.items() {
+                        match &n.value {
+                            Value::Map(entries) => {
+                                cfg.file_list.extend(entries.iter().map(|e| e.key.clone()));
+                            }
+                            _ => cfg.file_list.push(n.text().to_owned()),
+                        }
                     }
                 }
-                _ => {
-                    let keys = [
-                        "rule",
-                        "exclude",
-                        "file_list",
-                        "testbench_files",
-                        "testbench_libraries",
-                        "rtl",
-                        "testbench",
-                    ];
-                    cfg.unknown.push(Unknown {
-                        line: l,
-                        what: "key",
-                        near: near(&key, "key", keys.into_iter()),
-                        name: key,
-                        section: String::new(),
-                    });
-                }
+                _ => {}
             }
         }
-        unknown_error(&cfg.unknown)?;
-        Ok(cfg)
+        cfg
     }
 
-    /// One `rule:` section, at the top level or of a kind of file; `section` says which.
-    fn rules_section(&mut self, l: usize, section: &str, v: &Node) -> Result<(), String> {
-        let Node::Map(rules) = v else {
-            return Err(format!("line {l}: `{section}` must be a map"));
-        };
-        for (l, id, v) in rules {
-            match id.as_str() {
-                "global" => self.global = layer(*l, section, id, v, &mut self.unknown)?,
+    /// One `rule:` section, at the top level or of a kind of file.
+    fn rules_section(&mut self, section: &Node) {
+        for e in section.entries() {
+            match e.key.as_str() {
+                "global" => self.global = layer(&e.value),
                 "group" => {
-                    let Node::Map(groups) = v else {
-                        return Err(format!("line {l}: `{section}.group` must be a map"));
-                    };
-                    for (l, name, v) in groups {
-                        let classes = [
-                            Certainty::Definite,
-                            Certainty::Advisory,
-                            Certainty::Experimental,
-                            Certainty::Policy,
-                        ];
-                        let Some(class) = classes.into_iter().find(|c| c.name() == name) else {
-                            let groups = classes.map(|c| c.name());
-                            self.unknown.push(Unknown {
-                                line: *l,
-                                what: "rule group",
-                                name: name.clone(),
-                                section: format!("{section}.group"),
-                                near: near(name, "rule group", groups.into_iter()),
-                            });
-                            continue;
-                        };
-                        let group = format!("{section}.group");
-                        let settings = layer(*l, &group, name, v, &mut self.unknown)?;
-                        self.groups.push((class, settings));
+                    for g in e.value.entries() {
+                        let class = CLASSES.into_iter().find(|c| c.name() == g.key);
+                        self.groups
+                            .extend(class.map(|class| (class, layer(&g.value))));
                     }
                 }
-                _ => match crate::rule(id) {
-                    Some(rule) => {
-                        let settings = layer(*l, section, id, v, &mut self.unknown)?;
-                        self.rules.push((rule.id, settings));
+                id => {
+                    if let Some(rule) = crate::rule(id) {
+                        self.rules.push((rule.id, layer(&e.value)));
                     }
-                    None => {
-                        let mut tail = near_rule(id);
-                        if tail.is_empty() {
-                            tail = near(id, "key", ["global", "group"].into_iter());
-                        }
-                        self.unknown.push(Unknown {
-                            line: *l,
-                            what: "rule",
-                            name: id.clone(),
-                            section: section.to_owned(),
-                            near: tail,
-                        });
-                    }
-                },
+                }
             }
         }
-        Ok(())
     }
 
     fn layers(&self, r: &Rule) -> [Layer; 3] {
@@ -498,30 +495,6 @@ impl Config {
             .find_map(|l| l.severity)
             .unwrap_or(Severity::Error)
     }
-}
-
-/// One entry of `file_list`: a path or glob, or a map from one to its settings, of which only
-/// empty ones are taken. Settings of one file are refused, never dropped.
-fn file_list_entry(l: usize, n: Node, out: &mut Vec<String>) -> Result<(), String> {
-    match n {
-        Node::Scalar(s) => out.push(s),
-        Node::Map(entries) => {
-            for (l, pattern, settings) in entries {
-                if !matches!(&settings, Node::Scalar(s) if s.is_empty())
-                    && !matches!(&settings, Node::Map(m) if m.is_empty())
-                {
-                    return Err(format!(
-                        "line {l}: settings for one `file_list` entry are not implemented: list `{pattern}` as a plain path, and use a waiver to turn a rule off for it"
-                    ));
-                }
-                out.push(pattern);
-            }
-        }
-        Node::Seq(_) | Node::Alias => {
-            return Err(format!("line {l}: a `file_list` entry must be a path"));
-        }
-    }
-    Ok(())
 }
 
 /// `$NAME` and `${NAME}` replaced from the environment; one that is not set stays as written, and
@@ -648,112 +621,38 @@ struct Waiver {
 #[derive(Default)]
 pub struct Waivers(Vec<Waiver>);
 
-/// The tail of an error about the unknown rule `id`.
-fn near_rule(id: &str) -> String {
-    crate::similar_rule(id).map_or_else(String::new, |r| {
-        format!("; {}", yavs_diag::suggest::help(&[(r.into(), "rule")]))
-    })
-}
-
 impl Waivers {
-    /// Read a `yavs-lint-waivers.yaml`; the error names the line of each unknown name or bad value.
-    /// A misspelled `files` or `lines` would widen a waiver, so unknown keys are errors.
+    /// Read a `yavs-lint-waivers.yaml`; the error names the line of every problem. A misspelled
+    /// `files` or `lines` would widen a waiver, and an unknown rule would waive nothing, so
+    /// neither is accepted (`WAIVERS` says what is).
     pub fn parse(text: &str) -> Result<Waivers, String> {
+        let root = yaml::read(text, &WAIVERS)?;
         let mut out = Vec::new();
-        let mut unknown = Vec::new();
-        for (l, key, v) in top(text)? {
-            if key != "waivers" {
-                unknown.push(Unknown {
-                    line: l,
-                    what: "key",
-                    near: near(&key, "key", ["waivers"].into_iter()),
-                    name: key,
-                    section: String::new(),
-                });
-                continue;
-            }
-            let items = match v {
-                Node::Seq(items) => items,
-                // `waivers:` with every entry commented out.
-                Node::Scalar(s) if s.is_empty() => Vec::new(),
-                _ => return Err(format!("line {l}: `waivers` must be a list")),
+        for item in root.get("waivers").map_or(&[][..], Node::items) {
+            let list = |key: &str| item.get(key).map(Node::words).unwrap_or_default();
+            let patterns = |key: &str| {
+                let line = item.entries().iter().find(|e| e.key == key);
+                let line = line.map_or(0, |e| e.line);
+                list(key)
+                    .into_iter()
+                    .map(|s| (line, normalize(&s)))
+                    .collect()
             };
-            for item in items {
-                let Node::Map(fields) = item else {
-                    return Err(format!("line {l}: each waiver must be a map"));
-                };
-                let mut w = Waiver {
-                    rules: Vec::new(),
-                    files: Vec::new(),
-                    files_exclude: Vec::new(),
-                    lines: Vec::new(),
-                };
-                let mut named_rule = false;
-                for (l, key, v) in fields {
-                    match (key.as_str(), v) {
-                        ("rule", v @ (Node::Scalar(_) | Node::Seq(_))) => {
-                            named_rule = true;
-                            for s in one_or_list(l, &key, v)? {
-                                if s == "*" || crate::rule(&s).is_some() {
-                                    w.rules.push(s);
-                                } else {
-                                    unknown.push(Unknown {
-                                        line: l,
-                                        what: "rule",
-                                        near: near_rule(&s),
-                                        name: s,
-                                        section: "waivers".into(),
-                                    });
-                                }
-                            }
-                        }
-                        ("files", v @ (Node::Scalar(_) | Node::Seq(_))) => {
-                            for s in one_or_list(l, &key, v)? {
-                                w.files.push((l, normalize(&s)));
-                            }
-                        }
-                        ("files_exclude", v @ (Node::Scalar(_) | Node::Seq(_))) => {
-                            for s in one_or_list(l, &key, v)? {
-                                w.files_exclude.push((l, normalize(&s)));
-                            }
-                        }
-                        ("reason", Node::Scalar(_)) => {}
-                        ("lines", Node::Seq(lines)) => {
-                            for n in lines {
-                                match n {
-                                    Node::Scalar(s) if s.parse::<usize>().is_ok() => {
-                                        w.lines.push(s.parse().expect("checked"))
-                                    }
-                                    _ => {
-                                        return Err(format!(
-                                            "line {l}: `lines` must be a list of line numbers"
-                                        ));
-                                    }
-                                }
-                            }
-                        }
-                        ("rule" | "files" | "files_exclude" | "reason" | "lines", _) => {
-                            return Err(format!("line {l}: `{key}` has the wrong form"));
-                        }
-                        _ => {
-                            let keys = ["rule", "files", "files_exclude", "lines", "reason"];
-                            unknown.push(Unknown {
-                                line: l,
-                                what: "key",
-                                near: near(&key, "key", keys.into_iter()),
-                                name: key,
-                                section: "waivers".into(),
-                            });
-                        }
-                    }
-                }
-                if !named_rule {
-                    return Err(format!("line {l}: a waiver needs a `rule`"));
-                }
-                out.push(w);
-            }
+            out.push(Waiver {
+                rules: list("rule"),
+                files: patterns("files"),
+                files_exclude: patterns("files_exclude"),
+                lines: item
+                    .get("lines")
+                    .map(|n| {
+                        n.items()
+                            .iter()
+                            .filter_map(|l| l.text().parse().ok())
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+            });
         }
-        unknown_error(&unknown)?;
         Ok(Waivers(out))
     }
 
@@ -790,26 +689,6 @@ pub fn unmatched<'a>(
     patterns
         .into_iter()
         .filter(|(_, p)| !found.iter().any(|f| f.matches(p)))
-        .collect()
-}
-
-/// A value that is one word or a list of them, none empty.
-fn one_or_list(l: usize, key: &str, v: Node) -> Result<Vec<String>, String> {
-    let items = match v {
-        Node::Seq(items) => items,
-        n => vec![n],
-    };
-    if items.is_empty() {
-        return Err(format!("line {l}: `{key}` is an empty list"));
-    }
-    items
-        .into_iter()
-        .map(|n| match n {
-            Node::Scalar(s) if !s.is_empty() => Ok(s),
-            _ => Err(format!(
-                "line {l}: `{key}` must be a word or a list of them"
-            )),
-        })
         .collect()
 }
 
@@ -893,7 +772,7 @@ mod tests {
                 .unwrap_err()
                 .contains("must be a list")
         );
-        assert!(list("file_list:\n").unwrap_err().contains("must be a list"));
+        assert!(list("file_list:\n").unwrap().is_empty(), "no entries");
         assert!(
             list("file_list:\n  - [a.vhd]\n")
                 .unwrap_err()
@@ -949,13 +828,102 @@ mod tests {
         .unwrap();
         for want in [
             "line 1: unknown key `waiver`",
-            "unknown rule `length_001` in `waivers`",
+            "unknown rule `length_001` in `waivers.rule`",
             "unknown key `line` in `waivers`",
-            "unknown rule `port_007` in `waivers`",
+            "unknown rule `port_007` in `waivers.rule`",
         ] {
             assert!(e.contains(want), "{e} / {want}");
         }
         assert_eq!(e.lines().count(), 4, "{e}");
+    }
+
+    #[test]
+    fn unknown_names_and_bad_values_are_listed_together() {
+        let e = Config::parse(
+            "indent: 1\nrule:\n  lint_770:\n    severity: fatal\n    disable: [a]\n  lint_602:\n    suffixes: ['re:(', ok]\n  lint_100: {}\nexclude: gen\nfile_list:\n  - [a]\n  - b.vhd: {rule: {}}\n",
+        )
+        .err()
+        .unwrap();
+        let lines: Vec<&str> = e.lines().collect();
+        assert_eq!(lines.len(), 8, "{e}");
+        assert!(lines[0].starts_with("line 1: unknown key `indent`"), "{e}");
+        assert!(
+            lines[1].contains(
+                "`rule.lint_770.severity` must be one of `error`, `warning`, not `fatal`"
+            ),
+            "{e}"
+        );
+        assert!(
+            lines[2].contains("`rule.lint_770.disable` must be true or false, not a list"),
+            "{e}"
+        );
+        assert!(
+            lines[3].contains("`re:(` in `rule.lint_602.suffixes` is not a regular expression"),
+            "{e}"
+        );
+        assert!(
+            lines[4].starts_with("line 8: unknown rule `lint_100` in `rule`"),
+            "{e}"
+        );
+        assert!(
+            lines[5].contains("`exclude` must be a list of words, not `gen`"),
+            "{e}"
+        );
+        assert!(
+            lines[6].contains("a `file_list` entry must be a path"),
+            "{e}"
+        );
+        assert!(
+            lines[7].contains("settings for one `file_list` entry are not implemented"),
+            "{e}"
+        );
+    }
+
+    #[test]
+    fn the_waiver_schema_checks_types_and_the_required_rule() {
+        let e = Waivers::parse(
+            "waivers:\n  - files: a.vhd\n  - rule: lint_770\n    lines: [1, x]\n    files: []\n    reason: [a]\n  - rule: {a: b}\n",
+        )
+        .err()
+        .unwrap();
+        for want in [
+            "line 2: a waiver needs `rule`",
+            "line 4: `waivers.lines` must be a whole number, not `x`",
+            "`waivers.files` is an empty list",
+            "`waivers.reason` must be a word, not a list",
+            "`waivers.rule` must be a word or a list of them, not a map",
+        ] {
+            assert!(e.contains(want), "{e} / {want}");
+        }
+        assert!(Waivers::parse("waivers:\n  - rule: '*'\n").is_ok());
+    }
+
+    #[test]
+    fn the_schema_declares_every_key_a_file_may_have() {
+        let keys = CONFIG.keys();
+        for k in [
+            "rule",
+            "rule.global.disable",
+            "rule.group",
+            "exclude",
+            "file_list",
+            "rtl.rule",
+            "testbench.rule.global.severity",
+        ] {
+            assert!(keys.iter().any(|x| x == k), "{k} in {keys:?}");
+        }
+        let keys = WAIVERS.keys();
+        assert_eq!(
+            keys,
+            [
+                "waivers",
+                "waivers.rule",
+                "waivers.files",
+                "waivers.files_exclude",
+                "waivers.lines",
+                "waivers.reason"
+            ]
+        );
     }
 
     #[test]
@@ -982,7 +950,10 @@ mod tests {
         for (text, needle) in [
             ("rule:\n  lint_770:\n    disable: maybe\n", "`maybe`"),
             ("rule:\n  lint_770:\n    severity: fatal\n", "`fatal`"),
-            ("rule:\n  lint_770:\n    disable: [a]\n", "single value"),
+            (
+                "rule:\n  lint_770:\n    disable: [a]\n",
+                "must be true or false, not a list",
+            ),
             ("rule: [a]\n", "`rule` must be a map"),
             ("rule:\n  group: [a]\n", "`rule.group` must be a map"),
             ("rule:\n  lint_602:\n    suffixes: a\n", "must be a list"),
@@ -1006,7 +977,7 @@ mod tests {
         assert!(said("exclud:\n").contains("a key with a similar name exists: `exclude`"));
         assert!(
             said("rule:\n  lint_770:\n    disabel: true\n")
-                .contains("a setting with a similar name exists: `disable`")
+                .contains("a key with a similar name exists: `disable`")
         );
         assert!(
             said("rule:\n  group:\n    definit:\n      disable: true\n")
