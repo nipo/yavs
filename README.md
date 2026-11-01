@@ -8,32 +8,9 @@
 
 yavs (Yet Another VHDL Simulator) is a VHDL simulator written in Rust. It runs VHDL-1993, 2008 and 2019, mixed in one project, from one executable with nothing else to install, on Linux x86_64, Linux aarch64 and Windows x86_64.
 
-## Debug a VHDL test from a prompt or from VS Code
-
-```
-$ yavs run --work=work:lib tb --interactive
-yavs> break assert error
-stop at assertions and reports of severity error, failure
-yavs> run
-** Error: 25000000fs+1: q is not high
-    Process tb.check
-assertion of severity error at 25 ns, delta 1, /work/tb.vhd:53: q is not high
-yavs> trace x q
-tb.q = 'U', never changed, declared at tb.vhd:30
-  tb.u_reg.q = 'U', never changed, declared at tb.vhd:7
-    driven 'U' by process tb.u_reg.flop, at tb.vhd:15
-      tb.u_reg.d = 'U', never changed, declared at tb.vhd:7
-        tb.enable = 'U', never changed, declared at tb.vhd:29
-Where it starts:
-  tb.enable: nothing drives it, it keeps its initial value (tb.vhd:29)
-It follows drivers and the signals their processes name. It cannot see variables,
-values from files, subprogram parameters, or which signal read made this value.
-```
-
-The [debugger tutorial](https://yavs.readthedocs.io/en/latest/debugger-tutorial.html) debugs a failing FIFO test step by step, in VS Code with the waves in Surfer, then at this prompt, with files you can run. The prompt, Surfer, attaching from VS Code without a configuration, `yavs lint`, combination coverage, `--assert-summary` and `--activity` need a release newer than 0.11.0; the [release notes](https://yavs.readthedocs.io/en/latest/release_notes.html) list everything unreleased.
-
 ## What it does
 
+- **[Debugger tutorial](https://yavs.readthedocs.io/en/latest/debugger-tutorial.html):** a failing FIFO test debugged step by step, in VS Code with the waves in Surfer, then at a terminal prompt, with files you can run.
 - **[Interactive console](https://yavs.readthedocs.io/en/latest/interactive.html):** breakpoints on lines, signal values and failed assertions, stepping, `examine` (also of a past value), `force`, `drivers`, `trace x`, `waits`, `find`, and `restart` to time 0 without recompiling. Tab completes names, and a typo gets a "did you mean". [Every command](https://yavs.readthedocs.io/en/latest/console-reference.html); `--do` runs the same commands as a script.
 - **[VS Code debugger](https://yavs.readthedocs.io/en/latest/debugging.html):** `python run.py lib.tb.test --yavs-debug`, set breakpoints in your own files, press F5. No configuration. The Debug Console takes the console's commands, and other Debug Adapter Protocol clients work with `yavs run --dap`.
 - **[Live waveforms in Surfer](https://yavs.readthedocs.io/en/latest/waveforms.html#watching-in-surfer):** `--surfer` shows the waves while the run writes them, the cursor follows the debugger's stops, and "Add to Wave" adds a signal or process variable with its history.
@@ -58,23 +35,7 @@ The [debugger tutorial](https://yavs.readthedocs.io/en/latest/debugger-tutorial.
 - **[VHPI](https://yavs.readthedocs.io/en/latest/vhpi.html) and foreign calls:** `--vhpi` loads plugins, with most of the standard there and [the gaps](https://yavs.readthedocs.io/en/latest/vhpi.html#at-a-glance) listed; `--load` calls C functions from VHDL.
 - **Languages:** [VHDL-1993, 2008 and 2019](https://yavs.readthedocs.io/en/latest/language-support.html), each file under its own standard, the IEEE, VITAL and Synopsys packages built in, and a [subset of PSL](https://yavs.readthedocs.io/en/latest/psl.html). No Verilog yet ([planned](https://github.com/ru551n/yavs/issues/776)).
 
-## Speed
-
-On 41 third-party testbenches, counting analysis, elaboration and the run, a repeated run took about a fifth of the time of an established open-source VHDL simulator and a first run a little over half (measured 2026-10-28 at commit `1a8edb76`; yavs was slower on 4 of them; [performance](docs/performance.md)). A run starts in the interpreter and compiles hot code with the bundled [Cranelift](https://cranelift.dev/) in the background ([running faster](https://yavs.readthedocs.io/en/latest/running-faster.html)).
-
-`--threads=N` (default 1) helps large, flat RTL designs: up to 2.4 times faster at 4 threads, whole run, measured 2026-10-28. Processor models and testbench-style designs stay at about their one-thread speed ([threads](https://yavs.readthedocs.io/en/latest/threads.html)). Output is identical on every tier and at any thread count.
-
-## Results on other projects' test suites
-
-| Suite | Passed / total |
-| --- | ---: |
-| OSVVM, VHDL-2008 and VHDL-2019 | 314/314 each |
-| VUnit | 1338/1338 |
-| UVVM | 131/137 |
-| Open Logic | 6867/6867 |
-| All suites of the report | 14902/15029 |
-
-From the [conformance report](docs/conformance.md) of 2026-10-29, commit `a3e95822df`, which has every suite, what ran where, and the [known differences between simulators](docs/design/simulator-discrepancies.md).
+The console, Surfer, attaching from VS Code without a configuration, `yavs lint`, combination coverage, `--assert-summary` and `--activity` need a release newer than 0.11.0; the [release notes](https://yavs.readthedocs.io/en/latest/release_notes.html) list everything unreleased.
 
 ## Quickstart
 
@@ -117,6 +78,24 @@ vu.add_package("vunit-yavs", allow_setup=True)  # first: it provides the simulat
 ```
 VUNIT_SIMULATOR=yavs python run.py
 ```
+
+## Speed
+
+On 41 third-party testbenches, counting analysis, elaboration and the run, a repeated run took about a fifth of the time of an established open-source VHDL simulator and a first run a little over half (measured 2026-10-28 at commit `1a8edb76`; yavs was slower on 4 of them; [performance](docs/performance.md)). A run starts in the interpreter and compiles hot code with the bundled [Cranelift](https://cranelift.dev/) in the background ([running faster](https://yavs.readthedocs.io/en/latest/running-faster.html)).
+
+`--threads=N` (default 1) helps large, flat RTL designs: up to 2.4 times faster at 4 threads, whole run, measured 2026-10-28. Processor models and testbench-style designs stay at about their one-thread speed ([threads](https://yavs.readthedocs.io/en/latest/threads.html)). Output is identical on every tier and at any thread count.
+
+## Results on other projects' test suites
+
+| Suite | Passed / total |
+| --- | ---: |
+| OSVVM, VHDL-2008 and VHDL-2019 | 314/314 each |
+| VUnit | 1338/1338 |
+| UVVM | 131/137 |
+| Open Logic | 6867/6867 |
+| All suites of the report | 14902/15029 |
+
+From the [conformance report](docs/conformance.md) of 2026-10-29, commit `a3e95822df`, which has every suite, what ran where, and the [known differences between simulators](docs/design/simulator-discrepancies.md).
 
 ## Documentation
 

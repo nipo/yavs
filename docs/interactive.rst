@@ -194,6 +194,16 @@ Stop on a failing assertion
     tb.check, /work/tb.vhd:53
     yavs> examine q
     'U'
+    yavs> trace x q
+    tb.q = 'U', never changed, declared at tb.vhd:30
+      tb.u_reg.q = 'U', never changed, declared at tb.vhd:7
+        driven 'U' by process tb.u_reg.flop, at tb.vhd:15
+          tb.u_reg.d = 'U', never changed, declared at tb.vhd:7
+            tb.enable = 'U', never changed, declared at tb.vhd:29
+    Where it starts:
+      tb.enable: nothing drives it, it keeps its initial value (tb.vhd:29)
+    It follows drivers and the signals their processes name. It cannot see variables,
+    values from files, subprogram parameters, or which signal read made this value.
     yavs> asserts
     Assertion summary: 0 failures, 1 error, 0 warnings, 0 notes
       severity  count  place      first message
