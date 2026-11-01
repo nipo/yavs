@@ -14,7 +14,7 @@ and exits 1 when the committed docs/conformance.md differs outside the `Generate
 --waveq re-renders the committed report with the current tools/waveq results (a local record written by tools/waveq).
 Needs the corpora: tools/fetch-corpus.sh (YAVS_CORPUS, default ~/.cache/rsim-corpus). Python stdlib only.
 """
-import argparse, concurrent.futures as cf, datetime, json, os, re, subprocess, sys, tempfile
+import argparse, concurrent.futures as cf, datetime, importlib.util, json, os, re, subprocess, sys, tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -237,8 +237,22 @@ def corpus_refs():
 
 
 def ci_platforms():
-    jobs = re.findall(r"^  (\w+):\n(?:    name: .*\n)?(?:    strategy:\n      fail-fast: \w+\n      matrix:\n        os: \[(.*?)\]\n)?", (ROOT / ".github/workflows/ci.yml").read_text(), re.M)
-    return {j: [o.strip() for o in os_.split(",")] for j, os_ in jobs if os_}
+    """job -> platforms of a full CI run (nightly, by hand, release tag): the matrix of each job of ci.yml names an
+    output of the `plan` job, whose full-scope value is in tools/ci-plan.py (#1018)."""
+    spec = importlib.util.spec_from_file_location("ci_plan", TOOLS / "ci-plan.py")
+    plan = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(plan)
+    full, job, res = plan.plan(None), None, {}
+    for line in (ROOT / ".github/workflows/ci.yml").read_text().splitlines():
+        if m := re.match(r"  ([\w-]+):$", line):
+            job = m[1]
+        elif m := re.match(r"\s+os: \$\{\{ fromJSON\(needs\.plan\.outputs\.(\w+)\) \}\}$", line):
+            if m[1] not in full:
+                sys.exit(f"ci.yml job {job} reads plan output {m[1]}, which tools/ci-plan.py does not make")
+            res[job] = full[m[1]]
+    if not res:
+        sys.exit("no job of .github/workflows/ci.yml has an `os: ${{ fromJSON(needs.plan.outputs.<name>) }}` matrix: update ci_platforms() in tools/conformance/run.py")
+    return res
 
 
 LIMITS = [
@@ -247,7 +261,7 @@ LIMITS = [
     ("PSL", f"a subset; the rest is skipped with warning W0004 or listed in the tracking issue [#445]({GH}/issues/445)"),
     ("SDF and VITAL timing, SystemC, macOS", "out of scope (docs/plan.md, \"Out of scope\")"),
     ("Platforms", "Linux x86_64, Linux aarch64 and Windows x86_64 only"),
-    ("LLVM tier", "the release archives use the Cranelift compiled tier (`--tier=auto` default); the LLVM tier exists only in a build from source with the `llvm` feature. CI runs a slice of the corpus under the LLVM tier on the three platforms"),
+    ("LLVM tier", f"the release archives use the Cranelift compiled tier (`--tier=auto` default); the LLVM tier exists only in a build from source with the `llvm` feature. CI has not built or tested it since 2026-10-30 ([#898]({GH}/issues/898))"),
     ("Reference simulators", "the comparison is against two established open-source VHDL simulators (sim3 and sim4, two commercial simulators, vote in part of the discrepancy catalogue); where the language reference is unclear yavs is permissive and the choice is recorded below"),
     ("What a pass means", "a pass is agreement with a recorded reference output or with a suite's own verdict. It is evidence, not a proof of correctness; each known disagreement is listed in the catalogue"),
 ]
@@ -476,8 +490,9 @@ and yavs's verdict.
     o.append(("" if w else "### Waveforms of real designs\n\n") + "<details><summary>Every design and signal class</summary>\n\n" + R["trust2"] + "\n\n</details>\n")
     # --- platforms and limits
     o.append("### Platforms covered by CI\n\n" + table(["job", "runs on"], [[f"`{j}`", ", ".join(os_)] for j, os_ in st["platforms"].items()]) +
-             "\nThe `check` job is `cargo fmt`, `clippy -D warnings` and the whole test suite of the workspace; the `clift` job the same for the Cranelift tier plus a simulation smoke run. "
-             "The `corpus` and `conformance` jobs run on Linux x86_64 only.\n")
+             "\nThe table is a full run: nightly, by hand and on a release tag. A push runs Linux x86_64, and Windows too when source or build files changed. "
+             "The `check` job is `cargo fmt`, `clippy -D warnings` and the whole test suite of the workspace; the `clift` job the same for the Cranelift tier plus a simulation smoke run; "
+             "the `vunit-yavs` job the tests of the test runner package. The `corpus` and `conformance` jobs run on Linux x86_64 only.\n")
     o.append("### Where and when each result was produced\n\n" + table(["suite", "where", "date, commit", "tool"], [[r["name"], r["where"] or "not run", r["when"], r["tool"]] for r in srows]))
     o.append("## How to reproduce\n\n```sh\n"
              "tools/fetch-corpus.sh                        # the external suites and libraries at pinned commits, ~/.cache/rsim-corpus\n"

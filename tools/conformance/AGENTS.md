@@ -19,7 +19,7 @@ report generator or regenerate the report (#780).
 
 | Path | What |
 |---|---|
-| `run.py` | Steps (`step_*` methods of `Run`), static facts (discrepancy catalogue, recorded sim1 corpus lists, CI platforms from `ci.yml`, known limits), `render()`, `--check` |
+| `run.py` | Steps (`step_*` methods of `Run`), static facts (discrepancy catalogue, recorded sim1 corpus lists, CI platforms from `ci.yml` and `tools/ci-plan.py`, known limits), `render()`, `--check` |
 | `../../docs/conformance-local.json` | Records of runs that CI cannot repeat: `--local` rewrites `refdiff` and `vhpi`; `vunit-own` and `cocotb` are hand-kept copies of `docs/STATUS.md` numbers (date, commit, command, note); `openlogic` is hand-kept too (Open Logic's own `sim/run.py` run with yavs, 6867 tests: re-run it and edit the record by hand) |
 | `../../.github/workflows/conformance.yml` | CI, nightly (not per push): build, `run.py --check`, upload the report artifact; a red nightly opens an issue |
 
@@ -32,6 +32,7 @@ report generator or regenerate the report (#780).
 | The committed report is compared with the regenerated one ignoring the `Generated:` line. On `main` a difference is a warning, on a release tag it fails the run | Ten agents push to `main`: failing every push for a changed count would block them; a release must carry a current report | #780 |
 | The report is user-facing: it opens with a short plain-language summary and one table (suite, what it is, passed / total), terms explained once; everything else (per-suite detail, where and when each result was produced, gated lists, discrepancies, commands) follows under "Details", "How to reproduce" and "Known limits". No internal jargon (no agent names, tool option names or rule numbers); CI rows name no commit (only the `Generated:` line does, so `--check` can compare) | Maintainer instruction | #780, 2026-10-28 |
 | Records of external tools that are not user-facing (`INTERNAL_RECORDS` in `run.py`: cocotb) stay in `conformance-local.json` and are left out of `conformance.md` | Maintainer: cocotb is an external tool and is not named in user documents | user, 2026-10-28 |
+| The platform table is the full-scope plan of `tools/ci-plan.py` (nightly, by hand, release tag) for each job whose `ci.yml` matrix reads a `plan` output; no match fails the run instead of printing an empty table | `ci.yml` stopped having a literal `os: [..]` list in #888 and the old regex then returned nothing, silently | #1018 |
 | Nothing is published outside the repository (no Pages) | Needs the maintainer's decision | #780 |
 | Corpus results come from `tools/corpus/run.py` against the gated `.expected` lists; sim1's numbers are the recorded `.sim1.expected` lists, not a rerun | Same files, no reference needed in CI | #780 |
 
