@@ -14,6 +14,10 @@ What does it cost, and do I need a licence server?
     yavs is free software under MIT or Apache-2.0, at your choice. It needs no licence server and no
     account.
 
+Is the source open?
+    Yes, on `GitHub <https://github.com/ru551n/yavs>`__, written in Rust. The kernel, interpreter, parser and semantic
+    analysis forbid ``unsafe`` code.
+
 What do I have to install?
     One executable. The ``std`` and ``ieee`` libraries are built in. There is nothing else to set up, unless you
     want VUnit (:doc:`vunit`), the VS Code debugger (:doc:`debugging`) or the Surfer viewer (:doc:`waveforms`).

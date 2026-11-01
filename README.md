@@ -6,53 +6,48 @@
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#license)
 [![CI status](https://github.com/ru551n/yavs/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ru551n/yavs/actions/workflows/ci.yml)
 
-yavs (Yet Another VHDL Simulator) is a VHDL simulator written in Rust. It runs VHDL-1993, 2008 and 2019, mixed in one project, from one executable with nothing else to install, on Linux x86_64, Linux aarch64 and Windows x86_64.
+yavs is a VHDL simulator written in Rust, for VHDL-1993, 2008 and 2019.
 
 ## What it does
 
-- **[Debugger tutorial](https://yavs.readthedocs.io/en/latest/debugger-tutorial.html):** a failing FIFO test debugged step by step, in VS Code with the waves in Surfer, then at a terminal prompt, with files you can run.
-- **[Interactive console](https://yavs.readthedocs.io/en/latest/interactive.html):** breakpoints on lines, signal values and failed assertions, stepping, `examine` (also of a past value), `force`, `drivers`, `trace x`, `waits`, `find`, and `restart` to time 0 without recompiling. Tab completes names, and a typo gets a "did you mean". [Every command](https://yavs.readthedocs.io/en/latest/console-reference.html); `--do` runs the same commands as a script.
-- **[VS Code debugger](https://yavs.readthedocs.io/en/latest/debugging.html):** `python run.py lib.tb.test --yavs-debug`, set breakpoints in your own files, press F5. No configuration. The Debug Console takes the console's commands, and other Debug Adapter Protocol clients work with `yavs run --dap`.
-- **[Live waveforms in Surfer](https://yavs.readthedocs.io/en/latest/waveforms.html#watching-in-surfer):** `--surfer` shows the waves while the run writes them, the cursor follows the debugger's stops, and "Add to Wave" adds a signal or process variable with its history.
-- **[VUnit](https://yavs.readthedocs.io/en/latest/vunit.html):** the `vunit-yavs` package adds yavs as a simulator, with `--yavs-debug`, `--yavs-interactive`, `--yavs-surfer`, `--yavs-lint`, coverage flags and a gate, a token server for `-p`, and hooks for packages that call native libraries.
-- **[Static analysis](https://yavs.readthedocs.io/en/latest/lint.html):** `yavs lint` reports what can be proved wrong before a simulation runs, with waivers and SARIF, JUnit, Code Climate and SonarQube reports.
-- **[Coverage](docs/coverage.md):** statement, branch, toggle, condition, expression and condition-combination coverage; merged databases, text, HTML and Cobertura reports, source comments that waive what cannot occur, `--fail-under` for CI and `yavs cov rank` for a small set of tests.
-- **[Answers at the end of a run](https://yavs.readthedocs.io/en/latest/cli.html#control-a-run):** `--assert-summary` (what failed, where), `--activity` (what keeps it busy), `--hang-report` (what each process waits for), `--profile` (where the time goes).
-- **[Diagnostics](https://yavs.readthedocs.io/en/latest/troubleshooting.html):** a stable code and the source for every problem, and `yavs --explain E1100`:
+- [Debugger tutorial](https://yavs.readthedocs.io/en/latest/debugger-tutorial.html): a failing test debugged step by step, in VS Code and at a prompt.
+- [Interactive console](https://yavs.readthedocs.io/en/latest/interactive.html): breakpoints, stepping, `examine`, `force`, `drivers`, `trace x` and `restart` at a `yavs>` prompt or in a script.
+- [VS Code debugger](https://yavs.readthedocs.io/en/latest/debugging.html): attach with no configuration, or use any Debug Adapter Protocol client.
+- [Live waveforms](https://yavs.readthedocs.io/en/latest/waveforms.html): Surfer follows the run and the debugger's stops; FST files for any viewer.
+- [Static analysis](https://yavs.readthedocs.io/en/latest/lint.html): `yavs lint` reports what can be proved wrong before a simulation.
+- [Coverage](https://yavs.readthedocs.io/en/latest/coverage.html): from statements to condition combinations, with HTML and Cobertura reports and a CI gate.
+- [Run reports](https://yavs.readthedocs.io/en/latest/cli.html#control-a-run): what failed, what keeps a run busy, what each process waits for, where the time goes.
+- [VHPI](https://yavs.readthedocs.io/en/latest/vhpi.html): plugins and C functions called from VHDL.
+- [Languages](https://yavs.readthedocs.io/en/latest/language-support.html): each file under its own standard, IEEE packages built in, a subset of PSL.
+- [Platforms](https://yavs.readthedocs.io/en/latest/install.html): Linux x86_64, Linux aarch64 and Windows x86_64, one archive with nothing else to install.
 
-  ```
-  error[E1100]: `cnt` is not declared
-   --> hello_error.vhd:7:12
-    |
-  5 |   signal count : natural;
-    |          ----- similar name declared here
-  6 | begin
-  7 |   count <= cnt + 1;
-    |            ^^^ not found in this scope
-    |
-    = help: a signal with a similar name exists: `count`
-  ```
-- **[VHPI](https://yavs.readthedocs.io/en/latest/vhpi.html) and foreign calls:** `--vhpi` loads plugins, with most of the standard there and [the gaps](https://yavs.readthedocs.io/en/latest/vhpi.html#at-a-glance) listed; `--load` calls C functions from VHDL.
-- **Languages:** [VHDL-1993, 2008 and 2019](https://yavs.readthedocs.io/en/latest/language-support.html), each file under its own standard, the IEEE, VITAL and Synopsys packages built in, and a [subset of PSL](https://yavs.readthedocs.io/en/latest/psl.html). No Verilog yet ([planned](https://github.com/ru551n/yavs/issues/776)).
+Some of this needs a release newer than 0.11.0: see the [release notes](https://yavs.readthedocs.io/en/latest/release_notes.html).
 
-The console, Surfer, attaching from VS Code without a configuration, `yavs lint`, combination coverage, `--assert-summary` and `--activity` need a release newer than 0.11.0; the [release notes](https://yavs.readthedocs.io/en/latest/release_notes.html) list everything unreleased.
+## Error messages
+
+```
+error[E1100]: `cnt` is not declared
+ --> hello_error.vhd:7:12
+  |
+5 |   signal count : natural;
+  |          ----- similar name declared here
+6 | begin
+7 |   count <= cnt + 1;
+  |            ^^^ not found in this scope
+  |
+  = help: a signal with a similar name exists: `count`
+```
 
 ## Quickstart
-
-Download the archive for your platform from the [releases](https://github.com/ru551n/yavs/releases) page, unpack it and put the directory on `PATH`. Every platform has one archive, with the Cranelift compiled tier built in and nothing else to install. See [`docs/install.rst`](docs/install.rst) for checks, the build variants and building from source.
-
-Then analyze files into a library (a directory) and run a top level:
 
 ```
 yavs analyze --work=work:build/work hello_tb.vhd
 yavs run --work=work:build/work hello_tb
 ```
 
-The example files are in [`docs/examples/`](docs/examples); [Getting started](https://yavs.readthedocs.io/en/latest/getting-started.html) goes on from here.
+[Install yavs](https://yavs.readthedocs.io/en/latest/install.html), then follow [Getting started](https://yavs.readthedocs.io/en/latest/getting-started.html).
 
 ### In GitHub Actions
-
-[yavs-action](https://github.com/ru551n/yavs-action) installs a release, checks it against its checksums and puts it on `PATH`; [`docs/ci.rst`](docs/ci.rst) has a whole job:
 
 ```yaml
 - uses: ru551n/yavs-action@main
@@ -60,46 +55,29 @@ The example files are in [`docs/examples/`](docs/examples); [Getting started](ht
     version: 0.11.0
 ```
 
+[yavs-action](https://github.com/ru551n/yavs-action) installs a release; [Continuous integration](https://yavs.readthedocs.io/en/latest/ci.html) has a whole job.
+
 ## With VUnit
 
-Install the `vunit-yavs` package next to VUnit; it needs yavs 0.11.0 or later on `PATH`:
-
-```
-pip install vunit-yavs
-```
-
-Add it in `run.py` before anything else, then select yavs when you run:
-
-```python
-vu = VUnit.from_argv()
-vu.add_package("vunit-yavs", allow_setup=True)  # first: it provides the simulator
-```
-
-```
-VUNIT_SIMULATOR=yavs python run.py
-```
+The `vunit-yavs` package adds yavs to VUnit as a simulator; it needs yavs 0.11.0 or later: [Using yavs from VUnit](https://yavs.readthedocs.io/en/latest/vunit.html).
 
 ## Speed
 
-On 41 third-party testbenches, counting analysis, elaboration and the run, a repeated run took about a fifth of the time of an established open-source VHDL simulator and a first run a little over half (measured 2026-10-28 at commit `1a8edb76`; yavs was slower on 4 of them; [performance](docs/performance.md)). A run starts in the interpreter and compiles hot code with the bundled [Cranelift](https://cranelift.dev/) in the background ([running faster](https://yavs.readthedocs.io/en/latest/running-faster.html)).
+On 41 third-party testbenches, a repeated run took about a fifth of the time of an established open-source VHDL simulator and a first run a little over half (measured 2026-10-28): [performance](https://yavs.readthedocs.io/en/latest/performance.html).
 
-`--threads=N` (default 1) helps large, flat RTL designs: up to 2.4 times faster at 4 threads, whole run, measured 2026-10-28. Processor models and testbench-style designs stay at about their one-thread speed ([threads](https://yavs.readthedocs.io/en/latest/threads.html)). Output is identical on every tier and at any thread count.
+## Test suites
 
-## Results on other projects' test suites
-
-| Suite | Passed / total |
-| --- | ---: |
-| OSVVM, VHDL-2008 and VHDL-2019 | 314/314 each |
-| VUnit | 1338/1338 |
-| UVVM | 131/137 |
-| Open Logic | 6867/6867 |
-| All suites of the report | 14902/15029 |
-
-From the [conformance report](docs/conformance.md) of 2026-10-29, commit `a3e95822df`, which has every suite, what ran where, and the [known differences between simulators](docs/design/simulator-discrepancies.md).
+The test suites of OSVVM, UVVM, VUnit and Open Logic and the VESTs language suite run on yavs: results per suite in the [conformance report](https://yavs.readthedocs.io/en/latest/conformance.html) of 2026-10-29.
 
 ## Documentation
 
-The [user guide](https://yavs.readthedocs.io), with [the command-line reference](https://yavs.readthedocs.io/en/latest/cli-reference.html), [error codes](https://yavs.readthedocs.io/en/latest/error-codes.html), [a page for moving from another simulator](https://yavs.readthedocs.io/en/latest/migrating.html), [known limitations](https://yavs.readthedocs.io/en/latest/faq.html) and [release notes](https://yavs.readthedocs.io/en/latest/release_notes.html). It is also available to coding assistants through [Context7](https://context7.com/ru551n/yavs).
+- [User guide](https://yavs.readthedocs.io)
+- [Command-line reference](https://yavs.readthedocs.io/en/latest/cli-reference.html)
+- [Error codes](https://yavs.readthedocs.io/en/latest/error-codes.html)
+- [Moving from another simulator](https://yavs.readthedocs.io/en/latest/migrating.html)
+- [Known limitations](https://yavs.readthedocs.io/en/latest/faq.html)
+- [Release notes](https://yavs.readthedocs.io/en/latest/release_notes.html)
+- [Context7](https://context7.com/ru551n/yavs), for coding assistants
 
 yavs is a pre-release: expect gaps, and please [report](https://github.com/ru551n/yavs/issues) what breaks.
 
@@ -109,12 +87,4 @@ Pull requests and bug reports are welcome: see [`CONTRIBUTING.md`](CONTRIBUTING.
 
 ## License
 
-yavs is licensed under either of [Apache-2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT), at your
-option. The IEEE `std` and `ieee` sources in `lib/` are Apache-2.0 (`lib/LICENSE`,
-`lib/SOURCES.md`). The built-in IEEE 1076.4 VITAL packages (`ieee.vital_timing`,
-`ieee.vital_primitives`, `ieee.vital_memory`) are IEEE-copyrighted and carry no explicit licence
-grant; they are redistributed unmodified, as other open-source VHDL simulators do (`lib/LICENSE-IEEE-VITAL`). The
-built-in Synopsys packages (`ieee.std_logic_arith`, `std_logic_unsigned`, `std_logic_signed`,
-`std_logic_misc`) are Synopsys copyright, redistributable without restriction when the notice is
-kept, and are also shipped unmodified (`lib/LICENSE-SYNOPSYS`). The VHDL-1993 `numeric_std` and
-`numeric_bit` are derived from the Apache-2.0 sources (`lib/SOURCES.md`).
+yavs is licensed under either of [Apache-2.0](https://github.com/ru551n/yavs/blob/main/LICENSE-APACHE) or [MIT](https://github.com/ru551n/yavs/blob/main/LICENSE-MIT), at your option. The bundled IEEE, VITAL and Synopsys packages have their own terms: see [`lib/SOURCES.md`](https://github.com/ru551n/yavs/blob/main/lib/SOURCES.md), [`lib/LICENSE`](https://github.com/ru551n/yavs/blob/main/lib/LICENSE), [`lib/LICENSE-IEEE-VITAL`](https://github.com/ru551n/yavs/blob/main/lib/LICENSE-IEEE-VITAL) and [`lib/LICENSE-SYNOPSYS`](https://github.com/ru551n/yavs/blob/main/lib/LICENSE-SYNOPSYS).

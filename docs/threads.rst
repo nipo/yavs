@@ -51,7 +51,8 @@ Run the longest test alone and compare, on an otherwise idle machine:
     yavs run --work=work:build/work tb --threads=4 --time-report
 
 ``--time-report`` prints the wall and CPU time of each phase. If it is at least about 1.3 times faster with 4
-threads, they are worth using. Most designs gain little beyond 4. The measured gains per kind of design are in
+threads, they are worth using. Most designs gain little beyond 4: the flat RTL design that gained most ran 2.39 times
+faster at 4 threads and 3.25 at 8, whole run, measured 2026-10-28. The measured gains per kind of design are in
 `parallel.md <https://github.com/ru551n/yavs/blob/main/docs/parallel.md>`__ in the repository.
 
 Regressions: threads or parallel tests

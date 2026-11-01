@@ -37,7 +37,7 @@ The files are in ``docs/examples/vunit`` of the source tree. They test the count
    :caption: tb_counter.vhd
 
 Add the package before anything else in the script: it provides the simulator. Select yavs with the
-``VUNIT_SIMULATOR`` environment variable, as this script does for itself. Without it VUnit picks the first
+``VUNIT_SIMULATOR`` environment variable, as this script does for itself (or run ``VUNIT_SIMULATOR=yavs python run.py``). Without it VUnit picks the first
 simulator it finds on ``PATH``, which may be another one.
 
 Run tests
