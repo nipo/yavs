@@ -502,8 +502,8 @@ its false result, so in `assert a or b` the rows `a = 0` and `b = 0` are hit onl
 passing regression at most half of these rows can be hit, and a gate on `condition` would drop for code
 that is fine. And testbench assertions are often the most evaluated conditions of a run, each with the
 cost of any condition. Exclude the rows of the failing result, or read them as a list of what no test
-provoked. Neither form has `combination` items, and a `-- yavs cov exclude` comment does not apply to
-them.
+provoked. Neither form has `combination` items, and a `-- yavs cov exclude` comment right before one
+is error `E2024`: exclude a row of these with an exclusion row instead.
 
 **Clocked processes.** A process that does nothing unless a clock edge happens runs only at
 that edge, with or without `--cov`. Its edge test therefore counts one run at initialisation

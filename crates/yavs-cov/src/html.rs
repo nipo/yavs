@@ -187,6 +187,13 @@ pub fn pages(
         table_head("", fec),
         total.cells(fec)
     );
+    if !db.unmeasured.is_empty() {
+        b.push_str("<h2>Not measured as state machines</h2>\n<ul>\n");
+        for (file, line, text) in &db.unmeasured {
+            let _ = writeln!(b, "<li>{}:{line} {}</li>", esc(file), esc(text));
+        }
+        b.push_str("</ul>\n");
+    }
     if !ex.is_empty() {
         let _ = writeln!(
             b,

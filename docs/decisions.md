@@ -13142,18 +13142,22 @@ index (machine written; a damaged index says to re-analyze).
 - An edge test in a `wait until` has no rows (`CovCond::consts` marks it, as a constant input): edge
   triggers stay on under coverage, so a clocked process never evaluates it false.
 - No combinations at either: the directives bind to the decisions they know, which are unchanged.
-- Identical text in one unit shares its occurrence numbers across sites, so a `wait until` or `assert`
-  with the text of a later `if` moves that `if`'s occurrence, and an exclusion row of it reports `W0111`.
+- The rows of a wait and of an assert hash their site's word with the text (`collect`). Occurrences are
+  numbered per kind and hash over what was lowered, so sharing the hash with an `if` of the same text
+  would shift that `if`'s occurrence in a run with `assert` on, and a merge with a run without it would
+  silently add the `if`'s counts to the assert's row.
 
 ## State machine coverage (yavs-cov, yavs-lint, CLI, #1020, 2026-11-01)
 
 - **A kernel observer, not counters in the code** (`yavs_cov::fsm`, as toggles): it compares the
   register's value with the last one, so every tier and thread count sees the same, and lowering and
   the optimiser are not touched. A self-loop changes no value, so it is not an item.
-- **Detection is shared with lint, and wider** (`yavs_lint::machines`, `design/fsm.rs`, on `design.rs`'s
-  flattening and helpers). `lint_710` and `lint_711` judge a whole type and need every assignment readable, or
-  they would report falsely; a count needs only the register. So two-process machines and package types
-  are measured here and left alone by those rules, which are unchanged.
+- **Detection lives with lint, as a second reading** (`yavs_lint::machines`, `design/fsm.rs`). It shares
+  `design.rs`'s flattening and helpers, not `Arch::machines`, which `lint_710`, `lint_711` and the
+  `state_machines` of `--facts` still use. Those rules judge a whole type and need every assignment
+  readable, or they would report falsely; a count needs only the register. So two-process machines and
+  package types are measured here and left alone by the rules, and `--facts` and `--cov-kind=fsm` can name
+  different machines. Open for the maintainer: whether `--facts` should list the wider reading.
 - **`yavs-cov` depends on `yavs-lint`**: one edge, no cycle (lint knows nothing below sem). `yavs_lint`
   still runs no rule during a run, and only with `--cov-kind=fsm` does the detection run at all.
 - **Transitions no `case` names** (a reset) are added when they happen rather than dropped: every

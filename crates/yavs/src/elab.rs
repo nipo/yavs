@@ -2073,7 +2073,7 @@ fn run_design(
                 &db.sources,
                 &Diagnostic::warning("W0120", format!("not measured as a state machine: {text}"))
                     .with_primary(span, "this looks like a state machine")
-                    .with_help("`docs/coverage.md` says which forms are measured"),
+                    .with_help("`yavs --explain W0120` says which forms are measured"),
             );
         }
         sim.subscribe(Box::new(f.clone()));

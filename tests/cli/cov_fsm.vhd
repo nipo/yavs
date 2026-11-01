@@ -166,7 +166,7 @@ begin
 end architecture;
 
 entity cov_fsm is
-  generic (runs : natural := 3);
+  generic (runs : natural := 3; do_reset : boolean := true);
 end entity;
 
 architecture tb of cov_fsm is
@@ -184,7 +184,7 @@ begin
     wait for 10 ns * runs;
     go <= '0';
     wait for 20 ns;
-    rst <= '1';
+    rst <= '1' when do_reset else '0';
     wait for 10 ns;
     rst <= '0';
     wait for 10 ns;

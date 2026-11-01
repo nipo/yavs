@@ -383,7 +383,7 @@ fn fsm_exclusions_merge_and_rank() {
             "--cov=b.ycov",
             "--cov-kind=fsm",
             "--cov-test=b",
-            "-gruns=9",
+            "-gdo_reset=false",
         ],
     );
     assert!(o.status.success());
@@ -391,15 +391,26 @@ fn fsm_exclusions_merge_and_rank() {
     let o = yavs(&tmp, &["cov", "merge", "a.ycov", "b.ycov", "-o", "m.ycov"]);
     assert!(o.status.success());
     let m = read(&tmp.join("m.ycov"));
+    let n = |d: &Database, k| d.items.get(k).map_or(0, |e| e.count);
     for (k, e) in &m.items {
-        assert_eq!(e.count, a.items[k].count + b.items[k].count, "{k:?}");
+        assert_eq!(e.count, n(&a, k) + n(&b, k), "{k:?}");
     }
+    // Only the run with the reset took the reset's transitions.
+    let unique = m
+        .items
+        .keys()
+        .filter(|k| n(&a, k) > 0 && n(&b, k) == 0)
+        .count();
+    assert_eq!(unique, 2, "{m:#?}");
     let o = yavs(&tmp, &["cov", "rank", "m.ycov"]);
     let rank = String::from_utf8_lossy(&o.stdout);
-    assert!(
-        o.status.success() && rank.contains('a') && rank.contains("items"),
-        "{rank}"
-    );
+    assert!(o.status.success(), "{rank}");
+    let row = rank
+        .lines()
+        .find(|l| l.starts_with("a "))
+        .unwrap_or_else(|| panic!("{rank}"));
+    assert!(row.ends_with(&format!(" {unique}")), "{rank}");
+    assert!(rank.contains("not needed: b"), "{rank}");
 
     let report = |args: &[&str]| {
         let o = yavs(&tmp, &[&["cov", "report", "m.ycov"][..], args].concat());
@@ -455,6 +466,7 @@ fn fsm_exclusions_merge_and_rank() {
     assert_eq!(code, Some(0), "{err}");
     let index = std::fs::read_to_string(tmp.join("h/index.html")).expect("index");
     assert!(index.contains("<th>fsm</th>"), "{index}");
+    assert!(index.contains("Not measured as state machines"), "{index}");
     let page = std::fs::read_dir(tmp.join("h"))
         .expect("dir")
         .filter_map(|e| std::fs::read_to_string(e.ok()?.path()).ok())
@@ -526,4 +538,99 @@ fn walking_a_method_alias_of_a_private_variable_ends() {
         String::from_utf8_lossy(&o.stderr)
     );
     assert!(tmp.join("f.json").is_file());
+}
+
+/// An `assert` with the text of an `if` has rows of its own: merging a run that asked for them with
+/// one that did not adds the `if`'s counts to the `if` alone. A directive before a wait or an
+/// assert never reaches a later decision.
+#[test]
+fn assert_rows_keep_apart_from_an_if_of_the_same_text() {
+    let tmp = tempdir("meas_same_text");
+    std::fs::write(
+        tmp.join("t.vhd"),
+        "entity t is end;
+architecture a of t is
+  signal x, y : bit := '0';
+begin
+  process
+  begin
+    y <= '1';
+    wait for 1 ns;
+    x <= '1';
+    wait for 1 ns;
+    wait until x = '1' or y = '0' for 1 ns;
+    assert x = '1' or y = '0' report \"no\" severity note;
+    if x = '1' or y = '0' then
+      null;
+    end if;
+    wait;
+  end process;
+end;
+",
+    )
+    .expect("write");
+    assert!(
+        yavs(&tmp, &["analyze", "--work=work:lib", "t.vhd"])
+            .status
+            .success()
+    );
+    let run = |db: &str, kinds: &str| {
+        let o = yavs(
+            &tmp,
+            &["run", "--work=work:lib", "t", &format!("--cov={db}"), kinds],
+        );
+        assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    };
+    run("c.ycov", "--cov-kind=condition");
+    run("a.ycov", "--cov-kind=condition,assert");
+    let by_line = |db: &Database, l: u32| -> u64 {
+        db.items
+            .iter()
+            .filter(|(k, e)| matches!(k.kind, Kind::Condition(_)) && e.line == l)
+            .map(|(_, e)| e.count)
+            .sum()
+    };
+    let (c, a) = (read(&tmp.join("c.ycov")), read(&tmp.join("a.ycov")));
+    let (assert_l, if_l) = (12, 13);
+    assert_eq!(by_line(&c, assert_l), 0);
+    assert!(by_line(&a, assert_l) > 0);
+    assert!(by_line(&c, if_l) > 0);
+    assert_eq!(by_line(&c, if_l), by_line(&a, if_l));
+    let o = yavs(&tmp, &["cov", "merge", "c.ycov", "a.ycov", "-o", "m.ycov"]);
+    assert!(o.status.success());
+    let m = read(&tmp.join("m.ycov"));
+    assert_eq!(by_line(&m, if_l), 2 * by_line(&c, if_l));
+    assert_eq!(by_line(&m, assert_l), by_line(&a, assert_l));
+
+    // A directive right before a wait or an assert.
+    for stmt in [
+        "wait until x = '1' or y = '0' for 1 ns;",
+        "assert x = '1' or y = '0';",
+    ] {
+        std::fs::write(
+            tmp.join("d.vhd"),
+            format!(
+                "entity d is end;
+architecture a of d is
+  signal x, y : bit := '0';
+begin
+  process
+  begin
+    -- yavs cov exclude 01: not this one
+    {stmt}
+    if x = '1' or y = '0' then
+      null;
+    end if;
+    wait;
+  end process;
+end;
+"
+            ),
+        )
+        .expect("write");
+        let o = yavs(&tmp, &["analyze", "--work=work:d", "d.vhd"]);
+        let err = String::from_utf8_lossy(&o.stderr);
+        assert!(!o.status.success(), "{stmt}: {err}");
+        assert!(err.contains("error[E2024]"), "{stmt}: {err}");
+    }
 }

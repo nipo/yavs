@@ -533,7 +533,13 @@ pub fn collect(
                 yavs_ir::CovKind::Expression(r) => Kind::Expression(r),
                 yavs_ir::CovKind::Combination(s) => Kind::Combination(s),
             },
-            hash: fnv1a(text),
+            // The rows of a wait or an assert are not asked for together with those of an `if` of
+            // the same text: a hash of their own keeps the `if`'s occurrence whatever was asked.
+            hash: match (&c.row, prog.stmts.get(c.stmt).map(|s| s.kind)) {
+                (Some(_), Some(yavs_ir::StmtKind::Wait)) => fnv1a(&format!("wait until {text}")),
+                (Some(_), Some(yavs_ir::StmtKind::Assert)) => fnv1a(&format!("assert {text}")),
+                _ => fnv1a(text),
+            },
             start: span.start,
             file: f.path.clone(),
             line,
