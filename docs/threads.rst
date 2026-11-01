@@ -95,7 +95,7 @@ and the flag does nothing:
 value, at most 4, since more threads buy little and each costs memory in every simulation. A test can have its
 own cap with ``vu.set_sim_option("yavs.max_threads", 2)``. Without the server ``--yavs-max-threads N`` simply runs
 each simulation with ``--threads=N``. If the server cannot start (a blocked local socket), the run prints a
-warning and every simulation uses one thread. A run script with a command line of its own can set
+warning and goes on without a server, as if ``--yavs-jobserver`` had not been given. A run script with a command line of its own can set
 ``VUNIT_YAVS_MAX_THREADS`` instead of the flag.
 
 A run never keeps more than N threads busy once it has settled. A test that starts while every slot is

@@ -10,9 +10,12 @@ The site shows the summary of `conformance.md` (`conformance.rst`). Keep develop
 developer document on GitHub instead. The exception is `environment.rst`, which lists every
 environment variable, the development ones in a section of their own.
 
-Some pages have a test that keeps them current. `error-codes.rst`, `cli-reference.rst` and
-`lint-rules.rst` are generated: regenerate them with
+Some pages have a test that keeps them current. `error-codes.rst`, `cli-reference.rst`,
+`lint-rules.rst` and the `console-*.inc` tables are generated (the console table comes from
+`crates/yavs-dap/src/console.rs`): regenerate them with
 `YAVS_BLESS=1 cargo test -p yavs --bin yavs cli_reference`.
+The `yavs>` examples of `interactive.rst` and `console-reference.rst` are run by
+`crates/yavs/tests/docs_debugger.rs`.
 `environment.rst` is written by hand: `cargo test -p yavs --test env_registry` fails on a variable
 without a row and on a row nothing reads.
 

@@ -25,9 +25,9 @@ VS Code
 -------
 
 The VS Code extension adds a ``yavs`` debugger. Download ``yavs-debug-<version>.vsix`` from the
-`releases of yavs <https://github.com/ru551n/yavs/releases>`_ (the releases titled "yavs VS Code
-debugger"; ``SHA256SUMS`` is attached) and install it. yavs must be on ``PATH``, or set
-``yavsPath``:
+`releases of yavs <https://github.com/ru551n/yavs/releases>`_ (releases after 0.11.0 carry the extension of the same
+version; until then, the release titled "yavs VS Code debugger"; ``SHA256SUMS`` is attached) and install it. yavs must be
+on ``PATH``, or set ``yavsPath``:
 
 .. code-block:: bash
 
@@ -153,6 +153,8 @@ Limits
 
 * A debugger session runs the interpreter on one thread, so every session behaves the same;
   ``--threads`` and ``--tier`` have no effect there.
+* One driver per run: ``--dap`` cannot be combined with ``--interactive`` or ``--do``, and ``--yavs-debug`` not with
+  ``--yavs-interactive``. ``--surfer`` and ``--yavs-surfer`` combine with either.
 * ``--cov`` and ``--profile`` cannot be combined with ``--dap``.
 * Breakpoint conditions, and expressions in a Watch or ``examine``, cannot call functions other than ``to_integer`` or use
   attributes. An ``unsigned`` or ``signed`` compares with a number (``cnt = 3``, ``cnt > n``) or with another as

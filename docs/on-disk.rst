@@ -85,6 +85,8 @@ Other files a run writes
      - ``--cov`` without a file name.
    * - The file of ``--profile=FILE``
      - The profile as JSON.
+   * - The file of ``--activity=FILE``
+     - The activity tables as JSON.
    * - ``yavs/`` in VUnit's output directory
      - With ``vunit-yavs``: ``libraries/`` holds the analyzed libraries, ``std_cache/`` the ``std`` and
        ``ieee`` store of this output directory. ``test_output/`` holds the rest of each test.

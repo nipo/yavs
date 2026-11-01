@@ -137,7 +137,7 @@ time 0 up to the stop.
 .. note::
 
    Keep Surfer and VS Code side by side, so that Surfer's window stays visible. If Add to Wave reports "Surfer does not
-   answer", see `#952 <https://github.com/ru551n/yavs/issues/952>`__.
+   answer", bring its window to the front: :doc:`waveforms` says why.
 
 8. Find a process variable and add it
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

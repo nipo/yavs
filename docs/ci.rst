@@ -96,6 +96,16 @@ a gate never passes by rounding up. With VUnit the same gate is one command line
 
     python run.py --yavs-cov --yavs-cov-html cov-html --yavs-cov-fail-under 85
 
+A lint step
+-----------
+
+``yavs lint`` (a release newer than 0.11.0) fails a step with a finding of severity error, and writes reports a pipeline can
+read (:doc:`lint`):
+
+.. code-block:: bash
+
+    yavs lint --work=rtl:build/rtl --sarif=lint.sarif
+
 What to cache
 -------------
 

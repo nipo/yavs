@@ -116,5 +116,7 @@ See also
 * :doc:`project-walkthrough`: several libraries, rebuilds, generics, waves and coverage.
 * :doc:`migrating`: what is different if you know another simulator.
 * :doc:`vunit`: running tests with VUnit.
+* :doc:`interactive`: a debugger at a terminal prompt, and :doc:`debugger-tutorial` for a walk through a failing test.
 * :doc:`debugging`: breakpoints in VS Code.
+* :doc:`lint`: find what is provably wrong before a simulation.
 * :doc:`cli-reference`: every option in one place.

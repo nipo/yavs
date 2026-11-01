@@ -47,6 +47,8 @@ Finding where the time goes
   simulation when the run ends.
 * ``--profile[=FILE]`` samples the run and prints the busiest processes, instances, subprograms
   and source lines (with ``FILE``, also as JSON). Ctrl-C prints the profile of the time so far.
+* ``--activity[=FILE]`` counts instead of measuring: the processes that ran most often and the signals that changed most
+  often (:doc:`cli`).
 
 See also
 --------

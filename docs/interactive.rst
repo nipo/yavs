@@ -362,7 +362,8 @@ Limits
 ------
 
 The console is a debug session: the interpreter on one thread (``--threads`` and ``--tier`` have no
-effect), no ``--cov`` or ``--profile``.
+effect), no ``--cov`` or ``--profile``. One driver per run: the console or a debugger, not both (``--dap`` is refused with
+``--interactive`` and ``--do``). ``--surfer`` combines with either.
 ``run until`` watches signals and reads them between cycles, so a variable of a process in its condition is an unknown name.
 
 See also

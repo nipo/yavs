@@ -68,7 +68,8 @@ Flags of the run script (``python run.py ...``), next to VUnit's own:
        or more than one simulation.
    * - ``--yavs-surfer[=HOST:PORT]``
      - Shows the waves of the one selected test in Surfer while it runs (``yavs run --surfer``,
-       :doc:`waveforms`). Not with ``-p`` above 1 or more than one simulation.
+       :doc:`waveforms`). Combines with ``--yavs-debug`` and ``--yavs-interactive``, where the cursor follows the stops.
+       Not with ``-p`` above 1 or more than one simulation.
    * - ``--yavs-max-threads N``
      - ``yavs.max_threads`` for every test that does not set it.
    * - ``--yavs-lint``
@@ -99,7 +100,8 @@ Compiling
 ---------
 
 The package analyzes consecutive files of one library, standard and flags in one ``yavs analyze`` call. A VUnit
-release with ``--batch-compile`` and ``--parallel-compile`` does the compiling itself when you give those flags:
+release with ``--batch-compile`` and ``--parallel-compile`` (5.0.0.dev16 does not have them) does the compiling itself
+when you give those flags:
 yavs accepts compiling into one library from several processes and several files in a call, and the file
 names go on the command line.
 

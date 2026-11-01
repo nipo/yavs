@@ -28,7 +28,7 @@ Commands
      - Report what can be proved wrong about a design before it is simulated (:doc:`lint`):
        ``--work``, ``--map``, ``--recursive``, ``--config``, ``--waivers``, ``--list-rules``,
        ``--explain RULE``, ``--json``, ``--sarif``, ``--junit``, ``--quality-report``,
-       ``--sonarqube``. Exit status 1 with a finding of severity error.
+       ``--sonarqube``, ``--facts``. Exit status 1 with a finding of severity error.
    * - ``yavs cache clean --work=NAME:PATH``
      - Empty the compile cache of a library (:doc:`on-disk`).
    * - ``yavs parse FILE...``
@@ -58,11 +58,14 @@ Control a run
 * End the run at a time with ``--stop-time=10ms``. The exit status is then 0.
 * Stop at a report of a lower severity with ``--exit-severity=error``. By default a ``failure`` stops the run, and
   an ``error`` report does not, but it still makes the exit status 1 at the end.
-* A run that ends without ``finish`` or ``stop``: ``--hang-report`` says where each process waits and what for.
+* A run that ends without ``finish`` or ``stop``: ``--hang-report`` says where each process waits and what for, labels the
+  statement each stands at and lists every process that can still run.
 * How many assertions failed, and where: ``--assert-summary`` prints the counts by severity and source line at
   the end, ``--message-format=json`` makes that one JSON object for CI.
 * What keeps a simulation busy: ``--activity`` prints the processes that ran most often and the signals that
   changed most often, with ``--activity=FILE`` also as JSON. ``--profile`` measures time instead.
+
+These need a release newer than 0.11.0, except ``--hang-report`` and ``--profile`` themselves.
 * A testbench that may depend on process order: ``--shuffle`` runs the processes in a random order and prints the
   seed, so the run can be repeated with ``--shuffle=SEED``.
 

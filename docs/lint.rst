@@ -1,7 +1,7 @@
 Static analysis
 ===============
 
-``yavs lint`` reports what can be proved wrong about a design before it is simulated. A default run
+``yavs lint`` (needs a release newer than 0.11.0) reports what can be proved wrong about a design before it is simulated. A default run
 reports definite errors only: the program cannot do what it says, whatever anyone intended. It
 reports what it can derive and nothing it would have to guess, so an empty report means nothing
 provable was found, and a line in it is something to correct.

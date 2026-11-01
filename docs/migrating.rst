@@ -43,8 +43,12 @@ The same tasks in yavs
    * - Open a debugger
      - VS Code or another Debug Adapter Protocol client with ``--dap=PORT`` (:doc:`debugging`), or a
        prompt with ``--interactive`` (a release newer than 0.11.0).
+   * - Check code without simulating
+     - ``yavs lint`` (:doc:`lint`, a release newer than 0.11.0).
    * - Collect coverage
      - ``--cov=FILE`` on ``run``, then ``yavs cov report`` (:doc:`coverage`).
+   * - See why a run does not finish, what failed, what is busy
+     - ``--hang-report``, ``--assert-summary``, ``--activity`` (:doc:`cli`, a release newer than 0.11.0).
    * - Silence a warning
      - ``-Wno-CODE``. ``-Werror`` makes warnings errors.
    * - Find out what a message means

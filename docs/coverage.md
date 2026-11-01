@@ -70,7 +70,7 @@ tells you whether one of the two tests adds nothing the other lacks.
 | `--cov-test=NAME` | the name of this run's test in the database |
 | `--cov-exclude-translate-off` | also leave `translate_off` ... `translate_on` regions out |
 
-`--cov` cannot be combined with `--dap` yet: the run stops before time 0 with a "not implemented" error (exit 2).
+`--cov` cannot be combined with a debug session (`--dap`, `--interactive`, `--do`) yet: the run stops before time 0 with a "not implemented" error (exit 2).
 
 ## Commands
 

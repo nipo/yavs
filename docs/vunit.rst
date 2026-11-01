@@ -110,6 +110,9 @@ Newer than 0.11.0, there are two more ways to look at one test:
   (:doc:`interactive`).
 * ``--yavs-surfer`` shows its waves in Surfer while it runs (:doc:`waveforms`).
 
+``--yavs-debug`` and ``--yavs-interactive`` cannot be combined, since one of them drives the run; ``--yavs-surfer``
+combines with either, and the cursor then follows the stops. :doc:`debugger-tutorial` walks through a failing test with all three.
+
 Collect coverage
 ----------------
 
@@ -141,6 +144,12 @@ A sim option collects coverage for some tests, or for every run:
 Below the limit the run exits with status 1, after VUnit has written its reports. Coverage cannot be combined
 with ``--yavs-debug``. :ref:`vunit-coverage` has more, and :doc:`coverage` the reports and exclusions.
 
+Check the code before running
+-----------------------------
+
+``python run.py --compile --yavs-lint`` runs ``yavs lint`` on every library it compiled, and a finding of severity error
+fails the compile step (:doc:`lint`).
+
 Share CPU cores
 ---------------
 
@@ -151,7 +160,8 @@ tests are left, the token server can lend the idle slots to them as threads:
 
     python run.py -p 8 --yavs-jobserver --yavs-max-threads 4
 
-It helps only when those long tests gain from threads. :doc:`threads` says how to tell.
+It helps only when those long tests gain from threads. :doc:`threads` says how to tell. Under the server a simulation
+uses at most 4 threads unless ``--yavs-max-threads`` or ``yavs.max_threads`` says otherwise.
 
 Other libraries in a test
 -------------------------

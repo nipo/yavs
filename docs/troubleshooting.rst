@@ -32,6 +32,8 @@ what to do. A runtime error also shows the VHDL call stack.
 * yavs stops at the first failing step: nothing runs after a failed ``analyze``, and an exit
   status other than 0 always comes with a diagnostic.
 * ``--message-format`` and the ``-W`` options change the form and the severity: :doc:`cli-reference`.
+* A misspelled name gets a suggestion: options, subcommands, option values, diagnostic codes, lint rules, libraries,
+  design units, generics, enumeration literals, time units, configuration keys, and every name the debugger takes.
 
 Exit statuses are listed in :doc:`cli-reference`. Status 3 is an internal error: please
 `report it <https://github.com/ru551n/yavs/issues>`__ with the input that caused it.
