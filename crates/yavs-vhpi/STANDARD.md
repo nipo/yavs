@@ -184,8 +184,10 @@ yavs run --vhpi=LIB[:ENTRY] [--vhpi=...] TOP
   module. An import library made for `yavs.exe` binds only to an executable of that name.
 - `vhpi_printf` and `vhpi_assert` write UTF-8: text that is not valid UTF-8 is taken as ISO-8859-1,
   the encoding of VHPI string values.
-- Property 1100 (the random seed) is an extension of one reference, not in the standard's header:
-  `vhpi_get` on it is an error.
+- Property 1100 (`vhpiRandomSeedP`) is an extension of one reference, not in the standard's header:
+  `vhpi_get` on it with the tool handle or NULL is the seed of `--shuffle`. Without `--shuffle`
+  (no seed is in use), or with a seed above 2147483647 (it does not fit `vhpiIntT`), it returns -1
+  with a message for `vhpi_check_error` and no warning; other objects are an error too.
 - `vhpi_control` with `vhpiStop` or `vhpiFinish` ends the run with status 0 (an extra argument
   after the command is accepted and ignored). `vhpiReset`: `docs/vhpi.md`, "Resetting a
   simulation". Other commands are refused.

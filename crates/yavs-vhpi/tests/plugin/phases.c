@@ -208,11 +208,36 @@ PLUGIN_EXPORT void released(void) {
   on(vhpiCbStartOfSimulation, "start", register_then_release);
 }
 
-/* text: printed UTF-8 stays, ISO-8859-1 as a VHPI string value is becomes UTF-8 (#984); a property
- * that only one reference has is an error (#983). */
+/* text: printed UTF-8 stays, ISO-8859-1 as a VHPI string value is becomes UTF-8 (#984). */
 PLUGIN_EXPORT void text(void) {
   vhpi_printf("utf8 W\xc3\xb6rks\n");
   vhpi_printf("latin1 W\xf6rks\n");
-  int seed = vhpi_get(1100, vhpi_handle(vhpiTool, NULL));
-  vhpi_printf("seed property: %d error %d\n", seed, err());
+}
+
+static void print_seed(const vhpiCbDataT *cb) {
+  vhpi_printf("%s: seed %d error %d\n", (const char *)cb->user_data, vhpi_get(1100, NULL), err());
+}
+
+/* reset_seed: the seed in the first run and in the run after a reset (#983). */
+PLUGIN_EXPORT void reset_seed(void) {
+  reset();
+  on(vhpiCbStartOfSimulation, "first run", print_seed);
+  on(vhpiCbEndOfReset, "after reset", print_seed);
+}
+
+/* seed: vhpiRandomSeedP, 1100 as it is not in the standard's header (#983). */
+PLUGIN_EXPORT void seed(void) {
+  vhpiHandleT tool = vhpi_handle(vhpiTool, NULL);
+  int a = vhpi_get(1100, tool);
+  int ea = err();
+  int b = vhpi_get(1100, NULL);
+  int eb = err();
+  vhpi_printf("tool %d error %d, NULL %d error %d\n", a, ea, b, eb);
+  vhpi_get(1100, vhpi_handle_by_name("top", NULL));
+  vhpiErrorInfoT e;
+  vhpi_printf("region error %d\n", vhpi_check_error(&e) != 0);
+  vhpi_get(1100, NULL);
+  if (vhpi_check_error(&e)) {
+    vhpi_printf("%s\n", e.message);
+  }
 }

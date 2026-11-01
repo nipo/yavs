@@ -469,6 +469,9 @@ c_consts! { VHPIONETOMANYT_VALUES: vhpiOneToManyT {
     vhpiSensitivities = 1569,
 } }
 
+/// An extension of one reference, not in `vhpi_user.h`, so not in the table below (#983).
+pub const vhpiRandomSeedP: vhpiIntPropertyT = 1100;
+
 c_consts! { VHPIINTPROPERTYT_VALUES: vhpiIntPropertyT {
     vhpiAccessP = 1001,
     vhpiArgcP = 1002,

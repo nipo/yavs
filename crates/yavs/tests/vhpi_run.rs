@@ -1705,13 +1705,51 @@ fn vhpi_callback_outlives_the_released_handle() {
     assert!(!err.contains("W0903"), "{err}");
 }
 
-/// `vhpi_printf` writes UTF-8 whichever way a plugin's text is encoded (#984), and the random seed
-/// property of one reference, not in the standard's header, is an error (#983).
+/// `vhpi_printf` writes UTF-8 whichever way a plugin's text is encoded (#984).
 #[test]
 fn vhpi_printf_text_is_utf8() {
     let (code, err, out) = phases("text", &[]);
     assert_eq!(code, 0, "{err}");
     assert!(out.contains("utf8 W\u{f6}rks"), "{out}");
     assert!(out.contains("latin1 W\u{f6}rks"), "{out}");
-    assert!(out.contains("seed property: -1 error 1"), "{out}");
+}
+
+/// A reset runs the design again with the same seed (#983).
+#[test]
+fn vhpi_random_seed_survives_a_reset() {
+    let (code, err, out) = phases("reset_seed", &["--shuffle=7"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("first run: seed 7 error 0"), "{out}");
+    assert!(out.contains("after reset: seed 7 error 0"), "{out}");
+}
+
+/// `vhpiRandomSeedP` is the seed of `--shuffle`, with the tool handle or NULL (#983). A run without
+/// a seed, and a seed `vhpiIntT` cannot hold, read as an error only: no warning, no other number.
+#[test]
+fn vhpi_random_seed_is_the_shuffle_seed() {
+    const NO_SEED: &str = "tool -1 error 1, NULL -1 error 1";
+    for (args, first, message) in [
+        (&[][..], NO_SEED, "it runs without --shuffle"),
+        (&["--shuffle"], "tool 1 error 0, NULL 1 error 0", ""),
+        (&["--shuffle=0"], "tool 0 error 0, NULL 0 error 0", ""),
+        (&["--shuffle=7"], "tool 7 error 0, NULL 7 error 0", ""),
+        (
+            &["--shuffle=2147483647"],
+            "tool 2147483647 error 0, NULL 2147483647 error 0",
+            "",
+        ),
+        (
+            &["--shuffle=2147483648"],
+            NO_SEED,
+            "--shuffle seed 2147483648 does not fit vhpiIntT; a seed up to 2147483647 does",
+        ),
+    ] {
+        let (code, err, out) = phases("seed", args);
+        assert_eq!(code, 0, "{args:?}: {err}");
+        assert!(out.contains(first), "{args:?}: {out}");
+        // The property belongs to the tool: any other object is an error, also in a shuffled run.
+        assert!(out.contains("region error 1"), "{args:?}: {out}");
+        assert!(out.contains(message), "{args:?}: {out}");
+        assert!(!err.contains("W090"), "{args:?}: {err}");
+    }
 }

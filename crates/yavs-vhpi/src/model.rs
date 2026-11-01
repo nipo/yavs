@@ -332,6 +332,7 @@ pub(crate) const INT_PROPS: &[vhpiIntPropertyT] = &[
     vhpiGenerateIndexP,
     vhpiCapabilitiesP,
     vhpiPhaseP,
+    vhpiRandomSeedP,
     vhpiIsResolvedP,
     vhpiIsBasicP,
     vhpiSigKindP,
@@ -387,6 +388,8 @@ pub(crate) struct State {
     pub(crate) reset: Reset,
     /// Why this run cannot reset (`vhpi_control`, `vhpiProvidesReset`).
     pub(crate) reset_refused: Option<String>,
+    /// The seed of `--shuffle` (`vhpiRandomSeedP`); `None` in a run without it.
+    pub(crate) shuffle_seed: Option<u64>,
     /// A `vhpiCbPLIError` callback is running: errors in it do not fire it again.
     pub(crate) in_pli_error: bool,
     /// The interpreter side of the simulation (`set_runtime`): shared variables (#309).

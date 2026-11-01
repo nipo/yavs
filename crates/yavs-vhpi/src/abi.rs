@@ -383,6 +383,22 @@ fn no_property(s: &mut State, func: &str, prop: i32, obj: &Object, implemented: 
     }
 }
 
+/// `vhpiRandomSeedP` of the tool. Never a made-up or truncated number: a plugin could replay it.
+fn random_seed(s: &mut State) -> vhpiIntT {
+    let why = match s.shuffle_seed {
+        None => "this run has no seed, it runs without --shuffle".to_string(),
+        Some(seed) => match vhpiIntT::try_from(seed) {
+            Ok(seed) => return seed,
+            Err(_) => format!(
+                "--shuffle seed {seed} does not fit vhpiIntT; a seed up to {} does",
+                vhpiIntT::MAX
+            ),
+        },
+    };
+    s.fail(Fault::NotFound, format!("vhpi_get: vhpiRandomSeedP: {why}"));
+    vhpiUndefined
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn vhpi_get(prop: vhpiIntPropertyT, h: vhpiHandleT) -> vhpiIntT {
     with_state(|s| {
@@ -390,9 +406,15 @@ pub extern "C" fn vhpi_get(prop: vhpiIntPropertyT, h: vhpiHandleT) -> vhpiIntT {
         if h.is_null() && prop == vhpiPhaseP {
             return s.tool_phase.0;
         }
+        if h.is_null() && prop == vhpiRandomSeedP {
+            return random_seed(s);
+        }
         let Some(obj) = get_obj(s, h, "vhpi_get") else {
             return vhpiUndefined;
         };
+        if prop == vhpiRandomSeedP && matches!(obj, Object::Tool) {
+            return random_seed(s);
+        }
         s.int_property(&obj, prop).unwrap_or_else(|| {
             no_property(s, "vhpi_get", prop, &obj, INT_PROPS.contains(&prop));
             vhpiUndefined

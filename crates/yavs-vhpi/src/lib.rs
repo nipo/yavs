@@ -137,6 +137,11 @@ pub fn set_reset_refusal(why: Option<String>) {
     abi::with_state(|s| s.reset_refused = why);
 }
 
+/// The seed of `--shuffle` that plugins read (`vhpiRandomSeedP`); set before plugins load.
+pub fn set_shuffle_seed(seed: Option<u64>) {
+    abi::with_state(|s| s.shuffle_seed = seed);
+}
+
 /// A plugin asked for a reset and the run has ended: build the simulation again, subscribe
 /// [`VhpiObserver`], then call [`reset_done`].
 pub fn reset_pending() -> bool {

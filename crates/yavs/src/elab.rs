@@ -1527,6 +1527,7 @@ fn prepare(
         argv.extend(a.plusargs.iter().cloned());
         yavs_vhpi::set_argv(argv);
         yavs_vhpi::set_reset_refusal(a.no_vhpi_reset());
+        yavs_vhpi::set_shuffle_seed(a.shuffle);
         for spec in &a.vhpi {
             let p: yavs_vhpi::PluginSpec = spec.parse().unwrap_or_else(|e| match e {});
             let loaded = yavs_vhpi::load(&p).map_err(|err| err.to_diagnostic());

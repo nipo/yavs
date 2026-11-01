@@ -110,6 +110,11 @@ yavs run --vhpi=LIB[:ENTRY] [--vhpi=...] TOP
   run time.
 - Plugin calls are serialized, so a plugin needs no locking whatever `--threads` says. VHPI times
   count in units of `--resolution`.
+- `vhpi_get(1100, tool)` or `vhpi_get(1100, NULL)` is the seed of `--shuffle` (`--shuffle` alone is
+  seed 1). 1100 is the extension property `vhpiRandomSeedP`: it is not in `vhpi_user.h`, so a plugin
+  defines it itself. A run without `--shuffle` has no seed, and a seed above 2147483647 does not fit
+  `vhpiIntT`: both return -1 with a message for `vhpi_check_error`, and no warning. A seed is never
+  negative, so -1 is never a real one.
 - A call yavs does not implement fails with a "not implemented" message that the plugin reads with
   `vhpi_check_error` (warning `W0904`); a misused call is warning `W0903`.
 

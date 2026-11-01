@@ -5468,7 +5468,9 @@ runs the test as written.
 
 ## vhpi export (`crates/yavs-vhpi`, `crates/yavs`)
 
-Done (#984, #983, 2026-11-01): `vhpi_printf` and `vhpi_assert` write UTF-8, text that is not valid UTF-8 is read as ISO-8859-1; `vhpiRandomSeedP`, one reference's extension, stays an error. Test `vhpi_printf_text_is_utf8`.
+Done (#983, 2026-11-01): `vhpiRandomSeedP` (1100, one reference's extension) of the tool or NULL is the seed of `--shuffle`; without `--shuffle`, or when the seed does not fit `vhpiIntT`, -1 and `vhpi_check_error`, no warning. Test `vhpi_random_seed_is_the_shuffle_seed`.
+
+Done (#984, 2026-11-01): `vhpi_printf` and `vhpi_assert` write UTF-8, text that is not valid UTF-8 is read as ISO-8859-1. Test `vhpi_printf_text_is_utf8`.
 
 Done (#273, 2026-11-01): `tools/vhpi-conformance/rust_plugins.py`, the Rust `vhpi` crate's plugins at a pinned commit, Linux. All pass (markers and exit status): `test_simple` 2/2, `cb_toggle` 6/6, `foreignf` 2/2, `stringindexing` no markers, exit 0, `dumper` 3/3 on each of 6 testbenches. The dumper's output differs from the reference in what is deliberate: processes are regions, `vhpi_get_next_time` only in the end-of-time-step phase, error texts, the order of value changes within a cycle, plus issue-tracked encoding of characters above 127. Found and fixed: a callback's `obj` was invalid once the plugin released the handle it registered with, `vhpi_get_phys(vhpiResolutionLimitP)` refused the tool handle, `vhpiObjTypeVal` on a composite gave tool-defined raw data (a generic client aborted on it; now an error, raw only when asked for). Not done: the same plugins on Windows (`dynamic` feature, #124), not in CI (network, libclang).
 
