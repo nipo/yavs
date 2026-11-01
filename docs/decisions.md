@@ -1753,7 +1753,8 @@ which tools/difftest parses.
   yavs-elab per region: a design unit names its instance, a signal or constant the region that
   declares it, a process label its process. During elaboration `'path_name` and
   `'instance_name` of a design unit evaluate to the same text (`Model::eval`), so a constant
-  built from them can be a generic actual or a bound (#314). Objects declared in a process or subprogram add
+  built from them can be a generic actual or a bound (#314). A library package is named by its library, not by
+  the region reading it, at both stages (`library_package_item_name`, lrm-checks L173, #1010). Objects declared in a process or subprogram add
   the path elements between the region and the object (#207, LRM 16.2.5): the process label
   (an unlabeled process gives an empty element: `:t::v`, `:t:b::v`, as the reference
   simulators print it) and each enclosing subprogram as `name[type,type return type]` in
