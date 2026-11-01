@@ -274,14 +274,21 @@ on, with a ``schema_version``:
        "unit": "fifo(rtl)",
        "file": "src/fifo.vhd",
        "state_machines": [{
-         "type": "state_t", "signals": ["state"], "states": ["idle", "run"],
-         "transitions": [{"from": "idle", "to": "run"}], "reset_state": "idle"
+         "type": "state_t", "register": "state", "signals": ["state", "next_state"],
+         "states": ["idle", "run"], "transitions": [{"from": "idle", "to": "run"}],
+         "readable": true, "reset_state": "idle"
        }],
        "clock_domains": [{"clock": "clk", "registers": ["state"]}],
        "reset_domains": [{"reset": "rst", "registers": ["state"]}],
        "crossings": [{"kind": "clock", "signal": "flag", "from": "clk_a", "to": "clk_b", "line": 42}]
      }]
    }
+
+``state_machines`` has one entry per register, the same machines ``yavs run --cov-kind=fsm`` counts
+(:doc:`coverage`): ``signals`` are the register and the next-state signals a clocked statement copies
+into it, ``transitions`` what the ``case`` alternatives name, a state to itself included.
+``readable`` false means some assignment does not say which state it gives: the transitions may be
+incomplete, and ``lint_710`` and ``lint_711`` say nothing about that machine.
 
 With VUnit
 ----------

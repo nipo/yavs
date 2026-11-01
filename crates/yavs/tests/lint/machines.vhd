@@ -1,4 +1,10 @@
 -- lint_710 to lint_713: what is a state machine, and which `others` is dead.
+package machines_pkg is
+  type shared_t is (s_idle, s_run, s_orphan);
+end package;
+
+use work.machines_pkg.all;
+
 entity machines is
 end entity;
 
@@ -151,3 +157,135 @@ begin
     wait;
   end process;
 end architecture;
+
+-- Two processes: the next state is read through the copy, a default that holds is no exit.
+architecture two_process of machines is
+  type state_t is (idle, run, stuck, orphan); -- expect: lint_710
+  signal state, next_state : state_t := idle;
+  signal clk, go : bit;
+begin
+  reg : process (clk) is
+  begin
+    if rising_edge(clk) then
+      state <= next_state;
+    end if;
+  end process;
+
+  comb : process (all) is
+  begin
+    next_state <= state;
+    case state is
+      when idle =>
+        if go = '1' then
+          next_state <= run;
+        end if;
+      when run => next_state <= stuck;
+      when stuck => null; -- expect: lint_711
+      when orphan => next_state <= idle;
+    end case;
+  end process;
+end architecture;
+
+-- A default that is a state is the exit of every alternative.
+architecture default_state of machines is
+  type state_t is (idle, run);
+  signal state, next_state : state_t := idle;
+  signal clk : bit;
+begin
+  reg : process (clk) is
+  begin
+    if rising_edge(clk) then
+      state <= next_state;
+    end if;
+  end process;
+
+  comb : process (all) is
+  begin
+    next_state <= idle;
+    case state is
+      when idle => next_state <= run;
+      when run => null;
+    end case;
+  end process;
+end architecture;
+
+-- A type of a package: the finding is at the register, whatever else uses the type.
+architecture from_package of machines is
+  signal state : shared_t := s_idle; -- expect: lint_710
+  signal clk : bit;
+begin
+  p : process (clk) is
+  begin
+    if rising_edge(clk) then
+      case state is
+        when s_idle => state <= s_run;
+        when s_run => state <= s_idle;
+        when s_orphan => state <= s_idle;
+      end case;
+    end if;
+  end process;
+end architecture;
+
+-- A wait, and two registers of one type judged apart.
+architecture two_registers of machines is
+  type state_t is (idle, run, last); -- expect: lint_710
+  signal a : state_t := idle;
+  signal b : state_t := idle;
+  signal clk : bit;
+begin
+  pa : process is
+  begin
+    wait until rising_edge(clk);
+    case a is
+      when idle => a <= run;
+      when run => a <= last;
+      when last => a <= idle;
+    end case;
+  end process;
+
+  pb : process is
+  begin
+    wait until rising_edge(clk);
+    case b is
+      when idle => b <= run;
+      when run => b <= idle;
+      when last => b <= idle;
+    end case;
+  end process;
+end architecture;
+
+-- A subtype leaves the rest of its type out, and a next state from a function leaves it unread.
+architecture narrowed of machines is
+  type state_t is (idle, run, outside);
+  subtype small_t is state_t range idle to run;
+  signal state : small_t := idle;
+  type other_t is (o0, o1, o2);
+  signal other, other_next : other_t := o0;
+  signal clk : bit;
+  function pick return other_t is
+  begin
+    return o1;
+  end function;
+begin
+  p : process (clk) is
+  begin
+    if rising_edge(clk) then
+      case state is
+        when idle => state <= run;
+        when run => state <= idle;
+        when others => null; -- expect: lint_712
+      end case;
+      other <= other_next;
+    end if;
+  end process;
+
+  q : process (all) is
+  begin
+    other_next <= pick;
+    case other is
+      when o0 => null;
+      when others => null; -- expect: lint_713
+    end case;
+  end process;
+end architecture;
+

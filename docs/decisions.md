@@ -13199,12 +13199,28 @@ index (machine written; a damaged index says to re-analyze).
 - **A kernel observer, not counters in the code** (`yavs_cov::fsm`, as toggles): it compares the
   register's value with the last one, so every tier and thread count sees the same, and lowering and
   the optimiser are not touched. A self-loop changes no value, so it is not an item.
-- **Detection lives with lint, as a second reading** (`yavs_lint::machines`, `design/fsm.rs`). It shares
-  `design.rs`'s flattening and helpers, not `Arch::machines`, which `lint_710`, `lint_711` and the
-  `state_machines` of `--facts` still use. Those rules judge a whole type and need every assignment
-  readable, or they would report falsely; a count needs only the register. So two-process machines and
-  package types are measured here and left alone by the rules, and `--facts` and `--cov-kind=fsm` can name
-  different machines. Open for the maintainer: whether `--facts` should list the wider reading.
+- **One detection** (maintainer, 2026-11-01): `lint_710`, `lint_711`, the `state_machines` of `--facts` and
+  `--cov-kind=fsm` all read `yavs_lint::machines` (`design/fsm.rs`), one implementation and one walk. A
+  machine is a register: a signal of an enumeration type declared anywhere but `std` and `ieee`, driven
+  by a clocked statement, selected on by a `case`. Compared with the rules' earlier reading, per type and
+  only for a type of the architecture:
+  - **Wider:** two-process machines (a next-state signal a clocked statement copies into the register,
+    `next <= state` holds), types of a package, a clocked concurrent assignment, and `when A | B`/`others`
+    in the transitions of the facts.
+  - **Per register:** a literal another signal of the type receives no longer counts as entered, and two
+    machines of one type are judged apart. A `lint_710` names the register, and a type of a package
+    reports at the register rather than the literal.
+  - **A default that holds is no exit:** `next <= state` before the `case` keeps `lint_711` on, because
+    the machine stays; a default that is a state is still the exit.
+  - **Narrower, on purpose:** a literal outside the register's subtype is no finding of `lint_710`; a type
+    whose `case`d signal is not itself clocked, only another of its signals, is no machine.
+  - **Facts:** one entry per register rather than per type, with `register` and `readable` added; schema version unchanged, since the old keys stay.
+  - **On real code** (2026-11-01, every library of the 43 realbench designs, 327 in all, none unread): the 4 findings of the
+    old reading stay. 2 are new, both real: `dstruct_stack.vhdl` declares a `WAITING` state nothing assigns;
+    `cache_cpu.vhdl`'s `UNKNOWN` is a deliberate trap only reset leaves, which is what `lint_711` says to waive.
+    Both rules are off by default, so `tools/corpus/lint.expected` is unchanged.
+  - `readable` is what the rules need and a count does not: every assignment to the register and its next
+    state gives a literal or copies another of them, none comes from a port map, a parameter or a subprogram.
 - **`yavs-cov` depends on `yavs-lint`**: one edge, no cycle (lint knows nothing below sem). `yavs_lint`
   still runs no rule during a run, and only with `--cov-kind=fsm` does the detection run at all.
 - **Transitions no `case` names** (a reset) are added when they happen rather than dropped: every

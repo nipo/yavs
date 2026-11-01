@@ -125,6 +125,7 @@ pub fn fsm(db: &Db, e: &Elaborated) -> (Fsm, Vec<(yavs_diag::Span, String)>) {
                 arcs: m
                     .arcs
                     .iter()
+                    .filter(|a| a.0 != a.1)
                     .map(|&(f, t, s)| ((f, t), (place(s), 0)))
                     .collect(),
                 last: None,

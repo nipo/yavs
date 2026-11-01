@@ -102,14 +102,14 @@ lint_710
 
 advisory, off by default. A state of an enumerated state machine is never entered.
 
-No assignment gives this value to a signal of an enumeration the architecture declares and a ``case`` selects on, and no initial value does. The machine has to be readable: a value that does not fold, or a signal driven through a port or a parameter, leaves the type alone.
+A state machine is a signal of an enumeration type (declared anywhere but the ``std`` and ``ieee`` libraries) that a clocked statement drives and a ``case`` selects on. No assignment gives this value to that register, or to a next-state signal a clocked statement copies into it, and no initial value does. The machine has to be readable: a value that is neither a literal nor a copy of those signals, or one of them driven through a port, a parameter or a subprogram, leaves it alone. A value outside the subtype of the register is not a state of it.
 
 lint_711
 --------
 
 advisory, off by default. A state of an enumerated state machine has no exit.
 
-The ``case`` alternative of the state never assigns another state, so the machine cannot leave it unless it is a deliberate terminal state: waive that. A ``case`` that assigns no state at all is a multiplexer and is not checked, and neither is one after a default assignment, as the default is then the exit.
+The ``case`` alternative of the state never assigns another state, to the register or to its next-state signal, so the machine cannot leave it unless it is a deliberate terminal state: waive that. A reset outside the ``case`` does not count as an exit. A ``case`` that assigns no state at all is a multiplexer and is not checked, and neither is one after a default assignment of a state, as the default is then the exit. A default that holds the state (``next_state <= state``) is no exit.
 
 lint_712
 --------

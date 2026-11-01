@@ -338,7 +338,7 @@ each transition it took. It only reads the register's value as the simulation ch
 counter to the code and a run prints what it prints without coverage. It costs a look at each signal
 that changes, in every cycle.
 
-**What counts as a machine.** A signal of an enumeration type (declared anywhere, but not by the `std`
+**What counts as a machine.** The same machines as `lint_710`, `lint_711` and `yavs lint --facts`: a signal of an enumeration type (declared anywhere, but not by the `std`
 or `ieee` libraries) in an architecture, block or generate, when
 
 - a process or concurrent assignment with an edge test drives it, and

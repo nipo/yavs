@@ -228,6 +228,58 @@ fn state_machines_and_others() {
     );
 }
 
+/// The facts list one entry per register, whatever form it has, and say when it cannot be read.
+#[test]
+fn facts_of_every_form_of_machine() {
+    let dir = tempdir("lint");
+    let o = yavs(
+        &dir,
+        &[
+            "lint",
+            "--facts=f.json",
+            case("machines.vhd").to_str().unwrap(),
+        ],
+    );
+    assert!(dir.join("f.json").is_file(), "{}", stderr(&o));
+    let facts: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.join("f.json")).unwrap()).unwrap();
+    let machines = |unit: &str| {
+        facts["architectures"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|a| a["unit"] == unit)
+            .unwrap_or_else(|| panic!("no {unit} in {facts}"))["state_machines"]
+            .as_array()
+            .unwrap()
+            .clone()
+    };
+    let two = machines("machines(two_process)");
+    assert_eq!(two.len(), 1, "{two:?}");
+    assert_eq!(two[0]["register"], "state");
+    assert_eq!(
+        two[0]["signals"],
+        serde_json::json!(["state", "next_state"])
+    );
+    assert_eq!(two[0]["readable"], true);
+    assert_eq!(two[0]["reset_state"], "idle");
+    assert!(
+        two[0]["transitions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|t| t["from"] == "run" && t["to"] == "stuck")
+    );
+    assert_eq!(machines("machines(from_package)")[0]["type"], "shared_t");
+    let regs = machines("machines(two_registers)");
+    assert_eq!(regs.len(), 2, "{regs:?}");
+    // A next state from a function cannot be read; a clockless signal is no machine.
+    let narrowed = machines("machines(narrowed)");
+    let other = narrowed.iter().find(|m| m["register"] == "other").unwrap();
+    assert_eq!(other["readable"], false);
+    assert!(machines("machines(no_clock)").is_empty());
+}
+
 #[test]
 fn instances_recursion_and_sensitivity() {
     regression_with(
