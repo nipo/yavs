@@ -121,8 +121,7 @@ Method (the same for every number quoted in `docs/STATUS.md`):
 - Analysis is excluded: libraries are analysed once per tool before timing (the untimed preparation batches consecutive files of a library in one call like the integrations, #745: `analyse_files`, a failing call repeated file by file); the timed part is elaborate + initialise + run
   (references that need a separate elaboration command are summed).
 - Interleave the tools inside each round and swap the order every round; take the median of `--runs` (use 5 for a decision).
-- Report wall, CPU and peak RSS. When the host is loaded, wall time is noise: also pass `--instructions` and quote cycles
-  or instructions (`perf stat` counters are per core type: a run pinned to efficiency cores counts the other event).
+- Report wall, CPU and peak RSS. When the host is loaded, wall time is noise: repeat on quiet cores. Wall and counted cycles decide, instructions only explain: `--tier=auto` can retire fewer instructions and take more cycles (front-end misses). Pass `--instructions` to see both (`perf stat` counters are per core type: a run pinned to efficiency cores counts the other event).
 - Cells below 0.1 s carry up to +-15%.
 
 Set up the references once (untracked, never committed): `tools/sims.local.conf` (`tools/simconf.py`), section `[label]`, key `bench` or `discrep` =
@@ -136,7 +135,7 @@ python3 -I tools/bench/run.py target/release/yavs --ref sim1 --bench rtl_ff,lfsr
 python3 -I tools/bench/tiny.py target/release/yavs --ref sim1,sim2 --filter delta/                  # a part of the corpus
 ```
 
-`--tiers` entries may carry environment variables, `clift+YAVS_CLIFT_NATIVE=0` (the tier with `env VAR=VALUE` in front, for measurement knobs; the column is named with the suffix). `--tiers auto` and `llvm` need a yavs built with `--features llvm`; a tier that fails is shown as FAILED in its row. Results
+`--tiers` entries may carry environment variables, `clift+YAVS_CLIFT_NATIVE=0` (the tier with `env VAR=VALUE` in front, for measurement knobs; the column is named with the suffix). `--tiers auto` needs a yavs with a compiled tier (`tools/build-bench.sh --features clift`, what users get; `--features llvm` for the LLVM yardstick), `llvm` a yavs built with `--features llvm`; a tier that fails is shown as FAILED in its row. Results
 (raw samples and medians) go to `<cache>/results/<time>-ref*.json` and `-tiny*.json`.
 
 ## 6. Coordination

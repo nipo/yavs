@@ -57,7 +57,7 @@ Categories (`--category`): `rtl-datapath`, `fsm`, `numeric`, `memory`, `records`
 - A testbench that runs several VUnit test cases in one simulation (`vunit = true`) can fail where the runner would have run
   them one per simulation (state kept between cases); name one case then (`vunit = "test_name"`).
 - Testbenches that never finish need `stop` (`--stop-time`); the same flag is passed to both tools.
-- Results with a loaded host are noise: check the load average printed at the start and use the instruction ratio when wall differs.
+- Results with a loaded host are noise: check the load average printed at the start and repeat on quiet cores (9 to 15, siblings idle), with `--count-runs`. Wall and counted cycles decide a verdict, instructions only explain it: under `--tier=auto` compiled code can retire fewer instructions and take more cycles (front-end misses), so an instruction ratio would hide exactly that loss. An interpreter change has its own rule: instructions drop and the cycle geomean is not worse.
 - `data` files of a test (the GRLIB template reads `prom.srec` and `ram.srec` from its working directory) are copied into the world; the run starts in the world directory.
 - `grlib_leon3mp` runs at `std = "1993"` with the `grlib-1993` manifest (GRLIB is VHDL-93 code, decision #629; see `tools/corpus/AGENTS.md` and `docs/STATUS.md` "GRLIB"). Its `stop` is just before the template's own end-of-test failure assertion, so the run ends with status 0; the pass check is the text `Test passed` of the on-chip system test, searched in the whole output (`ok` is matched by `bench/run.py timed`, not in its 200 character tail).
 - Excluded testbenches (they fail on yavs or the reference) are listed with the reason in `docs/STATUS.md`
@@ -68,7 +68,8 @@ Categories (`--category`): `rtl-datapath`, `fsm`, `numeric`, `memory`, `records`
 ## 5. How to work here
 
 ```sh
-tools/build-bench.sh --features llvm      # release + 64-byte aligned functions (#576), never a plain release build
+tools/build-bench.sh --features clift     # release + 64-byte aligned functions (#576), never a plain release build; the compiled tier users get
+# --features llvm instead, in a target dir of its own, for the LLVM yardstick column and for the `codegen` phase, which needs `--tier=llvm`
 cp ~/.cache/yavs-agents/sims.local.conf tools/sims.local.conf       # untracked
 python3 -I tools/realbench/run.py --list
 python3 -I tools/realbench/run.py --self-test
@@ -102,7 +103,7 @@ tests run one at a time; check `uptime` first and re-run if the load is above th
 
 ```sh
 tools/fetch-corpus.sh                                   # neorv32 (with sw/), neorv32-coremark, eembc-coremark, microwatt
-tools/build-bench.sh --features llvm
+tools/build-bench.sh --features clift
 export YAVS_RISCV_PREFIX=/path/to/bin/riscv-none-elf-   # or a RISC-V GCC on PATH
 python3 -I tools/realbench/run.py target/release/yavs --ref sim1 --cores 9,10,11,12 --cpubench --prepare   # builds the images (and the ziglang venv), once
 python3 -I tools/realbench/run.py target/release/yavs --ref sim1 --cores 9,10,11,12 --cpubench
