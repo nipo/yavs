@@ -620,6 +620,10 @@ Arguments:
 
    May be repeated.
 
+.. option:: --config=FILE
+
+   Read options from a YAML file: ``exclude`` (exclusion files, added before those of ``--exclude``), ``root`` (both relative to the file) and ``kind``; ``--root`` and ``--kind`` win. Only this option reads such a file: nothing is found on its own. A file that cannot be read or has an unknown key is ``E0138``.
+
 .. option:: --exclusions, --exclusions=text|json
 
    Print the exclusion report instead of the summary: every rule that takes requirements out of the totals (``-- yavs coverage exclude`` directives and the rows of ``--exclude``) with its origin, reason, what it matched, how often that ran, and the totals before and after (``--exclusions=json``: versioned JSON). The HTML report gets the same page.
@@ -642,7 +646,7 @@ Arguments:
 
    May be repeated.
 
-Diagnostics named above: ``E0112``, ``E0114``, ``E0115``; ``yavs --explain CODE`` explains each.
+Diagnostics named above: ``E0112``, ``E0114``, ``E0115``, ``E0138``; ``yavs --explain CODE`` explains each.
 
 ``yavs cov rank``
 -----------------
@@ -665,13 +669,17 @@ Arguments:
 
    May be repeated.
 
+.. option:: --config=FILE
+
+   Read the ``exclude`` key of a YAML file, as ``cov report --config`` does (its other keys are checked and have no effect here). A file that cannot be read or has an unknown key is ``E0138``.
+
 .. option:: -W FLAG
 
    Warning control, as for ``analyze``: ``-Werror``, ``-Wno-CODE``, ...
 
    May be repeated.
 
-Diagnostics named above: ``E0112``; ``yavs --explain CODE`` explains each.
+Diagnostics named above: ``E0112``, ``E0138``; ``yavs --explain CODE`` explains each.
 
 ``yavs lint``
 -------------

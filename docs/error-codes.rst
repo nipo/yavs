@@ -134,6 +134,8 @@ Syntax, command line, waveforms, coverage, debugger, plugins (E0 and W0)
      - The argument layout in ``--load=LIB:args=LAYOUT`` does not exist: ``length`` is the default, ``fat-pointer`` the other one (see the VHPI guide).
    * - _`E0137`
      - ``yavs cov merge`` or ``yavs cov report`` was given databases that disagree about an in-source coverage exclusion: a combination that a ``-- yavs coverage exclude`` directive waives in one run is a requirement in another (the other run was made from other sources, or with ``--coverage-directives=ignore``).
+   * - _`E0138`
+     - The file of ``yavs cov report --config`` or ``yavs cov rank --config`` cannot be read or is not a coverage configuration file.
    * - _`E0199`
      - A command option or combination is not implemented yet.
    * - _`E0701`

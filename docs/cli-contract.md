@@ -715,7 +715,7 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   `yavs.ycov`, relative to the working directory) after the simulation, whatever its exit
   status; an elaboration failure writes none. The file is overwritten, never appended to:
   one database per run, merged afterwards with `yavs cov merge A B ... -o OUT`. `yavs cov report
-  DB ... [--cobertura FILE.xml] [--html DIR] [--root DIR] [--kind LIST] [--total] [--fail-under PCT] [--exclude FILE]... [--uncovered] [-W...]` prints a text summary on
+  DB ... [--cobertura FILE.xml] [--html DIR] [--root DIR] [--kind LIST] [--total] [--fail-under PCT] [--exclude FILE]... [--config FILE] [--uncovered] [-W...]` prints a text summary on
   stdout and writes Cobertura XML. The summary ends with the items that never ran in aligned
   columns (`FILE:LINE  KIND  ITEM  INSTANCE`; a branch is named by its arm in the source:
   `if C`, `elsif C`, `else`, `when CHOICES`, `(no arm taken)`, `loop body`; a toggle is `SIGNAL
@@ -745,6 +745,9 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   `files P... [files_exclude P...]`, `files_exclude P...`) use the matching of lint waivers
   (`yavs_diag::files`), relative to the exclusion file, and a pattern that covers no source file of the
   database is `W0111`.
+  `--config FILE` reads YAML with `exclude` (a word or list of exclusion files, added before those of
+  `--exclude`), `root` (both relative to the file) and `kind`; `--root` and `--kind` win; no file is
+  read without the option; a bad or unreadable file is `E0138`.
   Exclusions apply when reporting; databases keep raw counts. `--cov-exclude-translate-off`
   (`run`) also leaves `translate_off`/`translate_on` regions out; unbalanced `-- coverage`
   pragmas are `W0112`/`W0113`. `--cov-kind=statement,branch,toggle,condition,expression` (`run`, default `statement,branch,toggle`)
@@ -756,10 +759,10 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   `-grunner_cfg=...` generic (`,,` is a comma), else `TOP` or `TOP(g1=v1,g2=v2)` with the `-g`
   generics in command-line order. `cov merge` keeps per item the tests that hit it (matched by
   name); `cov report --tests` prints instead one exclusion row per item that ran, with
-  `# tests: A, B`; `yavs cov rank DB... [--exclude FILE]... [-W...]` prints a greedy minimal set
+  `# tests: A, B`; `yavs cov rank DB... [--exclude FILE]... [--config FILE] [-W...]` prints a greedy minimal set
   of tests reaching the same coverage (`  NAME  +NEW  SO_FAR/HIT` per pick, then `not needed:
   ...`) and per test its items and the items no other test hit. `yavs cov` exits 0, or 1 with `E0111` (a database cannot be
-  read), `E0114`, `E0115`, `E0112` (an exclusion file cannot be read or has a malformed row) or `E0110` (a file
+  read), `E0114`, `E0115`, `E0112` (an exclusion file cannot be read or has a malformed row), `E0138` (`--config`) or `E0110` (a file
   cannot be written), or when `-Werror` makes a warning an error; `run` exits at least 1 when the database cannot be written (`E0110`). The
   database format (a `yavs-coverage 6` line, a tests section of `test`, id, name lines with
   ids numbering the names in sorted order, then one tab-separated item per line: kind `s` or

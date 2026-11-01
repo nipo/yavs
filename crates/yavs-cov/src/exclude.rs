@@ -28,7 +28,7 @@ use yavs_diag::files::{Found, normalize};
 use yavs_diag::{Diagnostic, dotted};
 
 mod yaml;
-pub use yaml::parse as parse_yaml;
+pub use yaml::{Config, parse as parse_yaml, parse_config};
 
 /// An excluded item moved to another line than the row says.
 pub const MOVED: &str = "W0110";
@@ -948,6 +948,32 @@ mod tests {
             "exclude:\n  - kind: unit\n    unit: a\n    files: b\n",
         ] {
             assert!(parse_yaml(t).is_err(), "{t}");
+        }
+    }
+
+    #[test]
+    fn configuration_files() {
+        let c = parse_config("exclude: [a.txt, b.yaml]\nroot: ..\nkind: statement\n").unwrap();
+        assert_eq!(c.exclude, ["a.txt", "b.yaml"]);
+        assert_eq!(c.root.as_deref(), Some(".."));
+        assert_eq!(c.kind, ["statement"]);
+        assert_eq!(parse_config("# nothing\n").unwrap(), Config::default());
+        for (t, want) in [
+            ("exlude: a\n", "a key with a similar name exists: `exclude`"),
+            (
+                "kind: statment\n",
+                "a kind with a similar name exists: `statement`",
+            ),
+            ("root: [a, b]\n", "line 1: `root` must be one directory"),
+            ("exclude: []\n", "`exclude` must be a word or a list"),
+            ("- a\n", "line 1: expected a map"),
+            (
+                "exclude:\n  - kind: unit\n    unit: a\n",
+                "pass it with `--exclude`",
+            ),
+        ] {
+            let e = parse_config(t).unwrap_err();
+            assert!(e.contains(want), "{t:?}: {e}");
         }
     }
 

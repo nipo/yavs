@@ -78,7 +78,7 @@ tells you whether one of the two tests adds nothing the other lacks.
 |---------|--------------|
 | `yavs cov merge a.ycov b.ycov -o all.ycov` | adds up the counts of the runs and keeps, for every item, the tests that hit it |
 | `yavs cov report all.ycov [options]` | merges its inputs, then reports (options below) |
-| `yavs cov rank all.ycov [--exclude FILE]...` | prints a small set of tests that reaches the same coverage, the tests that set does not need, and per test how many items it hit and how many no other test hit |
+| `yavs cov rank all.ycov [--exclude FILE]... [--config FILE]` | prints a small set of tests that reaches the same coverage, the tests that set does not need, and per test how many items it hit and how many no other test hit |
 
 Report options:
 
@@ -94,7 +94,26 @@ Report options:
 | `--uncovered[=yaml]` | one exclusion row per item that never ran, with file, line and the statement as a comment; `=yaml` prints a YAML exclusion file |
 | `--tests` | one row per item that ran, followed by `# tests:` and the tests that hit it; cannot be combined with `--uncovered` |
 | `--exclude FILE` | apply an exclusion file (see Excluding code); repeat it to apply several: the rules add up |
+| `--config FILE` | read the options below from a YAML file (see Configuration file) |
 | `--exclusions[=json]` | print the exclusion report instead of the summary (see The exclusion report); the HTML report gets the same page |
+
+## Configuration file
+
+`--config FILE` on `yavs cov report` and `yavs cov rank` reads what a project always asks for from one
+file, so a CI job and a person at a terminal count the same. No file is ever found on its own: without
+the option nothing is read.
+
+```yaml
+exclude: [coverage/generated.yaml, coverage/waived.txt]  # exclusion files, as --exclude
+root: ..                                                  # as --root
+kind: [statement, branch]                                 # as --kind
+```
+
+`exclude` and `root` are relative to the configuration file; each value is one word or a list. Files of
+`--exclude` add up with those of the file, which come first. `--root` and `--kind` on the command line
+win over the file. `yavs cov rank` uses `exclude` and checks the other keys. Where the output goes and
+`--fail-under` stay on the command line. An unknown key or kind, or an unreadable file, is `E0138`, with
+the line and a near name.
 
 ## Coverage in CI
 
@@ -382,6 +401,7 @@ warning into an error, or when the total is below `--fail-under`; a malformed op
 | `E0110` | cannot write the output |
 | `E0111` | cannot read a database |
 | `E0112` | an exclusion file cannot be read or has a bad row; the message names the file and the line |
+| `E0138` | the file of `--config` cannot be read or has a bad key; the message names the file and the line |
 | `E0113` | HTML report cannot find a source file at its stored path; nothing is written |
 | `E0114` | the total coverage is below `--fail-under` (the report was printed) |
 | `E0115` | `--total` or `--fail-under` has no item to count: the database holds none of the `--kind`s |

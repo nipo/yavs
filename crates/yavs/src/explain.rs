@@ -222,6 +222,10 @@ const EXPLAIN: &[(&str, &str)] = &[
         "An exclusion file given to `yavs cov report --exclude` cannot be read or has a malformed row or entry (a `.yaml` or `.yml` file is read as YAML, any other as text rows); the note names the line. Rows start with `statement`, `branch`, `toggle`, `instance`, `unit` or `file`; a YAML entry has the same word as its `kind`.",
     ),
     (
+        "E0138",
+        "The file of `yavs cov report --config` or `yavs cov rank --config` cannot be read or is not a coverage configuration file. It is YAML with the keys `exclude`, `root` and `kind`; the note names the line. Nothing is ever read as a configuration without this option.",
+    ),
+    (
         "E0137",
         "`yavs cov merge` or `yavs cov report` was given databases that disagree about an in-source coverage exclusion: a combination that a `-- yavs coverage exclude` directive waives in one run is a requirement in another (the other run was made from other sources, or with `--coverage-directives=ignore`). Merging them would let the waiver hide a requirement, so nothing is merged. Run all the databases from the same sources and options.",
     ),

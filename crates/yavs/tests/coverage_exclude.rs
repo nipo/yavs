@@ -184,3 +184,98 @@ fn file_patterns_are_relative_to_their_file() {
         "{e}"
     );
 }
+
+#[test]
+fn configuration_file_gives_exclusions_root_and_kind() {
+    let tmp = database("config");
+    let rows = missed(&tmp);
+    let stmt = rows
+        .iter()
+        .find(|r| r.starts_with("statement "))
+        .expect("row");
+    let branch = rows.iter().find(|r| r.starts_with("branch ")).expect("row");
+    write(&tmp, "cfg/stmt.txt", &format!("{stmt}\n"));
+    write(&tmp, "more.txt", &format!("{branch}\n"));
+    write(
+        &tmp,
+        "cfg/c.yaml",
+        "exclude: stmt.txt\nroot: ..\nkind: [statement]\n",
+    );
+    let run = |more: &[&str]| {
+        let mut v = vec!["cov", "report", "a.ycov", "--config", "cfg/c.yaml"];
+        v.extend(more);
+        yavs(&tmp, &v)
+    };
+    // The file's exclusion, relative to it, and its kind.
+    let u = text(&run(&["--uncovered"]).stdout);
+    assert!(!u.contains(stmt.as_str()) && !u.contains("branch "), "{u}");
+    assert_eq!(
+        u.lines().count(),
+        rows.iter().filter(|r| r.starts_with("statement ")).count() - 1
+    );
+    // Its root, relative to it: paths are shown from the directory above `cfg`.
+    assert!(u.contains(" cov_report.vhd:"), "{u}");
+    // The command line wins for kind and root, and adds up for exclusions.
+    let o = run(&[
+        "--uncovered",
+        "--kind=branch",
+        "--exclude",
+        "more.txt",
+        "--root",
+        "cfg",
+    ]);
+    let u = text(&o.stdout);
+    assert!(
+        !u.contains(branch.as_str()) && !u.contains("statement "),
+        "{u}"
+    );
+    let r = text(&run(&["--exclusions", "--exclude", "more.txt"]).stdout);
+    let first = r.find("stmt.txt:1").expect("config rule");
+    assert!(first < r.find("more.txt:1").expect("flag rule"), "{r}");
+    // rank takes the same file.
+    let o = yavs(&tmp, &["cov", "rank", "a.ycov", "--config", "cfg/c.yaml"]);
+    assert!(o.status.success(), "{}", text(&o.stderr));
+}
+
+#[test]
+fn a_configuration_is_never_found_on_its_own() {
+    let tmp = database("noconfig");
+    let before = text(&yavs(&tmp, &["cov", "report", "a.ycov"]).stdout);
+    for name in [
+        "yavs-cov.yaml",
+        ".yavs-cov.yaml",
+        "yavs-coverage.yaml",
+        "yavs.yaml",
+    ] {
+        write(&tmp, name, "kind: [toggle]\nbad key: 1\n");
+    }
+    assert_eq!(
+        text(&yavs(&tmp, &["cov", "report", "a.ycov"]).stdout),
+        before
+    );
+}
+
+#[test]
+fn a_bad_configuration_is_e0138() {
+    let tmp = database("badconfig");
+    write(&tmp, "c.yaml", "exlude: a\n");
+    for cmd in ["report", "rank"] {
+        for (f, want) in [
+            ("c.yaml", "a key with a similar name exists: `exclude`"),
+            ("gone.yaml", "`gone.yaml`"),
+        ] {
+            let o = yavs(&tmp, &["cov", cmd, "a.ycov", "--config", f]);
+            assert_eq!(o.status.code(), Some(1));
+            let e = text(&o.stderr);
+            assert!(e.contains("error[E0138]") && e.contains(want), "{e}");
+        }
+    }
+    // An exclusion file it names is that file's error, under its path from the configuration.
+    write(&tmp, "d/c.yaml", "exclude: nope.txt\n");
+    let o = yavs(&tmp, &["cov", "report", "a.ycov", "--config", "d/c.yaml"]);
+    let e = text(&o.stderr);
+    assert!(
+        e.contains("error[E0112]") && e.contains("d/nope.txt"),
+        "{e}"
+    );
+}

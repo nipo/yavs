@@ -107,6 +107,12 @@ pub enum Command {
         /// file that cannot be read or has a bad row is `E0112`.
         #[arg(long, value_name = "FILE")]
         exclude: Vec<PathBuf>,
+        /// Read options from a YAML file: `exclude` (exclusion files, added before those of
+        /// `--exclude`), `root` (both relative to the file) and `kind`; `--root` and `--kind` win.
+        /// Only this option reads such a file: nothing is found on its own. A file that cannot be
+        /// read or has an unknown key is `E0138`.
+        #[arg(long, value_name = "FILE")]
+        config: Option<PathBuf>,
         /// Print the exclusion report instead of the summary: every rule that takes requirements
         /// out of the totals (`-- yavs coverage exclude` directives and the rows of `--exclude`)
         /// with its origin, reason, what it matched, how often that ran, and the totals before
@@ -147,6 +153,11 @@ pub enum Command {
         /// up. A file that cannot be read or has a bad row is `E0112`.
         #[arg(long, value_name = "FILE")]
         exclude: Vec<PathBuf>,
+        /// Read the `exclude` key of a YAML file, as `cov report --config` does (its other keys are
+        /// checked and have no effect here). A file that cannot be read or has an unknown key is
+        /// `E0138`.
+        #[arg(long, value_name = "FILE")]
+        config: Option<PathBuf>,
         /// Warning control, as for `analyze`: `-Werror`, `-Wno-CODE`, ...
         #[arg(short = 'W', value_name = "FLAG")]
         warn: Vec<String>,
@@ -170,6 +181,40 @@ const BELOW_ERROR: &str = "E0114";
 const EMPTY_ERROR: &str = "E0115";
 /// Merged databases disagree about an in-source exclusion.
 const CONFLICT_ERROR: &str = "E0137";
+/// Cannot read or parse the file of `--config`.
+const CONFIG_ERROR: &str = "E0138";
+
+/// What `--config FILE` asks for, its paths relative to the file.
+#[derive(Default)]
+struct Settings {
+    exclude: Vec<PathBuf>,
+    root: Option<PathBuf>,
+    kinds: Vec<String>,
+}
+
+fn settings(config: Option<&PathBuf>) -> Result<Settings, Box<Diagnostic>> {
+    let Some(p) = config else {
+        return Ok(Settings::default());
+    };
+    let c = std::fs::read_to_string(p)
+        .map_err(|e| e.to_string())
+        .and_then(|t| yavs_cov::exclude::parse_config(&t))
+        .map_err(|m| {
+            Box::new(
+                Diagnostic::error(
+                    CONFIG_ERROR,
+                    format!("cannot use coverage configuration file `{}`", p.display()),
+                )
+                .with_note(m),
+            )
+        })?;
+    let dir = p.parent().unwrap_or(std::path::Path::new(""));
+    Ok(Settings {
+        exclude: c.exclude.iter().map(|f| dir.join(f)).collect(),
+        root: c.root.map(|r| dir.join(r)),
+        kinds: c.kind,
+    })
+}
 
 fn merged(inputs: &[PathBuf]) -> Result<Database, Box<Diagnostic>> {
     let mut db = Database::default();
@@ -468,6 +513,7 @@ pub fn run(c: Command, format: MessageFormat, color: bool) -> ExitCode {
             total,
             fail_under,
             exclude,
+            config,
             exclusions,
             uncovered,
             tests,
@@ -475,15 +521,22 @@ pub fn run(c: Command, format: MessageFormat, color: bool) -> ExitCode {
             inputs,
         } => out
             .set_warn(&warn)
-            .and_then(|()| merged(&inputs))
-            .and_then(|db| {
+            .and_then(|()| settings(config.as_ref()))
+            .and_then(|mut set| {
+                merged(&inputs).map(|db| {
+                    set.exclude.extend(exclude);
+                    (db, set)
+                })
+            })
+            .and_then(|(db, set)| {
+                let kinds: Vec<String> = kind.into_iter().map(KindArg::name).collect();
                 let r = Report {
                     cobertura,
                     html,
-                    root,
-                    exclude,
+                    root: root.or(set.root),
+                    exclude: set.exclude,
                     exclusions,
-                    kinds: kind.into_iter().map(KindArg::name).collect(),
+                    kinds: if kinds.is_empty() { set.kinds } else { kinds },
                     uncovered,
                     tests,
                     total,
@@ -493,12 +546,19 @@ pub fn run(c: Command, format: MessageFormat, color: bool) -> ExitCode {
             }),
         Command::Rank {
             exclude,
+            config,
             warn,
             inputs,
         } => out
             .set_warn(&warn)
-            .and_then(|()| merged(&inputs))
-            .and_then(|db| excluded(&mut out, db, &exclude))
+            .and_then(|()| settings(config.as_ref()))
+            .and_then(|mut set| {
+                merged(&inputs).map(|db| {
+                    set.exclude.extend(exclude);
+                    (db, set.exclude)
+                })
+            })
+            .and_then(|(db, exclude)| excluded(&mut out, db, &exclude))
             .map(|(db, ..)| print!("{}", db.rank())),
     };
     match r {

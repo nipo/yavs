@@ -90,8 +90,8 @@ fn node<'a>(p: &mut Events<'a>, ev: Event<'a>, line: usize) -> Result<Node, Stri
     }
 }
 
-/// Parse a YAML exclusion file; the error names the line.
-pub fn parse(text: &str) -> Result<Vec<Row>, String> {
+/// The root node of a YAML document, if it has one.
+fn document(text: &str) -> Result<Option<Node>, String> {
     let mut p = Parser::new_from_str(text);
     let mut root = None;
     loop {
@@ -103,7 +103,12 @@ pub fn parse(text: &str) -> Result<Vec<Row>, String> {
             _ => return Err(err(l, "more than one YAML document")),
         }
     }
-    let Some((_, root)) = root else {
+    Ok(root.map(|r: (usize, Node)| r.1))
+}
+
+/// Parse a YAML exclusion file; the error names the line.
+pub fn parse(text: &str) -> Result<Vec<Row>, String> {
+    let Some(root) = document(text)? else {
         return Ok(Vec::new());
     };
     let Node::Map(top) = root else {
@@ -257,6 +262,78 @@ fn entry(line: usize, n: Node) -> Result<Row, String> {
         reason: find("reason").unwrap_or_default().trim().to_string(),
         line,
     })
+}
+
+/// A coverage configuration file (`yavs cov report --config`): the options that say what a project
+/// counts, so that they need not be repeated. Paths in it are as written; the caller joins them to
+/// the file's directory.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Config {
+    /// `--exclude`: exclusion files.
+    pub exclude: Vec<String>,
+    /// `--root`.
+    pub root: Option<String>,
+    /// `--kind`: the kinds, checked.
+    pub kind: Vec<String>,
+}
+
+/// The kinds `--kind` and the `kind` key of a configuration file take.
+const ITEM_KINDS: [&str; 6] = [
+    "statement",
+    "branch",
+    "toggle",
+    "condition",
+    "expression",
+    "combination",
+];
+
+/// Parse a coverage configuration file; the error names the line.
+pub fn parse_config(text: &str) -> Result<Config, String> {
+    let mut cfg = Config::default();
+    let Some(root) = document(text)? else {
+        return Ok(cfg);
+    };
+    let Node::Map(top) = root else {
+        return Err(err(
+            1,
+            "expected a map with the keys `exclude`, `root` and `kind`",
+        ));
+    };
+    for (l, key, v) in &top {
+        match (key.as_str(), v) {
+            ("exclude", Node::Seq(items)) if items.iter().any(|i| matches!(i.1, Node::Map(_))) => {
+                return Err(err(
+                    *l,
+                    "`exclude` lists exclusion files; this looks like an exclusion file itself: \
+                     pass it with `--exclude`",
+                ));
+            }
+            ("exclude", v) => cfg.exclude = words(*l, key, v)?,
+            ("root", Node::Scalar(s)) if !s.is_empty() => cfg.root = Some(s.clone()),
+            ("root", _) => return Err(err(*l, "`root` must be one directory")),
+            ("kind", v) => {
+                cfg.kind = words(*l, key, v)?;
+                if let Some(k) = cfg.kind.iter().find(|k| !ITEM_KINDS.contains(&k.as_str())) {
+                    let near = tail(k, "kind", ITEM_KINDS.into_iter());
+                    return Err(err(
+                        *l,
+                        &format!(
+                            "unknown kind `{k}` (expected {}){near}",
+                            ITEM_KINDS.join(", ")
+                        ),
+                    ));
+                }
+            }
+            _ => {
+                let near = tail(key, "key", ["exclude", "root", "kind"].into_iter());
+                return Err(err(
+                    *l,
+                    &format!("unknown key `{key}` (expected `exclude`, `root` or `kind`){near}"),
+                ));
+            }
+        }
+    }
+    Ok(cfg)
 }
 
 /// A value that is one word or a list of them, none empty.
