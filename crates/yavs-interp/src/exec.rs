@@ -2504,6 +2504,16 @@ impl Machine {
         // an object of either heap (the state of protected objects is in the shared one).
         let (sp, idx, off) = split(a);
         let mem = match sp {
+            // A variable in the root frame: one range test (its start and length in the address).
+            FRAME if idx & yavs_ir::FRAME_OBJECT != 0 => {
+                let (s, len) = yavs_ir::frame_object_range(idx).unwrap_or((0, 0));
+                if off + n <= len as u64
+                    && let Some(b) = self.root.get(s + off as usize..s + (off + n) as usize)
+                {
+                    return Ok(cell_w(b, w));
+                }
+                None
+            }
             FRAME => self.fslots(idx as usize),
             TEMP => Some(&self.temp[..]),
             HEAP => self.heap.data(idx),
@@ -2647,6 +2657,17 @@ impl Machine {
         let n = w.bytes().min(8) as usize;
         let (sp, idx, off) = split(a);
         let mem = match sp {
+            // A variable in the root frame, as in `load`.
+            FRAME if idx & yavs_ir::FRAME_OBJECT != 0 => {
+                let (s, len) = yavs_ir::frame_object_range(idx).unwrap_or((0, 0));
+                if off as usize + n <= len
+                    && let Some(b) = self.root.get_mut(s + off as usize..s + off as usize + n)
+                {
+                    put_le(b, v);
+                    return Ok(());
+                }
+                None
+            }
             FRAME => self.fslots_mut(idx as usize),
             HEAP => self.heap.data_mut(idx),
             SHARED_HEAP | SHARED => self.shared_mem_mut(sp, idx),
