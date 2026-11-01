@@ -34,7 +34,8 @@ PowerShell with the line of ``SHA256SUMS``, unzip the archive and add its direct
 ``yavs 0.11.0 (compiled tier: cranelift)``. Next: :doc:`getting-started`.
 
 Every platform has one archive with everything in it: nothing else needs to be installed. Its
-``yavs`` has the compiled tier built in (:doc:`running-faster`).
+``yavs`` has the compiled tier built in (:doc:`running-faster`). A release newer than 0.11.0 also carries the VS Code
+extension of the same version (:doc:`debugging`), and ``pip install vunit-yavs`` gets the VUnit package (:doc:`vunit`).
 
 What is in the archive
 ~~~~~~~~~~~~~~~~~~~~~~
