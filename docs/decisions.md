@@ -13197,6 +13197,16 @@ index (machine written; a damaged index says to re-analyze).
   would shift that `if`'s occurrence in a run with `assert` on, and a merge with a run without it would
   silently add the `if`'s counts to the assert's row.
 
+## State machine exclusions in the source (yavs-lower, yavs-cov, CLI, #1020, maintainer 2026-11-01)
+
+- `-- yavs cov exclude state NAME` and `transition FROM -> TO` stand before the `case` on the register or a `when` of it (maintainer): the placement names the register, so the directive holds no signal. They apply in every instance, like other directives.
+- A `when` is recognised by the next token being that word and the smallest statement around it being a `case`. The HIR has no span for the keyword, and a `when` in a conditional assignment has that assignment as its smallest statement.
+- The check calls `yavs_lint::machines` from `covdir`: a new `yavs-lower` to `yavs-lint` dependency, so there stays one reading of what a machine is. Lint only needs `yavs-sem`, so there is no cycle. It runs only for a file holding such a directive.
+- The states are checked against the type. A pair no alternative assigns is `W2022`, and the waiver is still kept: a transition no alternative names, such as a reset, comes into the database when it happens, and the directive excludes it there, as an exclusion row would.
+- Excluding a state does not exclude its transitions (maintainer), same as rows.
+- Database version 13 (state machine lines gain process and waivers), since the waivers must merge with `E0137` like others. 12 is still read.
+- Rows and regions: a `process` row takes a machine through the process that holds its `case`. In a two-process machine, that is not the clocked one. `-- coverage off` around the register or around every `case` on it takes the machine, around a literal or assignment that state or transition. Toggles stay as they were: regions do not reach them. `unit` rows name packages and never reach these items.
+
 ## State machine coverage (yavs-cov, yavs-lint, CLI, #1020, 2026-11-01)
 
 - **A kernel observer, not counters in the code** (`yavs_cov::fsm`, as toggles): it compares the

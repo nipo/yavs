@@ -1114,3 +1114,458 @@ fn a_suggestion_can_be_pasted() {
         assert!(seen >= 5, "{seen}");
     }
 }
+
+/// Three state machines, each with a state nothing enters and a transition nothing takes: one
+/// process, two processes, and a `wait until` process, with a test bench that instantiates the
+/// first one twice. The `case` lines stand alone, so a test can put a directive before them.
+const MACHINES: &str = "\
+entity one_p is port (clk : in bit); end entity;
+architecture a of one_p is
+  type one_t is (idle, busy, done, spare);
+  signal one : one_t := idle;
+begin
+  one_proc : process (clk) begin
+    if rising_edge(clk) then
+      case one is
+        when idle => one <= busy;
+        when busy => one <= idle;
+        when done => one <= idle;
+        when spare => one <= done;
+      end case;
+    end if;
+  end process;
+end architecture;
+
+entity two_p is port (clk : in bit); end entity;
+architecture a of two_p is
+  type two_t is (a0, a1, a2);
+  signal two, nxt : two_t := a0;
+begin
+  reg_proc : process (clk) begin
+    if rising_edge(clk) then two <= nxt; end if;
+  end process;
+  next_proc : process (two) begin
+    case two is
+      when a0 => nxt <= a1;
+      when a1 => nxt <= a0;
+      when a2 => nxt <= a0;
+    end case;
+  end process;
+end architecture;
+
+entity wait_p is port (clk : in bit); end entity;
+architecture a of wait_p is
+  type wt_t is (b0, b1, b2);
+  signal wt : wt_t := b0;
+begin
+  wait_proc : process begin
+    wait until rising_edge(clk);
+    case wt is
+      when b0 => wt <= b1;
+      when b1 => wt <= b0;
+      when b2 => wt <= b0;
+    end case;
+  end process;
+end architecture;
+
+entity tb is end entity;
+architecture t of tb is
+  signal clk : bit;
+begin
+  u1 : entity work.one_p port map (clk);
+  u1b : entity work.one_p port map (clk);
+  u2 : entity work.two_p port map (clk);
+  u3 : entity work.wait_p port map (clk);
+  process begin
+    for i in 1 to 6 loop
+      clk <= '1'; wait for 1 ns; clk <= '0'; wait for 1 ns;
+    end loop;
+    wait;
+  end process;
+end architecture;
+";
+
+/// Analyse `src` and run the test bench with state machine coverage into `a.ycov`.
+fn fsm_run(tmp: &Path, src: &str, extra: &[&str]) -> String {
+    write(tmp, "m.vhd", src);
+    let _ = std::fs::remove_dir_all(tmp.join("lib"));
+    let o = yavs(tmp, &["analyze", "--work=work:lib", "m.vhd"]);
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    let args = [
+        &["run", "--work=work:lib", "--cov=a.ycov", "--cov-kind=fsm"][..],
+        extra,
+        &["tb"][..],
+    ]
+    .concat();
+    let o = yavs(tmp, &args);
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    text(&o.stderr)
+}
+
+/// The `fsm` line of the kinds table of a report: items, hit, missed.
+fn fsm_totals(tmp: &Path, extra: &[&str]) -> (u32, u32, u32) {
+    let args = [&["cov", "report", "a.ycov"][..], extra].concat();
+    let o = yavs(tmp, &args);
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    let t = text(&o.stdout);
+    let Some(l) = t.lines().find(|l| l.starts_with("fsm ")) else {
+        return (0, 0, 0);
+    };
+    let n: Vec<u32> = l
+        .split_whitespace()
+        .skip(1)
+        .take(3)
+        .map(|x| x.parse().expect("number"))
+        .collect();
+    (n[0], n[1], n[2])
+}
+
+/// Everything in the design: three machines, one of them twice: 8, 8, 6 and 6 items.
+const FSM_ALL: (u32, u32, u32) = (28, 16, 12);
+
+#[test]
+fn fsm_rows_take_a_state_and_a_transition() {
+    let tmp = tempdir("fsm_rows");
+    fsm_run(&tmp, MACHINES, &[]);
+    assert_eq!(fsm_totals(&tmp, &[]), FSM_ALL);
+    let (i, h, m) = FSM_ALL;
+    for (form, row) in [
+        ("state", "fsm tb.u1 one spare # unused\n"),
+        ("transition", "fsm tb.u1 one spare->done # unused\n"),
+        ("to anything", "fsm tb.u1 one spare->* # unused\n"),
+    ] {
+        write(&tmp, "r.txt", row);
+        let args = ["--exclude", "r.txt"];
+        assert_eq!(fsm_totals(&tmp, &args), (i - 1, h, m - 1), "{form}");
+        let args = ["--exclude", "r.txt", "--detailed"];
+        let o = yavs(
+            &tmp,
+            &[&["cov", "report", "a.ycov"][..], &args[..]].concat(),
+        );
+        assert!(text(&o.stdout).contains("excluded: unused"), "{form}");
+    }
+    for (form, item) in [("state", "spare"), ("transition", "spare->done")] {
+        let y = format!(
+            "exclude:\n  - kind: fsm\n    instance: tb.u1\n    signal: one\n    item: {item}\n    reason: unused\n"
+        );
+        write(&tmp, "r.yaml", &y);
+        let args = ["--exclude", "r.yaml"];
+        assert_eq!(fsm_totals(&tmp, &args), (i - 1, h, m - 1), "{form}");
+    }
+    // A state keeps its transitions, and the other way round.
+    write(&tmp, "r.txt", "fsm tb.u1 one spare\n");
+    let args = ["--exclude", "r.txt", "--detailed"];
+    let t = text(
+        &yavs(
+            &tmp,
+            &[&["cov", "report", "a.ycov"][..], &args[..]].concat(),
+        )
+        .stdout,
+    );
+    let after = t.split("=== tb.u1 ").nth(1).expect("section");
+    let row = after.lines().find(|l| l.contains("one: spare -> done"));
+    assert!(row.is_some_and(|l| l.contains("MISSED")), "{t}");
+}
+
+#[test]
+fn fsm_items_follow_the_other_rows() {
+    let tmp = tempdir("fsm_other_rows");
+    fsm_run(&tmp, MACHINES, &[]);
+    let (i, ..) = FSM_ALL;
+    for (row, gone) in [
+        ("instance tb.u1\n", 8),
+        ("instance tb\n", 28),
+        ("entity one_p\n", 16),
+        ("entity work.one_p\n", 16),
+        ("file m.vhd\n", 28),
+        ("library work\n", 28),
+        // The process with the `case`, not the one that clocks the register.
+        ("process tb.u1 one_proc\n", 8),
+        ("process tb.u2 next_proc\n", 6),
+        ("process tb.u3 wait_proc\n", 6),
+    ] {
+        write(&tmp, "r.txt", row);
+        let (items, ..) = fsm_totals(&tmp, &["--exclude", "r.txt"]);
+        assert_eq!(items, i - gone, "{row}");
+    }
+    // No package holds them, and the clocked process of a two-process machine has no `case`.
+    for row in ["unit work.one_p\n", "process tb.u2 reg_proc\n"] {
+        write(&tmp, "r.txt", row);
+        let o = yavs(&tmp, &["cov", "report", "a.ycov", "--exclude", "r.txt"]);
+        assert!(text(&o.stderr).contains("W0111"), "{row}");
+        assert_eq!(fsm_totals(&tmp, &["--exclude", "r.txt"]), FSM_ALL, "{row}");
+    }
+}
+
+#[test]
+fn fsm_items_follow_the_regions() {
+    let tmp = tempdir("fsm_regions");
+    let (i, ..) = FSM_ALL;
+    // Around the `case`: the machine, in both its instances.
+    let around = MACHINES
+        .replace(
+            "      case one is",
+            "      -- coverage off\n      case one is",
+        )
+        .replace(
+            "      end case;\n    end if;",
+            "      end case;\n      -- coverage on\n    end if;",
+        );
+    fsm_run(&tmp, &around, &[]);
+    assert_eq!(fsm_totals(&tmp, &[]).0, i - 16);
+    // Around the register: the same.
+    let reg = MACHINES.replace(
+        "  signal wt : wt_t := b0;",
+        "  signal wt : wt_t := b0; -- coverage off-line",
+    );
+    fsm_run(&tmp, &reg, &[]);
+    assert_eq!(fsm_totals(&tmp, &[]).0, i - 6);
+    // One literal, one assignment: that item.
+    let one = MACHINES
+        .replace(
+            "type wt_t is (b0, b1, b2);",
+            "type wt_t is (b0, b1,\n    b2 -- coverage off-line\n  );",
+        )
+        .replace(
+            "      when b2 => wt <= b0;",
+            "      when b2 =>\n        wt <= b0; -- coverage off-line",
+        );
+    fsm_run(&tmp, &one, &[]);
+    assert_eq!(fsm_totals(&tmp, &[]).0, i - 2);
+    // `translate_off` only with the option.
+    let synth = MACHINES
+        .replace(
+            "    case wt is",
+            "    -- pragma translate_off\n    case wt is",
+        )
+        .replace(
+            "    end case;\n  end process;\nend architecture;\n\nentity tb",
+            "    end case;\n    -- pragma translate_on\n  end process;\nend architecture;\n\nentity tb",
+        );
+    fsm_run(&tmp, &synth, &[]);
+    assert_eq!(fsm_totals(&tmp, &[]).0, i);
+    fsm_run(&tmp, &synth, &["--cov-exclude-translate-off"]);
+    assert_eq!(fsm_totals(&tmp, &[]).0, i - 6);
+    // A region never closed warns once, with counters too.
+    let open = MACHINES.replace(
+        "  signal wt : wt_t",
+        "  -- coverage off\n  signal wt : wt_t",
+    );
+    let said = fsm_run(&tmp, &open, &[]);
+    assert_eq!(said.matches("W0112").count(), 1, "{said}");
+    let said = fsm_run(&tmp, &open, &["--cov-kind=fsm,statement"]);
+    assert_eq!(said.matches("W0112").count(), 1, "{said}");
+}
+
+/// The directive a report prints goes before the `case` of its register and takes out that item,
+/// in every instance of the design unit: one process, two processes, `wait until`.
+#[test]
+fn fsm_directive_printed_by_the_report_works_when_pasted() {
+    let tmp = tempdir("fsm_paste");
+    fsm_run(&tmp, MACHINES, &[]);
+    let detailed = text(&yavs(&tmp, &["cov", "report", "a.ycov", "--detailed"]).stdout);
+    let printed: std::collections::BTreeSet<(String, String)> = detailed
+        .lines()
+        .filter_map(|l| {
+            let (row, rest) = l.split_once("MISSED (exclude with ")?;
+            let register = row.split_whitespace().nth(1)?.trim_end_matches(':');
+            Some((register.to_string(), rest.strip_suffix(')')?.to_string()))
+        })
+        .collect();
+    assert_eq!(printed.len(), 8, "{detailed}");
+    for (register, directive) in &printed {
+        assert!(directive.starts_with("-- yavs cov exclude "), "{directive}");
+        let case = format!("case {register} is");
+        let src = MACHINES.replace(&case, &format!("{directive}: pasted\n{case}"));
+        let said = fsm_run(&tmp, &src, &[]);
+        assert!(!said.contains("W20"), "{directive}: {said}");
+        let t = text(&yavs(&tmp, &["cov", "report", "a.ycov", "--detailed"]).stdout);
+        assert!(t.contains("excluded: pasted"), "{directive}: {t}");
+        // Gone from the missed rows.
+        assert!(!t.contains(&format!("(exclude with {directive})")), "{t}");
+        let (items, ..) = fsm_totals(&tmp, &[]);
+        let copies = if register == "one" { 2 } else { 1 };
+        assert_eq!(items, FSM_ALL.0 - copies, "{directive}");
+        // The exclusion report lists each instance with where the directive is.
+        let e = text(&yavs(&tmp, &["cov", "report", "a.ycov", "--exclusions"]).stdout);
+        assert!(e.contains("m.vhd:") && e.contains("(in the source)"), "{e}");
+        assert!(e.contains("reason:  pasted"), "{e}");
+    }
+}
+
+#[test]
+fn fsm_directive_before_a_when_and_the_forms() {
+    let tmp = tempdir("fsm_forms");
+    let src = MACHINES
+        .replace(
+            "        when spare =>",
+            "        -- yavs cov exclude state spare: not used\n        \
+             -- yavs coverage exclude transition spare->*\n        when spare =>",
+        )
+        .replace(
+            "      when b2 =>",
+            "      -- YAVS COV EXCLUDE STATE B2\n      when b2 =>",
+        )
+        .replace(
+            "      when a2 =>",
+            "      -- yavs cov exclude transition A2  ->  *: only named pair\n      when a2 =>",
+        );
+    let said = fsm_run(&tmp, &src, &[]);
+    assert!(!said.contains("W20"), "{said}");
+    assert_eq!(fsm_totals(&tmp, &[]), (28 - 6, 16, 12 - 6));
+    let e = text(&yavs(&tmp, &["cov", "report", "a.ycov", "--exclusions"]).stdout);
+    for rule in [
+        "rule:    state spare",
+        "rule:    transition spare -> *",
+        "rule:    state B2",
+        "rule:    transition A2 -> *",
+    ] {
+        assert!(e.contains(rule), "{rule}: {e}");
+    }
+    // Ignored on request; then a merge with a run that applies them is E0137.
+    std::fs::rename(tmp.join("a.ycov"), tmp.join("applied.ycov")).expect("rename");
+    let said = fsm_run(&tmp, &src, &["--coverage-directives=ignore"]);
+    assert!(
+        said.contains("4 `-- yavs coverage exclude` directives"),
+        "{said}"
+    );
+    assert_eq!(fsm_totals(&tmp, &[]), FSM_ALL);
+    let o = yavs(
+        &tmp,
+        &["cov", "merge", "applied.ycov", "a.ycov", "-o", "m.ycov"],
+    );
+    assert!(!o.status.success());
+    let t = text(&o.stderr);
+    assert!(
+        t.contains("E0137") && t.contains("fsm one: spare of tb.u1"),
+        "{t}"
+    );
+    // Equal databases merge and keep them.
+    let o = yavs(
+        &tmp,
+        &[
+            "cov",
+            "merge",
+            "applied.ycov",
+            "applied.ycov",
+            "-o",
+            "a.ycov",
+        ],
+    );
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    assert_eq!(fsm_totals(&tmp, &[]).0, 28 - 6);
+}
+
+/// Whether `src` analyses, and what analysis says.
+fn fsm_check(tmp: &Path, name: &str, src: &str) -> (bool, String) {
+    write(tmp, name, src);
+    let lib = format!("--work=work:lib_{name}");
+    let o = yavs(tmp, &["analyze", &lib, name]);
+    (o.status.success(), text(&o.stderr))
+}
+
+#[test]
+fn fsm_directive_checks() {
+    let tmp = tempdir("fsm_checks");
+    let before = |d: &str| MACHINES.replace("case wt is", &format!("{d}\n    case wt is"));
+
+    // Names: did you mean, and the list.
+    let (ok, t) = fsm_check(&tmp, "a.vhd", &before("-- yavs cov exclude state b3"));
+    assert!(
+        !ok && t.contains("E2022") && t.contains("`b3` is not a state of `wt_t`"),
+        "{t}"
+    );
+    assert!(t.contains("the states are: b0, b1, b2"), "{t}");
+    assert!(t.contains("similar names exist: `b0` (state)"), "{t}");
+    let (ok, t) = fsm_check(
+        &tmp,
+        "b.vhd",
+        &before("-- yavs cov exclude transition b0 -> b9"),
+    );
+    assert!(!ok && t.contains("E2022") && t.contains("`b9`"), "{t}");
+    let (ok, t) = fsm_check(&tmp, "c.vhd", &before("-- yavs cov exclude state *"));
+    assert!(!ok && t.contains("E2020"), "{t}");
+    let (ok, t) = fsm_check(&tmp, "d.vhd", &before("-- yavs cov exclude stat b0"));
+    assert!(!ok && t.contains("similar") && t.contains("`state`"), "{t}");
+
+    // A valid pair no alternative names, a state to itself, and `*` with nothing to match.
+    for d in [
+        "transition b2 -> b1",
+        "transition b1 -> b1",
+        "transition b1->b2",
+    ] {
+        let (ok, t) = fsm_check(&tmp, "e.vhd", &before(&format!("-- yavs cov exclude {d}")));
+        assert!(ok && t.contains("W2022"), "{d}: {t}");
+    }
+    let (ok, t) = fsm_check(
+        &tmp,
+        "f.vhd",
+        &before("-- yavs cov exclude transition * -> b2"),
+    );
+    assert!(ok && t.contains("W2022"), "{t}");
+
+    // Repeated, subsumed, everything.
+    let two = before("-- yavs cov exclude state b1\n-- yavs cov exclude state b1");
+    let (ok, t) = fsm_check(&tmp, "g.vhd", &two);
+    assert!(ok && t.contains("W2020") && t.contains("repeats"), "{t}");
+    let sub =
+        before("-- yavs cov exclude transition b1 -> b0\n-- yavs cov exclude transition * -> b0");
+    let (ok, t) = fsm_check(&tmp, "h.vhd", &sub);
+    assert!(ok && t.contains("W2020") && t.contains("broader"), "{t}");
+    let all = before("-- yavs cov exclude transition * -> *");
+    let (ok, t) = fsm_check(&tmp, "i.vhd", &all);
+    assert!(
+        ok && t.contains("W2021") && t.contains("every transition"),
+        "{t}"
+    );
+    let states = before(
+        "-- yavs cov exclude state b0\n-- yavs cov exclude state b1\n-- yavs cov exclude state b2",
+    );
+    let (ok, t) = fsm_check(&tmp, "j.vhd", &states);
+    assert!(
+        ok && t.contains("W2021") && t.contains("every state"),
+        "{t}"
+    );
+
+    // A `case` that is no state machine, and a `when` that is no alternative.
+    let other = "entity e is port (clk, x : in bit; y : out bit); end entity;
+architecture a of e is
+  type t is (s0, s1);
+  signal v, w : t;
+begin
+  process (clk) begin
+    if rising_edge(clk) then
+      -- yavs cov exclude state s0
+      case x is
+        when '0' => y <= '1';
+        -- yavs cov exclude state s0
+        when '1' => y <= '0';
+      end case;
+      -- yavs cov exclude state s0
+      if x = '1' then y <= '0'; end if;
+      y <= '1'
+        -- yavs cov exclude state s0
+        when x = '1' else '0';
+    end if;
+  end process;
+end architecture;
+";
+    let (ok, t) = fsm_check(&tmp, "k.vhd", other);
+    assert!(!ok, "{t}");
+    assert_eq!(
+        t.matches("this `case` is not on a detected state machine")
+            .count(),
+        2,
+        "{t}"
+    );
+    assert_eq!(
+        t.matches("needs a `case` on the state register").count(),
+        2,
+        "{t}"
+    );
+    assert!(t.contains("the `case` selects on this"), "{t}");
+
+    // A repeat analysis with the cache gives the same.
+    let (ok, again) = fsm_check(&tmp, "k.vhd", other);
+    assert!(!ok && again.contains("E2024"), "{again}");
+}

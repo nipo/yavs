@@ -259,7 +259,9 @@ pub struct Database {
     pub unmeasured: BTreeSet<(String, u32, String)>,
 }
 
-const MAGIC: &str = "yavs-coverage 12";
+const MAGIC: &str = "yavs-coverage 13";
+/// Version 12: no process or waivers on state machine lines.
+const V12: &str = "yavs-coverage 12";
 /// Version 11 has no embedded sources and no `at` lines.
 const V11: &str = "yavs-coverage 11";
 /// Older versions [`Database::parse`] still reads: 2 has no toggles, 2 and 3 no tests, 4 no
@@ -484,7 +486,7 @@ fn arm_name(
 /// `-- yavs coverage ...`) leave out; `off-line` is its own line. With `translate_off` the
 /// synthesis `translate_off`/`translate_on` pragmas count as `off`/`on`. ponytail: a `--`
 /// inside a string literal is read as a comment start.
-fn regions(
+pub(crate) fn regions(
     path: &str,
     text: &str,
     translate_off: bool,
@@ -553,6 +555,32 @@ fn regions(
     out
 }
 
+/// The labelled processes of each file: (start, end, label), sorted.
+pub(crate) type Labelled = HashMap<yavs_diag::FileId, Vec<(u32, u32, String)>>;
+
+pub(crate) fn labelled_processes(db: &Db, e: &Elaborated) -> Labelled {
+    let mut labelled = Labelled::new();
+    for p in &e.procs {
+        let s = &db.stmts[p.stmt];
+        if let Some(l) = &s.label {
+            let span = (s.span.start, s.span.end, l.text.to_string());
+            labelled.entry(s.span.file).or_default().push(span);
+        }
+    }
+    for v in labelled.values_mut() {
+        v.sort();
+        v.dedup();
+    }
+    labelled
+}
+
+/// The label of the process around `span`.
+pub(crate) fn process_at(labelled: &Labelled, span: yavs_diag::Span) -> Option<String> {
+    let v = labelled.get(&span.file)?;
+    let (_, end, label) = v[..v.partition_point(|x| x.0 <= span.start)].last()?;
+    (span.start < *end).then(|| label.clone())
+}
+
 /// The database of a run: `counts` is `Runtime::coverage` of the design `e` built after
 /// `Elaborated::lower_with` with coverage on. Items inside `-- coverage off` regions are left
 /// out; the warnings are about unbalanced pragmas.
@@ -582,24 +610,7 @@ pub fn collect(
     for v in units.values_mut() {
         v.sort();
     }
-    // The labelled processes of each file: (start, end, label), sorted.
-    let mut labelled: HashMap<yavs_diag::FileId, Vec<(u32, u32, String)>> = HashMap::new();
-    for p in &e.procs {
-        let s = &db.stmts[p.stmt];
-        if let Some(l) = &s.label {
-            let span = (s.span.start, s.span.end, l.text.to_string());
-            labelled.entry(s.span.file).or_default().push(span);
-        }
-    }
-    for v in labelled.values_mut() {
-        v.sort();
-        v.dedup();
-    }
-    let process_at = |span: yavs_diag::Span| {
-        let v = labelled.get(&span.file)?;
-        let (_, end, label) = v[..v.partition_point(|x| x.0 <= span.start)].last()?;
-        (span.start < *end).then(|| label.clone())
-    };
+    let labelled = labelled_processes(db, e);
     let mut items = Vec::with_capacity(n);
     let mut owner = HashMap::new();
     // Per stmt, the item of its statement counter.
@@ -741,7 +752,7 @@ pub fn collect(
                         .get(c.stmt)
                         .is_some_and(|st| st.span.start <= span.start && span.end <= st.span.end)
             }),
-            process: process_at(span).unwrap_or_default(),
+            process: process_at(&labelled, span).unwrap_or_default(),
             waivers,
             input: match (comb, &c.row) {
                 (Some(k), _) => k
@@ -1020,6 +1031,25 @@ fn unescaped(field: &str) -> String {
     o
 }
 
+/// What [`waiver_field`] wrote; `None` if it is malformed.
+fn parse_waivers(field: &str) -> Option<Vec<Waiver>> {
+    let mut out = Vec::new();
+    for x in field.split('\u{1e}').filter(|x| *x != "-") {
+        let p: Vec<&str> = x.split('\u{1f}').collect();
+        // Versions 8 to 10 have the operands of the directive after these.
+        let ([rule, reason, file, line] | [rule, reason, file, line, _]) = p[..] else {
+            return None;
+        };
+        out.push(Waiver {
+            rule: rule.into(),
+            reason: reason.into(),
+            file: file.into(),
+            line: line.parse().ok()?,
+        });
+    }
+    Some(out)
+}
+
 /// The waivers of an item as one field of a database line; `-` for none.
 fn waiver_field(waivers: &[Waiver]) -> String {
     let w: Vec<String> = waivers
@@ -1133,6 +1163,12 @@ impl Database {
                 s.push_str(&e.file);
                 s.push('\t');
                 s.push_str(dash(&e.unit));
+                if matches!(k.kind, Kind::Fsm(_)) {
+                    s.push('\t');
+                    s.push_str(dash(&e.process));
+                    s.push('\t');
+                    s.push_str(&waiver_field(&e.waivers));
+                }
                 s.push('\n');
                 push_at(&mut s, &e.detail);
                 continue;
@@ -1213,7 +1249,7 @@ impl Database {
         let mut lines = text.lines();
         let head = lines.next();
         let old = head.is_some_and(|h| OLD.contains(&h));
-        let known = [MAGIC, V11, V10, V9, V8, V7, V6, V5, V4]
+        let known = [MAGIC, V12, V11, V10, V9, V8, V7, V6, V5, V4]
             .iter()
             .any(|v| head == Some(*v));
         if !known && !old {
@@ -1230,12 +1266,13 @@ impl Database {
                 None => format!("not a yavs coverage database (no `{MAGIC}` line)"),
             });
         }
-        let with_units = [MAGIC, V11, V10, V9, V8, V7]
+        let with_units = [MAGIC, V12, V11, V10, V9, V8, V7]
             .iter()
             .any(|v| head == Some(*v));
         // A row line of these has a count of inputs where this version has the operands.
         let row_counts = head == Some(V10) || head == Some(V9);
-        let with_operands = head == Some(MAGIC) || head == Some(V11);
+        let with_operands = head == Some(MAGIC) || head == Some(V12) || head == Some(V11);
+        let fsm_fields = head == Some(MAGIC);
         let row_waivers = with_operands || row_counts;
         let mut db = Database {
             legacy: !with_units && head != Some(V6),
@@ -1281,6 +1318,11 @@ impl Database {
             // The last fields of this version: the process (not of toggles), then the unit.
             let mut process = String::new();
             let mut unit = String::new();
+            let mut fsm_waivers = Vec::new();
+            if fsm_fields && l.starts_with('f') {
+                fsm_waivers = parse_waivers(f.pop().ok_or_else(bad)?).ok_or_else(bad)?;
+                process = undash(f.pop().ok_or_else(bad)?).to_string();
+            }
             if with_units {
                 if !named {
                     let p = f.pop().ok_or_else(bad)?;
@@ -1331,7 +1373,7 @@ impl Database {
                     count: count.parse().map_err(|_| bad())?,
                     text: String::new(),
                     tests,
-                    waivers: Vec::new(),
+                    waivers: fsm_waivers,
                     unit,
                     process,
                     operands: Vec::new(),
@@ -1354,23 +1396,8 @@ impl Database {
                     f.pop().ok_or_else(bad)?;
                 }
                 if comb || (fec && row_waivers) {
-                    let Some(w) = f.pop() else {
-                        return Err(bad());
-                    };
-                    for x in w.split('\u{1e}').filter(|x| *x != "-") {
-                        let p: Vec<&str> = x.split('\u{1f}').collect();
-                        // Versions 8 to 10 have the operands of the directive after these.
-                        let (rule, reason, file, line) = match p[..] {
-                            [r, why, f, n] | [r, why, f, n, _] => (r, why, f, n),
-                            _ => return Err(bad()),
-                        };
-                        waivers.push(Waiver {
-                            rule: rule.into(),
-                            reason: reason.into(),
-                            file: file.into(),
-                            line: line.parse().map_err(|_| bad())?,
-                        });
-                    }
+                    let w = f.pop().ok_or_else(bad)?;
+                    waivers = parse_waivers(w).ok_or_else(bad)?;
                 }
                 let (sig, f) = match (fec || comb, &f[..]) {
                     (true, [a, b, c, d, e, g, h, i, sig, text]) => {
@@ -1462,9 +1489,10 @@ impl Database {
                         } else {
                             &x.waivers
                         };
-                        let what = match k.kind.row() {
-                            Some((_, v)) => format!("{} = {}", k.sig, u8::from(v)),
-                            None => pattern(&k),
+                        let what = match (k.kind, k.kind.row()) {
+                            (Kind::Fsm(_), _) => fsm_text(&k),
+                            (_, Some((_, v))) => format!("{} = {}", k.sig, u8::from(v)),
+                            _ => pattern(&k),
                         };
                         conflicts.push(format!(
                             "{} {what} of {} ({}:{}) is excluded at {}:{} in one database and required in the other",
@@ -1931,6 +1959,26 @@ fn xml(s: &str) -> String {
 mod tests {
     use super::*;
 
+    #[test]
+    fn state_machine_lines_keep_process_and_waivers() {
+        let v12 = "yavs-coverage 12\nf0\t:t\tst:spare\t0\t-\t3\ta.vhd\twork.e\n";
+        let old = Database::parse(v12).unwrap();
+        let e = old.items.values().next().unwrap();
+        assert_eq!(e.unit, "work.e");
+        assert!(e.process.is_empty() && e.waivers.is_empty());
+        let mut db = old.clone();
+        let e = db.items.values_mut().next().unwrap();
+        e.process = "p".into();
+        e.waivers.push(Waiver {
+            rule: "state spare".into(),
+            reason: "unused".into(),
+            file: "a.vhd".into(),
+            line: 7,
+        });
+        let text = db.write();
+        assert_eq!(Database::parse(&text).unwrap().items, db.items, "{text}");
+    }
+
     fn item(path: &str, kind: Kind, hash: u64, line: u32, count: u64) -> (Key, Entry) {
         (
             Key {
@@ -2168,7 +2216,7 @@ mod tests {
         let mut d = Database::default();
         d.items.insert(key.clone(), entry(2, vec![waiver.clone()]));
         let text = d.write();
-        assert!(text.starts_with("yavs-coverage 12\n"));
+        assert!(text.starts_with("yavs-coverage 13\n"));
         let back = Database::parse(&text).unwrap();
         assert_eq!(back, d);
         assert_eq!(pattern(&key), "01");

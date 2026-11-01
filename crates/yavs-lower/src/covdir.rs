@@ -6,6 +6,9 @@
 //! is collected; [`resolve`] gives the lowering the waivers of one file. Both read the final
 //! HIR, so a warm analysis cache changes nothing, and use the one decision reading of
 //! `covcond.rs`, so a directive and the counters it waives agree on the inputs.
+//!
+//! `exclude state` and `exclude transition` bind to a `case` on a state machine's register instead,
+//! read with `yavs_lint::machines` (docs/coverage.md "State machines").
 
 use rustc_hash::FxHashMap as HashMap;
 use std::collections::BTreeSet;
@@ -14,7 +17,7 @@ use yavs_diag::{Diagnostic, FileId, Span};
 use yavs_ir::CovWaiver;
 use yavs_sem::hir::{Rhs, StmtKind, Waveform};
 use yavs_sem::loader::LibSource;
-use yavs_sem::{Db, ExprId};
+use yavs_sem::{Db, DeclId, ExprId, UnitId};
 
 use crate::covcond::Decision;
 
@@ -42,13 +45,56 @@ pub const NOT_MEASURED: &str = "W2023";
 /// What `yavs coverage` may be followed by.
 const COMMANDS: [&str; 4] = ["exclude", "off", "on", "off-line"];
 /// What may stand where a pattern is expected, as a word.
-const SPEC_WORDS: [&str; 3] = ["row", "condition", "expression"];
+const SPEC_WORDS: [&str; 5] = ["row", "condition", "expression", "state", "transition"];
 
 /// The waivers of one file by decision, and the diagnostics of its directives.
 #[derive(Default)]
 pub struct Checked {
     pub waivers: HashMap<ExprId, Vec<CovWaiver>>,
+    /// What `exclude state` and `exclude transition` say, by state register.
+    pub machines: HashMap<DeclId, Vec<MachineWaiver>>,
     pub diags: Vec<Diagnostic>,
+}
+
+/// An `exclude state` or `exclude transition`: states by position in the type, `None` is `*`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MachineWaiver {
+    pub item: MachineItem,
+    /// The directive as written after `exclude`, without the reason.
+    pub rule: String,
+    pub reason: String,
+    /// The comment.
+    pub at: Span,
+}
+
+/// What a [`MachineWaiver`] takes out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MachineItem {
+    State(usize),
+    Transition(Option<usize>, Option<usize>),
+}
+
+impl MachineItem {
+    /// Whether it takes the transition `from` to `to` out.
+    pub fn takes_transition(self, from: usize, to: usize) -> bool {
+        match self {
+            MachineItem::State(_) => false,
+            MachineItem::Transition(f, t) => {
+                f.is_none_or(|f| f == from) && t.is_none_or(|t| t == to)
+            }
+        }
+    }
+
+    /// Whether every item `other` takes out, this takes out too.
+    fn covers(self, other: MachineItem) -> bool {
+        match (self, other) {
+            (MachineItem::State(a), MachineItem::State(b)) => a == b,
+            (MachineItem::Transition(f, t), MachineItem::Transition(g, u)) => {
+                (f.is_none() || f == g) && (t.is_none() || t == u)
+            }
+            _ => false,
+        }
+    }
 }
 
 /// Every source file of the design (the libraries yavs provides left out).
@@ -278,6 +324,10 @@ enum Spec {
     RowPattern(Vec<u8>, Span),
     /// `row INPUT = VALUE`: one input at one value, by its text.
     RowNamed(Named),
+    /// `state NAME`, with the span of the name.
+    State(String, Span),
+    /// `transition FROM -> TO`: each a name or `*`, with its span.
+    Transition((String, Span), (String, Span)),
 }
 
 /// The inputs a pattern says it was written for, with the span of the list.
@@ -335,6 +385,7 @@ pub fn resolve(db: &Db, file: FileId) -> Checked {
         return out;
     }
     let sites = sites(db, file);
+    let mut machines = None;
     let at = |d: &Diagnostic| {
         d.primary
             .as_ref()
@@ -344,6 +395,11 @@ pub fn resolve(db: &Db, file: FileId) -> Checked {
     for (next, ds) in groups {
         let targets = next.and_then(|n| sites.get(&n));
         for d in &ds {
+            if matches!(d.spec, Spec::State(..) | Spec::Transition(..)) {
+                let of = machines.get_or_insert_with(|| Machines::of(db, file));
+                bind_machine(db, d, next, of, &mut out);
+                continue;
+            }
             let Some(targets) = targets else {
                 out.diags.push(
                     Diagnostic::error(TARGET, "no construct follows this exclusion")
@@ -377,10 +433,244 @@ pub fn resolve(db: &Db, file: FileId) -> Checked {
     for (e, v) in &out.waivers {
         redundant(db, *e, v, &mut out.diags);
     }
+    if let Some(of) = &machines {
+        redundant_machine(of, &out.machines, &mut out.diags);
+    }
     out.diags.sort_by_key(at);
     out.diags
         .dedup_by(|a, b| a.code == b.code && a.message == b.message && at(a) == at(b));
     out
+}
+
+/// The state machines of the architectures of one file.
+struct Machines {
+    found: HashMap<DeclId, yavs_lint::Machine>,
+    missed: Vec<yavs_lint::NotMeasured>,
+}
+
+impl Machines {
+    fn of(db: &Db, file: FileId) -> Self {
+        let mut all = Machines {
+            found: HashMap::default(),
+            missed: Vec::new(),
+        };
+        let units: Vec<UnitId> = db
+            .units
+            .iter()
+            .filter(|(_, u)| u.file == file)
+            .map(|x| x.0)
+            .collect();
+        for u in units {
+            let (found, missed) = yavs_lint::machines(db, u);
+            all.found.extend(found.into_iter().map(|m| (m.signal, m)));
+            all.missed.extend(missed);
+        }
+        all
+    }
+}
+
+/// The selectors of the `case` a state machine directive stands before: the `case` starting at byte
+/// `next`, or the one whose alternative `when` is there. A construct analysed more than once gives
+/// one each. A `when` in a statement within an alternative (a conditional assignment) is not one.
+fn case_selectors(db: &Db, file: FileId, next: u32) -> Vec<ExprId> {
+    let text = db.sources.get(file).text();
+    let rest = text.get(next as usize..).unwrap_or("");
+    let word = rest
+        .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .next()
+        .unwrap_or("");
+    let of_file = || db.stmts.iter().filter(|(_, s)| s.span.file == file);
+    let selector = |k: &StmtKind| match k {
+        StmtKind::Case { expr, .. } => Some(*expr),
+        _ => None,
+    };
+    if word.eq_ignore_ascii_case("when") {
+        let around: Vec<_> = of_file()
+            .filter(|(_, s)| s.span.start < next && next < s.span.end)
+            .collect();
+        let inner = around.iter().map(|(_, s)| s.span.end - s.span.start).min();
+        return around
+            .iter()
+            .filter(|(_, s)| Some(s.span.end - s.span.start) == inner)
+            .filter_map(|(_, s)| selector(&s.kind))
+            .collect();
+    }
+    of_file()
+        .filter(|(_, s)| s.span.start == next)
+        .filter_map(|(_, s)| selector(&s.kind))
+        .collect()
+}
+
+/// Bind `exclude state` or `exclude transition` to the `case` right after it.
+fn bind_machine(db: &Db, d: &Directive, next: Option<u32>, of: &Machines, out: &mut Checked) {
+    let file = d.at.file;
+    let selectors = next.map_or(Vec::new(), |n| case_selectors(db, file, n));
+    if selectors.is_empty() {
+        out.diags.push(
+            Diagnostic::error(
+                TARGET,
+                "a state or transition exclusion needs a `case` on the state register after it",
+            )
+            .with_primary(d.at, "no `case` or `when` follows")
+            .with_help(
+                "write it right before the `case` on the register, or before one of its `when` \
+                 alternatives",
+            ),
+        );
+        return;
+    }
+    let register = |e: &ExprId| match db.exprs[*e].kind {
+        yavs_sem::hir::ExprKind::Obj(r) => of.found.contains_key(&r).then_some(r),
+        _ => None,
+    };
+    let registers: BTreeSet<DeclId> = selectors.iter().filter_map(register).collect();
+    if registers.is_empty() {
+        let shown = db.exprs[selectors[0]].span;
+        let src = db.sources.get(shown.file);
+        let text = src
+            .text()
+            .get(src.text_offset(shown.start)..src.text_offset(shown.end))
+            .unwrap_or("");
+        let why = of
+            .missed
+            .iter()
+            .find(|m| m.what.eq_ignore_ascii_case(text))
+            .map_or(
+                "a state machine is a signal of an enumeration type that a clocked statement \
+                 drives and a `case` selects on",
+                |m| m.why,
+            );
+        out.diags.push(
+            Diagnostic::error(TARGET, "this `case` is not on a detected state machine")
+                .with_primary(d.at, "there is no state or transition to exclude")
+                .with_secondary(shown, "the `case` selects on this")
+                .with_note(why),
+        );
+        return;
+    }
+    for r in registers {
+        match machine_item(db, d, &of.found[&r]) {
+            Ok((item, warning)) => {
+                out.diags.extend(warning);
+                let w = MachineWaiver {
+                    item,
+                    rule: d.rule.clone(),
+                    reason: d.reason.clone(),
+                    at: d.at,
+                };
+                let v = out.machines.entry(r).or_default();
+                if !v.contains(&w) {
+                    v.push(w);
+                }
+            }
+            Err(e) => out.diags.push(*e),
+        }
+    }
+}
+
+/// What `exclude state` or `exclude transition` names in machine `m`, and W2022 if that is no item.
+fn machine_item(
+    db: &Db,
+    d: &Directive,
+    m: &yavs_lint::Machine,
+) -> Result<(MachineItem, Option<Diagnostic>), Box<Diagnostic>> {
+    let ty = db.decls[db.types[m.ty].decl].name.to_string();
+    let find = |name: &str, at: Span| -> Result<usize, Box<Diagnostic>> {
+        // Only a basic identifier is the same in another case.
+        let basic = !name.starts_with(['\\', '\'']);
+        let same = |s: &str| {
+            if basic {
+                s.eq_ignore_ascii_case(name)
+            } else {
+                s == name
+            }
+        };
+        if let Some(i) = m.states.iter().position(|(s, _)| same(s)) {
+            return Ok(i);
+        }
+        let list: Vec<&str> = m.states.iter().map(|s| s.0.as_str()).collect();
+        let mut e = Diagnostic::error(OPERAND, format!("`{name}` is not a state of `{ty}`"))
+            .with_primary(at, "unknown state")
+            .with_note(format!("the states are: {}", list.join(", ")));
+        let keys: Vec<(String, &str)> = list.iter().map(|s| (s.to_ascii_lowercase(), *s)).collect();
+        if let Some(h) = yavs_sem::suggest::suggest(
+            &name.to_ascii_lowercase(),
+            "state",
+            keys.iter().map(|(k, s)| (k.as_str(), *s)),
+        ) {
+            e = e.with_help(h);
+        }
+        Err(Box::new(e))
+    };
+    let (from, to) = match &d.spec {
+        Spec::State(name, at) => return Ok((MachineItem::State(find(name, *at)?), None)),
+        Spec::Transition(from, to) => (from, to),
+        _ => unreachable!("only a state or transition exclusion comes here"),
+    };
+    let end = |(name, at): &(String, Span)| match name.as_str() {
+        "*" => Ok(None),
+        n => find(n, *at).map(Some),
+    };
+    let item = MachineItem::Transition(end(from)?, end(to)?);
+    let none = !m.transitions().any(|a| item.takes_transition(a.0, a.1));
+    let warning = none.then(|| {
+        Diagnostic::warning(
+            MATCHES_NONE,
+            "this exclusion matches no transition of the state machine",
+        )
+        .with_primary(d.at, "no `case` alternative assigns this")
+        .with_note(
+            "a state staying as it is has no item; a transition no alternative names, such as a \
+             reset, is an item only in a run where it happens, and is then excluded",
+        )
+    });
+    Ok((item, warning))
+}
+
+/// Warnings about the state machine waivers of one file: duplicates, subsumed ones, all of a kind.
+fn redundant_machine(
+    of: &Machines,
+    all: &HashMap<DeclId, Vec<MachineWaiver>>,
+    diags: &mut Vec<Diagnostic>,
+) {
+    for (r, v) in all {
+        for (j, b) in v.iter().enumerate() {
+            let same = |a: &MachineWaiver| a.item == b.item;
+            let over = v
+                .iter()
+                .enumerate()
+                .find(|&(i, a)| i != j && a.item.covers(b.item) && (!same(a) || i < j));
+            if let Some((_, a)) = over {
+                let msg = if same(a) {
+                    "this exclusion repeats an earlier one"
+                } else {
+                    "this exclusion is already covered by a broader one"
+                };
+                diags.push(
+                    Diagnostic::warning(REDUNDANT, msg)
+                        .with_primary(b.at, "redundant")
+                        .with_secondary(a.at, "this one waives it already"),
+                );
+            }
+        }
+        let Some(m) = of.found.get(r) else { continue };
+        let every_state =
+            (0..m.states.len()).all(|s| v.iter().any(|w| w.item == MachineItem::State(s)));
+        let mut arcs = m.transitions().peekable();
+        let every_arc = arcs.peek().is_some()
+            && arcs.all(|a| v.iter().any(|w| w.item.takes_transition(a.0, a.1)));
+        for (all, what) in [(every_state, "state"), (every_arc, "transition")] {
+            if all {
+                diags.push(
+                    Diagnostic::warning(
+                        ALL_WAIVED,
+                        format!("the exclusions together waive every {what} of this state machine"),
+                    )
+                    .with_primary(v[0].at, "nothing is left to cover"),
+                );
+            }
+        }
+    }
 }
 
 /// Resolve directive `d` against the decision `expr`; the waiver goes into `waivers`.
@@ -636,6 +926,7 @@ fn bind(
             }
         }
         Spec::RowPattern(..) | Spec::RowNamed(..) => unreachable!("a row returned above"),
+        Spec::State(..) | Spec::Transition(..) => unreachable!("bound by bind_machine"),
     }
     let states = dec.combinations(db).unwrap_or_default();
     let matched = states.iter().filter(|&&s| s & care == want).count();
@@ -857,7 +1148,7 @@ fn parse(file: FileId, start: u32, text: &str) -> Parsed {
     match w.to_ascii_lowercase().as_str() {
         "condition" => kind = Some(true),
         "expression" => kind = Some(false),
-        "row" => (cur.s, cur.at) = save,
+        "row" | "state" | "transition" => (cur.s, cur.at) = save,
         _ if !w.is_empty() && w.starts_with(|c: char| c.is_ascii_alphabetic()) => {
             // A word in front of `(`: a misspelt kind.
             let after = cur.s.trim_start();
@@ -886,7 +1177,19 @@ fn parse(file: FileId, start: u32, text: &str) -> Parsed {
             .next();
         w.is_some_and(|w| w.eq_ignore_ascii_case("row"))
     };
-    let spec = if row_word {
+    let machine_word = kind.is_none() && {
+        let w = &cur.s[..cur
+            .s
+            .find(|c: char| !(c.is_alphanumeric() || c == '_'))
+            .unwrap_or(cur.s.len())];
+        w.eq_ignore_ascii_case("state") || w.eq_ignore_ascii_case("transition")
+    };
+    let spec = if machine_word {
+        match machine_spec(&mut cur, &span, &fail) {
+            Ok(s) => s,
+            Err(e) => return e,
+        }
+    } else if row_word {
         cur.advance(3);
         cur.blank();
         match row_spec(&mut cur, kind, spec_at, &span, &fail) {
@@ -1075,6 +1378,54 @@ fn operand_list(
     }
     cur.advance(close + 1);
     Ok(Some((list, span(at, close + 1))))
+}
+
+/// `state NAME` or `transition FROM -> TO`, the cursor at the word. It ends at the reason.
+fn machine_spec(
+    cur: &mut Cursor<'_>,
+    span: &dyn Fn(usize, usize) -> Span,
+    fail: &dyn Fn(&'static str, String, usize, usize, &str) -> Parsed,
+) -> Result<(Spec, String, Operands), Parsed> {
+    let word_at = cur.at;
+    let word = cur.word();
+    cur.blank();
+    let name = |cur: &mut Cursor<'_>, what: &str, wild: bool| {
+        let at = cur.at;
+        let n = cur.state_name(wild);
+        if n.is_empty() {
+            let shown = cur.s.trim_end();
+            return Err(fail(
+                SYNTAX,
+                format!("`{word}` needs {what}, found `{shown}`"),
+                word_at,
+                word.len(),
+                "expected a name such as `idle`",
+            ));
+        }
+        Ok((n.to_string(), span(at, n.len())))
+    };
+    if word.eq_ignore_ascii_case("state") {
+        let (n, at) = name(cur, "the name of a state", false)?;
+        let rule = format!("state {n}");
+        return Ok((Spec::State(n, at), rule, None));
+    }
+    let from = name(cur, "a state before `->`", true)?;
+    cur.blank();
+    if !cur.s.starts_with("->") {
+        let shown = cur.s.trim_end();
+        return Err(fail(
+            SYNTAX,
+            format!("expected `->` between the states of a transition, found `{shown}`"),
+            cur.at,
+            shown.len(),
+            "expected `->`",
+        ));
+    }
+    cur.advance(2);
+    cur.blank();
+    let to = name(cur, "a state after `->`", true)?;
+    let rule = format!("transition {} -> {}", from.0, to.0);
+    Ok((Spec::Transition(from, to), rule, None))
 }
 
 /// What follows `row`: a pattern with one symbol that is not `-` and maybe its list of inputs, or
@@ -1309,6 +1660,24 @@ impl<'a> Cursor<'a> {
         w
     }
 
+    /// A state: an identifier, an extended identifier, a character literal, or with `wild` a `*`.
+    /// Empty if none stands here.
+    fn state_name(&mut self, wild: bool) -> &'a str {
+        let s = self.s;
+        let n = if wild && s.starts_with('*') {
+            1
+        } else if let Some(r) = s.strip_prefix('\\') {
+            r.find('\\').map_or(0, |e| e + 2)
+        } else if s.starts_with('\'') && yavs_diag::operand::char_literal(s, 0) {
+            s.char_indices().nth(3).map_or(s.len(), |x| x.0)
+        } else {
+            s.find(|c: char| !(c.is_alphanumeric() || c == '_'))
+                .unwrap_or(s.len())
+        };
+        self.advance(n);
+        &s[..n]
+    }
+
     /// Up to a blank or the `:` of the reason.
     fn pattern(&mut self) -> &'a str {
         let n = self
@@ -1339,6 +1708,46 @@ mod tests {
             Parsed::Ok(_) => panic!("{text}: accepted"),
             Parsed::Other => panic!("{text}: not a directive"),
         }
+    }
+
+    #[test]
+    fn state_machine_forms() {
+        let d = directive("-- yavs cov exclude state spare: never used");
+        assert!(matches!(&d.spec, Spec::State(n, _) if n == "spare"));
+        assert_eq!(
+            (d.rule.as_str(), d.reason.as_str()),
+            ("state spare", "never used")
+        );
+        for t in [
+            "-- yavs cov exclude transition busy -> done : reset path",
+            "-- yavs coverage exclude transition busy->done: reset path",
+            "-- yavs cov exclude TRANSITION busy  ->done: reset path",
+        ] {
+            let d = directive(t);
+            assert_eq!(d.rule, "transition busy -> done", "{t}");
+            assert_eq!(d.reason, "reset path", "{t}");
+        }
+        assert_eq!(
+            directive("-- yavs cov exclude transition spare -> *").rule,
+            "transition spare -> *"
+        );
+        let d = directive("-- yavs cov exclude state ':': colon");
+        assert_eq!((d.rule.as_str(), d.reason.as_str()), ("state ':'", "colon"));
+        let d = directive(r"-- yavs cov exclude transition \a b\->'x': why");
+        assert_eq!(d.rule, r"transition \a b\ -> 'x'");
+        for (t, code) in [
+            ("-- yavs cov exclude state", "E2020"),
+            ("-- yavs cov exclude state : why", "E2020"),
+            ("-- yavs cov exclude state a b", "E2020"),
+            ("-- yavs cov exclude transition a", "E2020"),
+            ("-- yavs cov exclude transition a b", "E2020"),
+            ("-- yavs cov exclude transition a ->", "E2020"),
+            ("-- yavs cov exclude condition state a", "E2020"),
+            ("-- yavs cov exclude stat a", "E2020"),
+        ] {
+            assert_eq!(error(t).0, code, "{t}");
+        }
+        assert!(error("-- yavs cov exclude stat a").1.contains("state"));
     }
 
     #[test]

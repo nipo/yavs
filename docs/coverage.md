@@ -378,20 +378,53 @@ declaration. So it only ever counts as hit: the total grows with it, and a run w
 slightly higher percentage. A transition from a state to itself is never an item, since the value does
 not change and there is nothing to observe.
 
-In `--detailed`, a table lists each state and transition of an instance, and what never happened gets an entry:
+In `--detailed`, a table lists each state and transition of an instance, and what never happened gets an entry. A
+missed row prints the directive that excludes it:
 
 ```
 fsm:
   Line  Item                 Hits  Status
-  ----  -------------------  ----  -------
+  ----  -------------------  ----  --------------------------------------------------------
   16    one: done               1  covered
   16    one: idle               2  covered
-  16    one: spare              0  MISSED
-      exclude with this row in an `--exclude` file: fsm cov_fsm.u_far one spare
+  16    one: spare              0  MISSED (exclude with -- yavs cov exclude state spare)
   ...
 ```
 
-An exclusion row names the instance, the signal and the state or transition, and `*` matches in all three:
+**Excluding in the source.** Write the directive on its own line right before the `case` on the state register, or before
+a `when` alternative of that `case`. The placement says which register. A reason follows `:`:
+
+```vhdl
+-- yavs cov exclude state spare: never used
+-- yavs cov exclude transition busy -> done: reset path only
+case state is
+  -- yavs cov exclude state idle
+  when idle => state <= busy;
+  when busy => state <= done;
+  -- yavs cov exclude transition spare -> *
+  when others => state <= idle;
+end case;
+```
+
+- It holds in every instance of the design unit, like the other directives. `-- yavs coverage` reads the same.
+- The excluded items show as `excluded` with the reason in `--detailed` and `--exclusions`, and leave the totals.
+- A name is matched like VHDL does: any case for an identifier, exactly for an extended identifier or a character literal.
+- `*` stands for any state at either end of a transition: `transition spare -> *`. Spaces around `->` are optional.
+- Excluding a state leaves its transitions, and the other way round, the same as exclusion rows.
+- The directives are checked at analysis, with or without `--cov`. `--coverage-directives=ignore` reads none.
+
+| What | Result |
+|---|---|
+| A name that is no state of the type | `E2022`, with the states listed and a near name |
+| Not before a `case` or a `when` alternative, or a `case` that is no detected state machine | `E2024`, which says so |
+| A malformed directive | `E2020` |
+| A valid pair of states no `case` alternative assigns, or a state to itself | `W2022`, matches nothing |
+| A repeated or already covered exclusion | `W2020` |
+| Exclusions that together take every state or every transition | `W2021` |
+
+The `W2022` case is an item only in a run where the transition happens, such as a reset: there the directive excludes it.
+
+**Exclusion rows.** A row names the instance, the signal and the state or transition, and `*` matches in all three:
 
 ```
 fsm tb.dut state spare                # unused state
@@ -399,6 +432,15 @@ fsm tb.dut state spare->*
 ```
 
 A text row cannot hold a character literal with a space or a `#` (`' '`): match it with `*`, or use a YAML file.
+
+**Other ways to leave items out.**
+
+| Form | What it does to a state machine |
+|---|---|
+| `instance`, `entity`, `library`, `file` rows | take its items, the file being that of the item: for a state where the literal is declared, for a transition its assignment |
+| `process INSTANCE LABEL` row | takes all its items if the process holds a `case` on the register. For two processes that is the one with the `case`, not the clocked one, which matches nothing unless it has the `case` |
+| `unit` row | does not apply: `unit` names a package, and these items belong to instances (`W0111`) |
+| `-- coverage off` region, `off-line`, `--cov-exclude-translate-off` | around the register's declaration or every `case` on it: the whole machine. Around one literal or one assignment: that state or transition |
 
 Cobertura has no notion of these items and leaves them out; the text and HTML reports show them. The
 items are identified by those names, so an edit keeps them mergeable, and renaming a state makes new ones.
@@ -422,6 +464,8 @@ inputs, or more than 512 combinations is not measured; with `--cov-kind=combinat
 `W2023` (its other coverage is unaffected).
 
 ## Excluding combinations and rows in the source
+
+For states and transitions, see State machines.
 
 A requirement that cannot occur is waived with a comment before the decision or assignment
 (sequential or concurrent), each exclusion on a line of its own, with an optional reason after
@@ -518,7 +562,7 @@ target, command), with a hint when a name is close (`vlaid` for `valid`). It is 
 partly applied. A duplicate or already covered exclusion is warning `W2020`, exclusions that waive
 every combination or every row `W2021`, one that matches no combination or names an input with no rows `W2022` (on booleans the right operand
 is not evaluated when the left one decides, so `(valid=false, ready=true)` matches nothing: write
-`0-`), and `W2023` is a decision that is not measured. Warnings follow `-W`/`-Werror`.
+`0-`), and `W2023` is a decision that is not measured. Warnings follow `-W`/`-Werror`. The same codes check `exclude state` and `exclude transition` (see State machines).
 Only comments that start `-- yavs cov` or `-- yavs coverage` are read: other comments, text in a
 string and block comments are not. `--coverage-directives=ignore` reads none of them and prints a note with
 the number it left out.
@@ -564,7 +608,8 @@ x <= y; -- coverage off-line
 ```
 
 `coverage off` (reason optional) starts a region whose statements are left out, `coverage on`
-ends it, and `coverage off-line` leaves out the statements starting on its line.
+ends it, and `coverage off-line` leaves out the statements starting on its line. For state machines,
+see State machines. Toggles are not affected.
 `-- yavs coverage ...` is accepted as a synonym.
 
 Outside the source, give `yavs cov report` or `yavs cov rank` an `--exclude FILE`, as many as you
@@ -631,7 +676,7 @@ there to read (a stale line is warning `W0110`). `yavs cov report --uncovered DB
 | `unit` | a package, such as `work.pkg_tools` |
 | `library` | a library: the items of the instances of its entities and of its packages (YAML: `library`) |
 | `entity` | the items of every instance of an entity, `NAME` or `LIBRARY.NAME`, toggles included but not the instances below them (YAML: `entity`) |
-| `process` | `INSTANCE LABEL`: the statements, branches, conditions and expressions of a labelled process, also a labelled concurrent statement. An unlabelled one has no name and cannot be matched; its items stay reachable by hash. Toggles belong to signals, not processes (YAML: `instance`, `process`) |
+| `process` | `INSTANCE LABEL`: the statements, branches, conditions and expressions of a labelled process, also a labelled concurrent statement, and the states and transitions of a machine whose `case` it holds. An unlabelled one has no name and cannot be matched; its items stay reachable by hash. Toggles belong to signals, not processes (YAML: `instance`, `process`) |
 | `file` | a file glob or directory, such as `*/generated/*.vhd` |
 | `files`, `files_exclude` | lists of files, directories and patterns relative to the exclusion file (YAML: under `kind: file`) |
 

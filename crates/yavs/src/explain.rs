@@ -239,7 +239,7 @@ const EXPLAIN: &[(&str, &str)] = &[
     ),
     (
         "E2022",
-        "A named exclusion (`(valid=false, ready=true)`) names something that is not exactly one input of the expression: an unknown name, a name that is several inputs, or an input given twice. An input is named by its text in the source, in any formatting: `(valid=false)`, `(count > 3 = false)`, `(f(a, b) = true)`, and so is the input of `row count > 3 = 0`. The list after a pattern, `01 (en, count < 15)`, is checked too: inputs that no longer match in order or text are this error, with what it found and expected and the directive to write. Case in a literal or extended identifier counts; other case and blanks do not. The note lists the inputs; an operand that appears twice can only be addressed by its position.",
+        "A named exclusion (`(valid=false, ready=true)`) names something that is not exactly one input of the expression: an unknown name, a name that is several inputs, or an input given twice. An input is named by its text in the source, in any formatting: `(valid=false)`, `(count > 3 = false)`, `(f(a, b) = true)`, and so is the input of `row count > 3 = 0`. The list after a pattern, `01 (en, count < 15)`, is checked too: inputs that no longer match in order or text are this error, with what it found and expected and the directive to write. Case in a literal or extended identifier counts; other case and blanks do not. The note lists the inputs; an operand that appears twice can only be addressed by its position. `exclude state NAME` and `exclude transition FROM -> TO` name states of the register's type: a name that is not one is this error, with the states listed and a near name if there is one.",
     ),
     (
         "E2023",
@@ -247,7 +247,7 @@ const EXPLAIN: &[(&str, &str)] = &[
     ),
     (
         "E2024",
-        "A coverage exclusion has nothing to attach to or cannot be used where it is: it stands after code on its line, or no `if`, `elsif`, `while`, `exit`, `next` or assignment (sequential or concurrent) follows it (comments and blank lines may stand between), the construct has several conditions or choices, `exclude condition` is on an assignment or `exclude expression` on a condition, or the expression has no combinations to exclude (fewer than two inputs, an input that is constant after elaboration, more than 8 inputs, or too many combinations).",
+        "A coverage exclusion has nothing to attach to or cannot be used where it is: it stands after code on its line, or no `if`, `elsif`, `while`, `exit`, `next` or assignment (sequential or concurrent) follows it (comments and blank lines may stand between), the construct has several conditions or choices, `exclude condition` is on an assignment or `exclude expression` on a condition, or the expression has no combinations to exclude (fewer than two inputs, an input that is constant after elaboration, more than 8 inputs, or too many combinations). `exclude state` and `exclude transition` belong right before the `case` on a state register or one of its `when` alternatives: anywhere else, or on a `case` that is no detected state machine, is this error.",
     ),
     (
         "E2025",
@@ -255,15 +255,15 @@ const EXPLAIN: &[(&str, &str)] = &[
     ),
     (
         "W2020",
-        "A coverage exclusion repeats an earlier one of the same expression, or is already covered by a broader one. It does nothing more. Remove it, or silence the warning with `-Wno-W2020`.",
+        "A coverage exclusion repeats an earlier one of the same expression or state machine, or is already covered by a broader one. It does nothing more. Remove it, or silence the warning with `-Wno-W2020`.",
     ),
     (
         "W2021",
-        "The exclusions of an expression together waive every combination of it, so nothing is left to cover. Check that the directives say what was meant.",
+        "The exclusions of an expression together waive every combination of it, or those of a state machine every state or every transition, so nothing is left to cover. Check that the directives say what was meant.",
     ),
     (
         "W2022",
-        "A coverage exclusion matches no combination the expression can show. The right operand of `and`, `or`, `nand` and `nor` on `boolean` and `bit` is not evaluated when the left one decides, so a pattern that gives it a value with the left operand deciding matches nothing; write `-` for it. `std_ulogic` operators evaluate both operands.",
+        "A coverage exclusion matches no combination the expression can show. The right operand of `and`, `or`, `nand` and `nor` on `boolean` and `bit` is not evaluated when the left one decides, so a pattern that gives it a value with the left operand deciding matches nothing; write `-` for it. `std_ulogic` operators evaluate both operands. An `exclude transition` matches nothing when no `case` alternative assigns that transition; if it happens in a run all the same, a reset say, it is excluded there.",
     ),
     (
         "W2023",

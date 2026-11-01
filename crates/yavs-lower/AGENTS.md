@@ -13,7 +13,7 @@ yavs-interp and yavs-elab and the Requests are in `crates/yavs-lower/DESIGN.md`;
 - Does not: own IR types (it only uses `yavs_ir::ProgramBuilder`/`FuncBuilder` and the
   verifier), analyze (input must be an error-free `Db`), fold generics or build the hierarchy
   (`yavs-elab`), or execute (`yavs-interp`).
-- Depends on: `yavs-diag`, `yavs-ffi` (C type mapping), `yavs-syntax`, `yavs-sem`, `yavs-ir`, `yavs-kernel` (dev: `yavs-elab`,
+- Depends on: `yavs-diag`, `yavs-ffi` (C type mapping), `yavs-syntax`, `yavs-sem`, `yavs-ir`, `yavs-kernel`, `yavs-lint` (state machines, for `covdir.rs` only) (dev: `yavs-elab`,
   `yavs-interp`, `yavs-logic`). Called by: `yavs-elab` (`Elaborated::lower`).
 
 ## 2. Map

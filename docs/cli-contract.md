@@ -749,6 +749,7 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   `--config FILE` reads YAML with `exclude` (a word or list of exclusion files, added before those of
   `--exclude`), `root` (both relative to the file) and `kind`; `--root` and `--kind` win; no file is
   read without the option; a bad or unreadable file is `E0138`.
+  In-source `-- yavs cov exclude state NAME` and `transition FROM -> TO` (`*` at either end), before the `case` on a state register or one of its `when` alternatives, waive that state machine item in every instance.
   In-source `-- yavs cov exclude row -0-` and `row INPUT = VALUE` (0, 1, false, true) waive one condition or expression row; a
   pattern without `row` always means combinations. Both forms are stored in the database, and both follow `E0137`.
   A pattern may be followed by its inputs, `01 (a, b)`, `row -0- (a, b, c)`: checked at analysis, a mismatch is `E2022`.
@@ -771,7 +772,7 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   ...`) and per test its items and the items no other test hit. `yavs cov` exits 0, or 1 with `E0111` (a database cannot be
   read), `E0114`, `E0115`, `E0112` (an exclusion file cannot be read or has a malformed row), `E0138` (`--config`) or `E0110` (a file
   cannot be written), or when `-Werror` makes a warning an error; `run` exits at least 1 when the database cannot be written (`E0110`). The
-  database format (a `yavs-coverage 12` line, a tests section of `test`, id, name lines with
+  database format (a `yavs-coverage 13` line, a tests section of `test`, id, name lines with
   ids numbering the names in sorted order, with `--cov-embed-sources` a `source`, path, text line per source file (`\\`, newline, return and tab escaped), then per item an `at` line after it (line, column, byte start, byte end, hex hash of those bytes, the arm around it `HASH.OCC.ARM` or `-`, its statement `HASH.OCC` or `-`, what the other inputs must be, the toggle's last level, `d` when a directive can waive it) and one tab-separated item per line: kind `s` or
   `bN`, path, statement text hash, occurrence, count, tests, line, file, statement text for
   display; conditions and expressions: kind `cN` or `eN` (N = 2 * input + value), the same fields with the

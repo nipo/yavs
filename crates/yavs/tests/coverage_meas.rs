@@ -349,10 +349,14 @@ fn fsm_not_detected_is_visible() {
     );
     let rep = String::from_utf8_lossy(&o.stdout);
     assert!(rep.contains("fsm:\n"), "{rep}");
-    // The printed row excludes that state and nothing else.
-    let row = rep
+    // A row of `--uncovered` excludes that state and nothing else.
+    let o = yavs(
+        &tmp,
+        &["cov", "report", "a.ycov", "--uncovered", "--kind=fsm"],
+    );
+    let row = String::from_utf8_lossy(&o.stdout)
         .lines()
-        .find_map(|l| l.split("`--exclude` file: ").nth(1))
+        .find(|l| l.starts_with("fsm "))
         .expect("a printed row")
         .to_string();
     assert!(row.starts_with("fsm "), "{row}");
@@ -583,7 +587,7 @@ fn fsm_old_databases_and_no_items() {
     assert!(String::from_utf8_lossy(&o.stderr).contains("E0115"));
     let text = std::fs::read_to_string(tmp.join("a.ycov")).expect("read");
     let (head, rest) = text.split_once('\n').expect("head");
-    assert_eq!(head, "yavs-coverage 12");
+    assert_eq!(head, "yavs-coverage 13");
     let old = Database::parse(&format!("yavs-coverage 11\n{rest}")).expect("parse");
     assert!(!old.legacy);
     assert!(Database::parse(&format!("yavs-coverage 99\n{rest}")).is_err());

@@ -489,11 +489,11 @@ Elaboration (E2 and W2)
    * - _`E2020`
      - A ``-- yavs coverage exclude`` directive is malformed: a missing ``)``, an input without ``=value``, text after the pattern that is not a reason (a reason follows ``:``), an unknown word where ``condition``, ``expression`` or ``row`` may stand, or a ``row`` without a pattern or an ``INPUT = VALUE``.
    * - _`W2020`
-     - A coverage exclusion repeats an earlier one of the same expression, or is already covered by a broader one.
+     - A coverage exclusion repeats an earlier one of the same expression or state machine, or is already covered by a broader one.
    * - _`E2021`
      - A positional exclusion (``-- yavs cov exclude 01-``) has a symbol other than ``0`` (evaluated false), ``1`` (evaluated true) or ``-`` (anything, also not evaluated), or a different number of positions than the expression has inputs.
    * - _`W2021`
-     - The exclusions of an expression together waive every combination of it, so nothing is left to cover.
+     - The exclusions of an expression together waive every combination of it, or those of a state machine every state or every transition, so nothing is left to cover.
    * - _`E2022`
      - A named exclusion (``(valid=false, ready=true)``) names something that is not exactly one input of the expression: an unknown name, a name that is several inputs, or an input given twice.
    * - _`W2022`

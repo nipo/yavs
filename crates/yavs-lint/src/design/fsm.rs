@@ -37,6 +37,13 @@ pub struct Machine {
     pub reset: Option<usize>,
 }
 
+impl Machine {
+    /// The transitions that are coverage items: what a `case` names, staying in a state left out.
+    pub fn transitions(&self) -> impl Iterator<Item = (usize, usize, Span)> + '_ {
+        self.arcs.iter().copied().filter(|a| a.0 != a.1)
+    }
+}
+
 /// What looks like a state machine and is not one of [`Machine`]: the warning `W0120` and the
 /// database's list of what was not measured.
 pub struct NotMeasured {

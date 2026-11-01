@@ -2066,7 +2066,14 @@ fn run_design(
     // State machine coverage the same way, over the machines detection finds.
     let mut unmeasured = std::collections::BTreeSet::new();
     let fsm = kind(CovKindArg::Fsm).then(|| {
-        let (f, missed) = yavs_cov::fsm::fsm(&db, &e);
+        let reading = yavs_cov::fsm::Reading {
+            translate_off: a.cov_exclude_translate_off,
+            directives: a.common.coverage_directives == DirectivesArg::Apply,
+        };
+        let (f, missed, warns) = yavs_cov::fsm::fsm(&db, &e, reading);
+        for d in &warns {
+            out.emit(&db.sources, d);
+        }
         for (span, text) in missed {
             let src = db.sources.get(span.file);
             unmeasured.insert((

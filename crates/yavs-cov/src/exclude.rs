@@ -784,9 +784,17 @@ fn partner<'a>(db: &'a Database, k: &Key) -> Option<&'a Entry> {
 }
 
 /// The comment that waives this item in the source, written before its decision: a combination or
-/// a condition or expression row in the short form, with the inputs yavs checks at analysis. `None`
-/// for other kinds, and for an item of a database that does not hold its inputs.
+/// a condition or expression row in the short form, with the inputs yavs checks at analysis, or,
+/// before the `case` on the register, a state or transition. `None` for other kinds, and for an
+/// item of a database that does not hold its inputs.
 pub fn directive(k: &Key, e: &Entry) -> Option<String> {
+    if let Kind::Fsm(_) = k.kind {
+        let (_, item) = k.sig.split_once(':').unwrap_or(("", &k.sig));
+        return Some(match item.split_once("->") {
+            Some((from, to)) => format!("-- yavs cov exclude transition {from} -> {to}"),
+            None => format!("-- yavs cov exclude state {item}"),
+        });
+    }
     if e.operands.is_empty() {
         return None;
     }
