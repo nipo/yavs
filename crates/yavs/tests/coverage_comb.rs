@@ -612,7 +612,7 @@ fn directives_are_checked_without_coverage() {
         (
             "    -- yavs cov exclude (valid)\n    if valid and ready then n <= 1; end if;",
             "E2020",
-            &["expected `name=value`"],
+            &["expected `input=value`"],
         ),
         (
             "    -- yavs cov exclude 01 impossible\n    if valid and ready then n <= 1; end if;",

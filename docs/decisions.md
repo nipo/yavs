@@ -2446,6 +2446,14 @@ scalars; the on-disk format is implementation-defined, so it is fixed here (yavs
 
 ## Coverage exclusions (yavs-cov, CLI, #351, user, 2026-10-19)
 
+- **Operand text of waivers (maintainer, 2026-11-01, #1020):** a named input is any operand's text, compared
+  by `yavs_diag::operand::key` (no comments, blanks or outer parentheses, lower case outside literals). A positional
+  waiver stores its operands in the `.ycov` (version 8). A directive is re-resolved at every run and within a run
+  always fits, so the only place its inputs can "no longer match" is between runs: `W0119` when merged databases
+  hold the same directive (file, line, rule) with other operand keys. A directive that also moved a line is not
+  matched: guessing identity would warn about unrelated directives. Changed text means another hash and so another
+  item, with no requirement hidden from the other run, so it is a warning and `E0137` keeps its meaning; `merge`
+  treats waivers that differ only in stored text as one.
 - **Library, entity and process rows (maintainer, 2026-11-01, #1020):** every database line of version 7 ends
   in the unit (`library.entity` of the instance, or the package) and, except toggles, the process label: per item,
   not per path, since one path can be bound to another entity in another test. They are metadata from the

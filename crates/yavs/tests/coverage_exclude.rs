@@ -514,3 +514,158 @@ fn names_do_not_change_with_threads() {
     );
     assert_eq!(a, b);
 }
+
+/// A design with one decision under a directive, analysed and run into `name.ycov`.
+fn decision(tmp: &Path, name: &str, cond: &str, directive: &str) -> Output {
+    write(
+        tmp,
+        "d.vhd",
+        &format!(
+            "entity d is end entity;\narchitecture a of d is\n  signal x, y : integer := 0;\n  \
+             signal r : bit := '1';\nbegin\n  process begin\n    -- yavs cov exclude {directive}\n    \
+             if {cond} then\n      y <= 1;\n    end if;\n    wait;\n  end process;\nend architecture;\n"
+        ),
+    );
+    let o = yavs(tmp, &["analyze", "--work=work:lib", "d.vhd"]);
+    if !o.status.success() {
+        return o;
+    }
+    yavs(
+        tmp,
+        &[
+            "run",
+            "--work=work:lib",
+            &format!("--cov={name}.ycov"),
+            "--cov-kind=combination",
+            "d",
+        ],
+    )
+}
+
+#[test]
+fn named_inputs_take_any_operand_text() {
+    let tmp = tempdir("named");
+    for form in [
+        "(x > 3 = false, r = '1' = true)",
+        "(X>3=false)",
+        "( ( x  >  3 ) = false )",
+        "condition (x > 3 = true)",
+    ] {
+        let o = decision(&tmp, "n", "x > 3 or r = '1'", form);
+        let e = text(&o.stderr);
+        assert!(o.status.success() && !e.contains("error"), "{form}: {e}");
+        let r = yavs(&tmp, &["cov", "report", "n.ycov", "--exclusions"]);
+        assert!(
+            text(&r.stdout).contains("applied") || text(&r.stdout).contains("matches"),
+            "{form}"
+        );
+    }
+    // Not an input: the error lists them and says how to write one, with a near one.
+    let o = decision(&tmp, "n", "x > 3 or r = '1'", "(x > 4 = false)");
+    assert_eq!(o.status.code(), Some(1), "{}", text(&o.stderr));
+    let e = text(&o.stderr);
+    assert!(
+        e.contains("error[E2022]") && e.contains("inputs, in order"),
+        "{e}"
+    );
+    assert!(e.contains("`x>3`"), "{e}");
+    let o = decision(&tmp, "n", "x > 3 or x > 3", "(x > 3 = false)");
+    let e = text(&o.stderr);
+    assert!(
+        e.contains("error[E2022]") && e.contains("is 2 inputs"),
+        "{e}"
+    );
+}
+
+#[test]
+fn a_positional_directive_warns_when_its_inputs_change_under_it() {
+    let tmp = tempdir("positional");
+    assert!(
+        decision(&tmp, "a", "x > 3 or r = '1'", "01")
+            .status
+            .success()
+    );
+    // Another formatting of the same operands: the same meaning, no warning.
+    assert!(decision(&tmp, "b", "x>3 or R='1'", "01").status.success());
+    let o = yavs(
+        &tmp,
+        &["cov", "merge", "a.ycov", "b.ycov", "-o", "same.ycov"],
+    );
+    assert!(
+        o.status.success() && text(&o.stderr).is_empty(),
+        "{}",
+        text(&o.stderr)
+    );
+    // The operands swapped under the directive.
+    assert!(
+        decision(&tmp, "c", "r = '1' or x > 3", "01")
+            .status
+            .success()
+    );
+    let o = yavs(&tmp, &["cov", "merge", "a.ycov", "c.ycov", "-o", "m.ycov"]);
+    let e = text(&o.stderr);
+    assert!(o.status.success(), "a warning, not an error: {e}");
+    assert!(e.contains("warning[W0119]") && e.contains("d.vhd:7"), "{e}");
+    assert!(
+        e.contains("x > 3, r = '1'") && e.contains("r = '1', x > 3"),
+        "{e}"
+    );
+    // It stays in the merged file, and follows -W.
+    let o = yavs(&tmp, &["cov", "report", "m.ycov", "--total"]);
+    assert!(text(&o.stderr).contains("W0119"), "{}", text(&o.stderr));
+    let o = yavs(
+        &tmp,
+        &["cov", "report", "a.ycov", "c.ycov", "-Wno-W0119", "--total"],
+    );
+    assert!(!text(&o.stderr).contains("W0119"), "{}", text(&o.stderr));
+    let o = yavs(
+        &tmp,
+        &["cov", "report", "a.ycov", "c.ycov", "-Werror", "--total"],
+    );
+    assert_eq!(o.status.code(), Some(1));
+    // One run alone has nothing to compare; the named form says what it means.
+    let o = yavs(&tmp, &["cov", "report", "a.ycov", "--total"]);
+    assert!(text(&o.stderr).is_empty(), "{}", text(&o.stderr));
+    assert!(
+        decision(&tmp, "e", "x > 3 or r = '1'", "(r = '1' = true)")
+            .status
+            .success()
+    );
+    assert!(
+        decision(&tmp, "f", "r = '1' or x > 3", "(r = '1' = true)")
+            .status
+            .success()
+    );
+    let o = yavs(&tmp, &["cov", "report", "e.ycov", "f.ycov", "--total"]);
+    assert!(!text(&o.stderr).contains("W0119"), "{}", text(&o.stderr));
+}
+
+/// A waiver on one side only stays the error it was, whatever the operand text.
+#[test]
+fn e0137_is_unchanged_by_the_operand_text() {
+    let tmp = tempdir("conflict");
+    assert!(
+        decision(&tmp, "a", "x > 3 or r = '1'", "01")
+            .status
+            .success()
+    );
+    let o = yavs(
+        &tmp,
+        &[
+            "run",
+            "--work=work:lib",
+            "--cov=b.ycov",
+            "--cov-kind=combination",
+            "--coverage-directives=ignore",
+            "d",
+        ],
+    );
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    let o = yavs(&tmp, &["cov", "merge", "a.ycov", "b.ycov", "-o", "m.ycov"]);
+    assert_eq!(o.status.code(), Some(1));
+    assert!(
+        text(&o.stderr).contains("error[E0137]"),
+        "{}",
+        text(&o.stderr)
+    );
+}

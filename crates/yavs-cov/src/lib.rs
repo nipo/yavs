@@ -126,7 +126,13 @@ pub struct Waiver {
     /// Where the directive is.
     pub file: String,
     pub line: u32,
+    /// A positional directive: the inputs its positions meant when the run was made, as written with
+    /// blanks collapsed. Empty for a named one, and in a database older than version 8.
+    pub operands: Vec<String>,
 }
+
+/// A positional directive whose inputs differ between merged runs.
+pub const OPERANDS_CHANGED: &str = "W0119";
 
 pub mod exclude;
 pub mod exclusions;
@@ -151,13 +157,15 @@ pub struct Database {
     pub no_units: bool,
 }
 
-const MAGIC: &str = "yavs-coverage 7";
+const MAGIC: &str = "yavs-coverage 8";
 /// Older versions [`Database::parse`] still reads: 2 has no toggles, 2 and 3 no tests, 4 no
-/// conditions, 5 no combinations and no in-source exclusions, 6 no units and process labels.
+/// conditions, 5 no combinations and no in-source exclusions, 6 no units and process labels, 7 no
+/// operand texts of its waivers.
 const OLD: &[&str] = &["yavs-coverage 2", "yavs-coverage 3"];
 const V4: &str = "yavs-coverage 4";
 const V5: &str = "yavs-coverage 5";
 const V6: &str = "yavs-coverage 6";
+const V7: &str = "yavs-coverage 7";
 
 /// `line` without its `--` comment (a `--` inside a string literal is text).
 fn uncommented(line: &str) -> &str {
@@ -445,6 +453,22 @@ pub fn collect(
                     .iter()
                     .filter(|w| state & w.care == w.want)
                     .map(|w| Waiver {
+                        // A named directive says what it means whatever the order of the inputs.
+                        operands: if w.rule.contains('(') {
+                            Vec::new()
+                        } else {
+                            k.inputs
+                                .iter()
+                                .map(|s| {
+                                    let t = at(*s);
+                                    let lines = t.lines().map(uncommented);
+                                    lines
+                                        .flat_map(str::split_whitespace)
+                                        .collect::<Vec<_>>()
+                                        .join(" ")
+                                })
+                                .collect()
+                        },
                         rule: w.rule.clone(),
                         reason: w.reason.replace('\t', " "),
                         file: db.sources.get(w.at.file).path.clone(),
@@ -720,8 +744,12 @@ impl Database {
                         .iter()
                         .map(|w| {
                             format!(
-                                "{}\u{1f}{}\u{1f}{}\u{1f}{}",
-                                w.rule, w.reason, w.file, w.line
+                                "{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}",
+                                w.rule,
+                                w.reason,
+                                w.file,
+                                w.line,
+                                w.operands.join("\u{1d}")
                             )
                         })
                         .collect();
@@ -771,13 +799,13 @@ impl Database {
         let mut lines = text.lines();
         let head = lines.next();
         let old = head.is_some_and(|h| OLD.contains(&h));
-        let known = [MAGIC, V6, V5, V4].iter().any(|v| head == Some(*v));
+        let known = [MAGIC, V7, V6, V5, V4].iter().any(|v| head == Some(*v));
         if !known && !old {
             return Err(format!("not a yavs coverage database (no `{MAGIC}` line)"));
         }
-        let with_units = head == Some(MAGIC);
+        let with_units = head == Some(MAGIC) || head == Some(V7);
         let mut db = Database {
-            legacy: head != Some(MAGIC) && head != Some(V6),
+            legacy: !with_units && head != Some(V6),
             no_units: !with_units,
             ..Database::default()
         };
@@ -858,10 +886,18 @@ impl Database {
                     };
                     for x in w.split('\u{1e}').filter(|x| *x != "-") {
                         let p: Vec<&str> = x.split('\u{1f}').collect();
-                        let [rule, reason, file, line] = p[..] else {
-                            return Err(bad());
+                        // The operands: since version 8.
+                        let (rule, reason, file, line, operands) = match p[..] {
+                            [r, why, f, n] => (r, why, f, n, ""),
+                            [r, why, f, n, o] => (r, why, f, n, o),
+                            _ => return Err(bad()),
                         };
                         waivers.push(Waiver {
+                            operands: operands
+                                .split('\u{1d}')
+                                .filter(|o| !o.is_empty())
+                                .map(str::to_string)
+                                .collect(),
                             rule: rule.into(),
                             reason: reason.into(),
                             file: file.into(),
@@ -960,8 +996,14 @@ impl Database {
                         ));
                         x.waivers.clear();
                     } else {
+                        // One directive whatever the operand text of each run: an older database
+                        // has none, and [`Database::operand_changes`] reports a difference.
                         for w in e.waivers {
-                            if !x.waivers.contains(&w) {
+                            let same = |y: &Waiver| {
+                                (&y.rule, &y.reason, &y.file, y.line)
+                                    == (&w.rule, &w.reason, &w.file, w.line)
+                            };
+                            if !x.waivers.iter().any(same) {
                                 x.waivers.push(w);
                             }
                         }
@@ -979,6 +1021,44 @@ impl Database {
             }
         }
         conflicts
+    }
+
+    /// Warnings for each positional directive whose inputs differ between the runs merged here: its
+    /// positions meant other operands in one of them, so its waiver may no longer say what it was
+    /// written for. Formatting does not count, nor does a database that did not store the text. The
+    /// items themselves are different items then, each with its own requirements, so this is not
+    /// the conflict of `merge` (a requirement one run waives and another keeps).
+    pub fn operand_changes(&self) -> Vec<Diagnostic> {
+        type Seen<'a> = BTreeMap<String, &'a [String]>;
+        let mut by: BTreeMap<(&str, u32, &str), Seen> = BTreeMap::new();
+        for w in self.items.values().flat_map(|e| &e.waivers) {
+            if !w.operands.is_empty() {
+                let key = w.operands.iter().map(|o| yavs_diag::operand::key(o));
+                by.entry((&w.file, w.line, &w.rule))
+                    .or_default()
+                    .entry(key.collect::<Vec<_>>().join("\u{1d}"))
+                    .or_insert(&w.operands);
+            }
+        }
+        by.into_iter()
+            .filter(|x| x.1.len() > 1)
+            .map(|((file, line, rule), seen)| {
+                let mut d = Diagnostic::warning(
+                    OPERANDS_CHANGED,
+                    format!(
+                        "{file}:{line}: the positions of the exclusion `{rule}` mean different inputs in the merged databases"
+                    ),
+                );
+                for o in seen.values() {
+                    d = d.with_note(format!("in one run: {}", o.join(", ")));
+                }
+                d.with_help(
+                    "the operands were reordered or replaced under a positional directive: check that it \
+                     still waives what it should and run the simulations again, or use the named form, \
+                     which does not depend on the order",
+                )
+            })
+            .collect()
     }
 
     /// Make this the database of one run of test `name`: every item that ran was hit by it.
@@ -1519,13 +1599,14 @@ mod tests {
         let waiver = Waiver {
             rule: "01".into(),
             reason: "impossible handshake".into(),
+            operands: Vec::new(),
             file: "a.vhd".into(),
             line: 2,
         };
         let mut d = Database::default();
         d.items.insert(key.clone(), entry(2, vec![waiver.clone()]));
         let text = d.write();
-        assert!(text.starts_with("yavs-coverage 7\n"));
+        assert!(text.starts_with("yavs-coverage 8\n"));
         let back = Database::parse(&text).unwrap();
         assert_eq!(back, d);
         assert_eq!(pattern(&key), "01");
@@ -1543,6 +1624,55 @@ mod tests {
         assert_eq!(conflicts.len(), 1, "{conflicts:?}");
         assert!(conflicts[0].contains("a.vhd:2"));
         assert!(m.items[&key].waivers.is_empty());
+    }
+
+    #[test]
+    fn waivers_keep_their_operands() {
+        let waiver = |operands: &[&str]| Waiver {
+            rule: "01".into(),
+            reason: "why".into(),
+            file: "a.vhd".into(),
+            line: 4,
+            operands: operands.iter().map(|o| o.to_string()).collect(),
+        };
+        let db = |hash, w: Waiver| {
+            let (k, mut e) = item(":t", Kind::Combination(9), hash, 5, 0);
+            let k = Key {
+                sig: format!("a{INPUT_SEP}b"),
+                ..k
+            };
+            e.waivers = vec![w];
+            let mut d = Database::default();
+            d.items.insert(k, e);
+            d
+        };
+        let a = db(1, waiver(&["count > 3", "b"]));
+        let back = Database::parse(&a.write()).unwrap();
+        assert_eq!(
+            back.items.values().next().unwrap().waivers[0].operands,
+            ["count > 3", "b"]
+        );
+        // No operand text (a named directive, an older database) reads back as none.
+        let n = db(1, waiver(&[]));
+        let back = Database::parse(&n.write()).unwrap();
+        assert!(
+            back.items.values().next().unwrap().waivers[0]
+                .operands
+                .is_empty()
+        );
+        // Formatting is one meaning, another order is not, and text that is absent says nothing.
+        let merge = |x: &Database, y: Database| {
+            let mut m = x.clone();
+            assert!(m.merge(y).is_empty());
+            m.operand_changes().len()
+        };
+        assert_eq!(merge(&a, db(2, waiver(&["COUNT>3", "(b)"]))), 0);
+        assert_eq!(merge(&a, db(2, waiver(&["b", "count > 3"]))), 1);
+        assert_eq!(merge(&a, db(2, waiver(&[]))), 0);
+        // The same item with and without text is one directive, not two.
+        let mut m = a.clone();
+        assert!(m.merge(db(1, waiver(&[]))).is_empty());
+        assert_eq!(m.items.values().next().unwrap().waivers.len(), 1);
     }
 
     #[test]

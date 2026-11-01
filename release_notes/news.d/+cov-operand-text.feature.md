@@ -1,0 +1,1 @@
+A named coverage exclusion takes any operand by its text, such as `(count > 3 = false)`. A positional one stores its operands in the database, and merging warns (`W0119`) when the operands changed under the directive.

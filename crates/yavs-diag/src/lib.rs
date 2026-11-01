@@ -31,6 +31,7 @@
 //! that gives the seed of a shuffled run.
 
 pub mod files;
+pub mod operand;
 mod path;
 mod shared;
 pub mod suggest;

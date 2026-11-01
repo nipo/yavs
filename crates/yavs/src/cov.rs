@@ -216,7 +216,7 @@ fn settings(config: Option<&PathBuf>) -> Result<Settings, Box<Diagnostic>> {
     })
 }
 
-fn merged(inputs: &[PathBuf]) -> Result<Database, Box<Diagnostic>> {
+fn merged(out: &mut Out, inputs: &[PathBuf]) -> Result<Database, Box<Diagnostic>> {
     let mut db = Database::default();
     for p in inputs {
         let d = std::fs::read_to_string(p)
@@ -254,6 +254,9 @@ fn merged(inputs: &[PathBuf]) -> Result<Database, Box<Diagnostic>> {
                 ));
             }
         }
+    }
+    for w in db.operand_changes() {
+        out.emit(&SourceMap::default(), &w);
     }
     Ok(db)
 }
@@ -521,7 +524,7 @@ pub fn run(c: Command, format: MessageFormat, color: bool) -> ExitCode {
     let mut out = Out::new(format, color);
     let r = match c {
         Command::Merge { output, inputs } => {
-            merged(&inputs).and_then(|db| write(&output, db.write()))
+            merged(&mut out, &inputs).and_then(|db| write(&output, db.write()))
         }
         Command::Report {
             cobertura,
@@ -541,7 +544,7 @@ pub fn run(c: Command, format: MessageFormat, color: bool) -> ExitCode {
             .set_warn(&warn)
             .and_then(|()| settings(config.as_ref()))
             .and_then(|mut set| {
-                merged(&inputs).map(|db| {
+                merged(&mut out, &inputs).map(|db| {
                     set.exclude.extend(exclude);
                     (db, set)
                 })
@@ -571,7 +574,7 @@ pub fn run(c: Command, format: MessageFormat, color: bool) -> ExitCode {
             .set_warn(&warn)
             .and_then(|()| settings(config.as_ref()))
             .and_then(|mut set| {
-                merged(&inputs).map(|db| {
+                merged(&mut out, &inputs).map(|db| {
                     set.exclude.extend(exclude);
                     (db, set.exclude)
                 })

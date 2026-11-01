@@ -445,6 +445,19 @@ fn bind(
             _ => None,
         })
         .collect();
+    // Each input as a named exclusion may write it: any formatting.
+    let texts: Vec<String> = dec
+        .leaves
+        .iter()
+        .map(|l| {
+            let s = db.exprs[l.expr].span;
+            let t = src
+                .text()
+                .get(src.text_offset(s.start)..src.text_offset(s.end))
+                .unwrap_or("");
+            yavs_diag::operand::key(t)
+        })
+        .collect();
     let order = || {
         (0..n)
             .map(|i| {
@@ -488,16 +501,17 @@ fn bind(
         Spec::Named(list) => {
             let mut done: Vec<usize> = Vec::new();
             for (name, at, value) in list {
-                let key = name.to_ascii_lowercase();
+                let key = yavs_diag::operand::key(name);
                 let hits: Vec<usize> = (0..n)
                     .filter(|&i| {
-                        names[i].as_ref().is_some_and(|x| {
-                            if name.starts_with('\\') {
-                                x == name
-                            } else {
-                                x.to_ascii_lowercase() == key
-                            }
-                        })
+                        texts[i] == key
+                            || names[i].as_ref().is_some_and(|x| {
+                                if name.starts_with('\\') {
+                                    x == name
+                                } else {
+                                    x.eq_ignore_ascii_case(name)
+                                }
+                            })
                     })
                     .collect();
                 let i = match hits[..] {
@@ -514,6 +528,7 @@ fn bind(
                             .iter()
                             .flatten()
                             .map(|x| (x.to_ascii_lowercase(), x.as_str()))
+                            .chain(texts.iter().map(|x| (x.clone(), x.as_str())))
                             .collect();
                         if let Some(h) = yavs_sem::suggest::suggest(
                             &key,
@@ -523,8 +538,8 @@ fn bind(
                             e = e.with_help(h);
                         } else {
                             e = e.with_help(
-                                "an input that is not a plain name is addressed by its position: \
-                                 write the pattern form, such as `01-`",
+                                "write the input as the note lists it, in any formatting, or address it \
+                                 by its position with the pattern form, such as `01-`",
                             );
                         }
                         return vec![e];
@@ -727,7 +742,7 @@ fn parse(file: FileId, start: u32, text: &str) -> Parsed {
     cur.blank();
     let spec_at = cur.at;
     let spec = if cur.s.starts_with('(') {
-        let Some(close) = cur.s.find(')') else {
+        let Some(close) = closing_paren(cur.s) else {
             return fail(
                 SYNTAX,
                 "missing `)` in the exclusion".into(),
@@ -745,45 +760,38 @@ fn parse(file: FileId, start: u32, text: &str) -> Parsed {
                 "the exclusion names no input".into(),
                 spec_at,
                 close + 1,
-                "expected `name=true` or `name=false`",
+                "expected `input=true` or `input=false`",
             );
         }
-        for part in inner.split(',') {
+        for part in top_commas(inner) {
             let lead = part.len() - part.trim_start().len();
             let p = part.trim();
             let at = off + lead;
             off += part.len() + 1;
-            let Some((name, value)) = p.split_once('=') else {
+            let Some(eq) = value_sign(p) else {
                 return fail(
                     SYNTAX,
-                    format!("expected `name=value`, found `{p}`"),
+                    format!("expected `input=value`, found `{p}`"),
                     at,
                     p.len(),
                     "missing `=`",
                 );
             };
-            let (name, value) = (name.trim(), value.trim());
-            if name.is_empty()
-                || !name
-                    .chars()
-                    .all(|c| c.is_alphanumeric() || c == '_' || c == '\\')
-            {
+            let (name, value) = (p[..eq].trim(), p[eq + 1..].trim());
+            if name.is_empty() {
                 return fail(
                     SYNTAX,
-                    format!("`{name}` is not an input name"),
+                    "an exclusion needs an input before `=`".to_string(),
                     at,
-                    name.len(),
-                    "expected an identifier",
+                    p.len(),
+                    "expected an input of the expression",
                 );
             }
             let v = match value.to_ascii_lowercase().as_str() {
                 "true" => true,
                 "false" => false,
                 other => {
-                    let vat = at
-                        + p.find('=').map_or(0, |i| i + 1)
-                        + (p[p.find('=').map_or(0, |i| i + 1)..].len()
-                            - p[p.find('=').map_or(0, |i| i + 1)..].trim_start().len());
+                    let vat = at + eq + 1 + (p[eq + 1..].len() - p[eq + 1..].trim_start().len());
                     let mut e =
                         Diagnostic::error(VALUE, format!("invalid Boolean value `{value}`"))
                             .with_primary(
@@ -859,6 +867,66 @@ fn parse(file: FileId, start: u32, text: &str) -> Parsed {
         rule: spec.1,
         reason,
     })
+}
+
+/// The byte offsets and characters of `s` that are outside string and character literals and
+/// extended identifiers, with the depth of parentheses there.
+fn outside_literals(s: &str) -> Vec<(usize, char, i32)> {
+    let mut out = Vec::new();
+    let mut depth = 0;
+    let mut lit = None;
+    let mut skip = 0;
+    for (i, c) in s.char_indices() {
+        if skip > 0 {
+            skip -= 1;
+            continue;
+        }
+        match lit {
+            Some(q) if q == c => lit = None,
+            Some(_) => {}
+            None => match c {
+                '"' | '\\' => lit = Some(c),
+                '\'' if yavs_diag::operand::char_literal(s, i) => skip = 2,
+                _ => {
+                    depth -= i32::from(c == ')');
+                    out.push((i, c, depth));
+                    depth += i32::from(c == '(');
+                }
+            },
+        }
+    }
+    out
+}
+
+/// The `)` that closes the `(` that `s` starts with.
+fn closing_paren(s: &str) -> Option<usize> {
+    let all = outside_literals(s);
+    all.iter().find(|x| x.1 == ')' && x.2 == 0).map(|x| x.0)
+}
+
+/// `s` split at its commas outside parentheses and literals.
+fn top_commas(s: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut from = 0;
+    for (i, c, depth) in outside_literals(s) {
+        if c == ',' && depth == 0 {
+            parts.push(&s[from..i]);
+            from = i + 1;
+        }
+    }
+    parts.push(&s[from..]);
+    parts
+}
+
+/// The `=` of `input=value`: the last one outside parentheses and literals that is not part of `/=`,
+/// `<=`, `>=` or `?=`, so an input may hold `=`.
+fn value_sign(s: &str) -> Option<usize> {
+    let all = outside_literals(s);
+    let of_op = |i: usize| matches!(s[..i].chars().next_back(), Some('/' | '<' | '>' | '?'));
+    all.iter()
+        .rev()
+        .find(|x| x.1 == '=' && x.2 == 0 && !of_op(x.0))
+        .map(|x| x.0)
 }
 
 fn kind_word(kind: Option<bool>) -> &'static str {
@@ -953,6 +1021,65 @@ mod tests {
         assert_eq!(d.reason, "idle");
         let d = directive("-- yavs cov exclude (reset=true)");
         assert_eq!(d.reason, "");
+    }
+
+    #[test]
+    fn named_inputs_take_any_operand_text() {
+        let names = |t: &str| match directive(t).spec {
+            Spec::Named(n) => n
+                .into_iter()
+                .map(|x| (x.0, x.2))
+                .collect::<Vec<(String, bool)>>(),
+            Spec::Pattern(..) => panic!("{t}"),
+        };
+        let one = |s: &str, v| vec![(s.to_string(), v)];
+        assert_eq!(
+            names("-- yavs cov exclude (count > 3 = false)"),
+            one("count > 3", false)
+        );
+        assert_eq!(
+            names("-- yavs cov exclude (a /= b = true)"),
+            one("a /= b", true)
+        );
+        assert_eq!(
+            names("-- yavs cov exclude (a <= b=false): why"),
+            one("a <= b", false)
+        );
+        assert_eq!(
+            names("-- yavs cov exclude (en = '1' = true)"),
+            one("en = '1'", true)
+        );
+        assert_eq!(
+            names("-- yavs cov exclude (c = ')' = true)"),
+            one("c = ')'", true)
+        );
+        assert_eq!(
+            names("-- yavs cov exclude (c = ',' = true)"),
+            one("c = ','", true)
+        );
+        assert_eq!(
+            names("-- yavs cov exclude (s = \"a,)\" = true)"),
+            one("s = \"a,)\"", true)
+        );
+        assert_eq!(
+            names("-- yavs cov exclude (f(a, b) = true)"),
+            one("f(a, b)", true)
+        );
+        assert_eq!(
+            names("-- yavs cov exclude ((a) = true, b'length > 1 = false)"),
+            vec![
+                ("(a)".to_string(), true),
+                ("b'length > 1".to_string(), false)
+            ]
+        );
+        let d = directive("-- yavs cov exclude (f(a, b) = true): the reason");
+        assert_eq!(d.reason, "the reason");
+        // No value sign of its own: `/=` and `<=` are not one.
+        assert_eq!(error("-- yavs cov exclude (a /= b)").0, SYNTAX);
+        assert_eq!(error("-- yavs cov exclude (a <= b)").0, SYNTAX);
+        assert_eq!(error("-- yavs cov exclude (= true)").0, SYNTAX);
+        assert_eq!(error("-- yavs cov exclude (a = b)").0, VALUE);
+        assert_eq!(error("-- yavs cov exclude (f(a = true)").0, SYNTAX);
     }
 
     #[test]

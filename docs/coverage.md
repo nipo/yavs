@@ -189,6 +189,7 @@ The short forms are the same exclusions:
 ```vhdl
 -- yavs cov exclude 01: impossible handshake       -- one symbol per input, in source order
 -- yavs cov exclude (valid=false, ready=true)      -- named inputs; the others are unrestricted
+-- yavs cov exclude (count > 3 = false)            -- any operand, by its text
 -- yavs cov exclude 1--: reset handled elsewhere   -- for: if reset or (valid and ready) then
 active <= enable and not fault;                    -- an assignment: exclude expression ... or the short form
 ```
@@ -203,8 +204,16 @@ active <= enable and not fault;                    -- an assignment: exclude exp
   itself, before a `not` in front of it: for `enable and not fault`, `01` is `enable` false,
   `fault` true. Reordering the operands changes what a positional exclusion means; the named form does not
   care. Exactly one symbol per input: a pattern is never padded.
-- A named input must be a plain name (`valid`); other operands (a relation, a function call) are
-  addressed by position. A name that is two inputs, or not an input, is an error.
+- A named input is the operand's text in the source: `valid`, `count > 3`, `f(a, b)`, `en = '1'`. The value
+  follows the last `=`, so `(en = '1' = true)` is the operand `en = '1'`. Case, blanks and outer parentheses do not
+  count, so `(COUNT>3 = false)` is the same input; case in a string, character literal or extended identifier does.
+  Text that is two inputs, or not an input, is an error that lists the inputs, with a near one if there is one.
+- A positional directive stores the text of its operands in the `.ycov`. When merged databases show the same
+  directive with other operands (they were reordered or replaced under it), that is warning `W0119`, naming both
+  lists, since a position now means another input. Formatting alone does not count. This compares runs, so one
+  database has nothing to compare, and a directive that also moved to another line is not recognised as the same one.
+  Those decisions are different items with their own requirements, so it is a warning and not `E0137`. A named
+  directive stores nothing and never warns: reordering does not change what it means.
 - Consecutive comments (comments and blank lines may stand between them) apply to the construct
   that follows. Before an `if` they apply to its condition only, not to its `elsif`s or nested
   decisions; a comment right before an `elsif` applies to that condition. A directive before a
@@ -231,7 +240,7 @@ error[E2021]: exclusion has 2 positions, but the expression has 3 inputs
    = help: provide one symbol per input; use `-` for an unrestricted input
 ```
 
-A malformed directive is an error (codes `E2020` to `E2025`: syntax, pattern, operand name, value,
+A malformed directive is an error (codes `E2020` to `E2025`: syntax, pattern, operand, value,
 target, command), with a hint when a name is close (`vlaid` for `valid`). It is never repaired or
 partly applied. A duplicate or already covered exclusion is warning `W2020`, exclusions that waive
 every combination `W2021`, one that matches no combination `W2022` (on booleans the right operand
@@ -434,6 +443,7 @@ warning into an error, or when the total is below `--fail-under`; a malformed op
 | `W0113` | a `coverage on` without a preceding `coverage off` |
 | `W0114` | an excluded item did run |
 | `W0115` | a signal was left out of toggle coverage because of `--cov-toggle-max` |
+| `W0119` | merged databases disagree about the operands under a positional `-- yavs coverage exclude` directive |
 
 **Tiers and threads.** Counts are the same in every tier and at any `--threads`.
 
