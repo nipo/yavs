@@ -1645,3 +1645,102 @@ fn exception_filters_and_find() {
     send("disconnect", serde_json::json!({}));
     let _ = child.wait();
 }
+
+/// #1032: `analyzed` is the spelling the file is analyzed under (relative to the scratch
+/// directory), `bp` the client's; both name one file. `map` is `--source-map` FROM=TO. Whether the
+/// breakpoint on line 5 (the `report`) is verified.
+fn spelled_breakpoint(analyzed: &str, bp: &str, map: Option<(&str, &str)>) -> bool {
+    let d = tempdir("dap-spelling");
+    std::fs::create_dir(d.join("sub")).expect("sub");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&*d, d.join("link")).expect("symlink");
+    std::fs::write(
+        d.join("t.vhd"),
+        "entity t is end;\narchitecture a of t is\nbegin\n  process begin\n    report \"here\";\n    wait;\n  end process;\nend;\n",
+    )
+    .expect("write");
+    let ok = yavs()
+        .current_dir(&d)
+        .args(["analyze", "--work=work:lib"])
+        .arg(analyzed)
+        .status()
+        .expect("yavs")
+        .success();
+    assert!(ok, "analyze failed");
+    let flag = map.map(|(from, to)| {
+        format!(
+            "--source-map={}={}",
+            d.join(from).display(),
+            d.join(to).display()
+        )
+    });
+    let mut extra = vec!["--dap=stdio"];
+    extra.extend(flag.as_deref());
+    let mut child = spawn(&d, "t", &extra);
+    let _w = Watchdog::new(child.id(), 60);
+    let mut c = stdio_client(&mut child);
+    c.request("initialize", json!({"adapterID": "yavs"}));
+    c.request("launch", json!({}));
+    let r = c.request(
+        "setBreakpoints",
+        json!({"source": {"path": d.join(bp)}, "breakpoints": [{"line": 5}]}),
+    );
+    let verified = r["body"]["breakpoints"][0]["verified"] == true;
+    c.request("disconnect", json!({}));
+    let _ = child.kill();
+    verified
+}
+
+#[test]
+fn a_breakpoint_matches_a_file_spelled_through_dotdot() {
+    assert!(spelled_breakpoint("t.vhd", "t.vhd", None));
+    assert!(spelled_breakpoint("sub/../t.vhd", "t.vhd", None));
+    assert!(spelled_breakpoint("t.vhd", "sub/../t.vhd", None));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_breakpoint_matches_a_file_spelled_through_a_symlink() {
+    assert!(spelled_breakpoint("link/t.vhd", "t.vhd", None));
+    assert!(spelled_breakpoint("t.vhd", "link/t.vhd", None));
+}
+
+/// The original of a source map need not exist: it is cleaned of `..` as far as it can be.
+#[test]
+fn a_source_map_matches_a_file_spelled_through_dotdot() {
+    assert!(spelled_breakpoint(
+        "t.vhd",
+        "o.vhd",
+        Some(("t.vhd", "o.vhd"))
+    ));
+    assert!(spelled_breakpoint(
+        "sub/../t.vhd",
+        "o.vhd",
+        Some(("t.vhd", "o.vhd"))
+    ));
+    assert!(spelled_breakpoint(
+        "t.vhd",
+        "o.vhd",
+        Some(("sub/../t.vhd", "o.vhd"))
+    ));
+    assert!(spelled_breakpoint(
+        "t.vhd",
+        "sub/../o.vhd",
+        Some(("t.vhd", "o.vhd"))
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_source_map_matches_a_file_spelled_through_a_symlink() {
+    assert!(spelled_breakpoint(
+        "link/t.vhd",
+        "o.vhd",
+        Some(("t.vhd", "o.vhd"))
+    ));
+    assert!(spelled_breakpoint(
+        "t.vhd",
+        "o.vhd",
+        Some(("link/t.vhd", "o.vhd"))
+    ));
+}

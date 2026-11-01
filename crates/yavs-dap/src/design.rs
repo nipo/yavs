@@ -467,11 +467,34 @@ pub(crate) fn absolute(p: &str) -> String {
     std::path::absolute(p).map_or_else(|_| p.to_string(), |c| c.display().to_string())
 }
 
-/// The key a breakpoint's file is matched by. Clients differ in the case of Windows drive
-/// letters.
+/// The key a breakpoint's file is matched by: one file is one key however its path is spelled
+/// (`..`, symlinks, `\\?\` on Windows), as `yavs-sem`'s `same_file` takes it. A path that does not
+/// exist (a source map's original, a moved build tree) is resolved as far as it exists, then
+/// cleaned of `.` and `..`. Clients differ in the case of Windows drive letters.
 fn file_key(p: &str) -> String {
-    let a = absolute(p);
-    if cfg!(windows) { a.to_lowercase() } else { a }
+    let a = std::path::absolute(p).unwrap_or_else(|_| p.into());
+    let c: Vec<_> = a.components().collect();
+    let resolved = (1..=c.len()).rev().find_map(|n| {
+        let head = c[..n]
+            .iter()
+            .collect::<std::path::PathBuf>()
+            .canonicalize()
+            .ok()?;
+        Some(c[n..].iter().fold(head, |mut r, x| {
+            match x {
+                std::path::Component::ParentDir => drop(r.pop()),
+                std::path::Component::CurDir => {}
+                x => r.push(x),
+            }
+            r
+        }))
+    });
+    let s = resolved.unwrap_or(a).display().to_string();
+    let s = match s.strip_prefix(r"\\?\UNC\") {
+        Some(unc) => format!(r"\\{unc}"),
+        None => s.strip_prefix(r"\\?\").map_or(s.clone(), str::to_string),
+    };
+    if cfg!(windows) { s.to_lowercase() } else { s }
 }
 
 /// The file and line of a declaration, as the debugger shows them.
@@ -487,9 +510,9 @@ pub(crate) fn decl_of(
 
 /// A source path as the debugger shows it (`--source-map`).
 fn shown_path(path: &str, source_map: &[(String, String)]) -> String {
-    let p = absolute(path);
-    let map = source_map.iter().find(|(from, _)| absolute(from) == p);
-    map.map_or(p, |(_, to)| absolute(to))
+    let p = file_key(path);
+    let map = source_map.iter().find(|(from, _)| file_key(from) == p);
+    map.map_or_else(|| absolute(path), |(_, to)| absolute(to))
 }
 
 impl Design {
@@ -511,6 +534,7 @@ impl Design {
             }));
         }
         let mut lines: HashMap<String, BTreeMap<u32, Vec<StmtId>>> = HashMap::new();
+        let mut keys: HashMap<&str, String> = HashMap::new();
         for (id, st) in prog.stmts.iter() {
             let Some(l) = &locs[id.0 as usize] else {
                 continue;
@@ -524,7 +548,11 @@ impl Design {
                 continue;
             }
             lines
-                .entry(file_key(&l.path))
+                .entry(
+                    keys.entry(&l.path)
+                        .or_insert_with(|| file_key(&l.path))
+                        .clone(),
+                )
                 .or_default()
                 .entry(l.line)
                 .or_default()
