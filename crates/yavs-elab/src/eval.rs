@@ -1971,27 +1971,50 @@ pub(crate) fn is_std_ulogic(db: &Db, t: TypeId) -> bool {
 // ---------------------------------------------------------------------------
 // Values of leaves.
 
-/// The scalar values of `v` (of shape `shape`) in row-major order, `None` meaning
-/// the scalar's default (`'left`).
-fn flatten(
+/// The initial value of one leaf while [`fill_leaves`] walks a value: kernel bytes or codes in
+/// row-major order, and the first scalar outside the subtype.
+struct LeafFill {
+    elem: Elem,
+    bit01: bool,
+    range: Option<Bounds>,
+    bytes: Vec<u8>,
+    bad: Option<i64>,
+}
+
+/// The number of leaves of `shape`, without allocating: the leaves of one element.
+fn leaf_count(shape: &Shape) -> usize {
+    match shape {
+        Shape::Scalar { .. } => 1,
+        Shape::Array { elem, .. } => leaf_count(elem),
+        Shape::Record { fields, .. } => fields.iter().map(|(_, f)| leaf_count(f)).sum(),
+    }
+}
+
+/// Append the scalars of `v` (of shape `shape`) to the leaves from `leaf` on, `None` meaning the
+/// scalar's default (`'left`). A large memory is mostly a repeated element, walked once.
+fn fill_leaves(
     shape: &Shape,
     v: Option<&Val>,
-    out: &mut Vec<(Val, Vec<u32>)>,
-    path: &mut Vec<u32>,
+    leaf: usize,
+    out: &mut [LeafFill],
 ) -> Result<(), String> {
     match shape {
         Shape::Scalar { left, .. } => {
-            out.push((v.cloned().unwrap_or_else(|| left.clone()), path.clone()));
+            let x = v.unwrap_or(left);
+            let f = &mut out[leaf];
+            if f.bad.is_none()
+                && let (Some(b), Some(x)) = (&f.range, x.as_int())
+                && b.pos(x).is_none()
+            {
+                f.bad = Some(x);
+            }
+            push_scalar(&mut f.bytes, f.elem, f.bit01, x);
             Ok(())
         }
         Shape::Array { elem, .. } => {
             let n = shape.len();
             match v {
-                None => {
-                    for _ in 0..n {
-                        flatten(elem, None, out, path)?;
-                    }
-                }
+                None => fill_repeated(elem, None, n, leaf, out),
                 Some(Val::Array(a)) => {
                     let have: u64 = a
                         .bounds
@@ -2011,21 +2034,20 @@ fn flatten(
                     match &a.elems {
                         Elems::Bytes(b) => {
                             for &x in b.iter() {
-                                flatten(elem, Some(&Val::Enum(u32::from(x))), out, path)?;
+                                fill_leaves(elem, Some(&Val::Enum(u32::from(x))), leaf, out)?;
                             }
+                            Ok(())
                         }
                         Elems::Runs(rs) => {
                             for (k, x) in rs.iter() {
-                                for _ in 0..*k {
-                                    flatten(elem, Some(x), out, path)?;
-                                }
+                                fill_repeated(elem, Some(x), *k, leaf, out)?;
                             }
+                            Ok(())
                         }
                     }
                 }
-                Some(_) => return Err("expected an array value".into()),
+                Some(_) => Err("expected an array value".into()),
             }
-            Ok(())
         }
         Shape::Record { fields, .. } => {
             let vs = match v {
@@ -2033,83 +2055,116 @@ fn flatten(
                 Some(Val::Record(vs)) if vs.len() == fields.len() => Some(vs),
                 Some(_) => return Err("expected a record value".into()),
             };
+            let mut leaf = leaf;
             for (i, (_, f)) in fields.iter().enumerate() {
-                path.push(i as u32);
-                flatten(f, vs.map(|vs| &vs[i]), out, path)?;
-                path.pop();
+                fill_leaves(f, vs.map(|vs| &vs[i]), leaf, out)?;
+                leaf += leaf_count(f);
             }
             Ok(())
         }
     }
 }
 
+/// `k` elements of shape `elem` and value `v`: one is walked, the others are copies of its bytes.
+fn fill_repeated(
+    elem: &Shape,
+    v: Option<&Val>,
+    k: u64,
+    leaf: usize,
+    out: &mut [LeafFill],
+) -> Result<(), String> {
+    if k == 0 {
+        return Ok(());
+    }
+    let leaves = leaf..leaf + leaf_count(elem);
+    let marks: Vec<usize> = out[leaves.clone()].iter().map(|f| f.bytes.len()).collect();
+    fill_leaves(elem, v, leaf, out)?;
+    for (f, mark) in out[leaves].iter_mut().zip(marks) {
+        let total = (f.bytes.len() - mark) * k as usize;
+        while f.bytes.len() - mark < total {
+            let have = f.bytes.len() - mark;
+            f.bytes
+                .extend_from_within(mark..mark + have.min(total - have));
+        }
+    }
+    Ok(())
+}
+
 /// Initial kernel values of each leaf of `shape`, in leaf order.
 pub fn leaf_values(db: &Db, shape: &Shape, v: Option<&Val>) -> Result<Vec<Value>, String> {
-    let mut flat = Vec::with_capacity(shape.len() as usize);
-    flatten(shape, v, &mut flat, &mut Vec::new())?;
-    let mut out = Vec::with_capacity(1);
-    for (path, leaf, n) in shape.leaves() {
+    let leaves = shape.leaves();
+    let mut fills = Vec::with_capacity(leaves.len());
+    for (_, leaf, n) in &leaves {
         let Shape::Scalar {
-            elem,
-            ty,
-            sub,
-            range,
-            ..
+            elem, ty, range, ..
         } = leaf
         else {
             continue;
         };
-        let xs: Vec<&Val> = flat
-            .iter()
-            .filter(|(_, p)| *p == path)
-            .map(|(v, _)| v)
-            .collect();
-        debug_assert_eq!(xs.len() as u64, n);
-        // Every scalar of the value lies in its (element) subtype (LRM 6.4.2.3, 9.3.3.3, #821).
-        if v.is_some()
-            && let Some(b) = range
-            && let Some(x) = xs
-                .iter()
-                .filter_map(|x| x.as_int())
-                .find(|&x| b.pos(x).is_none())
-        {
+        let width = match elem {
+            Elem::Logic => 1,
+            Elem::Bytes(w) => *w as usize,
+        };
+        fills.push(LeafFill {
+            elem: *elem,
+            bit01: !is_std_ulogic(db, *ty),
+            // Every scalar of the value lies in its (element) subtype (LRM 6.4.2.3, 9.3.3.3, #821).
+            range: v.and(*range),
+            bytes: Vec::with_capacity(*n as usize * width),
+            bad: None,
+        });
+    }
+    fill_leaves(shape, v, 0, &mut fills)?;
+    let mut out = Vec::with_capacity(fills.len());
+    for (f, (_, leaf, _)) in fills.into_iter().zip(&leaves) {
+        if let (Some(x), Some(b), Shape::Scalar { sub, .. }) = (f.bad, f.range, leaf) {
             let (lo, hi) = b.low_high();
             return Err(format!(
                 "value {x} is outside subtype `{}` ({lo} to {hi})",
                 db.subtype_name(*sub)
             ));
         }
-        out.push(encode(*elem, !is_std_ulogic(db, *ty), &xs));
+        out.push(encoded(f.elem, f.bytes));
     }
     Ok(out)
 }
 
-/// Kernel bytes or planes of scalar values in row-major order. `bit01`: a BIT or BOOLEAN
-/// leaf, whose positions 0/1 are stored as the std_ulogic codes of '0'/'1' (2/3,
-/// docs/decisions.md).
-pub fn encode(elem: Elem, bit01: bool, xs: &[&Val]) -> Value {
+/// Bytes of one scalar in the array of [`encoded`]. `bit01`: a BIT or BOOLEAN leaf, whose positions
+/// 0/1 are stored as the std_ulogic codes of '0'/'1' (2/3, docs/decisions.md).
+fn push_scalar(b: &mut Vec<u8>, elem: Elem, bit01: bool, x: &Val) {
+    match (elem, x) {
+        (Elem::Logic, x) => b.push(x.as_int().unwrap_or(0) as u8 + if bit01 { 2 } else { 0 }),
+        (Elem::Bytes(_), Val::Real(r)) => b.extend_from_slice(&r.to_le_bytes()),
+        (Elem::Bytes(1), x) => b.push(x.as_int().unwrap_or(0) as u8),
+        (Elem::Bytes(4), x) => b.extend_from_slice(&(x.as_int().unwrap_or(0) as u32).to_le_bytes()),
+        (Elem::Bytes(_), x) => b.extend_from_slice(&x.as_int().unwrap_or(0).to_le_bytes()),
+    }
+}
+
+/// The kernel value of the bytes [`push_scalar`] gave, in row-major order.
+fn encoded(elem: Elem, b: Vec<u8>) -> Value {
     match elem {
         Elem::Logic => {
-            let n = xs.len();
-            let off = if bit01 { 2 } else { 0 };
-            Value::Logic(LogicVec::from_fn(n, |i| {
-                let code = xs[n - 1 - i].as_int().unwrap_or(0) as u8 + off;
-                yavs_logic::StdULogic::from_code_pub(code)
-            }))
+            let n = b.len();
+            let code = yavs_logic::StdULogic::from_code_pub;
+            // A memory that starts as one value, whole words at once.
+            Value::Logic(if n > 0 && b[1..] == b[..n - 1] {
+                LogicVec::new(n, code(b[0]))
+            } else {
+                LogicVec::from_fn(n, |i| code(b[n - 1 - i]))
+            })
         }
-        Elem::Bytes(w) => {
-            let mut b = Vec::with_capacity(xs.len() * w as usize);
-            for x in xs {
-                match (x, w) {
-                    (Val::Real(r), _) => b.extend_from_slice(&r.to_le_bytes()),
-                    (x, 1) => b.push(x.as_int().unwrap_or(0) as u8),
-                    (x, 4) => b.extend_from_slice(&(x.as_int().unwrap_or(0) as u32).to_le_bytes()),
-                    (x, _) => b.extend_from_slice(&x.as_int().unwrap_or(0).to_le_bytes()),
-                }
-            }
-            Value::Bytes(b)
-        }
+        Elem::Bytes(_) => Value::Bytes(b),
     }
+}
+
+/// Kernel bytes or planes of scalar values in row-major order.
+pub fn encode(elem: Elem, bit01: bool, xs: &[&Val]) -> Value {
+    let mut b = Vec::with_capacity(xs.len());
+    for x in xs {
+        push_scalar(&mut b, elem, bit01, x);
+    }
+    encoded(elem, b)
 }
 
 // ---------------------------------------------------------------------------

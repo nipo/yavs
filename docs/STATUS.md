@@ -10632,3 +10632,11 @@ A clock read through an object alias has the edge trigger of the clock: `rising_
 `wait until` and the reset branch, through an alias of the signal, an element or a part, renumbered or not. A scalar alias lowers
 as its signal and leaves no unused reference behind. Tests: `process/edge_alias` in the corpus (differential), `edge_alias` and
 `edge_cost_parity` in `crates/yavs/tests/perf.rs`. Statements after the clocked `if` remain without a trigger (kernel work, not an alias matter).
+
+## Large memories and selected assignments (#1008, 2026-11-01)
+
+Two cost cliffs in getting to the start of a run. (1) The initial value of a signal was flattened to one value and one path per element and
+then searched per leaf, so a signal array took work and memory per element, several times over; it now goes leaf by leaf into a byte buffer and copies repeated elements
+(`eval::leaf_values`). It was linear, not quadratic, in array size, at a high constant, and it multiplied by the number of leaves. (2) `Opt::drop_statements` walked the
+whole function once per block that a dirty state crossed, so a chain of `n` branches took `n` walks: quadratic. It is a worklist now, and `forward_hits` sweeps backwards.
+The optimised code is the same. No work counter covers elaboration or the optimiser, so no bound guards these two; `composite/init_leaves` guards the values.

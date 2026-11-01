@@ -1,0 +1,141 @@
+exit	0
+diag	note	0	0	:init_leaves:_p0	u(0)=11111111
+diag	note	0	0	:init_leaves:_p0	u(1)=11111111
+diag	note	0	0	:init_leaves:_p0	u(2)=11111111
+diag	note	0	0	:init_leaves:_p0	u(3)=11111111
+diag	note	0	0	:init_leaves:_p0	u(4)=11111111
+diag	note	0	0	:init_leaves:_p0	u(5)=11111111
+diag	note	0	0	:init_leaves:_p0	u(6)=11111111
+diag	note	0	0	:init_leaves:_p0	u(7)=11111111
+diag	note	0	0	:init_leaves:_p0	v(0)=00000000
+diag	note	0	0	:init_leaves:_p0	v(1)=00000000
+diag	note	0	0	:init_leaves:_p0	v(2)=01011010
+diag	note	0	0	:init_leaves:_p0	v(3)=00000000
+diag	note	0	0	:init_leaves:_p0	v(4)=00000000
+diag	note	0	0	:init_leaves:_p0	v(5)=ZZZZ0000
+diag	note	0	0	:init_leaves:_p0	v(6)=00000000
+diag	note	0	0	:init_leaves:_p0	v(7)=00000000
+diag	note	0	0	:init_leaves:_p0	w(0)=L1ZL1ZL1
+diag	note	0	0	:init_leaves:_p0	w(1)=ZL1ZL1ZL
+diag	note	0	0	:init_leaves:_p0	w(2)=1ZL1ZL1Z
+diag	note	0	0	:init_leaves:_p0	w(3)=L1ZL1ZL1
+diag	note	0	0	:init_leaves:_p0	w(4)=ZL1ZL1ZL
+diag	note	0	0	:init_leaves:_p0	w(5)=1ZL1ZL1Z
+diag	note	0	0	:init_leaves:_p0	w(6)=L1ZL1ZL1
+diag	note	0	0	:init_leaves:_p0	w(7)=ZL1ZL1ZL
+diag	note	0	0	:init_leaves:_p0	none(0)=UUUUUUUU
+diag	note	0	0	:init_leaves:_p0	none(1)=UUUUUUUU
+diag	note	0	0	:init_leaves:_p0	none(2)=UUUUUUUU
+diag	note	0	0	:init_leaves:_p0	none(3)=UUUUUUUU
+diag	note	0	0	:init_leaves:_p0	none(4)=UUUUUUUU
+diag	note	0	0	:init_leaves:_p0	none(5)=UUUUUUUU
+diag	note	0	0	:init_leaves:_p0	none(6)=UUUUUUUU
+diag	note	0	0	:init_leaves:_p0	none(7)=UUUUUUUU
+diag	note	0	0	:init_leaves:_p0	g='0'
+diag	note	0	0	:init_leaves:_p0	g='1'
+diag	note	0	0	:init_leaves:_p0	g='X'
+diag	note	0	0	:init_leaves:_p0	g='H'
+diag	note	0	0	:init_leaves:_p0	g='L'
+diag	note	0	0	:init_leaves:_p0	g='W'
+diag	note	0	0	:init_leaves:_p0	rec blue truefalsefalsefalse 7000000 fs true 0
+diag	note	0	0	:init_leaves:_p0	  '1' 01XZ 7
+diag	note	0	0	:init_leaves:_p0	  '0' 1010 -5
+diag	note	0	0	:init_leaves:_p0	  '1' 01XZ 7
+diag	note	0	0	:init_leaves:_p0	recs red falsefalsetruefalse 1000000000 fs true 0
+diag	note	0	0	:init_leaves:_p0	  '1' 01XZ 7
+diag	note	0	0	:init_leaves:_p0	  '0' 1010 -5
+diag	note	0	0	:init_leaves:_p0	  '0' 1010 -5
+diag	note	0	0	:init_leaves:_p0	nd red falsefalsefalsetrue -9223372036854775808 fs false 0
+diag	note	0	0	:init_leaves:_p0	  '0' UUUU -5
+diag	note	0	0	:init_leaves:_p0	  '0' UUUU -5
+diag	note	0	0	:init_leaves:_p0	  '0' UUUU -5
+diag	note	0	0	:init_leaves:_p0	recs green falsetruefalsefalse 3000 fs false 0
+diag	note	0	0	:init_leaves:_p0	  '0' 1010 -5
+diag	note	0	0	:init_leaves:_p0	  '0' 1010 -5
+diag	note	0	0	:init_leaves:_p0	  '0' 1010 -5
+diag	note	0	0	:init_leaves:_p0	nd red falsefalsefalsetrue -9223372036854775808 fs false 0
+diag	note	0	0	:init_leaves:_p0	  '0' UUUU -5
+diag	note	0	0	:init_leaves:_p0	  '0' UUUU -5
+diag	note	0	0	:init_leaves:_p0	  '0' UUUU -5
+diag	note	0	0	:init_leaves:_p0	recs red falsefalsetruefalse 1000000000 fs true 0
+diag	note	0	0	:init_leaves:_p0	  '1' 01XZ 7
+diag	note	0	0	:init_leaves:_p0	  '0' 1010 -5
+diag	note	0	0	:init_leaves:_p0	  '0' 1010 -5
+diag	note	0	0	:init_leaves:_p0	nd red falsefalsefalsetrue -9223372036854775808 fs false 0
+diag	note	0	0	:init_leaves:_p0	  '0' UUUU -5
+diag	note	0	0	:init_leaves:_p0	  '0' UUUU -5
+diag	note	0	0	:init_leaves:_p0	  '0' UUUU -5
+diag	note	0	0	:init_leaves:_p0	im=500
+diag	note	0	0	:init_leaves:_p0	im=-1
+diag	note	0	0	:init_leaves:_p0	im=-1
+diag	note	0	0	:init_leaves:_p0	nv=0
+diag	note	0	1	:init_leaves:_p0	u(0)=11111111
+diag	note	0	1	:init_leaves:_p0	u(1)=11111111
+diag	note	0	1	:init_leaves:_p0	u(2)=11111111
+diag	note	0	1	:init_leaves:_p0	u(3)=11111111
+diag	note	0	1	:init_leaves:_p0	u(4)=11111111
+diag	note	0	1	:init_leaves:_p0	u(5)=11111111
+diag	note	0	1	:init_leaves:_p0	u(6)=11111111
+diag	note	0	1	:init_leaves:_p0	u(7)=11111111
+diag	note	0	1	:init_leaves:_p0	v(0)=00000000
+diag	note	0	1	:init_leaves:_p0	v(1)=00000000
+diag	note	0	1	:init_leaves:_p0	v(2)=01011010
+diag	note	0	1	:init_leaves:_p0	v(3)=00000000
+diag	note	0	1	:init_leaves:_p0	v(4)=00000000
+diag	note	0	1	:init_leaves:_p0	v(5)=ZZZZ0000
+diag	note	0	1	:init_leaves:_p0	v(6)=00000000
+diag	note	0	1	:init_leaves:_p0	v(7)=00000000
+diag	note	0	1	:init_leaves:_p0	w(0)=L1ZL1ZL1
+diag	note	0	1	:init_leaves:_p0	w(1)=ZL1ZL1ZL
+diag	note	0	1	:init_leaves:_p0	w(2)=1ZL1ZL1Z
+diag	note	0	1	:init_leaves:_p0	w(3)=L1ZL1ZL1
+diag	note	0	1	:init_leaves:_p0	w(4)=ZL1ZL1ZL
+diag	note	0	1	:init_leaves:_p0	w(5)=1ZL1ZL1Z
+diag	note	0	1	:init_leaves:_p0	w(6)=L1ZL1ZL1
+diag	note	0	1	:init_leaves:_p0	w(7)=ZL1ZL1ZL
+diag	note	0	1	:init_leaves:_p0	none(0)=UUUUUUUU
+diag	note	0	1	:init_leaves:_p0	none(1)=UUUUUUUU
+diag	note	0	1	:init_leaves:_p0	none(2)=UUUUUUUU
+diag	note	0	1	:init_leaves:_p0	none(3)=UUUUUUUU
+diag	note	0	1	:init_leaves:_p0	none(4)=UUUUUUUU
+diag	note	0	1	:init_leaves:_p0	none(5)=UUUUUUUU
+diag	note	0	1	:init_leaves:_p0	none(6)=UUUUUUUU
+diag	note	0	1	:init_leaves:_p0	none(7)=UUUUUUUU
+diag	note	0	1	:init_leaves:_p0	g='0'
+diag	note	0	1	:init_leaves:_p0	g='1'
+diag	note	0	1	:init_leaves:_p0	g='X'
+diag	note	0	1	:init_leaves:_p0	g='H'
+diag	note	0	1	:init_leaves:_p0	g='L'
+diag	note	0	1	:init_leaves:_p0	g='W'
+diag	note	0	1	:init_leaves:_p0	rec blue truefalsefalsefalse 7000000 fs true 0
+diag	note	0	1	:init_leaves:_p0	  '1' 01XZ 7
+diag	note	0	1	:init_leaves:_p0	  '0' 1010 -5
+diag	note	0	1	:init_leaves:_p0	  '1' 01XZ 7
+diag	note	0	1	:init_leaves:_p0	recs red falsefalsetruefalse 1000000000 fs true 0
+diag	note	0	1	:init_leaves:_p0	  '1' 01XZ 7
+diag	note	0	1	:init_leaves:_p0	  '0' 1010 -5
+diag	note	0	1	:init_leaves:_p0	  '0' 1010 -5
+diag	note	0	1	:init_leaves:_p0	nd red falsefalsefalsetrue -9223372036854775808 fs false 0
+diag	note	0	1	:init_leaves:_p0	  '0' UUUU -5
+diag	note	0	1	:init_leaves:_p0	  '0' UUUU -5
+diag	note	0	1	:init_leaves:_p0	  '0' UUUU -5
+diag	note	0	1	:init_leaves:_p0	recs green falsetruefalsefalse 3000 fs false 0
+diag	note	0	1	:init_leaves:_p0	  '0' 1010 -5
+diag	note	0	1	:init_leaves:_p0	  '0' 1010 -5
+diag	note	0	1	:init_leaves:_p0	  '0' 1010 -5
+diag	note	0	1	:init_leaves:_p0	nd red falsefalsefalsetrue -9223372036854775808 fs false 0
+diag	note	0	1	:init_leaves:_p0	  '0' UUUU -5
+diag	note	0	1	:init_leaves:_p0	  '0' UUUU -5
+diag	note	0	1	:init_leaves:_p0	  '0' UUUU -5
+diag	note	0	1	:init_leaves:_p0	recs red falsefalsetruefalse 1000000000 fs true 0
+diag	note	0	1	:init_leaves:_p0	  '1' 01XZ 7
+diag	note	0	1	:init_leaves:_p0	  '0' 1010 -5
+diag	note	0	1	:init_leaves:_p0	  '0' 1010 -5
+diag	note	0	1	:init_leaves:_p0	nd red falsefalsefalsetrue -9223372036854775808 fs false 0
+diag	note	0	1	:init_leaves:_p0	  '0' UUUU -5
+diag	note	0	1	:init_leaves:_p0	  '0' UUUU -5
+diag	note	0	1	:init_leaves:_p0	  '0' UUUU -5
+diag	note	0	1	:init_leaves:_p0	im=500
+diag	note	0	1	:init_leaves:_p0	im=-1
+diag	note	0	1	:init_leaves:_p0	im=-1
+diag	note	0	1	:init_leaves:_p0	nv=0
