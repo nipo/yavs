@@ -669,7 +669,8 @@ mod tests {
 
     #[test]
     fn waivers_of_directories_and_lists() {
-        let at = Path::new("/p");
+        // Absolute on every platform, like the directory of a real waiver file.
+        let at = &std::path::absolute("/p").unwrap();
         let w = Waivers::parse(
             "waivers:\n  - rule: [lint_770, lint_771]\n    files: [src/legacy/, 'gen/*.vhd']\n",
         )
