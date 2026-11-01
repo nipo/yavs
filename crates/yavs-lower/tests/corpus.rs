@@ -18,6 +18,7 @@ use yavs_sem::{Db, LangRev, Options};
 
 /// Corpus files whose output matches sim1's exactly.
 const PASS: &[&str] = &[
+    "hierarchy/package_own_name",
     "protected/access_method_call_2019",
     "textio/file_in_subprogram",
     "textio/read_failed",

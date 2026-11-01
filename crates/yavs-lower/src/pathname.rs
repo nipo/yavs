@@ -86,6 +86,16 @@ pub fn package_prefix(db: &Db, scope: yavs_sem::ScopeId) -> (String, Option<Stri
 pub fn library_package_item_name(db: &Db, d: yavs_sem::DeclId) -> Option<String> {
     let decl = &db.decls[d];
     let own = match &decl.kind {
+        // The package itself is named by its library and name (#1007).
+        DeclKind::Unit(u)
+            if matches!(
+                db.scopes[db.units[*u].scope].kind,
+                yavs_sem::scope::ScopeKind::Package | yavs_sem::scope::ScopeKind::PackageBody
+            ) =>
+        {
+            let u = &db.units[*u];
+            return Some(format!(":{}:{}:", db.libs[u.lib].name.key, u.name.key));
+        }
         DeclKind::Unit(_) | DeclKind::Label(_) => return None,
         DeclKind::Subprogram(_) => format!("{}:", subprogram_element(db, d)),
         _ => decl.name.to_string().to_ascii_lowercase(),
