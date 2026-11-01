@@ -42,10 +42,13 @@ mod layout_cache;
 mod licm;
 mod live;
 mod memo;
+mod proc_objects;
 mod range;
 mod share;
 mod sink;
 mod slots;
+
+pub(crate) use proc_objects::OBJECT_TY;
 
 pub use inline::FwdCache;
 
@@ -216,13 +219,14 @@ pub fn fingerprint() -> String {
         drives_enabled(),
         slots_enabled(),
         frame_blocks_on(),
+        proc_objects::enabled(),
     ])
 }
 
-fn fingerprint_of(f: [bool; 11]) -> String {
+fn fingerprint_of(f: [bool; 12]) -> String {
     let names = [
         "iropt", "memo", "cfg", "inline", "keep", "compiled", "external", "layouts", "drives",
-        "slots", "blocks",
+        "slots", "blocks", "objects",
     ];
     let parts: Vec<String> = names
         .iter()
@@ -239,9 +243,9 @@ mod fingerprint_tests {
     /// Every switch is part of the fingerprint (#491).
     #[test]
     fn each_switch_changes_the_fingerprint() {
-        let base = fingerprint_of([false; 11]);
-        for i in 0..11 {
-            let mut f = [false; 11];
+        let base = fingerprint_of([false; 12]);
+        for i in 0..12 {
+            let mut f = [false; 12];
             f[i] = true;
             assert_ne!(fingerprint_of(f), base, "switch {i}");
         }
@@ -413,11 +417,15 @@ fn optimize_body_with(
     }
     let tabbed = inline::tab_calls(prog, id, raw);
     let raw = tabbed.as_deref().unwrap_or(raw);
+    let framed = proc_objects::run(prog, raw);
+    let raw = framed.as_deref().unwrap_or(raw);
     let mut layouts = prog
         .layouts
         .0
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let moved = inst.and_then(|_| proc_objects::for_copy(prog, id, raw, inst, &mut layouts));
+    let raw = moved.as_deref().unwrap_or(raw);
     let mut o = Opt::new(
         prog,
         raw,
@@ -4669,7 +4677,14 @@ impl<'a> Opt<'a> {
             // (A byte holds a boolean, a bit, a character or another enumeration value: the
             // register keeps the same number.)
             let bytes = i64::from(a.w.bytes());
-            if overlap
+            // (A variable in the frame and a descriptor are also written whole, by a `Copy`.)
+            if self.in_descriptor(o)
+                || f.locals.iter().any(|l| {
+                    crate::is_frame_object(l)
+                        && i64::from(l.slot) <= o
+                        && o < i64::from(l.slot) + i64::from(l.size)
+                })
+                || overlap
                 || !a.ok
                 || !matches!(a.w, Width::B8 | Width::B1)
                 || ty == RegTy::Sig

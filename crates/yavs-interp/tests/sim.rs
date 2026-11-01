@@ -2615,3 +2615,119 @@ fn four_byte_loads_sign_extend_from_instance_data_and_frame() {
     let v = yavs_interp::call(rt, from_frame, inst, &[(-7i64) as u64]).unwrap();
     assert_eq!(v.map(|v| v as i64), Some(-7));
 }
+
+/// A record variable of a process lives in its frame (`opt/proc_objects.rs`), and an address that
+/// leaves it stops as one that leaves a heap object does: the variable behind it is not written.
+#[test]
+fn an_offset_past_a_variable_in_the_frame_is_an_error() {
+    let mut pb = ProgramBuilder::new();
+    let int = integer(&mut pb);
+    let rec = pb.ty(Ty::Record {
+        fields: vec![
+            Field {
+                name: "a".into(),
+                ty: int,
+                desc: None,
+            },
+            Field {
+                name: "b".into(),
+                ty: int,
+                desc: None,
+            },
+        ],
+    });
+    let what = pb.check_msg("variable", Dir::To);
+    let p = pb.declare("p", FuncKind::Process, None);
+    {
+        let mut fb = pb.define(p);
+        stmt(&mut fb, StmtKind::VarAssign);
+        let k = fb.local("k", int, 8, 8);
+        let mut slots = Vec::new();
+        for name in ["v", "w"] {
+            let s = fb.local(name, rec, 24, 8);
+            slots.push(s);
+            let size = fb.int(16);
+            let init = fb.reg(RegTy::Ptr);
+            fb.emit(Inst::Alloc { dst: init, size });
+            let h = fb.reg(RegTy::Handle);
+            fb.emit(Inst::New {
+                dst: h,
+                ty: rec,
+                init,
+                size,
+                shared: false,
+            });
+            let d = fb.reg(RegTy::Ptr);
+            fb.emit(Inst::Deref {
+                dst: d,
+                handle: h,
+                what,
+            });
+            let (a0, a8, a16) = (
+                fb.addr(AddrSpace::Frame, s),
+                fb.addr(AddrSpace::Frame, s + 8),
+                fb.addr(AddrSpace::Frame, s + 16),
+            );
+            for (addr, src) in [(a0, d), (a8, d), (a16, h)] {
+                fb.emit(Inst::Store {
+                    addr,
+                    src,
+                    w: Width::B8,
+                });
+            }
+        }
+        let past = fb.int(16);
+        store(&mut fb, AddrSpace::Frame, k, past, Width::B8);
+        let body = fb.block();
+        fb.emit(Inst::Br { to: body });
+        fb.at(body);
+        fb.body(body);
+        wait_for(&mut fb, NS);
+        stmt(&mut fb, StmtKind::VarAssign);
+        // One word past `v`, at an offset nothing knows before it runs.
+        let word = fb.addr(AddrSpace::Frame, slots[0]);
+        let base = fb.reg(RegTy::Ptr);
+        fb.emit(Inst::Load {
+            dst: base,
+            addr: word,
+            w: Width::B8,
+        });
+        let pos = load(&mut fb, AddrSpace::Frame, k, Width::B8);
+        let at = fb.reg(RegTy::Ptr);
+        fb.emit(Inst::Index {
+            dst: at,
+            base,
+            pos,
+            stride: 1,
+        });
+        let v = fb.int(7);
+        fb.emit(Inst::Store {
+            addr: at,
+            src: v,
+            w: Width::B8,
+        });
+        report(&mut fb, "written");
+        wait_forever(&mut fb);
+        fb.finish();
+    }
+    let mut d = Design::new(pb);
+    d.procs = vec![ProcSpec {
+        name: "p",
+        func: p,
+        drives: vec![],
+    }];
+    let f = d.prog.func(p).unwrap();
+    assert_eq!(
+        f.code
+            .iter()
+            .filter(|i| matches!(i, Inst::New { .. }))
+            .count(),
+        0,
+        "both variables are in the frame"
+    );
+    assert!(f.objects_end() > 0);
+    let (lines, r) = d.run(Time::ns(10));
+    assert!(!has(&lines, "written"), "{lines:?}");
+    let e = format!("{:?}", r.err());
+    assert!(e.contains("outside"), "{e}");
+}

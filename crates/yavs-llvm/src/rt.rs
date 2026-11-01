@@ -317,6 +317,7 @@ pub const MEM_TEMP_CAP: u64 = std::mem::offset_of!(Mem, fr.temp_cap) as u64;
 pub const MEM_TEMP_BASE: u64 = std::mem::offset_of!(Mem, fr.temp_base) as u64;
 pub const MEM_UP: u64 = std::mem::offset_of!(Mem, fr.up) as u64;
 pub const MEM_UP_SLOTS: u64 = std::mem::offset_of!(Mem, fr.up_slots) as u64;
+pub const MEM_ROOT_SLOTS: u64 = std::mem::offset_of!(Mem, fr.root_slots) as u64;
 pub const MEM_UP_LEN: u64 = std::mem::offset_of!(Mem, fr.up_len) as u64;
 pub const MEM_INST: u64 = std::mem::offset_of!(Mem, fr.inst) as u64;
 pub const MEM_INST_LEN: u64 = std::mem::offset_of!(Mem, fr.inst_len) as u64;
@@ -1892,11 +1893,26 @@ impl Mem {
             Some((fr.temp, fr.temp_len))
         } else if hi == u64::from(space::INST) << 29 {
             (!write).then(|| (fr.inst.cast_mut(), fr.inst_len))
+        } else if hi == u64::from(space::FRAME) << 29 && fr.root_len != 0 {
+            Some((fr.root_slots, fr.root_len))
+        } else if let Some(o) = self.frame_object(hi) {
+            Some(o)
         } else {
             self.get(hi)
                 .filter(|o| !write || o.w != 0)
                 .map(|o| (o.ptr, o.len))
         }
+    }
+
+    /// The bytes of a composite variable in the root frame whose address has this high half.
+    #[inline]
+    fn frame_object(&self, hi: u64) -> Option<(*mut u8, u64)> {
+        if hi >> 29 != u64::from(space::FRAME) || self.fr.root_len == 0 {
+            return None;
+        }
+        let (s, n) = yavs_ir::frame_object_range(hi as u32 & ((1 << 29) - 1))?;
+        (s as u64 + n as u64 <= self.fr.root_len)
+            .then(|| (self.fr.root_slots.wrapping_add(s), n as u64))
     }
 
     /// The host pointer to `n` bytes at address `a` plus `extra` where they lie in the frame's
@@ -1906,7 +1922,10 @@ impl Mem {
         // `extra` is below 2^63: no wrap.
         let off = (a & 0xffff_ffff) + extra;
         let fr = &self.fr;
-        let (base, len) = if hi == fr.frame_hi {
+        let (base, len) = if hi >> 28 == 1 {
+            // (`space::FRAME` is 0: the flag `yavs_ir::FRAME_OBJECT` alone.)
+            self.frame_object(hi)?
+        } else if hi == fr.frame_hi {
             (fr.slots, fr.slots_len)
         } else if hi == u64::from(space::TEMP) << 29 {
             (fr.temp, fr.temp_len)
@@ -1917,6 +1936,9 @@ impl Mem {
             (fr.up_slots[0], fr.up_len[0])
         } else if hi == fr.up[1] {
             (fr.up_slots[1], fr.up_len[1])
+        } else if hi == u64::from(space::FRAME) << 29 {
+            // The root frame, seen from a procedure.
+            (fr.root_slots, fr.root_len)
         } else {
             let o = self.get(hi)?;
             if write && o.w == 0 {
@@ -3237,6 +3259,9 @@ pub enum Known<V = ()> {
     /// An address in the slots of the frame `.0` static links up (1 or 2), at an offset the
     /// generator does not track: frame-mode code reads them from the view (`TierFrame::up_slots`).
     Up(u8),
+    /// An address in the frame's composite variable at bytes `.0..end .1` (`opt/proc_objects.rs`),
+    /// at an offset the generator does not know: tested against the object, not the frame.
+    FrameObj(u32, u32),
     /// An address in the temporary area (`Alloc`, or an index into one).
     Temp,
     /// A guess, not a fact: probably an address in the temporary area (the fat pair a call
@@ -3736,6 +3761,16 @@ pub fn track<V: Copy>(known: &mut [Option<Known<V>>], fixed: &[Option<i64>], f: 
                 (Some(Known::Inst(o)), Some(Known::Int(p))) => {
                     at(o, p).map(|a| (dst, Known::Inst(a)))
                 }
+                (Some(Known::Frame(o)), _) => f
+                    .locals
+                    .iter()
+                    .find(|l| {
+                        yavs_ir::is_frame_object(l)
+                            && u64::from(l.slot) <= o
+                            && o < u64::from(l.slot) + u64::from(l.size)
+                    })
+                    .map(|l| (dst, Known::FrameObj(l.slot, l.slot + l.size))),
+                (Some(Known::FrameObj(s, e)), _) => Some((dst, Known::FrameObj(s, e))),
                 // An offset past 4 GiB leaves the block through the instruction's own exit.
                 (Some(Known::Inst(_) | Known::InstAny), _) => Some((dst, Known::InstAny)),
                 (Some(Known::Up(d)), _) => Some((dst, Known::Up(d))),

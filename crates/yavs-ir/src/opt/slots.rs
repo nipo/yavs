@@ -15,10 +15,15 @@
 
 use super::*;
 
-/// The most bytes of one temporary.
-const MAX_TEMP: u32 = 256;
-/// The most bytes of slots one process takes.
-const MAX_BYTES: u32 = 4 * 1024;
+/// The most bytes of one temporary, and of slots one process takes (signal copies go past the
+/// small sizes with the variables they are copied to, `opt/proc_objects.rs`).
+fn limits() -> (u32, u32) {
+    if super::proc_objects::enabled() {
+        (4 * 1024, 16 * 1024)
+    } else {
+        (256, 4 * 1024)
+    }
+}
 /// The temporaries of one block tracked at a time (a bit each).
 const MAX_PER_BLOCK: usize = 64;
 
@@ -101,6 +106,8 @@ fn classify(f: &crate::Func, i: &Inst) -> Option<Use> {
             u.ok.extend_from_slice(f.regs(parts)?);
         }
         Inst::SigRead { dst, .. } | Inst::SigLastValue { dst, .. } => u.ok.push(dst),
+        Inst::SigGather { dst, desc, .. } => u.ok.extend([dst, desc]),
+        Inst::SigScatter { src, desc, .. } => u.ok.extend([src, desc]),
         Inst::DrivingValue { dst, .. } | Inst::SigDrivingValue { dst, .. } => u.ok.push(dst),
         Inst::Drive { wave, .. } | Inst::DriveSlot { wave, .. } => u.ok.push(wave),
         Inst::Force { value, .. } => u.ok.push(value),
@@ -217,7 +224,7 @@ pub(super) fn run(prog: &Program, f: &mut crate::Func) -> bool {
             }
             break;
         }
-        if at + size > MAX_BYTES {
+        if at + size > limits().1 {
             cands[c].ok = false;
             continue;
         }
@@ -573,7 +580,7 @@ fn scan_block(
             && let Some(n) = konst_of(&cv, size)
             && let Ok(n) = u32::try_from(n)
             && n > 0
-            && n <= MAX_TEMP
+            && n <= limits().0
             && local.len() < MAX_PER_BLOCK
             && !(n == 32 && !frame_blocks_on() && fused_in_loop(f, pc, blk.end as usize, dst))
         {

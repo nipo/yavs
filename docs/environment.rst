@@ -269,6 +269,11 @@ Each one turns a fast path off or changes its threshold, to compare a run with a
      - not ``0``
      - unset
      - ``run``
+   * - ``YAVS_NO_PROC_OBJECTS``
+     - Keeps the composite variables of processes on the heap instead of in their frames.
+     - not ``0``
+     - unset
+     - ``run``
    * - ``YAVS_NO_SLOTS``
      - Turns the slot pass off.
      - not ``0``

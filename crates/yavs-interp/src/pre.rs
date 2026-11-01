@@ -143,9 +143,15 @@ impl Pre {
                     let off = u64::from(off);
                     let a = match space {
                         AddrSpace::Frame => {
-                            frame.push((dst.0, off));
                             known[dst.0 as usize] = Known::Frame(off as u32);
-                            Some(0)
+                            // (A variable in the frame is at the same address in any activation.)
+                            match yavs_ir::frame_object_addr(f, off as u32) {
+                                Some((i, o)) => mk_addr(FRAME, i, o.into()).ok(),
+                                None => {
+                                    frame.push((dst.0, off));
+                                    Some(0)
+                                }
+                            }
                         }
                         AddrSpace::Up(_) => None,
                         AddrSpace::Inst => {
@@ -5321,7 +5327,10 @@ impl Code {
                 // The other spaces are numbers (an address the machine cannot make stays a
                 // step, which reports it).
                 Inst::AddrOf { dst, space, off } => match space {
-                    AddrSpace::Frame => Op::AddrFrame { dst: dst.0, off },
+                    AddrSpace::Frame => match yavs_ir::frame_object_addr(f, off) {
+                        Some((i, o)) => const_addr(dst, FRAME, i, o, pc),
+                        None => Op::AddrFrame { dst: dst.0, off },
+                    },
                     AddrSpace::Up(depth) => Op::AddrUp {
                         dst: dst.0,
                         depth,

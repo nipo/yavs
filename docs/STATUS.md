@@ -10724,3 +10724,7 @@ A record signal, an array of records or an array of arrays is an element of an a
 ## Names of packages (#1010, 2026-11-01)
 
 `'path_name` and `'instance_name` of a package: one last element (`own_element`), a colon for a package; a library package from any region is `:lib:pkg:` (it was the reading instance's path); a generic package named by itself is `:lib:gp:` in declaration and body; items nested in a library package are static text, so its initialisation reads no instance data. The reading in the declaration of a generic package splits the references and is open for the maintainer (L173).
+
+## Frame objects in processes (#1048, plan step 1, 2026-11-01, branch `perf/iterative`)
+
+Composite variables of processes of a fixed size, without handles, live in the frame; signal copies up to 4 KiB too (`docs/decisions.md` "Frame objects in processes"). `YAVS_NO_PROC_OBJECTS=1` turns it off. Not moved: variables with handles, over 16 KiB, a size only known at run time, under a debugger or external variables.

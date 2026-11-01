@@ -175,6 +175,8 @@ macro_rules! case {
     };
 }
 
+// The record variable is in the frame: the count is what its statements do without an object lookup.
+case!(frame_vars, "n=200", &[], [("ops", Max(11200))]);
 case!(
     pkg_table,
     "sum=212",
@@ -446,17 +448,17 @@ case!(
     reduce_idiom,
     "n1=",
     &[],
-    [("process_runs", Max(2)), ("ops", Max(1481)),]
+    [("process_runs", Max(2)), ("ops", Max(1374)),]
 );
 case!(ieee_operands, "acc=", &[], [("ops", Max(2716))]);
 case!(ieee_share, "n=", &[], [("ops", Max(3626))]);
 case!(elem_loops, "acc=", &[], [("ops", Max(27715))]);
-case!(wide_vec, "wide=0", &[], [("ops", Max(2143000))]);
+case!(wide_vec, "wide=0", &[], [("ops", Max(1997254))]);
 case!(
     licm_loop,
     "acc=",
     &[],
-    [("process_runs", Max(2)), ("ops", Max(19800)),]
+    [("process_runs", Max(2)), ("ops", Max(18376)),]
 );
 case!(
     slice_memo,
@@ -492,7 +494,7 @@ case!(
     [
         ("pmemo_hits", Max(0)),
         ("pmemo_runs", Max(0)),
-        ("ops", Max(11920))
+        ("ops", Max(10324))
     ]
 );
 // Two processes whose calls of a pure function never repeat: both give its memo up, which turns it
@@ -512,7 +514,7 @@ case!(
 case!(hread_loop, "sum=", &[], [("ops", Max(4233))]);
 // The same loop with an argument of an integer type, whose table read tests the range and a mask
 // of valid digits (#769): the pair of the array result is not made on the table path.
-case!(tab_tail, "sum=", &[], [("ops", Max(14590))]);
+case!(tab_tail, "sum=", &[], [("ops", Max(13549))]);
 // Rows of bit vectors behind access values filled in nested loops by a procedure of the process
 // (#768): the loads, the dereference and the descriptors leave the inner loop, which runs as one op.
 case!(row_fill, "ones=", &[], [("ops", Max(5290))]);
@@ -702,7 +704,7 @@ case!(
         ("cycles", Max(242)),
         ("cycles", Min(242)),
         ("direct_planes", Max(140)),
-        ("ops", Max(19173)),
+        ("ops", Max(18317)),
     ]
 );
 // Bits and slices of one register assigned in turn in one activation (the fields of a record) stay
@@ -750,7 +752,7 @@ case!(
     [
         ("cycles", Max(418)),
         ("process_runs", Max(525)),
-        ("ops", Max(26932)),
+        ("ops", Max(25669)),
         // The records `r` and `rin` are packs of leaves (#686), not one signal per leaf.
         ("signals", Max(20)),
     ]

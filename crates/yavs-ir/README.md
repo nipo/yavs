@@ -53,6 +53,7 @@ textual dump.
   `/=` of one-dimensional arrays of integer or enumeration elements (not logic arrays) after the
   length test, instead of an element loop. The LLVM tier leaves it to the interpreter.
 - Optimiser (#444): interval analysis, branch threading and dead-definition removal (`opt/range.rs`, `opt/live.rs`); unreachable blocks now end in a jump to the next block, which the predecoder of yavs-interp runs as no operation. No instruction changes.
+- `Func::moved`, `Local`s of no name and no type (#1048, `opt/proc_objects.rs`): composite variables of a process in its frame. Consumers that list locals skip them with `is_frame_object`; a debugger never sees one (the pass is off).
 - `Inst::NewFrame` (#444): made only by the optimiser. An object `[descriptor][value]` (the
   operands of `NewFill`) in the frame's temporary memory, whose address is the result; the
   frame's temporary base moves over it, so its `Stmt` markers keep it and the caller's next

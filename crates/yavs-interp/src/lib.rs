@@ -996,6 +996,10 @@ pub struct TierFrame {
     /// code reads a variable of an enclosing subprogram in place.
     pub up_slots: [*mut u8; 2],
     pub up_len: [u64; 2],
+    /// The slots of the root frame in a view of a deeper frame (0: not offered): a procedure
+    /// reaches a process's variable in the frame in place (`opt/proc_objects.rs`).
+    pub root_slots: *mut u8,
+    pub root_len: u64,
     /// The coverage counters of this instance (`Inst::Cover`; `cov_len` of them, 8 bytes each),
     /// null and 0 without coverage.
     pub cov: *const u8,
@@ -1236,6 +1240,8 @@ impl Default for TierFrame {
             up: [u64::MAX; 2],
             up_slots: [std::ptr::null_mut(); 2],
             up_len: [0; 2],
+            root_slots: std::ptr::null_mut(),
+            root_len: 0,
             sigtab: std::ptr::null(),
             sigtab_len: 0,
             known: u64::MAX,

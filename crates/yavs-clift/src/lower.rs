@@ -1179,6 +1179,8 @@ struct Gen<'a> {
     pres: Vec<(Value, Value, bool)>,
     /// The frame's size in bytes (`Func::frame`): the slots of every frame of the function.
     frame_len: u64,
+    /// The composite variables in the frame of a process: their bytes (`opt/proc_objects.rs`).
+    objs: Vec<(u32, u32)>,
     /// The pointer to the frame's slots, loaded once per run of straight code.
     slots: Option<Value>,
     /// Memory flags per alias region: the register array, guest memory (slots, temporaries,
@@ -1679,6 +1681,12 @@ fn gen_func(
         objnew: None,
         pres: Vec::new(),
         frame_len: u64::from(f.frame),
+        objs: f
+            .locals
+            .iter()
+            .filter(|l| yavs_ir::is_frame_object(l))
+            .map(|l| (l.slot, l.slot + l.size))
+            .collect(),
         slots: None,
         rf: MemFlagsData::trusted().with_alias_region(Some(rr)),
         gf: MemFlagsData::new()
@@ -2260,6 +2268,15 @@ fn gen_func(
                 g.st(dst, v);
             }
             Inst::AddrOf { dst, space, off } => match addr_const(space, off) {
+                Some(_)
+                    if space == AddrSpace::Frame
+                        && yavs_ir::frame_object_addr(f, off).is_some() =>
+                {
+                    let (i, o) = yavs_ir::frame_object_addr(f, off).expect("tested");
+                    let hi = u64::from(space::FRAME) << 29 | u64::from(i);
+                    let v = g.c64((hi << 32 | u64::from(o)) as i64);
+                    g.st(dst, v);
+                }
                 Some(a) if space == AddrSpace::Frame => {
                     let hi = match &g.nat {
                         Some(n) => {
@@ -4409,6 +4426,19 @@ impl Gen<'_> {
             self.b.switch_to_block(done);
             return p;
         }
+        if let Some(Some(Known::FrameObj(s, e))) = reg.and_then(|r| self.known.get(r.0 as usize)) {
+            let (s, e) = (*s, *e);
+            let (ev, nv) = (self.op(extra), self.op(n));
+            let lo = self.lo32(a);
+            let off = self.b.ins().iadd(lo, ev);
+            // (The offset of the address counts from the object's start.)
+            let len = self.c64(i64::from(e - s));
+            let okc = self.in_range(off, nv, len);
+            self.guard(okc, slow);
+            let slots = self.slots();
+            let base = self.b.ins().iadd_imm_s(slots, i64::from(s));
+            return self.b.ins().iadd(base, off);
+        }
         let frame = reg.and_then(|r| self.frame_of(r));
         let heap = reg.and_then(|r| match self.known.get(r.0 as usize) {
             Some(Some(Known::Heap(o))) => Some(*o),
@@ -4436,6 +4466,7 @@ impl Gen<'_> {
             let off = self.b.ins().iadd(lo, ev);
             let done = self.b.create_block();
             let p = self.b.append_block_param(done, I64);
+            self.frame_object_try(hi, off, nv, done, slow);
             self.obj_lookup(a, hi, off, ev, nv, write, true, done);
             self.b.switch_to_block(done);
             let nn = self.b.ins().icmp_imm_s(IntCC::NotEqual, p, 0);
@@ -4484,11 +4515,17 @@ impl Gen<'_> {
             return self.b.ins().iadd(base, off);
         }
         if let Some(o) = frame {
+            // A composite variable in the frame is tested against itself, not the frame.
+            let obj_end = self
+                .objs
+                .iter()
+                .find(|&&(s, e)| u64::from(s) <= o && o < u64::from(e))
+                .map(|&(_, e)| u64::from(e));
             // Within the frame whatever the frame: no check.
             if let (Op::C(e), Op::C(k)) = (extra, n)
                 && o.checked_add(e)
                     .and_then(|x| x.checked_add(k))
-                    .is_some_and(|end| end <= self.frame_len)
+                    .is_some_and(|end| end <= obj_end.unwrap_or(self.frame_len))
             {
                 let slots = self.slots();
                 return self.b.ins().iadd_imm_s(slots, (o + e) as i64);
@@ -4496,7 +4533,9 @@ impl Gen<'_> {
             let (ev, nv) = (self.op(extra), self.op(n));
             // `extra` is below 2^63, the sum cannot wrap.
             let off = self.b.ins().iadd_imm_s(ev, o as i64);
-            let len = if self.nat.is_some() {
+            let len = if let Some(e) = obj_end {
+                self.c64(e as i64)
+            } else if self.nat.is_some() {
                 self.c64(self.frame_len as i64)
             } else {
                 self.mem_ld(MEM_SLOTS_LEN)
@@ -4521,6 +4560,12 @@ impl Gen<'_> {
             let done = self.b.create_block();
             let p = self.b.append_block_param(done, I64);
             let w = self.c32(u32::from(write));
+            {
+                let hi = self.b.ins().ushr_imm_s(a, 32);
+                let lo = self.lo32(a);
+                let off = self.b.ins().iadd(lo, extra);
+                self.frame_object_try(hi, off, n, done, slow);
+            }
             if likely {
                 let hi = self.b.ins().ushr_imm_s(a, 32);
                 let lo = self.lo32(a);
@@ -4591,6 +4636,7 @@ impl Gen<'_> {
             self.b.ins().jump(done, &[BlockArg::Value(pown)]);
             self.b.switch_to_block(other);
         }
+        self.frame_object_try(hi, off, n, done, slow);
         let (up, rest) = (self.b.create_block(), self.b.create_block());
         let top = self.mem_ld(MEM_FRAME_IDX);
         let above = self.b.ins().icmp(IntCC::UnsignedGreaterThan, hi, top);
@@ -4671,6 +4717,28 @@ impl Gen<'_> {
     }
 
     /// Whether `n` bytes at offset `off` lie within `len` bytes.
+    /// A composite variable of the root frame by its address (`yavs_ir::FRAME_OBJECT`, high half
+    /// `hi`): its start and length are in the address. Goes on in a new block for any other.
+    fn frame_object_try(&mut self, hi: Value, off: Value, n: Value, done: Block, slow: Block) {
+        let top = self.b.ins().ushr_imm_s(hi, 28);
+        let is = self.b.ins().icmp_imm_s(IntCC::Equal, top, 1);
+        let (obj, other) = (self.b.create_block(), self.b.create_block());
+        self.brif_split(is, obj, other);
+        self.b.switch_to_block(obj);
+        let start = self.b.ins().ushr_imm_s(hi, 12);
+        let start = self.b.ins().band_imm_s(start, 0xffff);
+        let start = self.b.ins().ishl_imm_s(start, 3);
+        let len = self.b.ins().band_imm_s(hi, 0xfff);
+        let len = self.b.ins().ishl_imm_s(len, 3);
+        let okc = self.in_range(off, n, len);
+        self.guard(okc, slow);
+        let root = self.mem_ld(MEM_ROOT_SLOTS);
+        let base = self.b.ins().iadd(root, start);
+        let p = self.b.ins().iadd(base, off);
+        self.b.ins().jump(done, &[BlockArg::Value(p)]);
+        self.b.switch_to_block(other);
+    }
+
     fn in_range(&mut self, off: Value, n: Value, len: Value) -> Value {
         let fits = self.b.ins().icmp(IntCC::UnsignedLessThanOrEqual, n, len);
         let rest = self.b.ins().isub(len, n);

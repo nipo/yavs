@@ -447,6 +447,38 @@ pub struct Local {
 }
 
 /// What a frame slot holds for the GC (precise roots, rule 6).
+/// The frame index of an address in a composite variable in a process's root frame, with the
+/// flag below: `[FRAME_OBJECT | start / 8 << 12 | length / 8]`, the offset counting from the
+/// object's start. Such an address is bounded by its object wherever it goes: a callee, a native,
+/// any path of the interpreter (`opt/proc_objects.rs`).
+pub const FRAME_OBJECT: u32 = 1 << 28;
+
+/// The frame index and offset of the address of byte `off` of a frame object of `f`, if any.
+pub fn frame_object_addr(f: &Func, off: u32) -> Option<(u32, u32)> {
+    let l = f
+        .locals
+        .iter()
+        .find(|l| is_frame_object(l) && l.slot <= off && off < l.slot + l.size)?;
+    Some((
+        FRAME_OBJECT | (l.slot / 8) << 12 | l.size.div_ceil(8),
+        off - l.slot,
+    ))
+}
+
+/// The start and length in bytes of the frame object a frame index names.
+#[inline]
+pub fn frame_object_range(idx: u32) -> Option<(usize, usize)> {
+    (idx & FRAME_OBJECT != 0).then(|| {
+        let i = (idx & !FRAME_OBJECT) as usize;
+        ((i >> 12) * 8, (i & 0xfff) * 8)
+    })
+}
+
+/// Is this local a composite variable the optimiser put in a process's frame, not a named one?
+pub fn is_frame_object(l: &Local) -> bool {
+    l.name.is_empty() && l.ty.0 >= u32::MAX - 1
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum RootKind {
     /// An 8-byte access handle.
@@ -518,6 +550,9 @@ pub struct Func {
     /// the last functions of a program, never stored.
     #[serde(skip)]
     pub spare: bool,
+    /// A specialised copy: the heap objects of the shared code that move into its frame at the
+    /// switch, as (slot `[data, desc, handle]`, frame offset, bytes) (`opt/proc_objects.rs`).
+    pub moved: Vec<(u32, u32, u32)>,
     /// A function: the base type of its result (`None` for a procedure, a process).
     pub ret_ty: Option<TyId>,
     /// The optimised copy, made when [`Program::func`] first asks (`None`: the code is as
@@ -781,12 +816,24 @@ impl Func {
             defined: self.defined,
             nested: self.nested,
             spare: false,
+            moved: self.moved.clone(),
             ret_ty: self.ret_ty,
             opt: Default::default(),
             memo: Default::default(),
             lazy: None,
             fetches: Default::default(),
         }
+    }
+
+    /// The end of the composite variables the optimiser put in the frame of a process
+    /// (`opt/proc_objects.rs`), 0 for none.
+    pub fn objects_end(&self) -> u32 {
+        self.locals
+            .iter()
+            .filter(|l| l.ty == crate::opt::OBJECT_TY)
+            .map(|l| l.slot + l.size)
+            .max()
+            .unwrap_or(0)
     }
 
     /// An empty function that copies of processes will take the place of.
@@ -814,6 +861,7 @@ impl Func {
             defined: false,
             nested: false,
             spare: true,
+            moved: Vec::new(),
             ret_ty: None,
             opt: Default::default(),
             memo: Default::default(),

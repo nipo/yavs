@@ -410,12 +410,21 @@ pub(crate) struct Frame {
 /// The slots of frame `i`, from the machine's fields (so the caller can borrow others).
 #[inline(always)]
 fn slots_of<'a>(frames: &[Frame], root: &'a [u8], sstack: &'a [u8], i: usize) -> Option<&'a [u8]> {
-    let fr = frames.get(i)?;
+    let Some(fr) = frames.get(i) else {
+        return object_of(root, i);
+    };
     if i == 0 {
         Some(root)
     } else {
         sstack.get(fr.sbase as usize..(fr.sbase + fr.slen) as usize)
     }
+}
+
+/// The bytes of a composite variable in the root frame (`yavs_ir::FRAME_OBJECT`).
+#[inline(always)]
+fn object_of(root: &[u8], i: usize) -> Option<&[u8]> {
+    let (s, n) = yavs_ir::frame_object_range(i as u32)?;
+    root.get(s..s + n)
 }
 
 #[inline(always)]
@@ -425,7 +434,10 @@ fn slots_of_mut<'a>(
     sstack: &'a mut [u8],
     i: usize,
 ) -> Option<&'a mut [u8]> {
-    let fr = frames.get(i)?;
+    let Some(fr) = frames.get(i) else {
+        let (s, n) = yavs_ir::frame_object_range(i as u32)?;
+        return root.get_mut(s..s + n);
+    };
     if i == 0 {
         Some(root)
     } else {
@@ -1521,6 +1533,34 @@ impl Machine {
         Some(fr)
     }
 
+    /// The heap object of the variable at `slot` to `at` in the root frame: its words are
+    /// addresses there and the handle is null, as the copy's frame objects want (`Func::moved`).
+    fn move_to_frame(&mut self, slot: u32, at: u32) {
+        let s = slot as usize;
+        let rd =
+            |root: &[u8], o: usize| u64::from_le_bytes(root[o..o + 8].try_into().unwrap_or([0; 8]));
+        let (data, desc, h) = (
+            rd(&self.root, s),
+            rd(&self.root, s + 8),
+            rd(&self.root, s + 16),
+        );
+        let Ok(i) = self.heap.resolve(h) else { return };
+        let Some(bytes) = self.heap.data(i) else {
+            return;
+        };
+        self.root[at as usize..at as usize + bytes.len()].copy_from_slice(bytes);
+        let n = bytes.len() as u32;
+        let idx = yavs_ir::FRAME_OBJECT | (at / 8) << 12 | n.div_ceil(8);
+        let re = |a: u64| u64::from(FRAME) << 61 | u64::from(idx) << 32 | (a & 0xffff_ffff);
+        let hi = data >> 32;
+        self.root[s..s + 8].copy_from_slice(&re(data).to_le_bytes());
+        if desc >> 32 == hi {
+            self.root[s + 8..s + 16].copy_from_slice(&re(desc).to_le_bytes());
+        }
+        self.root[s + 16..s + 24].fill(0);
+        let _ = self.heap.free(h);
+    }
+
     /// Pop frames down to `n`.
     pub(crate) fn truncate_frames(&mut self, n: usize) {
         while self.frames.len() > n {
@@ -1701,11 +1741,33 @@ impl Machine {
         let Some(pre) = rt.pre(id, new) else {
             return;
         };
-        let keep = raw.frame as usize;
+        // (The variables in the frame are where the shared code put them: same lowered code, same
+        // places, `opt/proc_objects.rs`.)
+        let keep = old.objects_end().max(raw.frame) as usize;
+        if old.objects_end() != new.objects_end() {
+            return;
+        }
+        // Every object the copy takes from the heap has the size it was made for.
+        let word = |root: &[u8], at: u32| -> Option<u64> {
+            let b = root.get(at as usize..at as usize + 8)?;
+            Some(u64::from_le_bytes(b.try_into().ok()?))
+        };
+        let holds = |&(slot, _, bytes): &(u32, u32, u32)| {
+            word(&self.root, slot + 16)
+                .and_then(|h| self.heap.resolve(h).ok())
+                .and_then(|i| self.heap.data(i))
+                .is_some_and(|d| d.len() == bytes as usize)
+        };
+        if !new.moved.iter().all(holds) {
+            return;
+        }
         if self.root.len() > keep {
             self.root[keep..].fill(0);
         }
         self.root.resize(pre.slots as usize, 0);
+        for &(slot, at, _) in &new.moved {
+            self.move_to_frame(slot, at);
+        }
         let fr = &mut self.frames[0];
         (fr.func, fr.pc, fr.slen) = (id, at, pre.slots);
         self.entry = id;
@@ -8959,6 +9021,8 @@ impl Machine {
         let shared_alloc = fr.shared_alloc;
         tf.slots = m.root.as_mut_ptr().wrapping_add(fr.sbase as usize);
         tf.slots_len = u64::from(slen);
+        tf.root_slots = tf.slots;
+        tf.root_len = u64::from(slen);
         // `tier_view` writes these three together: the root frame's values stay until a deeper
         // frame's view replaces them.
         const ROOT: u64 = (FRAME as u64) << 29;
@@ -9087,6 +9151,14 @@ impl Machine {
             .unwrap_or(&[]);
         tf.cov = cov.as_ptr().cast();
         tf.cov_len = cov.len() as u64;
+        // (Not while a native window holds the root frame's slots elsewhere.)
+        let root_native = self.nwin.is_some() && self.nwin_from == 0;
+        tf.root_slots = self.root.as_mut_ptr();
+        tf.root_len = if root_native {
+            0
+        } else {
+            self.root.len() as u64
+        };
         let mut link = self.frames[top].link;
         for k in 0..2 {
             tf.up_len[k] = 0;
@@ -9927,7 +9999,17 @@ impl Machine {
             Inst::AddrOf { dst, space, off } => {
                 let off = u64::from(off);
                 let a = match space {
-                    AddrSpace::Frame => mk_addr(FRAME, self.frames.len() as u32 - 1, off)?,
+                    AddrSpace::Frame => {
+                        let top = self.frames.len() - 1;
+                        match (top == 0)
+                            .then(|| self.rt.prog.func(self.frames[0].func))
+                            .flatten()
+                            .and_then(|f| yavs_ir::frame_object_addr(f, off as u32))
+                        {
+                            Some((i, o)) => mk_addr(FRAME, i, o.into())?,
+                            None => mk_addr(FRAME, top as u32, off)?,
+                        }
+                    }
                     AddrSpace::Up(d) => {
                         let mut i = self.frames.len() - 1;
                         for _ in 0..d {

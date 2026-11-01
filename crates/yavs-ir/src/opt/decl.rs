@@ -38,6 +38,9 @@ pub(super) struct Facts {
     /// 8-byte words that point to a heap object's descriptor: its bytes and the offset the
     /// pointer has in them.
     pub descs: FxMap<u32, (Rc<[u8]>, u32)>,
+    /// Slots `[data, desc, handle]` over a private heap object of a known size: the slot's
+    /// offset, the object's bytes (descriptor included), its type, where the value starts in it.
+    pub objects: Vec<(u32, u32, TyId, u32)>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -744,7 +747,7 @@ impl Opt<'_> {
     /// Is `o` inside the descriptor of an array variable, `[data, dope, handle, descriptor]`'s
     /// last `24 * dims` bytes? Nothing writes it after the declaration. (An array of composites
     /// has a `[data, desc, handle]` slot of 24 bytes and no descriptor in it.)
-    fn in_descriptor(&self, o: i64) -> bool {
+    pub(super) fn in_descriptor(&self, o: i64) -> bool {
         self.f.locals.iter().any(|l| {
             matches!(self.prog.types.get(l.ty), Some(Ty::Array { dims, .. })
                 if o >= i64::from(l.slot) + 24
@@ -984,6 +987,20 @@ impl Opt<'_> {
                 _ => {}
             }
         }
+        for (&w, &v) in &ev.fw {
+            if let Av::B(b, off) = v
+                && w % 8 == 0
+                && let Ok(off) = u32::try_from(off)
+                && ev.fw.get(&(w + 16)) == Some(&Av::H(b))
+                && !gone(i64::from(w), 24)
+                && let Some(k) = ev.blks.get(b as usize)
+                && let Some(ty) = k.heap
+                && let Ok(n) = u32::try_from(k.m.v.len())
+            {
+                facts.objects.push((w, n, ty, off));
+            }
+        }
+        facts.objects.sort_unstable_by_key(|o| o.0);
         Some(facts)
     }
 }

@@ -243,6 +243,7 @@ impl ProgramBuilder {
             defined: false,
             nested: false,
             spare: false,
+            moved: Vec::new(),
             ret_ty: None,
             opt: Default::default(),
             memo: Default::default(),
