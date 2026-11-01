@@ -397,6 +397,99 @@ fn waivers_next_to_the_configuration_drop_findings() {
     assert!(stderr(&o).contains("E0134"), "{}", stderr(&o));
 }
 
+/// Rules off for whole directories and patterns, from any working directory and in a library run.
+#[test]
+fn waivers_of_directories_and_lists_of_rules() {
+    let dir = tempdir("lint");
+    let source = |n: &str| {
+        format!(
+            "entity {n} is end entity;\narchitecture r of {n} is\nbegin\n  p : process begin report \"x\"; end process;\nend architecture;\n"
+        )
+    };
+    for (d, n) in [
+        ("src/legacy/deep", "old"),
+        ("src/new", "fresh"),
+        ("third", "lib"),
+    ] {
+        std::fs::create_dir_all(dir.join(d)).unwrap();
+        std::fs::write(dir.join(d).join(format!("{n}.vhd")), source(n)).unwrap();
+    }
+    let files = [
+        "src/legacy/deep/old.vhd",
+        "src/new/fresh.vhd",
+        "third/lib.vhd",
+    ];
+    let waivers = |text: &str| std::fs::write(dir.join("yavs-lint-waivers.yaml"), text).unwrap();
+    let left = |cwd: &Path, args: &[&str]| {
+        let mut all = vec!["lint", "--message-format=short"];
+        all.extend_from_slice(args);
+        let o = yavs(cwd, &all);
+        let text = stderr(&o);
+        let mut found: Vec<_> = ["old.vhd", "fresh.vhd", "lib.vhd"]
+            .into_iter()
+            .filter(|f| text.contains(&format!("{f}:4:3: error[lint_770]")))
+            .collect();
+        found.sort_unstable();
+        (found, status(&o), text)
+    };
+    let mut args = vec![];
+    args.extend_from_slice(&files);
+
+    // A plain directory, with and without the slash, covers everything under it, like `exclude`.
+    for form in ["src/legacy", "src/legacy/", "./src/legacy"] {
+        waivers(&format!(
+            "waivers:\n  - rule: lint_770\n    files: {form}\n"
+        ));
+        let (found, code, text) = left(&dir, &args);
+        assert_eq!(found, ["fresh.vhd", "lib.vhd"], "{form}: {text}");
+        assert_eq!(code, 1);
+    }
+    // Lists of rules and of patterns, in one entry.
+    waivers(
+        "waivers:\n  - rule: [lint_771, lint_770]\n    files: [src/legacy, 'third/*.vhd']\n    reason: x\n",
+    );
+    let (found, _, text) = left(&dir, &args);
+    assert_eq!(found, ["fresh.vhd"], "{text}");
+    // Block form, and a rule the entry does not name is not waived.
+    waivers(
+        "waivers:\n  - rule:\n      - lint_771\n      - lint_772\n    files:\n      - src\n      - third\n",
+    );
+    let (found, _, text) = left(&dir, &args);
+    assert_eq!(found.len(), 3, "{text}");
+
+    // Relative to the waiver file: from another directory, and for the absolute paths a library records.
+    waivers("waivers:\n  - rule: lint_770\n    files: ['src/legacy/**/*.vhd', third]\n");
+    let (found, _, text) = left(
+        &dir.join("src"),
+        &["legacy/deep/old.vhd", "new/fresh.vhd", "../third/lib.vhd"],
+    );
+    assert_eq!(found, ["fresh.vhd"], "{text}");
+    let lib = dir.join("out/lib");
+    let work = format!("--work=lib:{}", lib.display());
+    let mut analyze = vec!["analyze", work.as_str()];
+    analyze.extend_from_slice(&files);
+    assert_eq!(status(&yavs(&dir, &analyze)), 0);
+    let (found, _, text) = left(&dir, &[work.as_str()]);
+    assert_eq!(found, ["fresh.vhd"], "{text}");
+
+    // A pattern that covers nothing is reported and changes no status, unless asked to.
+    waivers(
+        "waivers:\n  - rule: lint_770\n    files: [src, thrid]\n  - rule: lint_770\n    files: third/lib.vhd\n",
+    );
+    let (found, code, text) = left(&dir, &args);
+    assert!(found.is_empty(), "{text}");
+    assert_eq!(code, 0, "{text}");
+    assert_eq!(text.matches("W0132").count(), 1, "{text}");
+    assert!(text.contains("`thrid` (line 3"), "{text}");
+    let mut strict = args.clone();
+    strict.push("-Werror");
+    assert_eq!(left(&dir, &strict).1, 1);
+    // A file on disk that this run did not read is no stale pattern.
+    let (found, _, text) = left(&dir, &["src/new/fresh.vhd"]);
+    assert!(found.is_empty(), "{text}");
+    assert_eq!(text.matches("W0132").count(), 1, "{text}");
+}
+
 #[test]
 fn every_report_format() {
     let dir = tempdir("lint");

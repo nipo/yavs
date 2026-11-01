@@ -120,6 +120,8 @@ Syntax, command line, waveforms, coverage, debugger, plugins (E0 and W0)
      - ``--threads`` is above 1 and ``YAVS_TOKENS`` names a token server that yavs cannot use: the value is not ``<port>:<secret>``, or the server did not accept the secret (often a ``YAVS_TOKENS`` left over from a test runner that has ended).
    * - _`E0130`
      - ``--surfer`` cannot use Surfer: ``surfer`` is not on PATH, it ended or did not connect within 30 seconds, the address does not answer, it refuses the greeting, or it does not load the file.
+   * - _`W0132`
+     - A ``files`` pattern in a ``yavs lint`` waiver file covers no file of this run and no VHDL file under the waiver file: it is relative to that file. The run goes on, as a shared waiver file may name generated files that do not exist yet.
    * - _`W0131`
      - The connection to Surfer ended during the run, or Surfer did not answer at the end of the run.
    * - _`E0133`

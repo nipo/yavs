@@ -1,0 +1,1 @@
+A `yavs lint` waiver can turn rules off for whole directories and file patterns: `rule` and `files` each take a list, a plain directory covers everything under it, and patterns are relative to the waiver file. A pattern that covers no file gets a warning.

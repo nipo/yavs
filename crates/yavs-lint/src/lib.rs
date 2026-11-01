@@ -10,7 +10,7 @@ mod design;
 mod report;
 mod rules;
 
-pub use config::{Config, Waivers, find_up};
+pub use config::{Config, Waivers, find_up, unmatched};
 pub use report::{Entry, Reports};
 
 use serde_json::Value;

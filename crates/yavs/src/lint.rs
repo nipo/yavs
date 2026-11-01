@@ -219,7 +219,7 @@ fn read_file(path: &Path) -> Result<String, Box<Diagnostic>> {
 }
 
 /// The configuration and waivers named or found, with their errors naming the file.
-fn load_settings(a: &Args) -> Result<(Config, Waivers, PathBuf), Box<Diagnostic>> {
+fn load_settings(a: &Args) -> Result<(Config, Waivers, PathBuf, PathBuf), Box<Diagnostic>> {
     let cwd = std::env::current_dir().unwrap_or_default();
     // In the message: the short format, which CI reads, prints no notes.
     let bad = |p: &Path, e: String| {
@@ -254,7 +254,36 @@ fn load_settings(a: &Args) -> Result<(Config, Waivers, PathBuf), Box<Diagnostic>
         .and_then(|p| std::path::absolute(p).ok())
         .and_then(|p| p.parent().map(Path::to_path_buf))
         .unwrap_or(cwd);
-    Ok((cfg, w, base))
+    // A waiver's patterns are relative to the waiver file.
+    let waiver_base = waivers
+        .as_deref()
+        .and_then(|p| std::path::absolute(p).ok())
+        .and_then(|p| p.parent().map(Path::to_path_buf))
+        .unwrap_or_else(|| base.clone());
+    Ok((cfg, w, base, waiver_base))
+}
+
+/// W0132: a waiver pattern that covers no file of this run and no VHDL file under the waiver file.
+/// A warning: a shared waiver file may name generated files that are not there yet.
+fn stale_patterns(w: &Waivers, checked: &[String], base: &Path, out: &mut Out, none: &SourceMap) {
+    let left = yavs_lint::unmatched(w.patterns(), checked, base);
+    if left.is_empty() {
+        return;
+    }
+    let mut on_disk = Vec::new();
+    if let Err(e) = vhdl_files(base, true, &mut on_disk) {
+        let message = format!("cannot look for what the waiver patterns cover: {e}");
+        out.emit(none, &Diagnostic::new(Severity::Warning, "W0132", message));
+        return;
+    }
+    let on_disk: Vec<String> = on_disk.iter().map(|p| p.display().to_string()).collect();
+    for (line, pattern) in yavs_lint::unmatched(left, &on_disk, base) {
+        let message = format!(
+            "the waiver pattern `{pattern}` (line {line} of the waiver file) covers no file: it is relative to `{}`",
+            base.display()
+        );
+        out.emit(none, &Diagnostic::new(Severity::Warning, "W0132", message));
+    }
 }
 
 fn class(c: Certainty) -> &'static str {
@@ -300,7 +329,7 @@ pub fn run(a: Args, format: MessageFormat, color: bool, encoding: Encoding) -> E
             }
         };
     }
-    let (cfg, waivers, base) = match load_settings(&a) {
+    let (cfg, waivers, base, waiver_base) = match load_settings(&a) {
         Ok(s) => s,
         Err(d) => {
             out.emit(&none, &d);
@@ -428,7 +457,7 @@ pub fn run(a: Args, format: MessageFormat, color: bool, encoding: Encoding) -> E
     for f in found {
         let file = db.sources.get(f.span.file);
         let (line, column) = file.line_col(f.span.start);
-        if waivers.waives(&file.path, f.rule.id, line) {
+        if waivers.waives(&file.path, &waiver_base, f.rule.id, line) {
             waived += 1;
             continue;
         }
@@ -452,6 +481,7 @@ pub fn run(a: Args, format: MessageFormat, color: bool, encoding: Encoding) -> E
             message: f.message,
         });
     }
+    stale_patterns(&waivers, &checked, &waiver_base, &mut out, &none);
     let reports = Reports {
         files: &checked,
         entries: &entries,

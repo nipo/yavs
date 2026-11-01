@@ -238,38 +238,13 @@ impl Config {
     }
 
     /// Whether `exclude` covers this file, `base` being the directory of the configuration file, or
-    /// a directory the file is in. A pattern is relative to `base`; one that starts with `/` or `**`
-    /// also matches the absolute path, for files outside `base`. Both paths are absolute.
+    /// a directory the file is in. Both paths are absolute.
     pub fn excluded(&self, file: &Path, base: &Path) -> bool {
         if self.exclude.is_empty() {
             return false;
         }
-        let (file, base) = (lexical(file), lexical(base));
-        let relative = file
-            .strip_prefix(&base)
-            .ok()
-            .map(|p| p.to_string_lossy().replace('\\', "/"));
-        let absolute = file.to_string_lossy().replace('\\', "/");
-        // The file and every directory above it.
-        let covers = |pattern: &str, path: &str| {
-            let mut upto = path;
-            loop {
-                if glob(pattern.as_bytes(), upto.as_bytes()) {
-                    return true;
-                }
-                match upto.rfind('/') {
-                    Some(i) if i > 0 => upto = &upto[..i],
-                    _ => return false,
-                }
-            }
-        };
-        self.exclude.iter().any(|p| {
-            relative.as_deref().is_some_and(|r| covers(p, r))
-                || ((p.starts_with('/')
-                    || p.starts_with("**")
-                    || p.as_bytes().get(1) == Some(&b':'))
-                    && covers(p, &absolute))
-        })
+        let place = Place::new(file, base);
+        self.exclude.iter().any(|p| place.covered_by(p))
     }
 
     /// The list a rule's own settings give (`suffixes`, `prefixes`), empty when not set.
@@ -305,10 +280,54 @@ impl Config {
     }
 }
 
+/// A file as a pattern of `exclude` or a waiver sees it.
+struct Place {
+    /// Relative to the directory of the file holding the pattern, when the file is under it.
+    relative: Option<String>,
+    absolute: String,
+}
+
+impl Place {
+    fn new(file: &Path, base: &Path) -> Place {
+        let (file, base) = (lexical(file), lexical(base));
+        Place {
+            relative: file
+                .strip_prefix(&base)
+                .ok()
+                .map(|p| p.to_string_lossy().replace('\\', "/")),
+            absolute: file.to_string_lossy().replace('\\', "/"),
+        }
+    }
+
+    /// Whether the pattern names the file or a directory above it. A pattern is relative to the
+    /// base; one that starts with `/` or `**` also matches the absolute path, for files outside.
+    fn covered_by(&self, pattern: &str) -> bool {
+        let pattern = pattern.trim_end_matches('/');
+        let covers = |path: &str| {
+            let mut upto = path;
+            loop {
+                if glob(pattern.as_bytes(), upto.as_bytes()) {
+                    return true;
+                }
+                match upto.rfind('/') {
+                    Some(i) if i > 0 => upto = &upto[..i],
+                    _ => return false,
+                }
+            }
+        };
+        self.relative.as_deref().is_some_and(covers)
+            || ((pattern.starts_with('/')
+                || pattern.starts_with("**")
+                || pattern.as_bytes().get(1) == Some(&b':'))
+                && covers(&self.absolute))
+    }
+}
+
 struct Waiver {
-    /// A rule id, or `*`.
-    rule: String,
-    files: Option<String>,
+    /// Rule ids, or `*`.
+    rules: Vec<String>,
+    /// The line of the pattern in the waiver file, and the pattern. Empty: every file.
+    files: Vec<(usize, String)>,
     /// Empty: the whole file.
     lines: Vec<usize>,
 }
@@ -366,22 +385,28 @@ impl Waivers {
                     return Err(format!("line {l}: each waiver must be a map"));
                 };
                 let mut w = Waiver {
-                    rule: String::new(),
-                    files: None,
+                    rules: Vec::new(),
+                    files: Vec::new(),
                     lines: Vec::new(),
                 };
                 for (l, key, v) in fields {
                     match (key.as_str(), v) {
-                        ("rule", Node::Scalar(s)) => {
-                            if s != "*" && crate::rule(&s).is_none() {
-                                return Err(format!(
-                                    "line {l}: unknown rule `{s}` in a waiver{}",
-                                    near_rule(&s)
-                                ));
+                        ("rule", v @ (Node::Scalar(_) | Node::Seq(_))) => {
+                            for s in one_or_list(l, &key, v)? {
+                                if s != "*" && crate::rule(&s).is_none() {
+                                    return Err(format!(
+                                        "line {l}: unknown rule `{s}` in a waiver{}",
+                                        near_rule(&s)
+                                    ));
+                                }
+                                w.rules.push(s);
                             }
-                            w.rule = s;
                         }
-                        ("files", Node::Scalar(s)) => w.files = Some(normalize(&s)),
+                        ("files", v @ (Node::Scalar(_) | Node::Seq(_))) => {
+                            for s in one_or_list(l, &key, v)? {
+                                w.files.push((l, normalize(&s)));
+                            }
+                        }
                         ("reason", Node::Scalar(_)) => {}
                         ("lines", Node::Seq(lines)) => {
                             for n in lines {
@@ -409,7 +434,7 @@ impl Waivers {
                         }
                     }
                 }
-                if w.rule.is_empty() {
+                if w.rules.is_empty() {
                     return Err(format!("line {l}: a waiver needs a `rule`"));
                 }
                 out.push(w);
@@ -418,18 +443,79 @@ impl Waivers {
         Ok(Waivers(out))
     }
 
-    /// Whether a waiver covers this finding. A bare file name also matches that file under any
-    /// directory.
-    pub fn waives(&self, file: &str, rule: &str, line: usize) -> bool {
-        let file = normalize(file);
+    /// Whether a waiver covers this finding. A pattern is relative to `base`, the directory of the
+    /// waiver file, as for `exclude`. It also matches the path as reported, and a bare file name
+    /// that file under any directory, which is what a generated waiver file relies on.
+    pub fn waives(&self, file: &str, base: &Path, rule: &str, line: usize) -> bool {
+        let found = Found::new(file, base);
         self.0.iter().any(|w| {
-            (w.rule == rule || w.rule == "*")
-                && w.files.as_ref().is_none_or(|p| {
-                    glob(p.as_bytes(), file.as_bytes()) || Path::new(&file).ends_with(p)
-                })
+            (w.rules.iter().any(|r| r == rule || r == "*"))
+                && (w.files.is_empty() || w.files.iter().any(|(_, p)| found.matches(p)))
                 && (w.lines.is_empty() || w.lines.contains(&line))
         })
     }
+
+    /// Every pattern, with its line in the waiver file.
+    pub fn patterns(&self) -> Vec<(usize, &str)> {
+        let all = self.0.iter().flat_map(|w| &w.files);
+        all.map(|(l, p)| (*l, p.as_str())).collect()
+    }
+}
+
+/// Those of the patterns that cover none of these files.
+pub fn unmatched<'a>(
+    patterns: Vec<(usize, &'a str)>,
+    files: &[String],
+    base: &Path,
+) -> Vec<(usize, &'a str)> {
+    let found: Vec<Found> = files.iter().map(|f| Found::new(f, base)).collect();
+    patterns
+        .into_iter()
+        .filter(|(_, p)| !found.iter().any(|f| f.matches(p)))
+        .collect()
+}
+
+/// A file a waiver may be about: as reported, and as a pattern sees it.
+struct Found {
+    reported: String,
+    place: Place,
+}
+
+impl Found {
+    fn new(file: &str, base: &Path) -> Found {
+        let path = Path::new(file);
+        let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+        Found {
+            reported: normalize(file),
+            place: Place::new(&absolute, base),
+        }
+    }
+
+    fn matches(&self, pattern: &str) -> bool {
+        self.place.covered_by(pattern)
+            || glob(pattern.as_bytes(), self.reported.as_bytes())
+            || Path::new(&self.reported).ends_with(pattern)
+    }
+}
+
+/// A value that is one word or a list of them, none empty.
+fn one_or_list(l: usize, key: &str, v: Node) -> Result<Vec<String>, String> {
+    let items = match v {
+        Node::Seq(items) => items,
+        n => vec![n],
+    };
+    if items.is_empty() {
+        return Err(format!("line {l}: `{key}` is an empty list"));
+    }
+    items
+        .into_iter()
+        .map(|n| match n {
+            Node::Scalar(s) if !s.is_empty() => Ok(s),
+            _ => Err(format!(
+                "line {l}: `{key}` must be a word or a list of them"
+            )),
+        })
+        .collect()
 }
 
 /// `path` with `.` and `..` taken out, without asking the file system.
@@ -557,15 +643,41 @@ mod tests {
             "waivers:\n  - rule: lint_770\n    files: 'src/**/*.vhd'\n    lines: [7]\n    reason: legacy\n",
         )
         .unwrap();
-        assert!(w.waives("src/a/b.vhd", "lint_770", 7));
-        assert!(w.waives("./src/b.vhd", "lint_770", 7));
-        assert!(!w.waives("src/a/b.vhd", "lint_770", 8));
-        assert!(!w.waives("src/a/b.vhd", "lint_771", 7));
-        assert!(!w.waives("test/b.vhd", "lint_770", 7));
+        let at = Path::new("/p");
+        assert!(w.waives("src/a/b.vhd", at, "lint_770", 7));
+        assert!(w.waives("./src/b.vhd", at, "lint_770", 7));
+        assert!(!w.waives("src/a/b.vhd", at, "lint_770", 8));
+        assert!(!w.waives("src/a/b.vhd", at, "lint_771", 7));
+        assert!(!w.waives("test/b.vhd", at, "lint_770", 7));
         let w = Waivers::parse("waivers:\n  - rule: '*'\n    reason: all\n").unwrap();
-        assert!(w.waives("any/file.vhd", "lint_771", 99));
+        assert!(w.waives("any/file.vhd", at, "lint_771", 99));
         let w = Waivers::parse("waivers:\n  - rule: lint_770\n    files: b.vhd\n").unwrap();
-        assert!(w.waives("src/b.vhd", "lint_770", 4000));
+        assert!(w.waives("src/b.vhd", at, "lint_770", 4000));
+    }
+
+    #[test]
+    fn waivers_of_directories_and_lists() {
+        let at = Path::new("/p");
+        let w = Waivers::parse(
+            "waivers:\n  - rule: [lint_770, lint_771]\n    files: [src/legacy/, 'gen/*.vhd']\n",
+        )
+        .unwrap();
+        for f in [
+            "/p/src/legacy/a.vhd",
+            "/p/src/legacy/x/y/a.vhd",
+            "/p/gen/a.vhd",
+        ] {
+            assert!(w.waives(f, at, "lint_770", 1), "{f}");
+            assert!(w.waives(f, at, "lint_771", 1), "{f}");
+            assert!(!w.waives(f, at, "lint_772", 1), "{f}");
+        }
+        assert!(!w.waives("/p/src/legacy2/a.vhd", at, "lint_770", 1));
+        assert!(!w.waives("/p/gen/x/a.vhd", at, "lint_770", 1));
+        assert!(!w.waives("/q/src/legacy/a.vhd", at, "lint_770", 1));
+        let files = ["/p/gen/a.vhd".to_string()];
+        assert_eq!(unmatched(w.patterns(), &files, at), [(3, "src/legacy/")]);
+        let w = Waivers::parse("waivers:\n  - rule: lint_770\n    files: '**/third/**'\n").unwrap();
+        assert!(w.waives("/elsewhere/third/a.vhd", at, "lint_770", 1));
     }
 
     #[test]
@@ -574,6 +686,9 @@ mod tests {
         assert!(Waivers::parse("waivers:\n  - rule: no_such\n").is_err());
         assert!(Waivers::parse("waivers:\n  - rule: lint_770\n    line: 3\n").is_err());
         assert!(Waivers::parse("waive: []\n").is_err());
+        assert!(Waivers::parse("waivers:\n  - rule: lint_770\n    files: []\n").is_err());
+        assert!(Waivers::parse("waivers:\n  - rule: []\n").is_err());
+        assert!(Waivers::parse("waivers:\n  - rule: [lint_770, no_such]\n").is_err());
         assert!(Waivers::parse("waivers:\n").unwrap().0.is_empty());
     }
 }

@@ -115,6 +115,27 @@ A waiver accepts a finding a project has decided about, with the reason. They li
 ``rule: '*'`` covers every rule, and a bare file name matches that file in any directory. A waived
 finding is in no report and changes no exit status.
 
+Turning rules off for a directory or file pattern
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``exclude`` takes files out for every rule. To leave them checked and turn off only some rules, give
+one entry the rules and the places, each one word or a list:
+
+.. code-block:: yaml
+
+   waivers:
+     - rule: [lint_601, lint_004]
+       files:
+         - src/legacy              # a directory: everything under it
+         - 'third_party/**/*.vhd'  # a pattern
+         - '**/vendor/**'          # a pattern that starts with `**` also matches outside this directory
+       reason: code we do not change
+
+Patterns are relative to the waiver file, wherever the command runs and whether it reads files or a
+library. A pattern that covers no file of the run and no VHDL file under the waiver file gets the
+warning W0132, as it may be a typing mistake or a renamed directory. It is not an error, because a
+shared waiver file may name generated files that do not exist yet; ``-Werror`` makes it one.
+
 Reports
 -------
 
