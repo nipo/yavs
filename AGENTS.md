@@ -201,6 +201,8 @@ ownership, commit identity, shared-host limits) do not apply to them.
     change is not done, and its issue not closed, until the user guide covers it, the docs build
     passes and the examples it shows were run. The report names the pages changed, or says why none
     applies.
+28. **Openness and honesty are the general policy** (user, 2026-11-01). The README and the
+    documentation state gaps, failures, slower cases and pre-release status plainly.
 
 ## 3a. Working alongside other agents
 

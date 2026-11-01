@@ -13034,7 +13034,7 @@ index (machine written; a damaged index says to re-analyze).
 
 - **Compiler and simulation bugs come first** (user): a bug that affects the direct result of a simulation is fixed as soon as possible, ahead of everything; the order is wrong results, then compiler bugs (valid code rejected, invalid accepted, internal errors, crashes), then the rest. A simulator's users rely on its results above all else. `AGENTS.md` rule 26.
 - **Documentation is a required gate, like tests** (user): a user-facing feature or change is not done or closed until the user guide covers it, the docs build passes and its examples were run, and the report names the pages changed or why none applies. A feature nobody can find or follow is not finished. `AGENTS.md` rule 27.
-
+- **Openness and honesty are the general policy** (user): the README and the documentation state gaps, failures, slower cases and pre-release status plainly, so a reader can trust the rest. The performance page keeps saying where yavs is slower, and the README keeps its pre-release sentence and its links to the known limitations and the conformance report. `AGENTS.md` rule 28.
 ## Outside contributions (maintainer, 2026-11-01)
 
 `CONTRIBUTING.md` holds the rules for people outside the project. Maintainer decisions unless marked:
