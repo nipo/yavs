@@ -187,7 +187,13 @@ identical to a run without it, at any `--threads`.
   yavs build, another format version or a damaged file are ignored, never an error. An error-free
   analysis is stored; a design with errors never is.
 - Entries are written to a temporary file and renamed into place: concurrent runs need no lock and
-  never see a partial entry. The newest 96 entries per library directory are kept. A library
+  never see a partial entry. A library directory keeps at most 4 GiB of entries (and 65536 files); the
+  limit is soft by what parallel runs write in the 5 s between two looks at the directory. At the limit,
+  entries not used for an hour go first, oldest first; then, most recently used first, entries not used
+  for 10 s. A suite larger than the limit runs through its designs in order, and this keeps the
+  designs that fit warm, where removing the least recently used would remove each entry just before
+  its next use (#1027). A suite far over the limit is not cured by this: measured at about six times the limit, later runs cost 10 to 14 percent more instructions than the first. With nothing older than 10 s, or for an entry bigger than the limit, the new
+  entry is not stored; a new version of an entry that is there always goes in. A library
   directory that cannot be written (read-only mount, no permission) is simply not cached into;
   reading from it works as before.
 - `--no-cache` (`run` and `elab`) neither reads nor writes the cache. A custom `$YAVS_STDLIB` tree
@@ -205,7 +211,7 @@ identical to a run without it, at any `--threads`.
   that are not static) is kept beside it, `<dir>/yavs-cache/low-<key>.img`, when the design is
   elaborated without instantiating anything at elaboration time and the lowering is neither tiny
   nor huge; the same rules apply (identical results, damaged or foreign entries ignored, atomic
-  writes, `--no-cache`, `yavs cache clean`). It counts toward the 96 entries.
+  writes, `--no-cache`, `yavs cache clean`). It counts toward the limit of the directory.
 - The lowered design (the architectures that own processes and every subprogram they reach, with
   the optimised copies of the functions earlier runs called) is kept beside it,
   `<dir>/yavs-cache/ir-<key>.img`, under the same rules; a run that called functions the entry
@@ -218,7 +224,7 @@ identical to a run without it, at any `--threads`.
   initialisers. The reports the initialisers made (`** Note: (init): text`) are printed again, in the
   same order and counted for the exit status. It is not kept when an initialiser opened or used a
   file, read the environment or a clock, or called foreign code: those run every time. Results,
-  messages and waveforms are identical with and without it. It counts toward the 96 entries.
+  messages and waveforms are identical with and without it. It counts toward the limit of the directory.
 - A closure's first run also uses what the files it starts with give once for all closures of that
   prefix, kept in the cache of the library of the prefix's last file: the lowered library
   (`lib-<key>.img`: the packages and every subprogram they declare that does not depend on the design),
@@ -227,13 +233,13 @@ identical to a run without it, at any `--threads`.
   one run at a time (`<kind>-<key>.making` while it does), and only when no package body follows the
   prefix, nothing was instantiated at elaboration time and the run has no coverage counters and is not
   `--tier=llvm`; otherwise the run lowers as before. Results, messages and waveforms are identical with
-  and without it. A library directory keeps at most 96 entries and 512 MiB of them.
+  and without it. These entries count toward the limit of the directory.
 - With `--tier=llvm` or `--tier=auto`, the machine code of every module the compiled tier makes is
   kept in `<dir>/yavs-cache/obj/obj-<key>.img` of the work library (#505); a later run that makes a
   module with the same key (the same generated code, options, target and yavs build) links it instead
   of compiling it. Same rules: identical results, damaged or foreign entries ignored and compiled
   again, atomic writes, nothing stored into a directory that cannot be written, `--no-cache`, `yavs
-  cache clean`. The directory keeps at most 4096 objects and 256 MiB, apart from the 96 entries.
+  cache clean`. The directory keeps at most 16384 objects and 256 MiB, apart from the 4 GiB of entries, under the same rule at the limit.
   With `--tier=clift`, `--tier=clift-auto` or `--tier=auto3` the machine code of every function
   Cranelift translates goes to the same directory as `clif-<key>.img` (the function's translated
   body, the target and the yavs build; #481), under the same rules and limits; `--tier=auto3` keeps
@@ -252,8 +258,9 @@ identical to a run without it, at any `--threads`.
   Only `analyze` writes entries (under its library session; the units of other libraries and of
   `std`/`ieee` by atomic rename, no lock); `elab` and `run` only read them. A library directory that
   cannot be written is read and never fails. `analyze --no-cache` neither reads nor writes them; `yavs
-  cache clean` removes them. The directory keeps at most 16384 entries and 512 MiB, apart from the 96
-  entries.
+  cache clean` removes them. The directory keeps at most 16384 entries and 512 MiB, apart from the 4 GiB
+  of entries, under the same rule at the limit (a read does not refresh a unit's time, so its age is the
+  age of the entry). A library directory therefore holds at most about 4.75 GiB of cache.
 - **Shared std/ieee units** (#564, user decision 2026-10-26, `docs/decisions.md` "Shared std/ieee units"):
   the analysed units of the built-in `std` and `ieee` are kept once per user in
   `$YAVS_STD_CACHE/yavs-cache/units/`, default `yavs/std` in the user's cache directory (`$XDG_CACHE_HOME`

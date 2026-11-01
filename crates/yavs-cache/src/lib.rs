@@ -28,12 +28,23 @@ pub const FORMAT: u32 = 2;
 /// Name of the cache directory inside a library directory.
 pub const DIR: &str = "yavs-cache";
 
-/// Entries kept per directory; the least recently used ones are removed when it grows past this.
-pub const MAX_ENTRIES: usize = 96;
+/// Entries kept per directory: a guard on the size of the directory, the bytes are what limit it.
+pub const MAX_ENTRIES: usize = 65536;
 
-/// Bytes of entries kept per directory (the lowered library of a big verification library is
-/// about 10 MB): the least recently used entries go first, but the newest is always kept.
-pub const MAX_BYTES: u64 = 512 << 20;
+/// Bytes of entries kept per directory. A testbench of a big VUnit suite needs about 10 MB of
+/// entries, so this holds a suite of about 400 (#1027). What happens at the limit: [`STALE_AFTER`].
+pub const MAX_BYTES: u64 = 4 << 30;
+
+/// A directory at its limit first removes entries not used for this long, oldest first: what an
+/// edit left behind.
+pub const STALE_AFTER: std::time::Duration = std::time::Duration::from_secs(3600);
+
+/// If that makes no room it removes, most recently used first, entries not used for this long.
+/// A suite larger than the limit runs through its designs in order: least recently used would
+/// remove each entry just before its next use, and write every entry and read none (#1027).
+/// Removing the design that just finished keeps the rest warm, and the later test cases of the
+/// running design still find its entries. With nothing older than this, the new entry is not stored.
+pub const IN_USE: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// The subdirectory of [`DIR`] that holds the compiled code of the LLVM tier
 /// ([`Store::objects_of_library`]): many small entries, one per compiled module, under limits of
@@ -41,7 +52,7 @@ pub const MAX_BYTES: u64 = 512 << 20;
 pub const OBJ_DIR: &str = "obj";
 
 /// Entries and bytes kept in [`OBJ_DIR`].
-pub const OBJ_MAX_ENTRIES: usize = 4096;
+pub const OBJ_MAX_ENTRIES: usize = 16384;
 pub const OBJ_MAX_BYTES: u64 = 256 << 20;
 
 /// The subdirectory of [`DIR`] that holds the analysed-unit cache ([`Store::units_of_library`]):
@@ -53,21 +64,24 @@ pub const UNIT_DIR: &str = "units";
 pub const UNIT_MAX_ENTRIES: usize = 16384;
 pub const UNIT_MAX_BYTES: u64 = 512 << 20;
 
-/// Notes ([`Store::note`]) kept per directory: the newest ones. Trimming asks the age of every
-/// note (a system call each), so it waits until the directory is [`NOTES_SLACK`] past this.
-pub const MAX_NOTES: usize = 512;
+/// Notes ([`Store::note`]) kept per directory: the newest ones, empty files. Trimming asks the age
+/// of every note (a system call each), so it waits until the directory is [`NOTES_SLACK`] past
+/// this. A closure whose note is trimmed before its second run never gets an entry, so this must
+/// hold more closures than [`MAX_BYTES`] has room for.
+pub const MAX_NOTES: usize = 16384;
 const NOTES_SLACK: usize = 64;
 
-/// Whether a put of `added` bytes into a directory of `n` entries kept to `max_entries` and
+/// Whether a put of `added` bytes into a directory of `n` entries before it, kept to `max_entries` and
 /// `max_bytes` must look at them all (their size and age: 0.25 ms for 90 entries); `due` is that
-/// the last time was `SWEEP_EVERY` ago.
+/// the last time was `SWEEP_EVERY` ago and the answer may have changed.
 fn needs_sweep(n: usize, added: u64, due: bool, (max_entries, max_bytes): (usize, u64)) -> bool {
-    n > max_entries || added > max_bytes / FEW_ENTRIES as u64 || (n > FEW_ENTRIES && due)
+    n >= max_entries || added > max_bytes / FEW_ENTRIES as u64 || due
 }
 
 /// The file whose modification time says when a directory was last pruned by size, and how
 /// often that is done for a directory that is not over the entry limit: the byte limit is soft
-/// by what is stored in between.
+/// by what is stored in between. Not empty: that time, the directory was full, and puts of new
+/// entries are refused until the next time.
 const SWEPT: &str = ".swept";
 const SWEEP_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
 
@@ -361,8 +375,14 @@ impl Store {
         (size == HEADER as u64 + len).then_some(len)
     }
 
-    /// Store `payload` atomically. Failures are only noted with `YAVS_LOG=debug`.
+    /// Store `payload` atomically, unless the directory is full (see [`IN_USE`]): a new
+    /// version of an entry that is there always goes in. Failures are only noted with
+    /// `YAVS_LOG=debug`.
     pub fn put(&self, kind: &str, key: &Key, payload: &[u8]) {
+        if !self.room(payload.len() as u64) && !self.file(kind, key).exists() {
+            debug(format!("{} is full", self.dir.display()));
+            return;
+        }
         if let Err(e) = self.try_put(kind, key, payload) {
             debug(format!("cannot write into {}: {e}", self.dir.display()));
         }
@@ -370,7 +390,6 @@ impl Store {
 
     fn try_put(&self, kind: &str, key: &Key, payload: &[u8]) -> std::io::Result<()> {
         if self.direct && self.try_put_new(kind, key, payload)? {
-            self.prune(payload.len() as u64);
             return Ok(());
         }
         let tmp = self.dir.join(format!(
@@ -408,7 +427,6 @@ impl Store {
             let _ = fs::remove_file(&tmp);
             return Err(e);
         }
-        self.prune(payload.len() as u64);
         Ok(())
     }
 
@@ -470,7 +488,7 @@ impl Store {
         {
             return;
         }
-        self.trim_notes();
+        self.trim_notes(key);
     }
 
     /// Record that `member` wanted an entry of `group` (empty `.seen` files, each named by both, the
@@ -484,7 +502,7 @@ impl Store {
             if fs::create_dir_all(&self.dir).is_err() || fs::File::create(&mine).is_err() {
                 return 1;
             }
-            self.trim_notes();
+            self.trim_notes(member);
         }
         let prefix = format!("{kind}-{}.", group.hex());
         self.names_ending(".seen")
@@ -531,12 +549,11 @@ impl Store {
         let _ = fs::remove_file(self.claim_file(kind, key));
     }
 
-    /// Keep the most recently used entries within the store's limits ([`MAX_ENTRIES`] and
-    /// [`MAX_BYTES`] for a library's store),
-    /// after a put of `added` bytes. The names are counted first (one directory read); the sizes
-    /// and ages are asked for a directory over the entry limit, after a big entry, and at most
-    /// every [`SWEEP_EVERY`] otherwise, not for every put of every process.
-    fn prune(&self, added: u64) {
+    /// Whether `added` more bytes fit in the store's limits ([`MAX_ENTRIES`] and [`MAX_BYTES`] for
+    /// a library's store). The names are counted first (one directory read); the sizes and ages
+    /// are asked for a directory over the entry limit, after a big entry, and at most every
+    /// [`SWEEP_EVERY`] otherwise, not for every put of every process.
+    fn room(&self, added: u64) -> bool {
         use std::sync::atomic::Ordering::Relaxed;
         let n = match self.count.load(Relaxed) {
             UNKNOWN => self.names_ending(".img").len(),
@@ -544,23 +561,29 @@ impl Store {
         };
         self.count.store(n, Relaxed);
         let marker = self.dir.join(SWEPT);
-        let due = n > FEW_ENTRIES
-            && fs::metadata(&marker)
-                .and_then(|m| m.modified())
-                .ok()
+        let swept = fs::metadata(&marker).ok();
+        let was_full = swept.as_ref().is_some_and(|m| m.len() > 0);
+        let due = (n > FEW_ENTRIES || was_full)
+            && swept
+                .and_then(|m| m.modified().ok())
                 .and_then(|t| t.elapsed().ok())
                 .is_none_or(|age| age >= SWEEP_EVERY);
-        if needs_sweep(n, added, due, self.limits) {
-            let _ = fs::File::create(&marker);
-            self.prune_to(self.limits.0, self.limits.1);
-            self.count.store(UNKNOWN, Relaxed);
+        if !needs_sweep(n, added, due, self.limits) {
+            return !was_full;
         }
+        let room = self.make_room(added);
+        let _ = fs::write(&marker, if room { &b""[..] } else { b"full" });
+        self.count.store(UNKNOWN, Relaxed);
+        room
     }
 
     /// Drop the oldest notes (`.seen` files) beyond [`MAX_NOTES`], once there are
-    /// [`NOTES_SLACK`] more than that.
-    fn trim_notes(&self) {
-        if self.names_ending(".seen").len() > MAX_NOTES + NOTES_SLACK {
+    /// [`NOTES_SLACK`] more than that. One new note in [`NOTES_SLACK`] (by its `key`) looks: the
+    /// listing grows with the notes, and a first run of each of 16000 closures must not pay it.
+    fn trim_notes(&self, key: &Key) {
+        if usize::from(key.0[0]) % NOTES_SLACK == 0
+            && self.names_ending(".seen").len() > MAX_NOTES + NOTES_SLACK
+        {
             let mut all = self.files_ending(".seen");
             all.sort_by_key(|e| std::cmp::Reverse(e.1));
             for (p, _, _) in all.split_off(MAX_NOTES) {
@@ -569,21 +592,35 @@ impl Store {
         }
     }
 
-    fn prune_to(&self, max_entries: usize, max_bytes: u64) {
+    /// Remove entries by [`STALE_AFTER`] and [`IN_USE`] until `added` more bytes and one more entry
+    /// fit; whether they do.
+    fn make_room(&self, added: u64) -> bool {
+        let (max_entries, max_bytes) = self.limits;
         let mut all = self.entries();
-        all.sort_by_key(|e| std::cmp::Reverse(e.1));
-        let mut bytes = 0u64;
-        let mut keep = 0;
-        for (i, e) in all.iter().enumerate() {
-            bytes += e.2;
-            if i >= max_entries || (i > 0 && bytes > max_bytes) {
+        let mut n = all.len();
+        let mut bytes: u64 = all.iter().map(|e| e.2).sum();
+        let fits = |n: usize, bytes: u64| n < max_entries && bytes + added <= max_bytes;
+        if fits(n, bytes) {
+            return true;
+        }
+        // A time in the future (another clock) counts as just used.
+        let unused_for = |t: std::time::SystemTime| t.elapsed().unwrap_or_default();
+        all.sort_by_key(|e| e.1);
+        let recent = all.partition_point(|e| unused_for(e.1) >= STALE_AFTER);
+        let in_use = all.partition_point(|e| unused_for(e.1) >= IN_USE);
+        let stale = &all[..recent];
+        let finished = all[recent..in_use].iter().rev();
+        for (p, _, len) in stale.iter().chain(finished) {
+            if fits(n, bytes) {
                 break;
             }
-            keep = i + 1;
+            // An entry that cannot go (Windows: mapped by a run) still takes its room.
+            if fs::remove_file(p).is_ok() {
+                n -= 1;
+                bytes -= len;
+            }
         }
-        for (p, _, _) in all.split_off(keep) {
-            let _ = fs::remove_file(p);
-        }
+        fits(n, bytes)
     }
 
     fn entries(&self) -> Vec<(PathBuf, std::time::SystemTime, u64)> {
@@ -822,16 +859,15 @@ mod tests {
         assert!(s.noted("t", &key("a")));
         assert!(!s.noted("t", &key("b")));
         assert!(!s.noted("u", &key("a")));
-        // Trimmed down to the limit once NOTES_SLACK past it, so at least the newest MAX_NOTES stay.
-        for i in 0..MAX_NOTES + NOTES_SLACK + 5 {
+        // Trimmed down to the limit once NOTES_SLACK past it, looked at for one note in
+        // NOTES_SLACK, so at least the newest MAX_NOTES stay.
+        let n = MAX_NOTES + 8 * NOTES_SLACK;
+        for i in 0..n {
             s.note("t", &key(&i.to_string()));
         }
         let kept = s.files_ending(".seen").len();
-        assert!(
-            (MAX_NOTES..=MAX_NOTES + NOTES_SLACK).contains(&kept),
-            "{kept}"
-        );
-        assert!(s.noted("t", &key(&(MAX_NOTES + NOTES_SLACK + 4).to_string())));
+        assert!((MAX_NOTES..n).contains(&kept), "{kept}");
+        assert!(s.noted("t", &key(&(n - 1).to_string())));
         assert_eq!(s.entries().len(), 0);
         s.clean().unwrap();
         assert!(!s.dir().exists());
@@ -839,45 +875,195 @@ mod tests {
 
     const LIB: (usize, u64) = (MAX_ENTRIES, MAX_BYTES);
 
+    /// A store of `d` with limits a test can reach.
+    fn small(d: &Path, limits: (usize, u64)) -> Store {
+        Store {
+            limits,
+            ..Store::of_library(d)
+        }
+    }
+
+    /// Make the entry look unused for `age`, and let the next put look at the directory again.
+    fn age(s: &Store, k: &Key, age: std::time::Duration) {
+        fs::File::options()
+            .write(true)
+            .open(s.file("t", k))
+            .unwrap()
+            .set_modified(std::time::SystemTime::now() - age)
+            .unwrap();
+        let _ = fs::remove_file(s.dir().join(SWEPT));
+    }
+
     /// Compiled code has a store of its own inside the library's: its entries do not count
     /// against the library's limit, and cleaning the library removes them too.
     #[test]
     fn objects_have_limits_of_their_own_and_are_cleaned_with_the_library() {
         let d = tempfile::tempdir().unwrap();
-        let lib = Store::of_library(d.path());
+        let lib = small(d.path(), (2, MAX_BYTES));
         let obj = Store::objects_of_library(d.path());
         assert!(obj.dir().starts_with(lib.dir()));
         lib.put("t", &key("a"), b"stage");
-        for i in 0..MAX_ENTRIES + 5 {
+        for i in 0..5 {
             obj.put("obj", &key(&i.to_string()), b"code");
         }
-        assert_eq!(obj.entries().len(), MAX_ENTRIES + 5);
+        assert_eq!(obj.entries().len(), 5);
         lib.put("t", &key("b"), b"stage");
         assert_eq!(lib.get("t", &key("a")).as_deref(), Some(&b"stage"[..]));
+        assert_eq!(lib.get("t", &key("b")).as_deref(), Some(&b"stage"[..]));
         let c = lib.clean().unwrap();
-        assert_eq!(c.entries, MAX_ENTRIES + 5 + 2);
+        assert_eq!(c.entries, 5 + 2);
         assert!(!lib.dir().exists());
     }
 
-    /// A store counts its puts after the first listing of the directory (#747) and still keeps
-    /// to the entry limit; the newest entry is always kept.
+    /// A suite larger than the limit, run again and again in the same order, with a minute
+    /// between designs: the entries that fit stay and are read, and only the part over the limit
+    /// is written again (#1027). Least recently used would write every entry on every round and
+    /// read none.
     #[test]
-    fn counted_puts_still_prune() {
+    fn a_suite_over_the_limit_does_not_churn() {
+        let d = tempfile::tempdir().unwrap();
+        let s = small(d.path(), (8, MAX_BYTES));
+        let suite: Vec<Key> = (0..12).map(|i| key(&i.to_string())).collect();
+        let minute = std::time::Duration::from_secs(60);
+        let rounds = 3;
+        let mut left = rounds * suite.len() as u32;
+        for round in 0..rounds {
+            let (mut hits, mut puts) = (0, 0);
+            for k in &suite {
+                if s.get("t", k).is_some() {
+                    hits += 1;
+                } else {
+                    s.put("t", k, b"x");
+                    puts += 1;
+                }
+                left -= 1;
+                age(&s, k, left * minute);
+            }
+            assert!(s.entries().len() <= 8, "{}", s.entries().len());
+            if round > 0 {
+                assert!(hits >= 7, "round {round}: {hits} hits, {puts} puts");
+            }
+        }
+    }
+
+    /// Entries in use are not removed: the new entry waits, a new version of an entry goes in.
+    #[test]
+    fn entries_in_use_stay_and_new_versions_go_in() {
+        let d = tempfile::tempdir().unwrap();
+        let room = 2 * (100 + HEADER as u64);
+        let s = small(d.path(), (MAX_ENTRIES, room));
+        // Big enough against the limit to look at the directory on every put.
+        s.put("t", &key("a"), &[1u8; 100]);
+        s.put("t", &key("b"), &[2u8; 100]);
+        s.put("t", &key("c"), &[3u8; 100]);
+        assert!(s.get("t", &key("c")).is_none(), "no room");
+        s.put("t", &key("a"), &[4u8; 100]);
+        assert_eq!(s.get("t", &key("a")).as_deref(), Some(&[4u8; 100][..]));
+        assert_eq!(s.get("t", &key("b")).as_deref(), Some(&[2u8; 100][..]));
+    }
+
+    /// An entry bigger than the whole limit is not stored, and removes nothing.
+    #[test]
+    fn an_entry_over_the_limit_is_not_stored() {
+        let d = tempfile::tempdir().unwrap();
+        let s = small(d.path(), (MAX_ENTRIES, 1000));
+        s.put("t", &key("a"), &[1u8; 10]);
+        s.put("t", &key("big"), &[1u8; 2000]);
+        assert!(s.get("t", &key("big")).is_none());
+        assert!(s.get("t", &key("a")).is_some());
+    }
+
+    /// At the limit, entries unused for [`STALE_AFTER`] make room, oldest first, and only as many
+    /// as it takes: an edit leaves the entries of the old sources behind.
+    #[test]
+    fn stale_entries_make_room_oldest_first() {
+        let d = tempfile::tempdir().unwrap();
+        let s = small(d.path(), (3, MAX_BYTES));
+        let hour = std::time::Duration::from_secs(3600);
+        for (name, a) in [("old", 3 * hour), ("older", 4 * hour), ("used", hour / 2)] {
+            s.put("t", &key(name), b"x");
+            age(&s, &key(name), a);
+        }
+        s.put("t", &key("new"), b"x");
+        assert!(s.get("t", &key("new")).is_some());
+        assert!(s.get("t", &key("older")).is_none(), "oldest first");
+        assert!(s.get("t", &key("old")).is_some(), "only what it takes");
+        assert!(s.get("t", &key("used")).is_some());
+    }
+
+    /// With nothing stale, the entry used last among those not in use goes.
+    #[test]
+    fn finished_entries_make_room_most_recent_first() {
+        let d = tempfile::tempdir().unwrap();
+        let s = small(d.path(), (3, MAX_BYTES));
+        let minute = std::time::Duration::from_secs(60);
+        for (name, a) in [("early", 9 * minute), ("just", minute), ("now", IN_USE / 2)] {
+            s.put("t", &key(name), b"x");
+            age(&s, &key(name), a);
+        }
+        s.put("t", &key("new"), b"x");
+        assert!(s.get("t", &key("new")).is_some());
+        assert!(s.get("t", &key("just")).is_none(), "most recent first");
+        assert!(s.get("t", &key("early")).is_some());
+        assert!(s.get("t", &key("now")).is_some(), "in use");
+    }
+
+    /// A directory found full refuses new entries without being looked at again, until
+    /// [`SWEEP_EVERY`] has passed.
+    #[test]
+    fn a_full_directory_is_remembered_and_looked_at_again() {
         let d = tempfile::tempdir().unwrap();
         let s = Store::of_library(d.path());
-        let n = MAX_ENTRIES + MAX_ENTRIES / 2;
-        for i in 0..n {
-            s.put("t", &key(&i.to_string()), b"x");
+        s.put("t", &key("a"), b"x");
+        let marker = s.dir().join(SWEPT);
+        fs::write(&marker, b"full").unwrap();
+        s.put("t", &key("b"), b"x");
+        assert!(s.get("t", &key("b")).is_none());
+        fs::File::options()
+            .write(true)
+            .open(&marker)
+            .unwrap()
+            .set_modified(std::time::SystemTime::now() - 2 * SWEEP_EVERY)
+            .unwrap();
+        s.put("t", &key("b"), b"x");
+        assert!(s.get("t", &key("b")).is_some());
+        assert_eq!(fs::metadata(&marker).unwrap().len(), 0);
+    }
+
+    /// Parallel writers at the limit: every entry that is there reads back whole, and each
+    /// stops at the limit by its own count (entries of the others are seen at the next look).
+    #[test]
+    fn parallel_puts_at_the_limit_are_safe() {
+        let d = tempfile::tempdir().unwrap();
+        let limits = (32, MAX_BYTES);
+        std::thread::scope(|t| {
+            for w in 0..8 {
+                let dir = d.path();
+                t.spawn(move || {
+                    let s = small(dir, limits);
+                    for i in 0..200 {
+                        let k = key(&format!("{w}-{i}"));
+                        s.put("t", &k, &[w as u8; 4000]);
+                        if let Some(e) = s.get("t", &k) {
+                            assert_eq!(&*e, &[w as u8; 4000][..]);
+                        }
+                    }
+                });
+            }
+        });
+        let s = small(d.path(), limits);
+        let n = s.entries().len();
+        assert!(n <= 8 * 33, "{n}");
+        for (p, _, len) in s.entries() {
+            assert_eq!(len, 4000 + HEADER as u64, "{}", p.display());
         }
-        assert_eq!(s.entries().len(), MAX_ENTRIES);
-        assert!(s.get("t", &key(&(n - 1).to_string())).is_some());
     }
 
     /// Pruning asks the size and age of every entry: it waits for a reason.
     #[test]
     fn pruning_waits_for_a_reason() {
         assert!(
-            !needs_sweep(FEW_ENTRIES, 100, true, LIB),
+            !needs_sweep(FEW_ENTRIES, 100, false, LIB),
             "few entries cannot be over the limit"
         );
         assert!(
@@ -889,8 +1075,8 @@ mod tests {
             "later puts of the process"
         );
         assert!(
-            needs_sweep(MAX_ENTRIES + 1, 100, false, LIB),
-            "over the entry limit"
+            needs_sweep(MAX_ENTRIES, 100, false, LIB),
+            "at the entry limit"
         );
         assert!(
             needs_sweep(1, MAX_BYTES / 2, false, LIB),
@@ -898,45 +1084,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn pruning_keeps_the_newest() {
-        let d = tempfile::tempdir().unwrap();
-        let s = Store::of_library(d.path());
-        for i in 0..MAX_ENTRIES + 5 {
-            s.put("t", &key(&i.to_string()), b"x");
-        }
-        assert_eq!(s.entries().len(), MAX_ENTRIES);
-        let c = s.clean().unwrap();
-        assert_eq!(c.entries, MAX_ENTRIES);
-        assert!(!s.dir().exists());
-    }
-
-    #[test]
-    fn pruning_keeps_to_the_byte_limit_but_the_newest() {
-        let d = tempfile::tempdir().unwrap();
-        let s = Store::of_library(d.path());
-        let t0 = std::time::SystemTime::now() - std::time::Duration::from_secs(100);
-        for i in 0..4u64 {
-            s.put("t", &key(&i.to_string()), &[7u8; 1000]);
-            let f = fs::File::options()
-                .write(true)
-                .open(s.file("t", &key(&i.to_string())))
-                .unwrap();
-            f.set_modified(t0 + std::time::Duration::from_secs(i))
-                .unwrap();
-        }
-        // Room for two of them.
-        s.prune_to(96, 2 * (1000 + HEADER as u64) + 10);
-        assert_eq!(s.entries().len(), 2);
-        assert!(s.get("t", &key("3")).is_some() && s.get("t", &key("2")).is_some());
-        assert!(s.get("t", &key("1")).is_none());
-        // The newest stays even when it alone is over the limit.
-        s.prune_to(96, 5);
-        assert_eq!(s.entries().len(), 1);
-    }
-
-    /// A read refreshes the time of the entry (through the file it has open, Unix).
-    #[cfg(unix)]
     #[test]
     fn a_read_refreshes_the_entry() {
         let d = tempfile::tempdir().unwrap();

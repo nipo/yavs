@@ -602,7 +602,7 @@ pub fn analyze_closure(
     // its run count: the prefix image, the library stages and the analysis of its own files give
     // what a run needs, and a copy of the library per closure (5 MB of analysis, the same again
     // lowered) is slower to read than the shared ones, is written by every closure of a suite
-    // that runs twice, and evicts its neighbours from the 96 entries of a library directory.
+    // that runs twice, and fills the library directory.
     if library_made(&levels) {
         debug(format!("{} uses the library stages", k.hex()));
         return (

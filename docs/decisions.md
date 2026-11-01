@@ -2948,7 +2948,7 @@ Design: `docs/design/gui.md` (section 12 lists the same decisions).
   `yavs-cache` in a header with magic, format version, key, length and an xxh3 checksum of the payload. Stored in
   `<work library dir>/yavs-cache/sem-<key>.img`; a write is a temporary file plus an atomic rename (no
   lock needed; the library lock rules of rule 14 are unchanged and the manifest is never touched by
-  `run`); the 96 most recently used entries are kept; a directory that cannot be written is skipped
+  `run`); the 96 most recently used entries are kept (replaced: "Size of the compilation cache", #1027); a directory that cannot be written is skipped
   silently. `--no-cache` and `yavs cache clean` (`E0123`) control it. A custom `$YAVS_STDLIB` disables
   the cache.
 - **Not stored in the library but per user:** nothing yet. A precomputed std/ieee base shared by all
@@ -3744,7 +3744,7 @@ allocator would keep resident through the rest of the run (peak 224 MB of a cold
   design does not: package bodies are not the "last architecture"); difftest, the analysis corpora and the external
   suites are unchanged.
 - **Entries per directory:** `lib` (about 10 MB for a big library), `libopt` (under 1 MB) and `libinit` (a few KB) per
-  prefix, with the prefix's `pre` image (5 MB): the 96-entry limit now has a byte limit beside it, 512 MiB per library
+  prefix, with the prefix's `pre` image (5 MB): the 96-entry limit now has a byte limit beside it (both replaced: "Size of the compilation cache", #1027), 512 MiB per library
   directory, the least recently used go first and the newest stays (`yavs-cache` `MAX_BYTES`). The `.pro` regression
   (11 prefixes) leaves 199 MB of cache in all, 25 MB more than before (the library under eight suites holds 133 MB:
   eight prefixes of 10 MB, 1 MB and 5 MB of state and copies, 5.6 MB of analysis each; 16 MB, 11 MB and 5 MB in the
@@ -5129,7 +5129,7 @@ is one module of minutes, and every test case of a suite paid it again. Decision
   `Module::emit` with the target machine the JIT uses (portable CPU, JIT code model, the level) and linked
   through the object layer, on a miss as on a hit; without one (`--no-cache`) the module goes to ORC as IR as
   before, which compiles it with the same target machine.
-- **The store.** A subdirectory with limits of its own (4096 entries, 256 MiB, least recently used first),
+- **The store.** A subdirectory with limits of its own (4096 entries, 256 MiB, least recently used first; policy and entries replaced: "Size of the compilation cache", #1027),
   so that one small object per compiled function never pushes the stage entries out. Writes are a temporary
   file and a rename, so parallel runs (a suite at `-p N` into one library) need no lock and at worst compile
   one module twice and write the same bytes; a directory that cannot be written gets nothing and the run
@@ -13255,3 +13255,30 @@ index (machine written; a damaged index says to re-analyze).
 - **Decision (maintainer, 2026-11-01):** "conformance does not need to be run on every push, it can run nightly". `conformance.yml` has no trigger on pushes to `main` and no `paths` filter. It runs nightly at 04:41 UTC on `main`, on a release tag and by hand (`gh workflow run conformance.yml --ref main`, which RELEASING.md uses for the report of the exact release commit; the run's `headSha` is checked).
 - A red nightly opens an issue labelled `conformance-nightly`, or comments on the open one, with the run link (the `report` job, `issues: write` on that job only), because nobody watches a scheduled run. It is not required for merging and was not before. The nightly always runs: skipping an unchanged `main` was left out to keep the workflow small.
 - Consequence: a commit that makes the committed `docs/conformance.md` stale is noticed at the next nightly (a warning in the run, not an issue) or by the tag run (a failure); a release still needs a current report first (RELEASING.md step 1). The release waits for it: see "Release waits for the conformance run of its tag".
+
+## Size of the compilation cache (yavs-cache, #1027, 2026-11-01)
+
+Replaces the 96 entries and 512 MiB of "Compilation cache" and "Entries per directory", the 4096 objects of "Compiled
+code in the compilation cache" and the 512 notes.
+
+- **The limit is bytes: 4 GiB of entries per library directory** (`MAX_BYTES`), with `MAX_ENTRIES` 65536 as a guard on the
+  directory only, 16384 objects (256 MiB unchanged) and 16384 notes. A testbench of a big suite takes about 10 MB, so this
+  holds about 400. With the 256 MiB of `obj/` and 512 MiB of `units/`, a library directory holds at most about 4.75 GiB, soft
+  by what parallel runs write in the 5 s between two looks. A suite only takes what it uses. No option: nobody has asked to
+  move it, and a suite over it can be split into libraries.
+- **Why the old limit had to go.** Measured on a suite of 122 testbenches in one library (`docs/STATUS.md`, "Size of the
+  compilation cache"): it needs 655 entries and about 1.2 GB, so both the entry limit and the byte limit churned. Every warm pass
+  wrote and removed entries it was about to need.
+- **What goes at the limit:** first entries unused for an hour (`STALE_AFTER`), oldest first, which is what an edit leaves
+  behind. Then entries unused for 10 s (`IN_USE`), most recently used first. With neither, the new entry is not stored; a new
+  version of an entry that is there always goes in. A suite runs through its designs in order, so removing the least recently
+  used removes each entry just before its next use. Most recent first gives up the design that just finished and keeps the
+  rest; the 10 s keep the entries of the running design for its next test case.
+- **Rejected: refusing every new entry at the limit.** It never evicts, but a design that does not fit loses the reuse between
+  its own test cases, which a first run depends on: at 2.3 times the limit the first run cost 19 percent more instructions and
+  later runs were 15 percent over the policy above.
+- **Known gap:** about six times over the limit, later runs still cost 10 to 14 percent more instructions than the first
+  (15 to 19 percent with the old limit), so split such a suite into libraries (#1034). The window counts wall time, so what
+  is removed at the limit moves with the host's load.
+- **A put looks before it writes**, so a refused entry costs no write, and the `.swept` marker holds "full" until the next look,
+  so a full directory is not listed by every put.

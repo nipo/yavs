@@ -41,6 +41,43 @@ The file is the same however it is spelled (#1016): a named file that reached th
 
 Every path yavs writes is dotted through `yavs_diag::dotted`: reports, errors, hierarchy, hang report, activity, profile, coverage reports, JSON. The kernel holds the dotted names; `'path_name`, `'instance_name`, `{i}`, VHPI names, the coverage database and `dataId` keep colons. Both forms are accepted as input. `tools/difftest` normalises the process path.
 
+### Size of the compilation cache (#1027, 2026-11-01)
+
+A suite with many testbenches in one library now gets warm: warm runs of a suite of 122 testbenches (6867 test cases, 1258
+simulations) were slower than the first and are now about a fifth cheaper. Cause, proven with one trace build and only the
+limits changed: at 96 entries a warm pass made about 2800 evictions, 4800 writes and 6.3 GB rewritten, with 528 analysis misses
+of 1270 runs; with no limit 0 evictions, 6 misses, 0.1 to 0.2 GB. Raising only the entries left the 512 MiB byte limit
+churning (1100 evictions, 2386 to 2419 G). Ruled out: per test case key differences (those 6 misses), reading and validating
+(1.4 s summed over 1270 processes for 13 GB), locks (there are none), writes of a warm run (about 0.5 s in all).
+
+Whole suite, `-p 3` on cores 9-11, `--tier=auto`, Cranelift, aligned bench builds at d5b418b5 and with the change, seconds and
+user instructions. Load 7 to 15, except the second "after": 76 at its first pass, 25 to 38 later, so its wall is not comparable;
+its instructions are.
+
+| | cold | warm | second warm |
+|---|---:|---:|---:|
+| before | 96.7 s, 2524 G | 113.0 s, 2904 G | 111.9 s, 3011 G |
+| before | 86.6 s, 2506 G | 99.1 s, 2888 G | 99.4 s, 2891 G |
+| after | 92.0 s, 2532 G | 68.6 s, 2064 G | 71.8 s, 2061 G |
+| after | 107.4 s, 2533 G | 79.5 s, 2047 G | 82.1 s, 2074 G |
+
+Disk: the testbench library's cache is 1.2 GB (was about 220 MB). The limit is in `docs/on-disk.rst`. `obj/` still grows by
+about 10 MB per pass here, also with a fixed seed, for a reason not yet found (#1035); bounded by its limit, and entries
+unused for an hour go first. Warm passes with a fixed seed: 2061 G, 2060 G, 2076 G, the same as with the runner's seeds.
+
+A suite larger than the limit, measured by building with a smaller limit (instructions of cold, then later passes): about 2.3
+times over, 512 MiB: 2512 G, then 2419 G and 2465 G, and 2526 G, then 2371 to 2422 G. About 6 times over, 200 MiB: 2529 G, then
+2782 to 2877 G and still rising, so **later runs are 10 to 14 percent over the first** (the old limit: 15 to 19). The crossover
+lies between these two points and was not measured. With `IN_USE` at 1 s, keeping the window as small against the limit as
+10 s is against 4 GiB: 2536 G, then 2765 G and 2750 G, 9 percent over, so a suite six times over 4 GiB may do a little better
+than the shipped policy measured here; that size was not run. The window counts wall time, so these counts move with load (33 to 40
+during the 200 MiB run).
+
+Short tests: 40 tests of `tests/corpus`, runs 1 to 5 of each, counted instructions, in an empty library and in one holding
+the cache of the suite above: geometric mean change against before between 0.997 and 1.001 in every cell, the same as before
+against itself (0.995 to 1.004). Pass and fail per test case are the same as sim1 in every pass of every configuration. `difftest`
+`yavs-auto` 606/606; `yavs-auto-warm` 606/606.
+
 ### Documentation do-over (#994, 2026-11-01)
 
 README, guide, `vunit-yavs` and extension READMEs checked against a build of main: claims corrected, new features linked from the README and the front page. No page moved. Code bugs found: #995, #996, #997, #998.

@@ -114,6 +114,7 @@ What to cache
 Two things can be kept between CI runs, and both are safe to lose (:doc:`on-disk`):
 
 * The library directories, for example ``build/``. They hold the compile cache, ``yavs-cache/``.
+  A large suite can make that more than a GB per library directory, up to the limit in :doc:`on-disk`.
 * The shared store of ``std`` and ``ieee``. Set ``YAVS_STD_CACHE`` to a directory you choose, so that it is
   easy to name in the cache step.
 

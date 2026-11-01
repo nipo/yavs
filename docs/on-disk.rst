@@ -43,7 +43,15 @@ compiled code. The first run of a design notes it, the second stores it, later r
 
 * The key of an entry holds the yavs build and the options, so an edit or another yavs makes a new
   entry. Nothing has to be cleaned by hand.
-* yavs removes the oldest entries itself when the cache grows.
+* A library directory keeps at most about 4.75 GiB of cache: 4 GiB of design entries, 256 MiB of compiled
+  code, 512 MiB of analyzed units. A suite only takes what it uses, about 10 MB for each testbench that runs
+  more than once, so a suite of 120 testbenches in one library uses a little over 1 GB. Parallel runs can
+  pass the limit by what they write in about 5 seconds.
+* At the limit yavs first removes entries not used for an hour, and then the entries of the design that ran
+  last, not the oldest ones. A suite larger than the limit therefore keeps the part that fits warm, and writes
+  only the rest again on each run. Measured at about 2.3 times the limit, later runs took 2 to 4 percent fewer
+  instructions than the first. At about six times the limit they took 10 to 14 percent more: split such a
+  suite into several libraries, each with its own limit.
 * An entry that is damaged counts as not there. The cache can make a run faster, never wrong: a failure to
   read or write it is not an error.
 * ``--no-cache`` turns it off for one command.

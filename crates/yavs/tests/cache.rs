@@ -237,6 +237,66 @@ fn damaged_entries_are_ignored() {
     }
 }
 
+/// A library with more closures than the 96 entries it used to keep (#1027): a third run reads
+/// everything and writes nothing, and when every entry is then damaged the results do not change.
+#[test]
+fn a_library_of_many_closures_stays_warm() {
+    let e = Env::new("many");
+    let tops: Vec<String> = (0..50).map(|i| format!("tb{i}")).collect();
+    for t in &tops {
+        let f = format!("{t}.vhd");
+        std::fs::write(
+            e.tmp.join(&f),
+            TB.replace("entity tb is", &format!("entity {t} is"))
+                .replace("of tb is", &format!("of {t} is")),
+        )
+        .expect("write");
+        assert_eq!(e.yavs(&["analyze", "--work", &e.work(), &f]).code, 0, "{f}");
+    }
+    let env = &e;
+    let pass = |more: &[&str]| -> Vec<Out> {
+        std::thread::scope(|s| {
+            let runs: Vec<_> = tops
+                .chunks(tops.len() / 8)
+                .map(|c| {
+                    s.spawn(move || c.iter().map(|t| env.run_top(t, more)).collect::<Vec<_>>())
+                })
+                .collect();
+            runs.into_iter()
+                .flat_map(|r| r.join().expect("thread"))
+                .collect()
+        })
+    };
+    let same = |a: &[Out], b: &[Out]| {
+        for (x, y) in a.iter().zip(b) {
+            assert_eq!(visible(x), visible(y));
+        }
+    };
+    let plain = pass(&["--no-cache"]);
+    assert!(plain.iter().all(|o| o.code == 0), "{plain:?}");
+    same(&plain, &pass(&[]));
+    let stored = pass(&[]);
+    same(&plain, &stored);
+    assert!(stored.iter().all(|o| note(o, "store")));
+    assert!(e.entries() >= 2 * tops.len(), "{}", e.entries());
+    let warm = pass(&[]);
+    same(&plain, &warm);
+    for o in &warm {
+        assert!(note(o, "hit") && !note(o, "store"), "{o:?}");
+    }
+    let n = e.entries();
+    for kind in ["sem", "ir"] {
+        for f in e.entry_files(kind) {
+            let mut b = std::fs::read(&f).expect("read");
+            let mid = b.len() / 2;
+            b[mid] ^= 0x55;
+            std::fs::write(&f, b).expect("write");
+        }
+    }
+    same(&plain, &pass(&[]));
+    assert_eq!(e.entries(), n);
+}
+
 #[cfg(unix)]
 #[test]
 fn read_only_library_is_not_cached_into() {
