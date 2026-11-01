@@ -635,24 +635,24 @@ impl Cx {
             .unwrap_or_default()
     }
 
-    /// The counter of row `kind` of a condition or expression at `span`; a combination also
+    /// The counter of row `kind` of a condition or expression; a combination also
     /// names its decision (`cond`).
     pub fn cover_cond(
         &mut self,
         pb: &mut ProgramBuilder,
         stmt: yavs_ir::StmtId,
-        span: Span,
         kind: CovKind,
         row: yavs_ir::CovRow,
         cond: Option<u32>,
+        under: Option<CovItem>,
     ) -> CovItem {
-        let _ = span;
         pb.cov(CovInfo {
             stmt,
             kind,
             row: Some(row),
             arm: None,
             cond,
+            under,
         })
     }
 
@@ -663,6 +663,7 @@ impl Cx {
         span: Span,
         kind: CovKind,
         arm: Option<yavs_ir::CovArm>,
+        under: Option<CovItem>,
     ) -> Option<CovItem> {
         (self.opts.coverage && !self.cov_skip.contains(&span.file)).then(|| {
             pb.cov(CovInfo {
@@ -671,6 +672,7 @@ impl Cx {
                 row: None,
                 arm,
                 cond: None,
+                under,
             })
         })
     }

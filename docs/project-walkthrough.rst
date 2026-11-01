@@ -150,14 +150,19 @@ Run with ``--cov``, then report on the database it writes:
 
 .. code-block:: text
 
-    statements 19/19 100.0%
-    branches   8/8 100.0%
-    toggles    0/0 -
+    Kind       Items  Hit  Missed  Coverage
+    ---------  -----  ---  ------  --------
+    statement     19   19       0    100.0%
+    branch         8    8       0    100.0%
+    total         27   27       0    100.0%
 
-    path             statements            branches              toggles
-    counter_tb       10/10 100.0%          3/3 100.0%            0/0 -
-    counter_tb.dut   8/8 100.0%            5/5 100.0%            0/0 -
-    rtl.counter_pkg  1/1 100.0%            0/0 -                 0/0 -
+    Instance         Total         statement     branch
+    ---------------  ------------  ------------  ----------
+    counter_tb       13/13 100.0%  10/10 100.0%  3/3 100.0%
+    counter_tb.dut   13/13 100.0%  8/8 100.0%    5/5 100.0%
+    rtl.counter_pkg  1/1 100.0%    1/1 100.0%    -
+
+    every item is covered
 
 :doc:`coverage` has the other kinds, HTML reports, merging runs and exclusions.
 

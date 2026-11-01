@@ -212,6 +212,7 @@ impl Fsm {
                     unit: w.unit.clone(),
                     process: String::new(),
                     operands: Vec::new(),
+                    detail: crate::Detail::default(),
                 });
                 e.count = e.count.saturating_add(count);
             };

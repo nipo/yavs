@@ -478,6 +478,12 @@ fn matches(r: &Rule, k: &Key, e: &Entry, files: Option<&BTreeSet<&str>>) -> bool
 /// warnings for rows that match nothing, moved lines and excluded items that ran. An item more
 /// than one rule matches is excluded once; every rule is kept in [`Applied::uses`].
 pub fn apply(db: &Database, files: &[Rules]) -> Applied {
+    apply_showing(db, files, &|f| f.to_string())
+}
+
+/// [`apply`], with the source paths of its warnings through `show` (`--root`). One rule warns once
+/// that what it excludes ran, however many items it matches.
+pub fn apply_showing(db: &Database, files: &[Rules], show: &dyn Fn(&str) -> String) -> Applied {
     let rows: Vec<(&str, &Row)> = files
         .iter()
         .flat_map(|f| f.rows.iter().map(|r| (f.name.as_str(), r)))
@@ -509,6 +515,7 @@ pub fn apply(db: &Database, files: &[Rules]) -> Applied {
         kept: Database {
             tests: db.tests.clone(),
             legacy: db.legacy,
+            sources: db.sources.clone(),
             unmeasured: db.unmeasured.clone(),
             ..Default::default()
         },
@@ -517,6 +524,7 @@ pub fn apply(db: &Database, files: &[Rules]) -> Applied {
         uses: Vec::new(),
     };
     let mut seen: Vec<Vec<Key>> = vec![Vec::new(); rows.len()];
+    let mut ran: Vec<Vec<&Entry>> = vec![Vec::new(); rows.len()];
     let mut inline: BTreeMap<(String, u32, String, String), Vec<Key>> = BTreeMap::new();
     for (k, e) in &db.items {
         let mut hit = None;
@@ -543,19 +551,14 @@ pub fn apply(db: &Database, files: &[Rules]) -> Applied {
                         MOVED,
                         format!(
                             "{exfile}:{}: the excluded statement is now at {}:{}, not line {l}",
-                            r.line, e.file, e.line
+                            r.line,
+                            show(&e.file),
+                            e.line
                         ),
                     ));
                 }
-                let ran = e.count > 0;
-                if ran {
-                    out.warnings.push(Diagnostic::warning(
-                        HIT,
-                        format!(
-                            "{exfile}:{}: the excluded item at {}:{} ran {} times",
-                            r.line, e.file, e.line, e.count
-                        ),
-                    ));
+                if e.count > 0 {
+                    ran[i].push(e);
                 }
             }
         }
@@ -574,6 +577,20 @@ pub fn apply(db: &Database, files: &[Rules]) -> Applied {
             reason,
             items,
         });
+    }
+    for ((exfile, r), entries) in rows.iter().zip(&ran) {
+        let Some(e) = entries.first() else { continue };
+        let times = crate::count(e.count as usize, "time", "times");
+        let at = format!("{}:{}", show(&e.file), e.line);
+        let message = match entries.len() {
+            1 => format!("{exfile}:{}: the excluded item at {at} ran {times}", r.line),
+            n => format!(
+                "{exfile}:{}: {n} excluded items ran, the first at {at} ({times}); \
+                 `--exclusions` lists them",
+                r.line
+            ),
+        };
+        out.warnings.push(Diagnostic::warning(HIT, message));
     }
     for (i, ((exfile, r), items)) in rows.iter().zip(seen).enumerate() {
         // A pattern of a list that covers nothing says so itself, even if the others apply.
@@ -981,27 +998,15 @@ impl Database {
     }
 }
 
-/// The text block listing excluded items and their reasons.
+/// What the report says about excluded items: a count. `--detailed` shows them in its tables.
 pub fn excluded_text(ex: &[(Key, Entry, String)]) -> String {
     if ex.is_empty() {
         return String::new();
     }
-    let mut v: Vec<_> = ex.iter().collect();
-    v.sort_by(|a, b| (&a.1.file, a.1.line, &a.0).cmp(&(&b.1.file, b.1.line, &b.0)));
-    let mut s = format!("\nexcluded ({}, not in the totals):\n", v.len());
-    for (k, e, why) in v {
-        s.push_str(&format!(
-            "  {}   # {}{}\n",
-            head(k, e),
-            comment(k, e),
-            if why.is_empty() {
-                String::new()
-            } else {
-                format!("  [{why}]")
-            }
-        ));
-    }
-    s
+    let n = crate::count(ex.len(), "item", "items");
+    format!(
+        "{n} excluded, not in the totals; `--detailed` shows them, `--exclusions` is the full audit.\n"
+    )
 }
 
 #[cfg(test)]
@@ -1043,6 +1048,7 @@ mod tests {
                     text: "x;".into(),
                     tests: Vec::new(),
                     waivers: Vec::new(),
+                    detail: crate::Detail::default(),
                     unit: "work.e".into(),
                     process: String::new(),
                     operands: Vec::new(),
@@ -1528,6 +1534,7 @@ mod tests {
                         text: String::new(),
                         tests: Vec::new(),
                         waivers: Vec::new(),
+                        detail: crate::Detail::default(),
                         unit: "work.e".into(),
                         process: String::new(),
                         operands: Vec::new(),
@@ -1548,12 +1555,18 @@ mod tests {
             assert_eq!(a.excluded.len(), 3, "a rise, b rise and fall");
             assert!(a.warnings.is_empty());
         }
-        // One direction only; W0114 per excluded direction that ran.
+        // One direction only; one W0114 per rule, however many items ran.
         let a = apply1(&d, parse("toggle :t * fall\n").unwrap());
         assert_eq!(a.excluded.len(), 3);
-        assert_eq!(a.warnings.iter().filter(|w| w.code == HIT).count(), 2);
+        assert_eq!(a.warnings.iter().filter(|w| w.code == HIT).count(), 1);
         let a = apply1(&d, parse("toggle :t c\n").unwrap());
-        assert_eq!(a.warnings.iter().filter(|w| w.code == HIT).count(), 2);
+        let hits: Vec<_> = a.warnings.iter().filter(|w| w.code == HIT).collect();
+        assert_eq!(hits.len(), 1);
+        assert!(
+            hits[0].message.contains("2 excluded items ran"),
+            "{}",
+            hits[0].message
+        );
         let y = "exclude:\n  - {kind: toggle, instance: ':t', signal: c, direction: rise}\n";
         let a = apply1(&d, parse_yaml(y).unwrap());
         assert_eq!(a.excluded.len(), 1);

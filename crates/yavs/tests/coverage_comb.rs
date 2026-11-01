@@ -176,9 +176,14 @@ fn requirements_counts_and_waivers() {
     // The summary leaves the waived requirements out of the totals and lists them.
     let o = yavs(&tmp, &["cov", "report", "a.ycov"]);
     let text = out(&o);
-    assert!(text.contains("combinations "), "{text}");
-    assert!(text.contains("excluded ("), "{text}");
-    assert!(text.contains("[x and y are never high together]"), "{text}");
+    assert!(text.contains("\ncombination "), "{text}");
+    assert!(text.contains(" excluded, not in the totals"), "{text}");
+    let o = yavs(&tmp, &["cov", "report", "a.ycov", "--detailed"]);
+    assert!(
+        out(&o).contains("excluded: x and y are never high together"),
+        "{}",
+        out(&o)
+    );
     let total = yavs(&tmp, &["cov", "report", "a.ycov", "--total"]);
     let (hit, all) = {
         let kept = got.iter().filter(|r| r.3 == 0);

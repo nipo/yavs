@@ -204,13 +204,26 @@ fn counts_threads_and_reports() {
     let o = yavs(&tmp, &["cov", "report", "a.ycov"]);
     let text = String::from_utf8(o.stdout).expect("utf-8");
     assert!(
-        text.starts_with("statements 0/0 -\nbranches   0/0 -\ntoggles    0/0 -\nconditions 35/52 67.3%\nexpressions 10/10 100.0%\n"),
+        text.contains("\ncondition      52   35      17     67.3%\n"),
         "{text}"
     );
     assert!(
-        text.contains("condition  x is 1 (result 1) in x and y  "),
+        text.contains("\nexpression     10   10       0    100.0%\n"),
         "{text}"
     );
+    assert!(
+        text.contains("\ntotal          62   45      17     72.5%\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("17 items not covered; `--detailed`"),
+        "{text}"
+    );
+    let o = yavs(&tmp, &["cov", "report", "a.ycov", "--detailed"]);
+    let text = String::from_utf8(o.stdout).expect("utf-8");
+    assert!(text.contains("x and y   (condition)"), "{text}");
+    assert!(text.contains("x is 1"), "{text}");
+    assert!(!text.contains("(result"), "{text}");
     let o = yavs(&tmp, &["cov", "report", "a.ycov", "--uncovered"]);
     let miss = String::from_utf8(o.stdout).expect("utf-8");
     assert_eq!(miss.lines().count(), 17, "{miss}");
@@ -244,9 +257,9 @@ fn counts_threads_and_reports() {
     let xml = std::fs::read_to_string(tmp.join("a.xml")).expect("xml");
     assert!(
         xml.contains(
-            "<line number=\"38\" hits=\"0\" branch=\"true\" condition-coverage=\"100% (6/6)\"/>"
+            "<line number=\"38\" hits=\"4\" branch=\"true\" condition-coverage=\"100% (6/6)\"/>"
         ) && xml.contains(
-            "<line number=\"67\" hits=\"0\" branch=\"true\" condition-coverage=\"16% (1/6)\"/>"
+            "<line number=\"67\" hits=\"1\" branch=\"true\" condition-coverage=\"16% (1/6)\"/>"
         ),
         "{xml}"
     );
@@ -372,7 +385,7 @@ fn exclusions_per_row() {
         std::fs::write(tmp.join(name), body).expect("write");
         let (code, out, err) = report(&tmp, &["--exclude", name]);
         assert_eq!((code, err.as_str()), (Some(0), ""), "{name}: {out}");
-        assert!(out.contains("excluded (5, not in the totals)"), "{out}");
+        assert!(out.contains("5 items excluded, not in the totals"), "{out}");
         assert!(!out.contains("not covered"), "{out}");
     }
 
@@ -380,7 +393,7 @@ fn exclusions_per_row() {
     std::fs::write(tmp.join("ex2.txt"), "instance :d\n").expect("write");
     let (_, out, err) = report(&tmp, &["--exclude", "ex2.txt"]);
     assert!(
-        err.contains("W0114") || out.contains("excluded (6"),
+        err.contains("W0114") || out.contains("6 items excluded"),
         "{out}{err}"
     );
 
@@ -392,7 +405,7 @@ fn exclusions_per_row() {
     let (code, out, err) = report(&tmp, &["--exclude", "ex.txt"]);
     assert_eq!(code, Some(0));
     assert_eq!(err.matches("warning[W0110]").count(), 5, "{err}");
-    assert!(out.contains("excluded (5"), "{out}");
+    assert!(out.contains("5 items excluded"), "{out}");
 
     // The condition changes: its rows are stale.
     cov_run(&tmp, &EXCL.replace("a and b", "a and not b"));

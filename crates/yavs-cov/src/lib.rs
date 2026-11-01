@@ -124,6 +124,34 @@ pub struct Entry {
     /// full and on one line, what a directive names. Empty elsewhere, and in a database older than
     /// version 11.
     pub operands: Vec<String>,
+    /// What `--detailed` says about it (none in a database older than version 12).
+    pub detail: Detail,
+}
+
+/// Where an item is and what it depends on, for `yavs cov report --detailed`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Detail {
+    /// The code to underline: its line and column (1-based; 0 unknown), byte offsets in the
+    /// source text, and the hash of those bytes, to tell an edited file.
+    pub line: u32,
+    pub col: u32,
+    pub start: u32,
+    pub end: u32,
+    pub digest: u64,
+    /// The branch arm around it, same path: statement hash, occurrence, arm.
+    pub under: Option<(u64, u32, u32)>,
+    /// The statement it belongs to (arms, condition rows), same path: hash, occurrence.
+    pub owner: Option<(u64, u32)>,
+    /// A condition or expression row: what the other inputs must be for this input to decide
+    /// the result; empty when none matters.
+    pub needs: String,
+    /// A condition or expression row or a combination: an in-source directive before the
+    /// statement can waive it (a conditional or selected assignment is ambiguous, so a directive
+    /// there is an error).
+    pub directive: bool,
+    /// A toggle: the level the scalar ended at, `0`, `1`, `-` (neither), `?` (differs between
+    /// merged runs), or a space when not recorded.
+    pub level: char,
 }
 
 /// An in-source exclusion of a requirement.
@@ -137,8 +165,10 @@ pub struct Waiver {
     pub line: u32,
 }
 
+pub mod detail;
 pub mod exclude;
 pub mod exclusions;
+mod export;
 pub mod fsm;
 pub mod html;
 pub mod toggle;
@@ -146,6 +176,68 @@ pub mod toggle;
 /// An unclosed `-- coverage off` or a `-- coverage on` without one.
 pub const PRAGMA_UNCLOSED: &str = "W0112";
 pub const PRAGMA_UNOPENED: &str = "W0113";
+
+/// What `yavs cov report` adds to its text report.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SummaryOptions<'a> {
+    /// Only the paths under this percentage (in tenths, rounded down as everywhere), worst first.
+    pub below: Option<u64>,
+    /// Also every item of each of those paths, and entries for what never ran.
+    pub detailed: bool,
+    /// The excluded items and their reasons, shown as `excluded` in the tables of `detailed`.
+    pub excluded: Option<&'a [(Key, Entry, String)]>,
+    /// The source text the entries of `detailed` show.
+    pub sources: Option<&'a detail::Sources>,
+    pub color: bool,
+}
+
+/// Rows in aligned columns, plain ASCII, a rule under the first; the columns in `right` align
+/// right. Each line starts with `indent`.
+pub(crate) fn table(rows: &[Vec<String>], right: &[usize], indent: &str) -> String {
+    // A newline in a cell of the last column: what follows goes on lines under the row.
+    let first = |cell: &'_ String| cell.split('\n').next().unwrap_or("").chars().count();
+    let widths: Vec<usize> = (0..rows[0].len())
+        .map(|c| rows.iter().map(|r| first(&r[c])).max().unwrap_or(0))
+        .collect();
+    let mut s = String::new();
+    for (n, row) in rows.iter().enumerate() {
+        let mut under = "";
+        let cells: Vec<String> = row
+            .iter()
+            .zip(&widths)
+            .enumerate()
+            .map(|(c, (cell, w))| {
+                let (cell, rest) = cell.split_once('\n').unwrap_or((cell, ""));
+                if !rest.is_empty() {
+                    under = rest;
+                }
+                if right.contains(&c) {
+                    format!("{cell:>w$}")
+                } else {
+                    format!("{cell:w$}")
+                }
+            })
+            .collect();
+        let _ = writeln!(s, "{indent}{}", cells.join("  ").trim_end());
+        for l in under.lines() {
+            let _ = writeln!(s, "{indent}    {l}");
+        }
+        if n == 0 {
+            let rule: Vec<String> = widths
+                .iter()
+                .filter(|w| **w > 0)
+                .map(|w| "-".repeat(*w))
+                .collect();
+            let _ = writeln!(s, "{indent}{}", rule.join("  "));
+        }
+    }
+    s
+}
+
+/// [`table`], indented as the focused tables are.
+pub(crate) fn ruled(rows: &[Vec<String>], right: &[usize]) -> String {
+    table(rows, right, "  ")
+}
 
 /// The coverage of one run, or of several merged.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -159,12 +251,17 @@ pub struct Database {
     /// Some of its items do not say their unit and process: a database older than version 7 is in
     /// it, so `library`, `entity` and `process` exclusions cannot be applied.
     pub no_units: bool,
+    /// The text of source files, by the path in [`Entry::file`], when the run embedded them
+    /// (`--cov-embed-sources`).
+    pub sources: BTreeMap<String, String>,
     /// What looks like a state machine and is not measured: file, line and what it says, for the
     /// reports (`--cov-kind=fsm`). Display only.
     pub unmeasured: BTreeSet<(String, u32, String)>,
 }
 
-const MAGIC: &str = "yavs-coverage 11";
+const MAGIC: &str = "yavs-coverage 12";
+/// Version 11 has no embedded sources and no `at` lines.
+const V11: &str = "yavs-coverage 11";
 /// Older versions [`Database::parse`] still reads: 2 has no toggles, 2 and 3 no tests, 4 no
 /// conditions, 5 no combinations and no in-source exclusions, 6 no units and process labels, 7 no
 /// operand texts of its waivers, 8 no waivers and input counts of condition and expression rows, 9 no state machines.
@@ -179,8 +276,98 @@ const V10: &str = "yavs-coverage 10";
 
 use yavs_diag::operand::uncommented;
 
+/// The source text a condition tree of `nodes` needs of the inputs other than `input` for that
+/// input to decide the result; empty when no other input matters.
+fn needs(nodes: &[yavs_ir::CovNode], input: u8, names: &[Option<String>]) -> Option<String> {
+    use yavs_ir::CovNode as N;
+    enum T {
+        In(u8),
+        Not(Box<T>),
+        Bin(N, Box<T>, Box<T>),
+    }
+    let mut stack = Vec::new();
+    for &n in nodes {
+        let t = match n {
+            N::Input(i) => T::In(i),
+            N::Not => T::Not(Box::new(stack.pop()?)),
+            _ => {
+                let b = stack.pop()?;
+                let a = stack.pop()?;
+                T::Bin(n, Box::new(a), Box::new(b))
+            }
+        };
+        stack.push(t);
+    }
+    fn has(t: &T, i: u8) -> bool {
+        match t {
+            T::In(x) => *x == i,
+            T::Not(a) => has(a, i),
+            T::Bin(_, a, b) => has(a, i) || has(b, i),
+        }
+    }
+    /// What makes `t` have value `v`, in the words of its inputs.
+    fn want(t: &T, v: bool, names: &[Option<String>]) -> String {
+        let both = |a: &T, b: &T, x: bool, word: &str| {
+            let (a, b) = (want(a, x, names), want(b, x, names));
+            format!("{a} {word} {b}")
+        };
+        match t {
+            T::In(i) => match names.get(*i as usize).and_then(|n| n.as_ref()) {
+                Some(n) => format!("{n} is {}", u8::from(v)),
+                None => format!("a constant is {}", u8::from(v)),
+            },
+            T::Not(a) => want(a, !v, names),
+            T::Bin(N::And, a, b) if v => both(a, b, true, "and"),
+            T::Bin(N::And, a, b) => both(a, b, false, "or"),
+            T::Bin(N::Nand, a, b) if v => both(a, b, false, "or"),
+            T::Bin(N::Nand, a, b) => both(a, b, true, "and"),
+            T::Bin(N::Or, a, b) if v => both(a, b, true, "or"),
+            T::Bin(N::Or, a, b) => both(a, b, false, "and"),
+            T::Bin(N::Nor, a, b) if v => both(a, b, false, "and"),
+            T::Bin(N::Nor, a, b) => both(a, b, true, "or"),
+            T::Bin(N::Xor, a, b) | T::Bin(N::Xnor, a, b) => {
+                let same = matches!(t, T::Bin(N::Xnor, ..)) == v;
+                let (a, b) = (want(a, true, names), want(b, true, names));
+                format!(
+                    "({a}) {} ({b})",
+                    if same { "equals" } else { "differs from" }
+                )
+            }
+            T::Bin(..) => String::new(),
+        }
+    }
+    fn first(t: &T) -> u8 {
+        match t {
+            T::In(i) => *i,
+            T::Not(a) | T::Bin(_, a, _) => first(a),
+        }
+    }
+    fn path(t: &T, i: u8, names: &[Option<String>], out: &mut Vec<(u8, String)>) {
+        match t {
+            T::In(_) => {}
+            T::Not(a) => path(a, i, names, out),
+            T::Bin(n, a, b) => {
+                let (inner, other) = if has(a, i) { (a, b) } else { (b, a) };
+                match n {
+                    N::And | N::Nand => out.push((first(other), want(other, true, names))),
+                    N::Or | N::Nor => out.push((first(other), want(other, false, names))),
+                    // Either value of the other operand lets this input decide.
+                    _ => {}
+                }
+                path(inner, i, names, out);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    path(stack.last()?, input, names, &mut out);
+    // In source order.
+    out.sort();
+    let words: Vec<String> = out.into_iter().map(|x| x.1).collect();
+    Some(words.join(" and "))
+}
+
 /// FNV-1a of the words of `text`, comments left out: an edit of a comment keeps the identity.
-fn fnv1a(text: &str) -> u64 {
+pub(crate) fn fnv1a(text: &str) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     let mut first = true;
     for w in text.lines().flat_map(|l| uncommented(l).split_whitespace()) {
@@ -207,6 +394,10 @@ struct Item {
     /// A condition row: the text of its input; a combination: the texts of all its inputs.
     input: String,
     waivers: Vec<Waiver>,
+    detail: Detail,
+    /// The arm around it and the statement it belongs to, as item indices.
+    under: Option<usize>,
+    owner: Option<usize>,
     /// The label of the process around it.
     process: String,
     /// A condition, expression or combination item: the inputs of its decision, on one line each.
@@ -411,7 +602,49 @@ pub fn collect(
     };
     let mut items = Vec::with_capacity(n);
     let mut owner = HashMap::new();
-    for (_, c) in prog.cov.iter() {
+    // Per stmt, the item of its statement counter.
+    let mut stmt_item: HashMap<yavs_ir::StmtId, usize> = HashMap::new();
+    for (i, (_, c)) in prog.cov.iter().enumerate() {
+        if matches!(c.kind, yavs_ir::CovKind::Statement) {
+            stmt_item.insert(c.stmt, i);
+        }
+    }
+    // Per condition row, what the other inputs must be.
+    let row_needs: HashMap<usize, String> = {
+        let mut map = HashMap::new();
+        let span_text = |sp: yavs_diag::Span| {
+            let f = db.sources.get(sp.file);
+            f.text()
+                .get(f.text_offset(sp.start)..f.text_offset(sp.end))
+                .map(display)
+        };
+        let infos: Vec<&yavs_ir::CovInfo> = prog.cov.iter().map(|x| x.1).collect();
+        for c in &prog.cov_conds {
+            let Some(first) = c.first else { continue };
+            let mut k = first.0 as usize;
+            let mut names = vec![None; c.inputs as usize];
+            let mut rows = Vec::new();
+            for i in 0..c.inputs {
+                if c.consts >> i & 1 == 1 {
+                    continue;
+                }
+                names[i as usize] = infos
+                    .get(k)
+                    .and_then(|x| x.row.as_ref())
+                    .and_then(|r| span_text(r.input));
+                rows.push((i, k));
+                k += 2;
+            }
+            for (i, at) in rows {
+                if let Some(text) = needs(&c.nodes, i, &names) {
+                    map.insert(at, text.clone());
+                    map.insert(at + 1, text);
+                }
+            }
+        }
+        map
+    };
+    for (index, (_, c)) in prog.cov.iter().enumerate() {
         // A condition row belongs to the condition's text, not to its statement.
         let span = match &c.row {
             Some(r) => r.whole,
@@ -469,8 +702,45 @@ pub fn collect(
                     .collect()
             })
             .unwrap_or_default();
+        // What a report underlines: the arm's condition, the row's input, else the item's text.
+        let shown = match (c.arm, &c.row) {
+            (Some(yavs_ir::CovArm::Cond(sp) | yavs_ir::CovArm::Choice(Some(sp))), _) => sp,
+            (_, Some(r)) if comb.is_none() => r.input,
+            _ => span,
+        };
+        let (sline, scol) = f.line_col(shown.start);
+        let (ss, se) = (f.text_offset(shown.start), f.text_offset(shown.end));
+        let detail = Detail {
+            line: sline as u32,
+            col: scol as u32,
+            start: ss as u32,
+            end: se as u32,
+            digest: fnv1a(f.text().get(ss..se).unwrap_or("")),
+            needs: row_needs.get(&index).cloned().unwrap_or_default(),
+            directive: c.row.is_some() && {
+                let st = prog.stmts.get(c.stmt);
+                let t = st.map_or("", |s| at(s.span)).to_ascii_lowercase();
+                let words = |w: &str| {
+                    t.split(|ch: char| !ch.is_alphanumeric() && ch != '_')
+                        .any(|x| x == w)
+                };
+                let selective = words("when") || words("select");
+                st.is_some_and(|s| s.kind == yavs_ir::StmtKind::If) || !selective
+            },
+            ..Detail::default()
+        };
         items.push(Item {
             operands,
+            detail,
+            under: c.under.map(|u| u.0 as usize),
+            // The statement being lowered can be a nested one that came before an `elsif`.
+            owner: stmt_item.get(&c.stmt).copied().filter(|&o| {
+                o != index
+                    && prog
+                        .stmts
+                        .get(c.stmt)
+                        .is_some_and(|st| st.span.start <= span.start && span.end <= st.span.end)
+            }),
             process: process_at(span).unwrap_or_default(),
             waivers,
             input: match (comb, &c.row) {
@@ -583,6 +853,15 @@ pub fn collect(
             text: items[i].text.clone(),
             tests: Vec::new(),
             waivers: items[i].waivers.clone(),
+            detail: {
+                let mut d = items[i].detail.clone();
+                d.under = items[i].under.and_then(|u| match items[u].kind {
+                    Kind::Branch(arm) => Some((items[u].hash, occ[u], arm)),
+                    _ => None,
+                });
+                d.owner = items[i].owner.map(|o| (items[o].hash, occ[o]));
+                d
+            },
         });
         e.count = e.count.saturating_add(c);
     };
@@ -627,6 +906,119 @@ pub fn collect(
 
 /// Between the operands in a field of a database line.
 const OPERAND_SEP: &str = "\u{1d}";
+
+/// The `at` line of an item, after its own line: line, column, start, end, digest, arm around
+/// it, statement, what the other inputs must be, level. Nothing for an item without detail.
+fn push_at(s: &mut String, d: &Detail) {
+    if d.line == 0 {
+        return;
+    }
+    let _ = write!(
+        s,
+        "at\t{}\t{}\t{}\t{}\t{:x}\t",
+        d.line, d.col, d.start, d.end, d.digest
+    );
+    match d.under {
+        Some((h, o, a)) => {
+            let _ = write!(s, "{h:x}.{o}.{a}");
+        }
+        None => s.push('-'),
+    }
+    s.push('\t');
+    match d.owner {
+        Some((h, o)) => {
+            let _ = write!(s, "{h:x}.{o}");
+        }
+        None => s.push('-'),
+    }
+    let directive = if d.directive { "d" } else { "-" };
+    let _ = writeln!(s, "\t{}\t{}\t{directive}", one_line(&d.needs), d.level);
+}
+
+/// The fields of an `at` line.
+fn parse_at(t: &str) -> Option<Detail> {
+    let f: Vec<&str> = t.split('\t').collect();
+    let [
+        line,
+        col,
+        start,
+        end,
+        digest,
+        under,
+        owner,
+        needs,
+        level,
+        directive,
+    ] = f[..]
+    else {
+        return None;
+    };
+    let under = match under {
+        "-" => None,
+        u => {
+            let mut p = u.split('.');
+            Some((
+                u64::from_str_radix(p.next()?, 16).ok()?,
+                p.next()?.parse().ok()?,
+                p.next()?.parse().ok()?,
+            ))
+        }
+    };
+    let owner = match owner {
+        "-" => None,
+        u => {
+            let (h, o) = u.split_once('.')?;
+            Some((u64::from_str_radix(h, 16).ok()?, o.parse().ok()?))
+        }
+    };
+    Some(Detail {
+        line: line.parse().ok()?,
+        col: col.parse().ok()?,
+        start: start.parse().ok()?,
+        end: end.parse().ok()?,
+        digest: u64::from_str_radix(digest, 16).ok()?,
+        under,
+        owner,
+        needs: unescaped(needs),
+        level: level.chars().next().unwrap_or(' '),
+        directive: directive == "d",
+    })
+}
+
+/// A source text as one field of a database line.
+fn one_line(text: &str) -> String {
+    let mut o = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '\\' => o.push_str("\\\\"),
+            '\n' => o.push_str("\\n"),
+            '\r' => o.push_str("\\r"),
+            '\t' => o.push_str("\\t"),
+            c => o.push(c),
+        }
+    }
+    o
+}
+
+/// The inverse of [`one_line`].
+fn unescaped(field: &str) -> String {
+    let mut o = String::with_capacity(field.len());
+    let mut chars = field.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            o.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('n') => o.push('\n'),
+            Some('r') => o.push('\r'),
+            Some('t') => o.push('\t'),
+            Some(x) => o.push(x),
+            None => {}
+        }
+    }
+    o
+}
 
 /// The waivers of an item as one field of a database line; `-` for none.
 fn waiver_field(waivers: &[Waiver]) -> String {
@@ -710,6 +1102,9 @@ impl Database {
             id[old] = new;
             let _ = writeln!(s, "test\t{new}\t{}", self.tests[old]);
         }
+        for (path, text) in &self.sources {
+            let _ = writeln!(s, "source\t{path}\t{}", one_line(text));
+        }
         for (file, line, text) in &self.unmeasured {
             let _ = writeln!(s, "unmeasured\t{line}\t{file}\t{text}");
         }
@@ -739,6 +1134,7 @@ impl Database {
                 s.push('\t');
                 s.push_str(dash(&e.unit));
                 s.push('\n');
+                push_at(&mut s, &e.detail);
                 continue;
             }
             let mut t = String::new();
@@ -768,6 +1164,7 @@ impl Database {
                         dash(&e.unit),
                         dash(&e.process)
                     );
+                    push_at(&mut s, &e.detail);
                     continue;
                 }
                 Kind::Combination(st) => {
@@ -787,6 +1184,7 @@ impl Database {
                         dash(&e.unit),
                         dash(&e.process)
                     );
+                    push_at(&mut s, &e.detail);
                     continue;
                 }
                 Kind::Toggle(_) | Kind::Fsm(_) => continue,
@@ -804,6 +1202,7 @@ impl Database {
                 dash(&e.unit),
                 dash(&e.process)
             );
+            push_at(&mut s, &e.detail);
         }
         s
     }
@@ -814,30 +1213,55 @@ impl Database {
         let mut lines = text.lines();
         let head = lines.next();
         let old = head.is_some_and(|h| OLD.contains(&h));
-        let known = [MAGIC, V10, V9, V8, V7, V6, V5, V4]
+        let known = [MAGIC, V11, V10, V9, V8, V7, V6, V5, V4]
             .iter()
             .any(|v| head == Some(*v));
         if !known && !old {
-            return Err(format!("not a yavs coverage database (no `{MAGIC}` line)"));
+            let version = head
+                .and_then(|h| h.strip_prefix("yavs-coverage "))
+                .filter(|v| v.parse::<u32>().is_ok());
+            return Err(match version {
+                Some(v) => format!(
+                    "it has format version {v} and this yavs ({}) reads versions 2 to {}; re-run \
+                     the simulation with this yavs, or report with the yavs that wrote it",
+                    env!("CARGO_PKG_VERSION"),
+                    MAGIC.trim_start_matches("yavs-coverage "),
+                ),
+                None => format!("not a yavs coverage database (no `{MAGIC}` line)"),
+            });
         }
-        let with_units = [MAGIC, V10, V9, V8, V7].iter().any(|v| head == Some(*v));
+        let with_units = [MAGIC, V11, V10, V9, V8, V7]
+            .iter()
+            .any(|v| head == Some(*v));
         // A row line of these has a count of inputs where this version has the operands.
         let row_counts = head == Some(V10) || head == Some(V9);
-        let with_operands = head == Some(MAGIC);
+        let with_operands = head == Some(MAGIC) || head == Some(V11);
         let row_waivers = with_operands || row_counts;
         let mut db = Database {
             legacy: !with_units && head != Some(V6),
             no_units: !with_units,
             ..Database::default()
         };
+        let mut last: Option<Key> = None;
         for (n, l) in lines.enumerate() {
             let bad = || format!("line {}: malformed item `{l}`", n + 2);
+            if let Some(t) = l.strip_prefix("at\t") {
+                let d = parse_at(t).ok_or_else(bad)?;
+                let e = last.as_ref().and_then(|k| db.items.get_mut(k));
+                e.ok_or_else(bad)?.detail = d;
+                continue;
+            }
             if let Some(t) = l.strip_prefix("test\t") {
                 let (id, name) = t.split_once('\t').ok_or_else(bad)?;
                 if id.parse::<usize>().ok() != Some(db.tests.len()) {
                     return Err(bad());
                 }
                 db.tests.push(name.to_string());
+                continue;
+            }
+            if let Some(t) = l.strip_prefix("source\t") {
+                let (path, text) = t.split_once('\t').ok_or_else(bad)?;
+                db.sources.insert(path.to_string(), unescaped(text));
                 continue;
             }
             if let Some(t) = l.strip_prefix("unmeasured\t") {
@@ -911,6 +1335,7 @@ impl Database {
                     unit,
                     process,
                     operands: Vec::new(),
+                    detail: Detail::default(),
                 };
                 (key, entry)
             } else {
@@ -986,9 +1411,11 @@ impl Database {
                     unit,
                     process,
                     operands,
+                    detail: Detail::default(),
                 };
                 (key, entry)
             };
+            last = Some(key.clone());
             if db.items.insert(key, entry).is_some() {
                 return Err(format!("line {}: item listed twice", n + 2));
             }
@@ -1003,6 +1430,7 @@ impl Database {
     pub fn merge(&mut self, other: Database) -> Vec<String> {
         let mut conflicts = Vec::new();
         self.legacy |= other.legacy;
+        self.sources.extend(other.sources);
         self.no_units |= other.no_units;
         self.unmeasured.extend(other.unmeasured);
         let id: Vec<u32> = other
@@ -1022,6 +1450,12 @@ impl Database {
             }
             match self.items.get_mut(&k) {
                 Some(x) => {
+                    if x.detail.level != e.detail.level {
+                        x.detail.level = '?';
+                    }
+                    if x.detail.line == 0 {
+                        x.detail = e.detail.clone();
+                    }
                     if x.waivers.is_empty() != e.waivers.is_empty() {
                         let w = if x.waivers.is_empty() {
                             &e.waivers
@@ -1136,154 +1570,119 @@ impl Database {
         s
     }
 
-    /// A plain text summary: totals, one line per path, then every item never reached.
+    /// The report with no options: tables of the kinds and the paths, how much never ran.
     pub fn summary(&self) -> String {
-        let pct = percent;
-        let col = |h: usize, t: usize| format!("{h}/{t} {}", pct(h, t));
-        // Per path: statements, branches, toggles, conditions, expressions, combinations, state
-        // machines (hit, total each).
-        let mut per: BTreeMap<&str, [usize; 14]> = BTreeMap::new();
+        self.summary_with(&SummaryOptions::default())
+    }
+
+    /// The text report. Only the kinds the database holds show. Totals and gates do not depend
+    /// on the options.
+    pub fn summary_with(&self, o: &SummaryOptions) -> String {
+        const KINDS: [&str; 7] = [
+            "statement",
+            "branch",
+            "toggle",
+            "condition",
+            "expression",
+            "combination",
+            "fsm",
+        ];
+        let col = |h: usize, t: usize| format!("{h}/{t} {}", percent(h, t));
+        // Per path and kind (the order of `KINDS`): hit, total.
+        let mut per: BTreeMap<&str, [(usize, usize); 7]> = BTreeMap::new();
         for (k, e) in &self.items {
-            let c = per.entry(&k.path).or_default();
-            let o = match k.kind {
-                Kind::Statement => 0,
-                Kind::Branch(_) => 2,
-                Kind::Toggle(_) => 4,
-                Kind::Condition(_) => 6,
-                Kind::Expression(_) => 8,
-                Kind::Combination(_) => 10,
-                Kind::Fsm(_) => 12,
-            };
-            c[o + 1] += 1;
-            c[o] += usize::from(e.count > 0);
+            let at = KINDS.iter().position(|x| *x == k.kind.name());
+            let c = &mut per.entry(&k.path).or_default()[at.unwrap_or(0)];
+            c.1 += 1;
+            c.0 += usize::from(e.count > 0);
         }
-        let mut t = [0; 14];
+        let mut t = [(0, 0); 7];
         for c in per.values() {
             for (a, b) in t.iter_mut().zip(c) {
-                *a += b;
+                a.0 += b.0;
+                a.1 += b.1;
             }
         }
-        // Conditions and expressions show only when the database has them.
-        let (fc, fe, fm, ff) = (t[7] > 0, t[9] > 0, t[11] > 0, t[13] > 0);
-        let mut s = format!(
-            "statements {}\nbranches   {}\ntoggles    {}\n",
-            col(t[0], t[1]),
-            col(t[2], t[3]),
-            col(t[4], t[5])
-        );
-        if fc {
-            let _ = writeln!(s, "conditions {}", col(t[6], t[7]));
-        }
-        if fe {
-            let _ = writeln!(s, "expressions {}", col(t[8], t[9]));
-        }
-        if fm {
-            let _ = writeln!(s, "combinations {}", col(t[10], t[11]));
-        }
-        if ff {
-            let _ = writeln!(s, "fsm {}", col(t[12], t[13]));
-        }
-        if fm || ff {
-            // The longest label sets the column.
-            s = s
-                .lines()
-                .map(|l| {
-                    let (label, rest) = l.split_once(' ').unwrap_or((l, ""));
-                    format!("{label:12} {}\n", rest.trim_start())
-                })
-                .collect();
-        }
-        s.push('\n');
-        let w = per
-            .keys()
-            .map(|p| yavs_diag::dotted(p).len())
-            .max()
-            .unwrap_or(0)
-            .max(4);
-        // The toggles column is padded only when a column follows.
-        let pad = if fc || fe || fm || ff { 20 } else { 0 };
-        let _ = write!(
-            s,
-            "{:w$}  {:<20}  {:<20}  {:<pad$}",
-            "path", "statements", "branches", "toggles"
-        );
-        if fc {
-            let _ = write!(s, "  {:<20}", "conditions");
-        }
-        if fe {
-            let _ = write!(s, "  {:<20}", "expressions");
-        }
-        if fm {
-            let _ = write!(s, "  {:<20}", "combinations");
-        }
-        if ff {
-            let _ = write!(s, "  fsm");
-        }
-        s = s.trim_end().to_string();
-        s.push('\n');
-        for (p, c) in &per {
-            let _ = write!(
-                s,
-                "{:w$}  {:<20}  {:<20}  {:<pad$}",
-                yavs_diag::dotted(p),
-                col(c[0], c[1]),
-                col(c[2], c[3]),
-                col(c[4], c[5])
-            );
-            if fc {
-                let _ = write!(s, "  {:<20}", col(c[6], c[7]));
-            }
-            if fe {
-                let _ = write!(s, "  {:<20}", col(c[8], c[9]));
-            }
-            if fm {
-                let _ = write!(s, "  {:<20}", col(c[10], c[11]));
-            }
-            if ff {
-                let _ = write!(s, "  {}", col(c[12], c[13]));
-            }
-            s = s.trim_end().to_string();
-            s.push('\n');
-        }
-        let mut missed: Vec<_> = self.items.iter().filter(|(_, e)| e.count == 0).collect();
-        missed.sort_by(|a, b| (&a.1.file, a.1.line, a.0).cmp(&(&b.1.file, b.1.line, b.0)));
-        if !missed.is_empty() {
-            s.push_str("\nnot covered:\n");
-        }
-        // Location, kind, item and instance in aligned columns.
-        let rows: Vec<[String; 4]> = missed
+        let held: Vec<usize> = (0..7).filter(|&i| t[i].1 > 0).collect();
+        let excluded_only: Vec<&str> = o
+            .excluded
+            .unwrap_or(&[])
             .iter()
-            .map(|(k, e)| {
-                let item = match k.kind {
-                    Kind::Toggle(r) => format!("{} {}", k.sig, arrow(r)),
-                    Kind::Condition(_) | Kind::Expression(_) => fec_text(k, e),
-                    Kind::Combination(_) => comb_text(k, e),
-                    Kind::Fsm(_) => fsm_text(k),
-                    _ => e.text.clone(),
-                };
-                [
-                    format!("{}:{}", e.file, e.line),
-                    k.kind.name().to_string(),
-                    item,
-                    k.shown(),
-                ]
-            })
+            .map(|x| x.0.path.as_str())
+            .filter(|p| !per.contains_key(p))
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
             .collect();
-        let w: Vec<usize> = (0..3)
-            .map(|c| rows.iter().map(|r| r[c].chars().count()).max().unwrap_or(0))
-            .collect();
-        for r in &rows {
-            let _ = writeln!(
-                s,
-                "  {:<w0$}  {:<w1$}  {:<w2$}  {}",
-                r[0],
-                r[1],
-                r[2],
-                r[3],
-                w0 = w[0],
-                w1 = w[1],
-                w2 = w[2]
-            );
+        if held.is_empty() && !(o.detailed && !excluded_only.is_empty()) {
+            return "no coverage items\n".to_string();
+        }
+        let (hit, all) = self.totals();
+        let row = |name: &str, h: usize, a: usize| {
+            vec![
+                name.to_string(),
+                a.to_string(),
+                h.to_string(),
+                (a - h).to_string(),
+                percent(h, a),
+            ]
+        };
+        let mut rows = vec![
+            ["Kind", "Items", "Hit", "Missed", "Coverage"]
+                .map(String::from)
+                .to_vec(),
+        ];
+        rows.extend(held.iter().map(|&i| row(KINDS[i], t[i].0, t[i].1)));
+        rows.push(row("total", hit, all));
+        let mut s = table(&rows, &[1, 2, 3, 4], "");
+        // The line of a path: its hits and items over every kind.
+        let sum = |c: &[(usize, usize); 7]| c.iter().fold((0, 0), |x, y| (x.0 + y.0, x.1 + y.1));
+        let mut paths: Vec<_> = per.iter().collect();
+        if let Some(limit) = o.below {
+            let at = |c: &[(usize, usize); 7]| {
+                let (h, a) = sum(c);
+                tenths(h, a).unwrap_or(0)
+            };
+            paths.retain(|(_, c)| at(c) < limit);
+            paths.sort_by_key(|(p, c)| (at(c), **p));
+        }
+        s.push('\n');
+        if !paths.is_empty() {
+            let mut table_rows = vec![vec!["Instance".to_string(), "Total".to_string()]];
+            table_rows[0].extend(held.iter().map(|&i| KINDS[i].to_string()));
+            for (p, c) in &paths {
+                let (h, a) = sum(c);
+                let mut row = vec![yavs_diag::dotted(p), col(h, a)];
+                row.extend(held.iter().map(|&i| match c[i] {
+                    (_, 0) => "-".to_string(),
+                    (h, a) => col(h, a),
+                }));
+                table_rows.push(row);
+            }
+            s.push_str(&table(&table_rows, &[], ""));
+        }
+        if let Some(limit) = o.below {
+            let need = format!("{}.{}%", limit / 10, limit % 10);
+            let left = per.len() - paths.len();
+            if paths.is_empty() {
+                let _ = writeln!(s, "no instance or package is below {need}");
+            } else if left > 0 {
+                let _ = writeln!(s, "{left} of {} at or above {need} left out", per.len());
+            }
+        }
+        if o.detailed {
+            let mut order: Vec<&str> = paths.iter().map(|(p, _)| **p).collect();
+            if o.below.is_none() {
+                order.extend(excluded_only);
+            }
+            s.push_str(&detail::report(self, &order, o));
+        } else {
+            match all - hit {
+                0 => s.push_str("\nevery item is covered\n"),
+                n => {
+                    let n = count(n, "item", "items");
+                    let _ = writeln!(s, "\n{n} not covered; `--detailed` shows them.");
+                }
+            }
         }
         if !self.unmeasured.is_empty() {
             s.push_str("\nnot measured as state machines:\n");
@@ -1311,6 +1710,19 @@ impl Database {
                 BTreeSet::new()
             },
             legacy: self.legacy,
+            sources: self.sources.clone(),
+        }
+    }
+
+    /// Store the text of the source files the items are in (`--cov-embed-sources`).
+    pub fn embed_sources(&mut self, db: &Db) {
+        let files: std::collections::BTreeSet<&str> =
+            self.items.values().map(|e| e.file.as_str()).collect();
+        for i in 0..db.sources.len() {
+            let f = db.sources.get(yavs_diag::FileId(i as u32));
+            if files.contains(f.path.as_str()) {
+                self.sources.insert(f.path.clone(), f.text().to_string());
+            }
         }
     }
 
@@ -1366,9 +1778,20 @@ impl Database {
                 Kind::Toggle(_) | Kind::Combination(_) | Kind::Fsm(_) => {}
             }
         }
-        for ((f, l, _, _), c) in stmts {
-            if let Some(line) = files.get_mut(f).and_then(|m| m.get_mut(&l)) {
-                line.hits = line.hits.max(c);
+        for ((f, l, _, _), c) in &stmts {
+            if let Some(line) = files.get_mut(f).and_then(|m| m.get_mut(l)) {
+                line.hits = line.hits.max(*c);
+            }
+        }
+        // A line whose statement is not in this report (`--kind`, an exclusion) ran as often as
+        // its arms and rows say: 0 would call it missed (#1023).
+        let stated: std::collections::BTreeSet<(&str, u32)> =
+            stmts.keys().map(|&(f, l, ..)| (f, l)).collect();
+        for (f, lines) in &mut files {
+            for (l, line) in lines.iter_mut() {
+                if !stated.contains(&(*f, *l)) {
+                    line.hits = line.arms.values().copied().max().unwrap_or(0);
+                }
             }
         }
         let rate = |h: usize, t: usize| if t == 0 { 0.0 } else { h as f64 / t as f64 };
@@ -1518,6 +1941,7 @@ mod tests {
                 sig: String::new(),
             },
             Entry {
+                detail: Detail::default(),
                 file: "a&b.vhd".into(),
                 line,
                 count,
@@ -1568,10 +1992,15 @@ mod tests {
         assert!(x.contains("condition-coverage=\"100% (1/1)\""), "{x}");
         let s = m.summary();
         assert!(
-            s.starts_with("statements 1/2 50.0%\nbranches   1/1 100.0%\n"),
+            s.contains("\nstatement      2    1       1     50.0%\nbranch         1    1       0    100.0%\n"),
             "{s}"
         );
-        assert!(s.contains("a&b.vhd:9  statement  x := 1;  work.p"), "{s}");
+        let s = m.summary_with(&SummaryOptions {
+            detailed: true,
+            ..SummaryOptions::default()
+        });
+        assert!(s.contains("=== work.p  (a&b.vhd) ==="), "{s}");
+        assert!(s.contains("x := 1;"), "{s}");
     }
 
     #[test]
@@ -1615,7 +2044,96 @@ mod tests {
             d.items.keys().collect::<Vec<_>>()
         );
         assert!(d.cobertura().contains("lines-valid=\"0\""));
-        assert!(d.summary().contains("toggles    1/1 100.0%"));
+        assert!(
+            d.summary()
+                .contains("\ntoggle      1    1       0    100.0%\n"),
+            "{}",
+            d.summary()
+        );
+    }
+
+    /// Embedded sources survive write and parse, whatever their text; merging keeps them.
+    #[test]
+    fn sources_round_trip() {
+        let mut d = Database::default();
+        let text = "a\\n\tb\r\nsource\tx\n\n-- \u{e9}\n";
+        d.sources.insert("a.vhd".to_string(), text.to_string());
+        let t = d.write();
+        assert_eq!(t.lines().count(), 2, "{t}");
+        let back = Database::parse(&t).unwrap();
+        assert_eq!(back.sources["a.vhd"], text);
+        assert!(!back.legacy);
+        let mut m = Database::default();
+        m.merge(back);
+        assert_eq!(m.sources["a.vhd"], text);
+        // Version 6 is still read: it has none and records in-source exclusions.
+        let v6 = Database::parse("yavs-coverage 6\n").unwrap();
+        assert!(!v6.legacy && v6.sources.is_empty());
+    }
+
+    /// What `--detailed` needs survives write and parse, and a level differing between runs is
+    /// not claimed as one.
+    #[test]
+    fn details_round_trip_and_merge() {
+        let mut d = Database::default();
+        let key = Key {
+            path: ":t".into(),
+            kind: Kind::Toggle(true),
+            hash: 0,
+            occ: 0,
+            sig: "s".into(),
+        };
+        let detail = Detail {
+            line: 2,
+            col: 10,
+            start: 5,
+            end: 6,
+            digest: 0xabc,
+            under: Some((0xdef, 1, 2)),
+            owner: Some((0x12, 3)),
+            needs: "a is 1".into(),
+            directive: true,
+            level: '0',
+        };
+        d.items.insert(
+            key.clone(),
+            Entry {
+                file: "a.vhd".into(),
+                line: 2,
+                count: 0,
+                text: String::new(),
+                tests: Vec::new(),
+                waivers: Vec::new(),
+                unit: "work.e".into(),
+                process: String::new(),
+                operands: Vec::new(),
+                detail,
+            },
+        );
+        let back = Database::parse(&d.write()).unwrap();
+        assert_eq!(back, d);
+        let mut other = back.clone();
+        other.items.get_mut(&key).unwrap().detail.level = '1';
+        let mut m = back;
+        m.merge(other);
+        assert_eq!(m.items[&key].detail.level, '?');
+    }
+
+    /// What the other inputs must be for an input to decide the result.
+    #[test]
+    fn needs_of_an_input() {
+        use yavs_ir::CovNode as N;
+        let names: Vec<Option<String>> = ["a", "b", "c"].map(|n| Some(n.to_string())).to_vec();
+        // a and (b or c)
+        let nodes = [N::Input(0), N::Input(1), N::Input(2), N::Or, N::And];
+        assert_eq!(needs(&nodes, 0, &names).unwrap(), "b is 1 or c is 1");
+        assert_eq!(needs(&nodes, 1, &names).unwrap(), "a is 1 and c is 0");
+        // a or not b: a's other input is `not b`, which must be false, so b is 1.
+        let nodes = [N::Input(0), N::Input(1), N::Not, N::Or];
+        assert_eq!(needs(&nodes, 0, &names).unwrap(), "b is 1");
+        // xor: any value of the other lets this input decide.
+        let nodes = [N::Input(0), N::Input(1), N::Xor];
+        assert_eq!(needs(&nodes, 0, &names).unwrap(), "");
     }
 
     /// A combination with in-source waivers survives write and parse, and merging a database
@@ -1630,6 +2148,7 @@ mod tests {
             sig: format!("valid{INPUT_SEP}ready"),
         };
         let entry = |count, waivers| Entry {
+            detail: Detail::default(),
             file: "a.vhd".into(),
             line: 3,
             count,
@@ -1649,7 +2168,7 @@ mod tests {
         let mut d = Database::default();
         d.items.insert(key.clone(), entry(2, vec![waiver.clone()]));
         let text = d.write();
-        assert!(text.starts_with("yavs-coverage 11\n"));
+        assert!(text.starts_with("yavs-coverage 12\n"));
         let back = Database::parse(&text).unwrap();
         assert_eq!(back, d);
         assert_eq!(pattern(&key), "01");

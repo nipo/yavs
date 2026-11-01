@@ -1178,6 +1178,8 @@ pub struct CovInfo {
     pub arm: Option<CovArm>,
     /// A combination: the index of its decision in `Program::cov_conds`.
     pub cond: Option<u32>,
+    /// The branch arm around it: a report groups what never ran under the arm that never did.
+    pub under: Option<CovItem>,
 }
 
 /// What names a branch arm in a report (`if rst = '1'`, `else`, `when IDLE`).

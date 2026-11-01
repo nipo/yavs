@@ -235,6 +235,10 @@ pub(crate) struct Fx<'a, 'b> {
     pub cur: Option<(yavs_ir::StmtId, Span)>,
     /// Emit coverage counters (off in the implicit processes of port actuals and guards).
     pub cov: bool,
+    /// The branch arm around the statement being lowered, and the arm of that statement being
+    /// lowered: what a nested statement is under.
+    pub cov_parent: Option<yavs_ir::CovItem>,
+    pub cov_arm: Option<yavs_ir::CovItem>,
     /// The inputs of the conditions being lowered (`covcond.rs`): the state register, the
     /// shift of the input in it and whether it is a `std_ulogic`.
     pub cov_inputs: std::collections::HashMap<yavs_sem::ExprId, (Reg, u8, bool)>,
@@ -305,6 +309,8 @@ impl<'a, 'b> Fx<'a, 'b> {
             driver_base: Vec::new(),
             cur: None,
             cov: true,
+            cov_parent: None,
+            cov_arm: None,
             cov_inputs: std::collections::HashMap::new(),
             prot_self: None,
             prot_defaults: true,
@@ -527,6 +533,7 @@ impl<'a, 'b> Fx<'a, 'b> {
                 span,
                 yavs_ir::CovKind::Statement,
                 None,
+                self.cov_parent,
             )
         {
             self.emit(Inst::Cover { item });
@@ -552,8 +559,10 @@ impl<'a, 'b> Fx<'a, 'b> {
                 span,
                 yavs_ir::CovKind::Branch(arm),
                 Some(label),
+                self.cov_parent,
             )
         {
+            self.cov_arm = Some(item);
             self.emit(Inst::Cover { item });
         }
     }

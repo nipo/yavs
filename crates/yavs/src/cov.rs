@@ -65,7 +65,49 @@ fn percentage(text: &str) -> Result<u64, String> {
     Ok((v * 10.0 - 1e-9).ceil().max(0.0) as u64)
 }
 
+/// What `--fail-under` requires: a total, a percentage per kind, or both, all in tenths.
 #[cfg_attr(test, derive(Debug))]
+#[derive(Clone, Default)]
+pub struct FailUnder {
+    total: Option<u64>,
+    kinds: Vec<(String, u64)>,
+}
+
+/// `--fail-under`: comma separated `PCT` (the total) and `KIND:PCT`.
+fn fail_under(text: &str) -> Result<FailUnder, String> {
+    use clap::ValueEnum;
+    let mut f = FailUnder::default();
+    for part in text.split(',') {
+        let Some((kind, pct)) = part.split_once(':') else {
+            if f.total.replace(percentage(part)?).is_some() {
+                return Err("the total is given twice".to_string());
+            }
+            continue;
+        };
+        let Some(k) = KindArg::value_variants()
+            .iter()
+            .map(|k| k.name())
+            .find(|k| k == kind)
+        else {
+            let names = KindArg::value_variants().iter().map(|k| k.name());
+            let names: Vec<String> = names.collect();
+            let close = yavs_diag::suggest::tail(kind, "kind", names.iter().map(String::as_str));
+            return Err(format!(
+                "`{kind}` is not a coverage kind{close}; the kinds are {}",
+                names.join(", ")
+            ));
+        };
+        if f.kinds.iter().any(|(n, _)| *n == k) {
+            return Err(format!("`{k}` is given twice"));
+        }
+        f.kinds.push((k, percentage(pct)?));
+    }
+    Ok(f)
+}
+
+#[cfg_attr(test, derive(Debug))]
+// The parsed command line lives once and briefly: its size does not matter.
+#[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 pub enum Command {
     /// Add up the counts of several coverage databases into one.
@@ -82,8 +124,17 @@ pub enum Command {
         /// Also write a Cobertura XML report.
         #[arg(long, value_name = "FILE.xml")]
         cobertura: Option<PathBuf>,
-        /// Also write an HTML report (static files, sources read from the paths in the
-        /// database) into DIR.
+        /// Also write a JSON report with every kind and test (schema in the coverage guide).
+        #[arg(long, value_name = "FILE.json")]
+        json: Option<PathBuf>,
+        /// Also write an LCOV tracefile: lines and branches only.
+        #[arg(long, value_name = "FILE.info")]
+        lcov: Option<PathBuf>,
+        /// Also write a SonarQube generic coverage report: lines and branches only.
+        #[arg(long, value_name = "FILE.xml")]
+        sonarqube: Option<PathBuf>,
+        /// Also write an HTML report (static files; sources embedded with
+        /// `--cov-embed-sources`, else read from the paths in the database) into DIR.
         #[arg(long, value_name = "DIR")]
         html: Option<PathBuf>,
         /// Strip DIR from the front of the source paths the reports show (default: the
@@ -100,10 +151,25 @@ pub enum Command {
         #[arg(long, conflicts_with_all = ["uncovered", "tests"])]
         total: bool,
         /// Exit with status 1 and `E0114` when the total coverage is below PCT (0 to 100, such
-        /// as 80 or 92.5); the report is printed as usual. A PCT outside 0 to 100 is a usage
-        /// error.
-        #[arg(long, value_name = "PCT", value_parser = percentage)]
-        fail_under: Option<u64>,
+        /// as 80 or 92.5), or a kind is below its own (`statement:90,branch:80`); the report is
+        /// printed as usual. A PCT outside 0 to 100 or an unknown kind is a usage error.
+        #[arg(long, value_name = "PCT|KIND:PCT,...", value_parser = fail_under)]
+        fail_under: Option<FailUnder>,
+        /// Limit the table of instances and packages to those below PCT, worst first, with a
+        /// line counting the rest. Counts what the report counts (`--kind`, exclusions), rounded
+        /// down. Totals and `--fail-under` are not affected.
+        #[arg(
+            long,
+            value_name = "PCT",
+            value_parser = percentage,
+            conflicts_with_all = ["uncovered", "tests", "total", "exclusions"]
+        )]
+        below: Option<u64>,
+        /// Also show, per instance after `--below`, `--kind` and the exclusions, a table per kind
+        /// with every item, and for what never ran its source, what is missing and a tip.
+        /// `--uncovered` is the row format for exclusion files; `--exclusions` the full audit.
+        #[arg(long, conflicts_with_all = ["uncovered", "tests", "total", "exclusions"])]
+        detailed: bool,
         /// Leave out the items an exclusion file lists (rows pasted from `--uncovered`; a
         /// `.yaml` or `.yml` file is read as YAML). Repeatable: the rules of all files add up. A
         /// file that cannot be read or has a bad row is `E0112`.
@@ -181,6 +247,8 @@ const SOURCE_ERROR: &str = "E0113";
 const BELOW_ERROR: &str = "E0114";
 /// `--total` or `--fail-under` over a database with no item of the selected kinds.
 const EMPTY_ERROR: &str = "E0115";
+/// Merged databases embed different text for one source file.
+const SOURCE_CHANGED: &str = "W0121";
 /// Merged databases disagree about an in-source exclusion.
 const CONFLICT_ERROR: &str = "E0137";
 /// Cannot read or parse the file of `--config`.
@@ -218,7 +286,7 @@ fn settings(config: Option<&PathBuf>) -> Result<Settings, Box<Diagnostic>> {
     })
 }
 
-fn merged(inputs: &[PathBuf]) -> Result<Database, Box<Diagnostic>> {
+fn merged(out: &mut Out, inputs: &[PathBuf]) -> Result<Database, Box<Diagnostic>> {
     let mut db = Database::default();
     for p in inputs {
         let d = std::fs::read_to_string(p)
@@ -226,6 +294,19 @@ fn merged(inputs: &[PathBuf]) -> Result<Database, Box<Diagnostic>> {
             .and_then(|t| Database::parse(&t));
         match d {
             Ok(d) => {
+                for (f, text) in &d.sources {
+                    if db.sources.get(f).is_some_and(|t| t != text) {
+                        let w = Diagnostic::warning(
+                            SOURCE_CHANGED,
+                            format!(
+                                "the source `{f}` embedded in `{}` differs from the one before it; \
+                                 the HTML report shows the last",
+                                p.display()
+                            ),
+                        );
+                        out.emit(&SourceMap::default(), &w);
+                    }
+                }
                 let conflicts = db.merge(d);
                 if !conflicts.is_empty() {
                     let mut e = Diagnostic::error(
@@ -278,6 +359,7 @@ fn excluded(
     out: &mut Out,
     db: Database,
     exclude: &[PathBuf],
+    root: &str,
 ) -> Result<(Database, Excluded, yavs_cov::exclusions::Report), Box<Diagnostic>> {
     let files = exclude
         .iter()
@@ -311,7 +393,7 @@ fn excluded(
             .with_help("run the simulations again with this yavs, or take the row out"),
         ));
     }
-    let a = yavs_cov::exclude::apply(&db, &files);
+    let a = yavs_cov::exclude::apply_showing(&db, &files, &|f| relative(f, root));
     for w in &a.warnings {
         out.emit(&SourceMap::default(), w);
     }
@@ -407,7 +489,8 @@ fn shown(db: &Database, excluded: &Excluded, root: &str) -> (Database, Excluded)
     (db, excluded)
 }
 
-/// Write the HTML report into `dir`; every source file the database names must be readable.
+/// Write the HTML report into `dir`; every source file the database names and does not embed
+/// must be readable.
 /// Pages show the paths without the prefix `root` (default the current directory).
 fn write_html(
     dir: &PathBuf,
@@ -418,12 +501,17 @@ fn write_html(
 ) -> Result<(), Box<Diagnostic>> {
     let mut sources = std::collections::BTreeMap::new();
     for f in yavs_cov::html::files(db, excluded) {
+        if let Some(t) = db.sources.get(f) {
+            sources.insert(f.to_string(), t.clone());
+            continue;
+        }
         let t = std::fs::read_to_string(f).map_err(|e| {
             Box::new(
                 Diagnostic::error(SOURCE_ERROR, format!("cannot read source file `{f}`"))
                     .with_note(e.to_string())
                     .with_help(
-                        "run `yavs cov report --html` where the paths in the database resolve",
+                        "run `yavs cov report --html` where the paths in the database resolve, \
+                         or run the simulation with `--cov-embed-sources`",
                     ),
             )
         })?;
@@ -448,9 +536,28 @@ fn write_html(
     Ok(())
 }
 
+/// The sources `--detailed` shows, by the path it shows: embedded in the database, else read from
+/// the stored path. A file that cannot be read is said so there, not an error.
+fn detailed_sources(db: &Database, excluded: &Excluded, root: &str) -> yavs_cov::detail::Sources {
+    let mut out = yavs_cov::detail::Sources::new();
+    for f in yavs_cov::html::files(db, excluded) {
+        let text = match db.sources.get(f) {
+            Some(t) => Ok(t.clone()),
+            None => std::fs::read_to_string(f).map_err(|e| {
+                format!("{e}; run the simulation with `--cov-embed-sources` to keep the text")
+            }),
+        };
+        out.insert(relative(f, root), text);
+    }
+    out
+}
+
 /// What `yavs cov report` was asked for besides the database.
 struct Report {
     cobertura: Option<PathBuf>,
+    json: Option<PathBuf>,
+    lcov: Option<PathBuf>,
+    sonarqube: Option<PathBuf>,
     html: Option<PathBuf>,
     root: Option<PathBuf>,
     exclude: Vec<PathBuf>,
@@ -459,22 +566,26 @@ struct Report {
     uncovered: Option<UncoveredFormat>,
     tests: bool,
     total: bool,
-    fail_under: Option<u64>,
+    fail_under: Option<FailUnder>,
+    below: Option<u64>,
+    detailed: bool,
+    color: bool,
 }
 
 fn report(out: &mut Out, db: Database, r: Report) -> Result<(), Box<Diagnostic>> {
-    let (db, mut excluded, mut exclusions) = excluded(out, db, &r.exclude)?;
+    let root = root_dir(r.root.clone())?;
+    let (db, mut excluded, mut exclusions) = excluded(out, db, &r.exclude, &root)?;
     let db = if r.kinds.is_empty() {
         db
     } else {
         excluded.retain(|x| r.kinds.iter().any(|n| n == x.0.kind.name()));
         db.only(&r.kinds)
     };
-    let root = root_dir(r.root.clone())?;
     let (shown_db, shown_excluded) = shown(&db, &excluded, &root);
     exclusions.map_files(&|f| relative(f, &root));
     let (hit, all) = db.totals();
-    if (r.total || r.fail_under.is_some()) && all == 0 {
+    let need = r.fail_under.unwrap_or_default();
+    if (r.total || need.total.is_some()) && all == 0 {
         return Err(Box::new(
             Diagnostic::error(EMPTY_ERROR, "no coverage items to total")
                 .with_note(if r.kinds.is_empty() {
@@ -482,6 +593,27 @@ fn report(out: &mut Out, db: Database, r: Report) -> Result<(), Box<Diagnostic>>
                 } else {
                     format!("the database has no `{}` items", r.kinds.join("`, `"))
                 })
+                .with_help("run with `--cov-kind` naming the kinds to count"),
+        ));
+    }
+    let of_kind = |kind: &str| {
+        let d = db.only(std::slice::from_ref(&kind.to_string()));
+        d.totals()
+    };
+    let empty: Vec<&str> = need
+        .kinds
+        .iter()
+        .filter(|(k, _)| of_kind(k).1 == 0)
+        .map(|(k, _)| k.as_str())
+        .collect();
+    if !empty.is_empty() {
+        return Err(Box::new(
+            Diagnostic::error(EMPTY_ERROR, "no coverage items to total")
+                .with_note(format!(
+                    "`--fail-under` names `{}`, and the database has no such items after \
+                     the exclusions and `--kind`",
+                    empty.join("`, `")
+                ))
                 .with_help("run with `--cov-kind` naming the kinds to count"),
         ));
     }
@@ -500,26 +632,58 @@ fn report(out: &mut Out, db: Database, r: Report) -> Result<(), Box<Diagnostic>>
     } else if r.total {
         println!("{}", yavs_cov::percent(hit, all));
     } else {
-        print!("{}", shown_db.summary());
-        print!("{}", yavs_cov::exclude::excluded_text(&shown_excluded));
+        let sources = r.detailed.then(|| detailed_sources(&db, &excluded, &root));
+        let options = yavs_cov::SummaryOptions {
+            below: r.below,
+            detailed: r.detailed,
+            excluded: Some(&shown_excluded),
+            sources: sources.as_ref(),
+            color: r.color,
+        };
+        print!("{}", shown_db.summary_with(&options));
+        if !r.detailed {
+            print!("{}", yavs_cov::exclude::excluded_text(&shown_excluded));
+        }
     }
     if let Some(d) = r.html {
         write_html(&d, r.root, &db, &excluded, &exclusions)?;
     }
     if let Some(p) = r.cobertura {
-        write(&p, db.cobertura())?;
+        write(&p, shown_db.cobertura())?;
     }
-    match (r.fail_under, yavs_cov::tenths(hit, all)) {
-        (Some(need), Some(have)) if have < need => Err(Box::new(Diagnostic::error(
-            BELOW_ERROR,
-            format!(
-                "coverage {} is below the required {}.{}%",
-                yavs_cov::percent(hit, all),
-                need / 10,
-                need % 10
-            ),
-        ))),
-        _ => Ok(()),
+    if let Some(p) = r.json {
+        write(&p, shown_db.json())?;
+    }
+    if let Some(p) = r.lcov {
+        write(&p, shown_db.lcov())?;
+    }
+    if let Some(p) = r.sonarqube {
+        write(&p, shown_db.sonarqube())?;
+    }
+    let required = |t: u64| format!("{}.{}%", t / 10, t % 10);
+    let mut below = Vec::new();
+    if let (Some(t), Some(have)) = (need.total, yavs_cov::tenths(hit, all))
+        && have < t
+    {
+        let got = yavs_cov::percent(hit, all);
+        below.push(format!(
+            "coverage {got} is below the required {}",
+            required(t)
+        ));
+    }
+    for (k, t) in &need.kinds {
+        let (h, a) = of_kind(k);
+        if yavs_cov::tenths(h, a).is_some_and(|have| have < *t) {
+            let got = yavs_cov::percent(h, a);
+            below.push(format!(
+                "{k} coverage {got} is below the required {}",
+                required(*t)
+            ));
+        }
+    }
+    match below.len() {
+        0 => Ok(()),
+        _ => Err(Box::new(Diagnostic::error(BELOW_ERROR, below.join("; ")))),
     }
 }
 
@@ -527,15 +691,20 @@ pub fn run(c: Command, format: MessageFormat, color: bool) -> ExitCode {
     let mut out = Out::new(format, color);
     let r = match c {
         Command::Merge { output, inputs } => {
-            merged(&inputs).and_then(|db| write(&output, db.write()))
+            merged(&mut out, &inputs).and_then(|db| write(&output, db.write()))
         }
         Command::Report {
             cobertura,
+            json,
+            lcov,
+            sonarqube,
             html,
             root,
             kind,
             total,
             fail_under,
+            below,
+            detailed,
             exclude,
             config,
             exclusions,
@@ -547,7 +716,7 @@ pub fn run(c: Command, format: MessageFormat, color: bool) -> ExitCode {
             .set_warn(&warn)
             .and_then(|()| settings(config.as_ref()))
             .and_then(|mut set| {
-                merged(&inputs).map(|db| {
+                merged(&mut out, &inputs).map(|db| {
                     set.exclude.extend(exclude);
                     (db, set)
                 })
@@ -556,6 +725,9 @@ pub fn run(c: Command, format: MessageFormat, color: bool) -> ExitCode {
                 let kinds: Vec<String> = kind.into_iter().map(KindArg::name).collect();
                 let r = Report {
                     cobertura,
+                    json,
+                    lcov,
+                    sonarqube,
                     html,
                     root: root.or(set.root),
                     exclude: set.exclude,
@@ -565,6 +737,9 @@ pub fn run(c: Command, format: MessageFormat, color: bool) -> ExitCode {
                     tests,
                     total,
                     fail_under,
+                    below,
+                    detailed,
+                    color,
                 };
                 report(&mut out, db, r)
             }),
@@ -577,12 +752,12 @@ pub fn run(c: Command, format: MessageFormat, color: bool) -> ExitCode {
             .set_warn(&warn)
             .and_then(|()| settings(config.as_ref()))
             .and_then(|mut set| {
-                merged(&inputs).map(|db| {
+                merged(&mut out, &inputs).map(|db| {
                     set.exclude.extend(exclude);
                     (db, set.exclude)
                 })
             })
-            .and_then(|(db, exclude)| excluded(&mut out, db, &exclude))
+            .and_then(|(db, exclude)| excluded(&mut out, db, &exclude, &root_dir(None)?))
             .map(|(db, ..)| print!("{}", db.rank())),
     };
     match r {

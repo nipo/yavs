@@ -356,10 +356,10 @@ fn paths_after(tmp: &Path, rule: &str) -> (Vec<String>, String) {
     let o = yavs(tmp, &["cov", "report", "a.ycov", "--exclude", "r.txt"]);
     assert!(o.status.success(), "{}", text(&o.stderr));
     let out = text(&o.stdout);
-    let table = out.split("path ").nth(1).expect("table");
+    let table = out.split("Instance ").nth(1).unwrap_or("");
     let names = table
         .lines()
-        .skip(1)
+        .skip(2)
         .take_while(|l| !l.trim().is_empty())
         .map(|l| l.split_whitespace().next().unwrap_or("").to_string())
         .collect();
@@ -669,7 +669,7 @@ fn a_row_directive_waives_one_row() {
         let o = yavs(&tmp, &["cov", "report", db, "--kind=condition"]);
         let out = text(&o.stdout);
         out.lines()
-            .find(|l| l.starts_with("conditions"))
+            .find(|l| l.starts_with("condition"))
             .unwrap_or("")
             .to_string()
     };
@@ -677,14 +677,14 @@ fn a_row_directive_waives_one_row() {
         total("p.ycov")
             .split_whitespace()
             .nth(1)
-            .map(|t| t.split('/').nth(1).map(str::to_string)),
+            .map(|t| Some(t.to_string())),
         Some(Some("4".to_string()))
     );
     assert_eq!(
         total("w.ycov")
             .split_whitespace()
             .nth(1)
-            .map(|t| t.split('/').nth(1).map(str::to_string)),
+            .map(|t| Some(t.to_string())),
         Some(Some("3".to_string()))
     );
 }

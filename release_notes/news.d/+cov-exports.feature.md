@@ -1,0 +1,1 @@
+`yavs cov report` writes a versioned JSON report with every kind and test (`--json`), an LCOV tracefile (`--lcov`) and a SonarQube generic coverage report (`--sonarqube`); the last two follow the published formats and have not yet been read by a real consumer. `vunit-yavs` has `--yavs-cov-json`, `--yavs-cov-lcov`, `--yavs-cov-sonarqube` and `--yavs-cov-cobertura`.

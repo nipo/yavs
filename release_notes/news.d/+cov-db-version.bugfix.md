@@ -1,0 +1,1 @@
+A coverage database written by a newer yavs is reported as such, naming both format versions and saying to re-run, in `yavs cov merge`, `report` and `rank`; it used to be called "not a yavs coverage database".

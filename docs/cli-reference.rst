@@ -483,6 +483,10 @@ Arguments:
 
    With ``--cov``: also leave ``translate_off`` ... ``translate_on`` regions out of the coverage.
 
+.. option:: --cov-embed-sources
+
+   With ``--cov``: store the text of the source files in the database, so ``yavs cov report --html`` needs no checkout. The source text then travels with the database.
+
 .. option:: --vhpi=LIB[:ENTRY]
 
    Load a VHPI plugin, ``LIB[:ENTRY]`` (E0901 when it cannot be loaded, E0902 when the entry point is missing).
@@ -590,9 +594,21 @@ Arguments:
 
    Also write a Cobertura XML report.
 
+.. option:: --json=FILE.json
+
+   Also write a JSON report with every kind and test (schema in the coverage guide).
+
+.. option:: --lcov=FILE.info
+
+   Also write an LCOV tracefile: lines and branches only.
+
+.. option:: --sonarqube=FILE.xml
+
+   Also write a SonarQube generic coverage report: lines and branches only.
+
 .. option:: --html=DIR
 
-   Also write an HTML report (static files, sources read from the paths in the database) into DIR.
+   Also write an HTML report (static files; sources embedded with ``--cov-embed-sources``, else read from the paths in the database) into DIR.
 
 .. option:: --root=DIR
 
@@ -612,9 +628,21 @@ Arguments:
 
    Cannot be combined with ``--uncovered``, ``--tests``.
 
-.. option:: --fail-under=PCT
+.. option:: --fail-under=PCT|KIND:PCT,...
 
-   Exit with status 1 and ``E0114`` when the total coverage is below PCT (0 to 100, such as 80 or 92.5); the report is printed as usual. A PCT outside 0 to 100 is a usage error.
+   Exit with status 1 and ``E0114`` when the total coverage is below PCT (0 to 100, such as 80 or 92.5), or a kind is below its own (``statement:90,branch:80``); the report is printed as usual. A PCT outside 0 to 100 or an unknown kind is a usage error.
+
+.. option:: --below=PCT
+
+   Limit the table of instances and packages to those below PCT, worst first, with a line counting the rest. Counts what the report counts (``--kind``, exclusions), rounded down. Totals and ``--fail-under`` are not affected.
+
+   Cannot be combined with ``--uncovered``, ``--tests``, ``--total``, ``--exclusions``.
+
+.. option:: --detailed
+
+   Also show, per instance after ``--below``, ``--kind`` and the exclusions, a table per kind with every item, and for what never ran its source, what is missing and a tip. ``--uncovered`` is the row format for exclusion files; ``--exclusions`` the full audit.
+
+   Cannot be combined with ``--uncovered``, ``--tests``, ``--total``, ``--exclusions``.
 
 .. option:: --exclude=FILE
 

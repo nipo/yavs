@@ -77,7 +77,7 @@ Syntax, command line, waveforms, coverage, debugger, plugins (E0 and W0)
    * - _`W0110`
      - A row of the exclusion file names a line (``file:line``) that is not where the excluded statement is now.
    * - _`E0111`
-     - A coverage database given to ``yavs cov merge`` or ``yavs cov report`` cannot be read, or is not a database ``yavs run --cov`` wrote: the note says which.
+     - A coverage database given to ``yavs cov merge``, ``report`` or ``rank`` cannot be read, is not a database ``yavs run --cov`` wrote, or has a format version this yavs does not read: the note says which, naming both versions.
    * - _`W0111`
      - A row of the exclusion file matches nothing in the coverage database: the statement changed (its text hash with it), was removed, or the instance path is wrong.
    * - _`E0112`
@@ -89,11 +89,11 @@ Syntax, command line, waveforms, coverage, debugger, plugins (E0 and W0)
    * - _`W0113`
      - A ``-- coverage on`` pragma has no ``-- coverage off`` before it.
    * - _`E0114`
-     - The total coverage of ``yavs cov report`` is below the percentage of ``--fail-under=PCT``.
+     - The total coverage of ``yavs cov report`` is below the percentage of ``--fail-under=PCT``, or a kind is below its own in ``--fail-under=KIND:PCT,...``.
    * - _`W0114`
      - A row of the exclusion file excludes an item that ran in the merged runs (for a ``toggle`` row: the scalar toggled both ways).
    * - _`E0115`
-     - ``yavs cov report --total`` or ``--fail-under`` has no item to count: the coverage database holds none of the kinds selected with ``--kind`` (or nothing is left after the exclusions).
+     - ``yavs cov report --total`` or ``--fail-under`` has no item to count: the coverage database holds none of the kinds selected with ``--kind`` or named in ``--fail-under=KIND:PCT`` (or nothing is left after the exclusions).
    * - _`W0115`
      - A signal or port has more ``bit``/``std_ulogic`` scalars than ``--cov-toggle-max`` (default 65536), so its toggles are not counted.
    * - _`W0116`
@@ -108,6 +108,8 @@ Syntax, command line, waveforms, coverage, debugger, plugins (E0 and W0)
      - With ``--cov-kind=fsm``, something looks like a state machine but is not one the coverage measures: a register of an enumeration type that a ``case`` does not select on, a ``case`` on a part of a signal, on a port or on a variable of a clocked process.
    * - _`E0121`
      - A compiled tier could not compile the design for ``--tier=clift`` or ``--tier=llvm``, or could not start compiling for ``--tier=auto``.
+   * - _`W0121`
+     - Coverage databases given to ``yavs cov merge`` or ``report`` embed different text for one source file (``--cov-embed-sources``): the file changed between the runs.
    * - _`E0123`
      - ``yavs cache clean`` could not remove a compilation cache entry of a library directory (permissions, or the directory is in use by a read-only mount).
    * - _`E0124`

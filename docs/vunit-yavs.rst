@@ -34,6 +34,9 @@ as ``--name=value``.
      - ``yavs run --threads=N``: the most threads one simulation uses (with the token server, ``-p N`` but at most 4 when not set). An integer of at least 1.
        It overrides ``--yavs-max-threads`` for a test. Not passed under ``--yavs-debug`` or to
        ``elab``. A ``--threads`` in ``yavs.sim_flags`` comes after it and wins.
+   * - ``yavs.cov_embed_sources``
+     - ``yavs run --cov-embed-sources``: store the source text in the database, so the HTML report needs no
+       checkout. The source text then travels with the database (:doc:`coverage`).
    * - ``yavs.cov_kind``
      - ``yavs run --cov-kind=LIST``: the kinds of coverage to count (``statement``, ``branch``,
        ``toggle``, ``condition``, ``assert``, ``expression``, ``combination``, ``fsm``). Used with VUnit's own ``enable_coverage``
@@ -93,7 +96,19 @@ out stops the run script with one ``error:`` line that says why and what to drop
      - ``results.merge_coverage()`` also writes the HTML coverage report into DIR.
    * - ``--yavs-cov-fail-under PCT``
      - ``results.merge_coverage()`` prints the coverage report, and the run exits with status 1
-       (after VUnit has written its reports) when the total coverage is below PCT percent.
+       (after VUnit has written its reports) when the total coverage is below PCT percent. Also
+       per kind: ``statement:90,branch:80``.
+   * - ``--yavs-cov-cobertura FILE``, ``--yavs-cov-json FILE``, ``--yavs-cov-lcov FILE``, ``--yavs-cov-sonarqube FILE``
+     - ``results.merge_coverage()`` also writes that export (:doc:`coverage`). In a script:
+       ``merge_coverage("coverage", args=["--lcov", "c.info"])`` and so on.
+   * - ``--yavs-cov-embed-sources``
+     - Passes ``--cov-embed-sources`` to every simulation with coverage, as ``yavs.cov_embed_sources`` does for the
+       tests it is set for.
+   * - ``--yavs-cov-below PCT``
+     - The report of ``results.merge_coverage()`` limits its table of instances to those below PCT
+       percent, worst first (``--below``, :doc:`coverage`).
+   * - ``--yavs-cov-detailed``
+     - That report also lists what never ran, under each instance (``--detailed``, :doc:`coverage`).
    * - ``--yavs-cov-exclude FILE``
      - ``results.merge_coverage()`` reports without the items this exclusion file lists
        (``yavs cov report --exclude``). Repeatable: the rules of all files add up.
@@ -131,7 +146,8 @@ Each simulation writes a database named after its test. ``merge_coverage("covera
 them into ``coverage.ycov``. With ``--yavs-cov-html``, ``--yavs-cov-fail-under`` or arguments for
 ``yavs cov report`` (``merge_coverage("coverage", args=["--cobertura", "c.xml"])``) it then
 reports on the merged database. The reports, exclusions and numbers are in :doc:`coverage`;
-a CI gate is ``python run.py --yavs-cov --yavs-cov-fail-under 85``.
+a CI gate is ``python run.py --yavs-cov --yavs-cov-fail-under 85``. In a script, what a report does goes through ``args``: ``merge_coverage("coverage", args=["--below=100", "--detailed"])`` is the
+"what is left to do" view.
 
 A run script passes exclusions in ``args``, and a person adds more on the command line:
 

@@ -343,7 +343,71 @@ fn fsm_not_detected_is_visible() {
     let rep = String::from_utf8_lossy(&o.stdout);
     assert!(rep.contains("not measured as state machines:"), "{rep}");
     assert!(rep.contains("`r.st`: it is a part of a signal"), "{rep}");
-    assert!(rep.contains("fsm  one: busy -> idle"), "{rep}");
+    let o = yavs(
+        &tmp,
+        &["cov", "report", "a.ycov", "--detailed", "--kind=fsm"],
+    );
+    let rep = String::from_utf8_lossy(&o.stdout);
+    assert!(rep.contains("fsm:\n"), "{rep}");
+    // The exports: JSON holds the machines and what was not measured, LCOV and SonarQube neither.
+    let o = yavs(
+        &tmp,
+        &[
+            "cov",
+            "report",
+            "a.ycov",
+            "--kind=fsm",
+            "--json",
+            "c.json",
+            "--lcov",
+            "c.info",
+            "--sonarqube",
+            "s.xml",
+        ],
+    );
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let j: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(tmp.join("c.json")).expect("json"))
+            .expect("JSON");
+    assert!(
+        j["items"]
+            .as_array()
+            .expect("items")
+            .iter()
+            .any(|i| i["kind"] == "fsm" && i["from"] == "busy" && i["to"] == "idle")
+    );
+    assert!(
+        j["items"]
+            .as_array()
+            .expect("items")
+            .iter()
+            .any(|i| i["kind"] == "fsm" && i["state"].is_string())
+    );
+    assert!(
+        j["unmeasured"]
+            .as_array()
+            .expect("unmeasured")
+            .iter()
+            .any(|u| u["text"].as_str().is_some_and(|t| t.contains("`r.st`"))),
+        "{j}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(tmp.join("c.info")).expect("lcov"),
+        ""
+    );
+    assert_eq!(
+        std::fs::read_to_string(tmp.join("s.xml")).expect("sonar"),
+        "<coverage version=\"1\">\n</coverage>\n"
+    );
+    assert!(rep.contains("one: busy -> idle"), "{rep}");
+    assert!(
+        rep.contains("transition never taken: `one: busy -> idle`"),
+        "{rep}"
+    );
+    assert!(
+        rep.contains("= help: take `one` from busy to idle in one step"),
+        "{rep}"
+    );
     // A kind other than `fsm` does not show them.
     let o = yavs(&tmp, &["cov", "report", "a.ycov", "--kind=toggle"]);
     assert!(!String::from_utf8_lossy(&o.stdout).contains("not measured"));
@@ -493,8 +557,8 @@ fn fsm_old_databases_and_no_items() {
     assert!(String::from_utf8_lossy(&o.stderr).contains("E0115"));
     let text = std::fs::read_to_string(tmp.join("a.ycov")).expect("read");
     let (head, rest) = text.split_once('\n').expect("head");
-    assert_eq!(head, "yavs-coverage 11");
-    let old = Database::parse(&format!("yavs-coverage 9\n{rest}")).expect("parse");
+    assert_eq!(head, "yavs-coverage 12");
+    let old = Database::parse(&format!("yavs-coverage 11\n{rest}")).expect("parse");
     assert!(!old.legacy);
     assert!(Database::parse(&format!("yavs-coverage 99\n{rest}")).is_err());
 }

@@ -210,6 +210,10 @@ pub struct RunArgs {
     /// With `--cov`: also leave `translate_off` ... `translate_on` regions out of the coverage.
     #[arg(long)]
     cov_exclude_translate_off: bool,
+    /// With `--cov`: store the text of the source files in the database, so `yavs cov report
+    /// --html` needs no checkout. The source text then travels with the database.
+    #[arg(long, requires = "cov")]
+    cov_embed_sources: bool,
     /// Load a VHPI plugin, `LIB[:ENTRY]` (E0901 when it cannot be loaded, E0902 when the entry
     /// point is missing).
     #[arg(long, value_name = "LIB[:ENTRY]")]
@@ -2408,6 +2412,9 @@ fn run_design(
                 .clone()
                 .unwrap_or_else(|| test_name(&a.common.top, &a.common.generics)),
         );
+        if a.cov_embed_sources {
+            cov.embed_sources(&db);
+        }
         if let Err(err) = std::fs::write(path, cov.write()) {
             out.emit(
                 &none,

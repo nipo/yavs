@@ -94,6 +94,12 @@ const EXPECTED: &[(&str, &str, u32, u64)] = &[
     ("s", "work.cov_pkg", 14, 0),
 ];
 
+/// The row of a kind in the summary table, as words: items, hit, missed, coverage.
+fn kind_row(text: &str, kind: &str) -> Vec<String> {
+    let line = text.lines().find(|l| l.starts_with(kind)).unwrap_or("");
+    line.split_whitespace().skip(1).map(String::from).collect()
+}
+
 #[test]
 fn run_merge_report() {
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/cli/cov_run.vhd");
@@ -142,11 +148,21 @@ fn run_merge_report() {
     let o = yavs(&tmp, &["cov", "report", "a.ycov", "--cobertura", "a.xml"]);
     assert!(o.status.success());
     let text = String::from_utf8(o.stdout).expect("utf-8");
-    assert!(
-        text.starts_with("statements 18/24 75.0%\nbranches   8/15 53.3%\n"),
+    assert_eq!(
+        kind_row(&text, "statement"),
+        ["24", "18", "6", "75.0%"],
         "{text}"
     );
-    assert!(text.contains("cov_run.u2    2/4 50.0%"), "{text}");
+    assert_eq!(
+        kind_row(&text, "branch"),
+        ["15", "8", "7", "53.3%"],
+        "{text}"
+    );
+    assert!(
+        text.lines()
+            .any(|l| l.starts_with("cov_run.u2 ") && l.contains("2/4 50.0%")),
+        "{text}"
+    );
     let xml = std::fs::read_to_string(tmp.join("a.xml")).expect("xml");
     assert!(
         xml.contains(
@@ -246,17 +262,20 @@ fn exclusions() {
     std::fs::write(tmp.join("ex.txt"), format!("# why\n{rows}")).expect("write");
     let (code, out, err) = report(&tmp, &["--exclude", "ex.txt"]);
     assert_eq!((code, err.as_str()), (Some(0), ""), "{out}");
-    assert!(out.contains("excluded (2, not in the totals)"), "{out}");
+    assert!(out.contains("2 items excluded, not in the totals"), "{out}");
     assert!(!out.contains("not covered"), "{out}");
 
     // Coarse forms: `*` instance and a whole instance.
     std::fs::write(tmp.join("ex2.txt"), rows.replace("cov_excl", "*")).expect("write");
     let (_, out, err) = report(&tmp, &["--exclude", "ex2.txt"]);
-    assert!(err.is_empty() && out.contains("excluded (2"), "{out}{err}");
+    assert!(
+        err.is_empty() && out.contains("2 items excluded"),
+        "{out}{err}"
+    );
     std::fs::write(tmp.join("ex3.txt"), "instance :cov_excl\n").expect("write");
     let (_, out, _) = report(&tmp, &["--exclude", "ex3.txt"]);
     assert!(
-        out.contains("excluded (") && !out.contains("not covered"),
+        out.contains(" excluded, not in the totals") && !out.contains("not covered"),
         "{out}"
     );
 
@@ -265,7 +284,7 @@ fn exclusions() {
     let (code, out, err) = report(&tmp, &["--exclude", "ex.txt"]);
     assert_eq!(code, Some(0));
     assert_eq!(err.matches("warning[W0110]").count(), 2, "{err}");
-    assert!(out.contains("excluded (2"), "{out}");
+    assert!(out.contains("2 items excluded"), "{out}");
 
     // The statement changes: the row is stale, and `-Werror` fails the report.
     cov_run(&tmp, &EXCL.replace("s <= 2;", "s <= 22;"));
@@ -306,10 +325,10 @@ fn exclusions() {
         "exclude:\n  - {kind: instance, instance: ':cov_excl', reason: on}\n",
     )
     .expect("write");
-    let (code, out, err) = report(&tmp, &["--exclude", "ex6.yml"]);
+    let (code, out, err) = report(&tmp, &["--exclude", "ex6.yml", "--detailed"]);
     // Everything ran, so the exclusion warns (W0114) but applies.
     assert!(code == Some(0) && err.contains("warning[W0114]"), "{err}");
-    assert!(out.contains("[on]"), "{out}");
+    assert!(out.contains("excluded: on"), "{out}");
     // A malformed YAML file names the line.
     std::fs::write(tmp.join("ex7.yaml"), "exclude:\n  - kind: frob\n").expect("write");
     let (code, _, err) = report(&tmp, &["--exclude", "ex7.yaml"]);
@@ -404,9 +423,15 @@ fn toggle_coverage() {
     // The summary, and `--uncovered` rows that exclude exactly the misses.
     let o = yavs(&tmp, &["cov", "report", "a.ycov"]);
     let text = String::from_utf8(o.stdout).expect("utf-8");
-    assert!(text.contains("\ntoggles    8/16 50.0%\n"), "{text}");
+    assert_eq!(
+        kind_row(&text, "toggle"),
+        ["16", "8", "8", "50.0%"],
+        "{text}"
+    );
     // The summary and `--uncovered` say the direction the same way.
-    assert!(text.contains("  toggle  s fall (1->0)  "), "{text}");
+    let o = yavs(&tmp, &["cov", "report", "a.ycov", "--detailed"]);
+    let text = String::from_utf8(o.stdout).expect("utf-8");
+    assert!(text.contains("s fall (1->0)"), "{text}");
     let o = yavs(&tmp, &["cov", "report", "a.ycov", "--uncovered"]);
     let rows = String::from_utf8(o.stdout).expect("utf-8");
     let toggle_rows: Vec<_> = rows.lines().filter(|l| l.starts_with("toggle ")).collect();
@@ -429,7 +454,7 @@ fn toggle_coverage() {
     );
     assert!(err.is_empty(), "{err}");
     // Each row takes out the missed direction only; what ran stays.
-    assert!(out.contains("toggles    8/8 100.0%"), "{out}");
+    assert_eq!(kind_row(&out, "toggle"), ["8", "8", "0", "100.0%"], "{out}");
     // The same as YAML.
     let o = yavs(&tmp, &["cov", "report", "a.ycov", "--uncovered=yaml"]);
     let y = String::from_utf8(o.stdout).expect("utf-8");
@@ -450,7 +475,8 @@ fn toggle_coverage() {
     std::fs::write(tmp.join("ex2.txt"), "toggle * v(*)\n").expect("write");
     let o = yavs(&tmp, &["cov", "report", "a.ycov", "--exclude", "ex2.txt"]);
     let err = String::from_utf8_lossy(&o.stderr);
-    assert_eq!(err.matches("warning[W0114]").count(), 2, "{err}");
+    assert_eq!(err.matches("warning[W0114]").count(), 1, "{err}");
+    assert!(err.contains("excluded items ran"), "{err}");
     // One direction: `s` fell never, so only the rise is excluded and it ran.
     std::fs::write(tmp.join("ex3.txt"), "toggle * s rise\ntoggle * s fall\n").expect("write");
     let o = yavs(&tmp, &["cov", "report", "a.ycov", "--exclude", "ex3.txt"]);

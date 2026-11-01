@@ -176,11 +176,22 @@ class TestPackage(unittest.TestCase):
         vu.get_simulator_name()
         args = vu._args  # pylint: disable=protected-access
         self.assertEqual((args.yavs_cov, args.yavs_cov_html, args.yavs_cov_fail_under), (False, None, None))
-        for bad in ("101", "-1", "abc", ""):
+        vu = self._vunit("--yavs-cov-fail-under=statement:90,branch:80")
+        vu.get_simulator_name()
+        self.assertEqual(vu._args.yavs_cov_fail_under, "statement:90,branch:80")  # pylint: disable=protected-access
+        for bad in ("101", "-1", "abc", "", "branch:101", "branch:", "90,x"):
             vu = self._vunit(f"--yavs-cov-fail-under={bad}")
             with mock.patch("sys.stderr", new_callable=io.StringIO) as stderr, self.assertRaises(SystemExit):
                 vu.get_simulator_name()
             self.assertIn("expected a percentage from 0 to 100", stderr.getvalue())
+        vu = self._vunit("--yavs-cov-below=branch:80")
+        with mock.patch("sys.stderr", new_callable=io.StringIO) as stderr, self.assertRaises(SystemExit):
+            vu.get_simulator_name()
+        self.assertIn("expected a percentage from 0 to 100", stderr.getvalue())
+        vu = self._vunit("--yavs-cov-fail-under=statment:90")
+        with mock.patch("sys.stderr", new_callable=io.StringIO) as stderr, self.assertRaises(SystemExit):
+            vu.get_simulator_name()
+        self.assertIn("'statment' is not a coverage kind", stderr.getvalue())
 
     def test_coverage_exclude_and_config_arguments(self):
         vu = self._vunit("--yavs-cov-exclude=a.txt", "--yavs-cov-exclude", "b.yaml", "--yavs-cov-config=c.yaml")
@@ -500,6 +511,18 @@ class TestYavsInterface(unittest.TestCase):
         process.assert_not_called()
         self.assertIn("--yavs-debug and coverage cannot be combined", out.getvalue())
 
+    def test_embed_sources_option_and_flag(self):
+        config = make_config(sim_options={"enable_coverage": True, "yavs.cov_embed_sources": True})
+        _, cmd, _ = self._simulate(config, suite="lib.tb.test_a")
+        self.assertIn("--cov-embed-sources", cmd)
+        _, cmd, _ = self._simulate(make_config(sim_options={"enable_coverage": True}), suite="lib.tb.test_a")
+        self.assertNotIn("--cov-embed-sources", cmd)
+        self.simif = YavsInterface(
+            prefix="prefix", output_path=self.output_path, coverage=CoverageArgs(embed_sources=True)
+        )
+        _, cmd, _ = self._simulate(make_config(sim_options={"enable_coverage": True}), suite="lib.tb.test_a")
+        self.assertIn("--cov-embed-sources", cmd)
+
     def _simulate_with_coverage(self, **kwargs):
         """Run a simulation with coverage; yavs would write its database at yavs/coverage.ycov"""
         self.simif = YavsInterface(prefix="prefix", output_path=self.output_path, **kwargs)
@@ -512,8 +535,9 @@ class TestYavsInterface(unittest.TestCase):
         merged = str(Path(self.output_path) / "all.ycov")
         yavs = str(Path("prefix") / "yavs")
         with mock.patch("vunit_yavs.subprocess.run", autospec=True) as run:
+            run.return_value.returncode = 0
             self.simif.merge_coverage(str(Path(self.output_path) / "all"))
-        run.assert_called_once_with([yavs, "cov", "merge", "-o", merged, str(database)], check=True)
+        run.assert_called_once_with([yavs, "cov", "merge", "-o", merged, str(database)], check=False)
         # A file name that ends in .ycov is used as it is; arguments make a report on the merged database
         with mock.patch("vunit_yavs.subprocess.run", autospec=True) as run:
             run.return_value.returncode = 0
@@ -521,6 +545,44 @@ class TestYavsInterface(unittest.TestCase):
         self.assertEqual(
             run.call_args_list[1].args[0], [yavs, "cov", "report", merged, "--cobertura", "c.xml"]
         )
+
+    def test_merge_coverage_display_flags(self):
+        self._simulate_with_coverage(coverage=CoverageArgs(below="70", detailed=True))
+        (Path(self.output_path) / "yavs" / "coverage.ycov").write_text("db", encoding="utf-8")
+        merged = str(Path(self.output_path) / "all.ycov")
+        with mock.patch("vunit_yavs.subprocess.run", autospec=True) as run:
+            run.return_value.returncode = 0
+            self.simif.merge_coverage(merged)
+        self.assertEqual(run.call_args_list[1].args[0][-2:], ["--below=70", "--detailed"])
+
+    def test_merge_coverage_exports(self):
+        exports = {"cobertura": "c.xml", "json": "c.json", "lcov": "c.info", "sonarqube": "s.xml"}
+        self._simulate_with_coverage(coverage=CoverageArgs(exports=exports))
+        (Path(self.output_path) / "yavs" / "coverage.ycov").write_text("db", encoding="utf-8")
+        merged = str(Path(self.output_path) / "all.ycov")
+        with mock.patch("vunit_yavs.subprocess.run", autospec=True) as run:
+            run.return_value.returncode = 0
+            self.simif.merge_coverage(merged)
+        self.assertEqual(
+            run.call_args_list[1].args[0][4:],
+            ["--cobertura", "c.xml", "--json", "c.json", "--lcov", "c.info", "--sonarqube", "s.xml"],
+        )
+
+    def test_merge_coverage_takes_no_report_keywords(self):
+        self._simulate_with_coverage(coverage=CoverageArgs())
+        merged = str(Path(self.output_path) / "all.ycov")
+        for keyword in ("fail_under", "below", "detailed", "lcov", "json", "sonarqube", "cobertura"):
+            with self.assertRaises(TypeError):
+                self.simif.merge_coverage(merged, **{keyword: "x"})
+
+    def test_merge_coverage_failure_is_not_a_traceback(self):
+        self._simulate_with_coverage(coverage=CoverageArgs(html="cov html"))
+        (Path(self.output_path) / "yavs" / "coverage.ycov").write_text("db", encoding="utf-8")
+        with mock.patch("vunit_yavs.subprocess.run", autospec=True) as run, mock.patch("vunit_yavs.atexit") as atexit:
+            run.return_value.returncode = 1
+            self.simif.merge_coverage(str(Path(self.output_path) / "all.ycov"))
+        atexit.register.assert_called_once()
+        self.assertEqual(run.call_count, 1)  # no report on a merge that failed
 
     def test_merge_coverage_report_and_threshold(self):
         self._simulate_with_coverage(coverage=CoverageArgs(html="cov html", fail_under="80"))

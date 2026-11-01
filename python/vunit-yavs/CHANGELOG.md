@@ -6,6 +6,11 @@
   with that warning.
 - `--yavs-cov-exclude FILE` (repeatable) and `--yavs-cov-config FILE` apply exclusion files and a coverage configuration to
   the report; a run script passes the same through `results.merge_coverage(file, args=["--exclude", f, "--config", g])`. Needs a yavs with repeatable `--exclude` and `--config`.
+- `--yavs-cov-cobertura`, `--yavs-cov-json`, `--yavs-cov-lcov` and `--yavs-cov-sonarqube` write the coverage exports. Needs a yavs with those exports.
+- `--yavs-cov-embed-sources` and the sim option `yavs.cov_embed_sources` store the source text in the coverage database. Needs a yavs with `--cov-embed-sources`.
+- `--yavs-cov-below PCT` limits the report's table to the instances below PCT percent, worst first, and `--yavs-cov-detailed` lists what never ran under each. In a script they go through `merge_coverage(args=[...])`. Needs a yavs with `yavs cov report --below` and `--detailed`.
+- A `yavs cov merge` that fails in `merge_coverage`, for example on a database another yavs version wrote, shows yavs's error and exits with status 1 after VUnit's reports, not a Python traceback.
+- `--yavs-cov-fail-under` takes a percentage per kind (`statement:90,branch:80`), with the kinds checked before any simulation runs. Needs a yavs with per-kind `--fail-under`.
 - `yavs.cov_kind` takes `fsm` and `assert`, and `--yavs-cov-kind LIST` gives the kinds on the command line for tests
   without that option. Needs a yavs with state machine coverage.
 - A simulation ends with its test runner: yavs gets `--exit-on-stdin-close` and ends when the pipe the runner keeps to

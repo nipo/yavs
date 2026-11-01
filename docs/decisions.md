@@ -2592,12 +2592,52 @@ scalars; the on-disk format is implementation-defined, so it is fixed here (yavs
   is within a log factor of the minimal set; an exact set cover is NP-hard. Items no test hit
   are not counted; `--exclude` applies before ranking.
 
+## Coverage exports (yavs-cov, CLI, vunit-yavs, #1020, user 2026-11-01)
+
+- `--json` (schema version 1, documented in `docs/coverage.md`), `--lcov` and `--sonarqube`. They leave excluded items out,
+  like Cobertura, and follow `--kind` and `--root`. LCOV and SonarQube hold branch arms only, not condition rows: their
+  formats name lines and branches. UCIS was dropped by the maintainer. The LCOV and SonarQube exports are labelled unvalidated: no real consumer has read them.
+
+## Embedded sources in the coverage database (yavs-cov, CLI, vunit-yavs, #1020, user 2026-11-01)
+
+- `--cov-embed-sources` stores the text of the files that have items, as `source` lines (database version 12). Opt-in, because the
+  source then travels with the database. `E0113` stays without it. Embedded text wins over the file on disk, as it is
+  what the run saw. Merging different text for one path warns (`W0121`) and keeps the last, because items are
+  identified by their own text and an edit elsewhere must stay mergeable.
+
+## The coverage text report: tables by default, `--detailed` to debug (yavs-cov, yavs-ir, yavs-lower, CLI, vunit-yavs, #1020, user 2026-11-01)
+
+- Default: a table `Kind | Items | Hit | Missed | Coverage` with a total, a single instance table with a column per
+  kind (one wide table scanned better than a table per instance on a database with every kind), a count of what never
+  ran and of what is excluded. No item rows. Why: 194 of 260 rows on an audited design were single toggle bits.
+- `--detailed` is a debugging view per instance: a table per kind with every item, covered and missed, excluded ones as
+  `excluded`; for conditions and expressions the focused table, one row per input and value with hits, target and what
+  the other inputs must be, one line when fully covered; for combinations a row each. Then entries through the
+  diagnostics renderer for what never ran, worst first, with a tip the data supports, grouped under the cause.
+- A cause is found through `Detail::under` (the arm around an item, from `CovInfo::under`, set by lowering) and
+  `Detail::owner` (its statement). The row of an `elsif` condition has no owner: the statement being lowered there can be
+  the last one nested in the arm before it.
+- Database version 12 adds an `at` line per item with the span and hash of the code, those links, what the other inputs
+  must be (computed from the condition tree at the end of a run) and a toggle's last level. They are separate lines so the
+  item lines stay as they were. A hash mismatch means the file changed: an entry says so and underlines nothing.
+- The text beside a missed item must work when pasted: combinations and condition or expression rows take the short
+  directive of `exclude::directive` (one symbol per input and the inputs, user 2026-11-01), except before a conditional or selected
+  assignment, where a directive is an error; other kinds take a file row. A signal's toggles take a `s(*)` row only when every bit of that direction is missed.
+- `--uncovered` stays the row format for exclusion files; `--tests`, `--exclusions` and the HTML report keep every
+  detail. The number of tests is no longer in the summary; `yavs cov rank` gives it.
+- `--below=PCT` limits the instances, worst first, with a line counting the rest; totals and `--fail-under` do not
+  move. There is no per-file text view, so it has no file form.
+- `merge_coverage` takes no report options as keywords (user 2026-11-01): the `--yavs-cov-*` flags act on the report
+  step, and a script passes the same options in `args`.
+- `W0114` is one warning per rule, replacing one per item or direction: one `instance` row gave 16 warnings. Its
+  paths follow `--root`.
+
 ## Readable coverage report, `--total`, `--fail-under` (yavs-cov, yavs-ir, yavs-lower, CLI, vunit-yavs, #877, 2026-10-31)
 
 - **Paths:** every text report (summary, `--uncovered`, `--tests`, the excluded list) and the HTML
   report show source paths relative to the current directory or to `--root DIR` (a file outside it
   keeps its path), by one rewrite of `Entry::file` after the exclusions are applied (file globs
-  match the stored path). Cobertura keeps the stored paths. Why: absolute paths made the list
+  match the stored path). Cobertura kept the stored paths until #1020 (user 2026-11-01): it follows `--root` too. Why: absolute paths made the list
   unreadable; the HTML report already did it (#689).
 - **Branch arm names:** lowering records for each branch counter what names its arm
   (`yavs_ir::CovArm`: the source span of the condition or choices, `others`, a written `else`, the

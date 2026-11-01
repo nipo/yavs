@@ -29,6 +29,8 @@ struct Name {
     sig: String,
     file: String,
     line: u32,
+    /// Where it is declared, for reports.
+    detail: crate::Detail,
     bit: u32,
     /// `library.unit`: the entity of its instance, or the package.
     unit: String,
@@ -136,7 +138,17 @@ pub fn toggles(db: &Db, e: &Elaborated, max: u64) -> (Toggles, Vec<Skipped>) {
             }
             let span = db.decls[obj.decl].span;
             let f = db.sources.get(span.file);
-            let line = f.line_col(span.start).0 as u32;
+            let (line, col) = f.line_col(span.start);
+            let line = line as u32;
+            let (ds, de) = (f.text_offset(span.start), f.text_offset(span.end));
+            let detail = crate::Detail {
+                line,
+                col: col as u32,
+                start: ds as u32,
+                end: de as u32,
+                digest: crate::fnv1a(f.text().get(ds..de).unwrap_or("")),
+                ..crate::Detail::default()
+            };
             for (sig, leaf, k) in out {
                 let n = e.nets.leaves[leaf as usize].ty.len;
                 // A port collapsed into part of its actual's leaf counts that part's bins.
@@ -154,6 +166,7 @@ pub fn toggles(db: &Db, e: &Elaborated, max: u64) -> (Toggles, Vec<Skipped>) {
                     sig,
                     file: f.path.clone(),
                     line,
+                    detail: detail.clone(),
                     // Kernel offset 0 is the rightmost element.
                     bit: base + at + (own as u64 - 1 - k) as u32,
                 });
@@ -314,6 +327,15 @@ impl Observer for Toggles {
     }
 }
 
+/// The level bit `b` ended at.
+fn level(st: &State, b: usize) -> char {
+    match (get(&st.prev0, b, 1), get(&st.prev1, b, 1)) {
+        (1, _) => '0',
+        (_, 1) => '1',
+        _ => '-',
+    }
+}
+
 impl Toggles {
     /// Add one item per scalar and direction, count 0 included, to `db`, which holds no toggle
     /// items yet.
@@ -337,6 +359,10 @@ impl Toggles {
                         text: String::new(),
                         tests: Vec::new(),
                         waivers: Vec::new(),
+                        detail: crate::Detail {
+                            level: level(&st, n.bit as usize),
+                            ..n.detail.clone()
+                        },
                         unit: n.unit.clone(),
                         process: String::new(),
                         operands: Vec::new(),

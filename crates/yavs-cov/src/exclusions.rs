@@ -454,7 +454,7 @@ impl Report {
 }
 
 /// `s` as a JSON string.
-fn json_str(s: &str) -> String {
+pub(crate) fn json_str(s: &str) -> String {
     let mut o = String::from("\"");
     for c in s.chars() {
         match c {

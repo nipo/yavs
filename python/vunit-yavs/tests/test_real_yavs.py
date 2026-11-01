@@ -22,6 +22,7 @@ import time
 import unittest
 from pathlib import Path
 
+import vunit_yavs
 from test_fake_e2e import COMMA, FAIL, PASS, report
 from vunit.vunit_cli import VUnitCLI
 from vunit_yavs.console import HELP
@@ -366,7 +367,7 @@ class TestRealYavs(unittest.TestCase):
         database = (self.tempdir / "all.ycov").read_text(encoding="utf-8")
         self.assertIn(f"\t{PASS}\n", database)
         self.assertIn(f"\t{COMMA}\n", database)
-        self.assertIn("statements ", proc.stdout)
+        self.assertIn("statement ", proc.stdout)
 
     def test_coverage_exclusions_from_the_command_line(self):
         rows = self.tempdir / "rows.txt"
@@ -375,7 +376,7 @@ class TestRealYavs(unittest.TestCase):
         config.write_text("kind: statement\n", encoding="utf-8")
         proc = self._coverage_run("--yavs-cov-exclude", str(rows), "--yavs-cov-config", str(config))
         self.assertEqual(proc.returncode, 0, proc.stdout)
-        self.assertIn("excluded (", proc.stdout)
+        self.assertIn(" excluded, not in the totals", proc.stdout)
         # A bad file fails the run after the reports, and the message names it
         proc = self._coverage_run("--yavs-cov-exclude", str(self.tempdir / "gone.txt"))
         self.assertEqual(proc.returncode, 1, proc.stdout)
@@ -388,7 +389,7 @@ class TestRealYavs(unittest.TestCase):
         rows.write_text("instance *\n", encoding="utf-8")
         proc = self._coverage_run(RUN_PY_COVERAGE_ARGS=f"--exclude {rows}")
         self.assertEqual(proc.returncode, 0, proc.stdout)
-        self.assertIn("excluded (", proc.stdout)
+        self.assertIn(" excluded, not in the totals", proc.stdout)
 
     def test_coverage_of_state_machines_and_assertions(self):
         source = self.tempdir / "tb_fsm.vhd"
@@ -398,7 +399,7 @@ class TestRealYavs(unittest.TestCase):
         database = (self.tempdir / "all.ycov").read_text(encoding="utf-8")
         self.assertIn("state:busy->idle", database)
         self.assertIn("fsm ", proc.stdout)
-        self.assertIn("conditions ", proc.stdout)
+        self.assertIn("condition ", proc.stdout)
         # A kind yavs does not know fails the run, naming the one meant
         proc = self._coverage_run("lib.tb_fsm.all", "--yavs-cov-kind=fsn", EXTRA_VHDL=str(source))
         self.assertNotEqual(proc.returncode, 0, proc.stdout)
@@ -410,6 +411,49 @@ class TestRealYavs(unittest.TestCase):
         # VUnit still wrote its report, and yavs said why the run failed
         self.assertEqual(report(self.xml), {PASS: "passed", COMMA: "passed"})
         self.assertRegex(proc.stdout, r"error\[E0114\]: coverage [0-9.]+% is below the required 100.0%")
+
+    def test_coverage_below_a_kind_threshold_names_the_kind(self):
+        proc = self._coverage_run("--yavs-cov-fail-under=statement:0,branch:100")
+        self.assertEqual(proc.returncode, 1, proc.stdout)
+        self.assertRegex(proc.stdout, r"error\[E0114\]: branch coverage [0-9.]+% is below the required 100.0%")
+        self.assertNotIn("statement coverage", proc.stdout)
+
+    def test_coverage_below_limits_the_table(self):
+        proc = self._coverage_run("--yavs-cov-below=100")
+        self.assertEqual(proc.returncode, 0, proc.stdout)
+        self.assertIn("Instance ", proc.stdout)
+        proc = self._coverage_run("--yavs-cov-below=0")
+        self.assertEqual(proc.returncode, 0, proc.stdout)
+        self.assertIn("no instance or package is below 0.0%", proc.stdout)
+
+    def test_coverage_detailed_lists_what_is_left(self):
+        proc = self._coverage_run("--yavs-cov-below=100", "--yavs-cov-detailed")
+        self.assertEqual(proc.returncode, 0, proc.stdout)
+        self.assertIn("=== ", proc.stdout)
+        self.assertNotIn("`--detailed`", proc.stdout)
+
+    def test_coverage_embedded_sources(self):
+        proc = self._coverage_run("--yavs-cov-embed-sources")
+        self.assertEqual(proc.returncode, 0, proc.stdout)
+        database = (self.tempdir / "all.ycov").read_text(encoding="utf-8")
+        self.assertIn("\nsource\t", database)
+
+    def test_coverage_exports(self):
+        paths = {flag: self.tempdir / f"out.{flag}" for flag in ("cobertura", "json", "lcov", "sonarqube")}
+        proc = self._coverage_run(*[f"--yavs-cov-{flag}={path}" for flag, path in paths.items()])
+        self.assertEqual(proc.returncode, 0, proc.stdout)
+        self.assertEqual(json.loads(paths["json"].read_text(encoding="utf-8"))["version"], 1)
+        self.assertIn("end_of_record", paths["lcov"].read_text(encoding="utf-8"))
+        self.assertIn('<coverage version="1">', paths["sonarqube"].read_text(encoding="utf-8"))
+        self.assertIn("<coverage line-rate", paths["cobertura"].read_text(encoding="utf-8"))
+
+    def test_the_kinds_are_those_of_yavs(self):
+        # A kind yavs gains must reach --yavs-cov-fail-under too
+        yavs = str(Path(os.environ["VUNIT_YAVS_PATH"]) / "yavs") if "VUNIT_YAVS_PATH" in os.environ else "yavs"
+        proc = subprocess.run(
+            [yavs, "cov", "report", "--fail-under=nonsense:1", "x.ycov"], capture_output=True, text=True, check=False
+        )
+        self.assertIn(f"the kinds are {', '.join(vunit_yavs._COV_KINDS)}", proc.stderr)  # pylint: disable=protected-access
 
     def test_non_ascii_file_names_compile_in_batches(self):
         # Several files in one library with non-ASCII names go in one call, also with the runner's own

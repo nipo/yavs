@@ -47,7 +47,11 @@ or later (`pip install vunit-yavs` installs it, a pre-release) and yavs 0.11.0 o
 | `--yavs-cov` | Collects coverage in every simulation, as `enable_coverage` does for the tests it is set for |
 | `--yavs-cov-directives MODE` | `apply` or `ignore`: what `yavs analyze`, `elab` and `run` do with the `-- yavs coverage exclude` comments in the sources (`--coverage-directives`); without it yavs's default, `apply`, which checks them when compiling |
 | `--yavs-cov-html DIR` | `results.merge_coverage()` also writes the HTML coverage report into DIR |
-| `--yavs-cov-fail-under PCT` | `results.merge_coverage()` prints the coverage report and the run exits with status 1 when the total is below PCT percent |
+| `--yavs-cov-fail-under PCT` | `results.merge_coverage()` prints the coverage report and the run exits with status 1 when the total is below PCT percent; per kind with `statement:90,branch:80` |
+| `--yavs-cov-cobertura FILE`, `--yavs-cov-json FILE`, `--yavs-cov-lcov FILE`, `--yavs-cov-sonarqube FILE` | `results.merge_coverage()` also writes that export; in a script `merge_coverage("coverage", args=["--lcov", "c.info"])` and so on |
+| `--yavs-cov-embed-sources` | Passes `--cov-embed-sources`, as the sim option `yavs.cov_embed_sources` does for the tests it is set for: the HTML report then needs no checkout, and the source text travels with the database |
+| `--yavs-cov-below PCT` | The report of `results.merge_coverage()` limits its table of instances to those below PCT percent, worst first |
+| `--yavs-cov-detailed` | That report also lists what never ran, under each instance. In a script both go through `merge_coverage("coverage", args=["--below=100", "--detailed"])` |
 | `--yavs-cov-exclude FILE` | `results.merge_coverage()` reports without the items this exclusion file lists (`yavs cov report --exclude`); repeatable. A run script passes the same in `merge_coverage("coverage", args=["--exclude", file])` |
 | `--yavs-cov-config FILE` | `results.merge_coverage()` reads exclusion files, root and kinds from this file (`yavs cov report --config`). A run script passes `args=["--config", file]` |
 | `--yavs-jobserver` | Lends the CPU slots of `-p N` that no test uses to the running simulations through a token server (below) |

@@ -207,19 +207,19 @@ const EXPLAIN: &[(&str, &str)] = &[
     ),
     (
         "E0111",
-        "A coverage database given to `yavs cov merge` or `yavs cov report` cannot be read, or is not a database `yavs run --cov` wrote: the note says which.",
+        "A coverage database given to `yavs cov merge`, `report` or `rank` cannot be read, is not a database `yavs run --cov` wrote, or has a format version this yavs does not read: the note says which, naming both versions. The format is private to yavs: re-run the simulation with this yavs, or report with the yavs that wrote the file.",
     ),
     (
         "E0113",
-        "A source file named by the coverage database cannot be read, so `yavs cov report --html DIR` cannot show it; the note gives the reason. Run the command where the paths in the database resolve.",
+        "A source file named by the coverage database cannot be read, so `yavs cov report --html DIR` cannot show it; the note gives the reason. Run the command where the paths in the database resolve, or run the simulation with `--cov-embed-sources` so the database holds the text.",
     ),
     (
         "E0114",
-        "The total coverage of `yavs cov report` is below the percentage of `--fail-under=PCT`. The normal report was printed first; the message gives the total and the requirement. Run more tests, or lower the requirement. Percentages are rounded down, so `--fail-under=100` needs every item covered.",
+        "The total coverage of `yavs cov report` is below the percentage of `--fail-under=PCT`, or a kind is below its own in `--fail-under=KIND:PCT,...`. The normal report was printed first; the message names each total or kind that failed and its requirement. Run more tests, or lower the requirement. Percentages are rounded down, so `--fail-under=100` needs every item covered.",
     ),
     (
         "E0115",
-        "`yavs cov report --total` or `--fail-under` has no item to count: the coverage database holds none of the kinds selected with `--kind` (or nothing is left after the exclusions). Run with `--cov-kind` naming the kinds, or change `--kind`.",
+        "`yavs cov report --total` or `--fail-under` has no item to count: the coverage database holds none of the kinds selected with `--kind` or named in `--fail-under=KIND:PCT` (or nothing is left after the exclusions). Run with `--cov-kind` naming the kinds, or change `--kind`.",
     ),
     (
         "E0112",
@@ -300,6 +300,10 @@ const EXPLAIN: &[(&str, &str)] = &[
     (
         "W0120",
         "With `--cov-kind=fsm`, something looks like a state machine but is not one the coverage measures: a register of an enumeration type that a `case` does not select on, a `case` on a part of a signal, on a port or on a variable of a clocked process. It has no `fsm` items, and the coverage report lists it under \"not measured as state machines\". The other kinds are not affected.",
+    ),
+    (
+        "W0121",
+        "Coverage databases given to `yavs cov merge` or `report` embed different text for one source file (`--cov-embed-sources`): the file changed between the runs. Items still merge, since they are identified by their own text; the HTML report shows the last text, so a line number of an older run can be off. Run all databases from the same sources.",
     ),
     (
         "W0116",

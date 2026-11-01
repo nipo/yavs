@@ -6,8 +6,8 @@ two-step workflow:
 1. **Run** with `yavs run --cov`. Each run writes one database file (`.ycov`) with the counts.
 2. **Report** with `yavs cov`: merge the databases of several runs, then print, export or rank.
 
-You get a `.ycov` database per run, and from it a text summary, an HTML site, Cobertura XML
-for CI, or a list of items that never ran. Without `--cov` there are no counters and no cost.
+You get a `.ycov` database per run, and from it a text summary, an HTML site, Cobertura, JSON, LCOV or
+SonarQube exports for CI, or a list of items that never ran. Without `--cov` there are no counters and no cost.
 
 ```{contents} On this page
 :local:
@@ -28,17 +28,130 @@ yavs cov rank all.ycov
 ```
 
 The two runs write `a.ycov` and `b.ycov` (named `tb(test=a)` and `tb(test=b)` in the database,
-unless you pass `--cov-test`). The report prints one line each for statements, branches,
-toggles and conditions with hit/total and a percentage, then a table per instance, then the items that
-never ran, with the source text that says what each one is:
+unless you pass `--cov-test`). The report has a table of the kinds the database holds, a line per
+instance or package, and how much never ran. On `tests/cli/cov_report.vhd`:
 
 ```
-not covered:
-  tb.vhd:6   toggle     rst fall (1->0)                                        tb
-  tb.vhd:24  branch     if rst = '1'                                           tb
-  tb.vhd:25  statement  count <= 0;                                            tb
-  tb.vhd:26  condition  count < 15 is 0 (result 0) in en = '1' and count < 15  tb
+Kind         Items  Hit  Missed  Coverage
+-----------  -----  ---  ------  --------
+statement       23   19       4     82.6%
+branch          16   10       6     62.5%
+toggle          10    6       4     60.0%
+condition        4    3       1     75.0%
+combination      3    2       1     66.6%
+total           56   40      16     71.4%
+
+Instance    Total        statement    branch       toggle      condition  combination
+----------  -----------  -----------  -----------  ----------  ---------  -----------
+cov_report  40/56 71.4%  19/23 82.6%  10/16 62.5%  6/10 60.0%  3/4 75.0%  2/3 66.6%
+
+16 items not covered; `--detailed` shows them.
 ```
+
+A `-` in the instance table means that path has no item of the kind. The text is plain ASCII, so it
+stays readable in logs and CI.
+
+### What is left to do
+
+`yavs cov report all.ycov --below=100 --detailed` is the debugging view: the instances not fully
+covered, worst first, each with a table per kind and then an entry for what never ran. An instance
+section starts with the tables, covered and missed items alike:
+
+```
+=== cov_report  (cov_report.vhd) ===
+
+statement:
+  Line  Item                              Hits  Status
+  ----  --------------------------------  ----  -------
+  ...
+  25    if rst = '1' then                    3  covered
+  26    n <= 0;                              0  MISSED
+      exclude with this row in an `--exclude` file: statement cov_report c7099ba2c6e1.0 cov_report.vhd:26
+  ...
+
+condition:
+Line 27: en = '1' and n < 15   (condition)
+Input totals: 1 of 2 inputs covered, 50.0%
+  Input     Covered  Reason not covered  Hint
+  --------  -------  ------------------  ----------------------------------
+  en = '1'  yes
+  n < 15    no       value 0 not hit     make `n < 15` 0 with en = '1' is 1
+
+  Row  Hits  Target         Other inputs must be
+  ---  ----  -------------  --------------------  -----------------------------------------------------------------------
+    1     2  en = '1' is 0  n < 15 is 1
+    2     1  en = '1' is 1  n < 15 is 1
+    3     0  n < 15 is 0    en = '1' is 1         <- missed (exclude with: -- yavs cov exclude row -0 (en = '1', n < 15))
+    4     1  n < 15 is 1    en = '1' is 1
+
+combination:
+Line 27: en = '1' and n < 15
+  Combination                                 Hits  Status
+  ------------------------------------------  ----  ----------------------------------------------------------------
+  en = '1' is false, n < 15 is not evaluated     2  covered
+  en = '1' is true, n < 15 is false              0  MISSED (exclude with: -- yavs cov exclude 10 (en = '1', n < 15))
+  en = '1' is true, n < 15 is true               1  covered
+```
+
+- Hits of a toggle row: bits in a run of one direction and one count share a row, `data(0..7)`, whatever
+  direction the signal is declared in.
+- A condition or expression not fully covered gets the table above, one row per input and value: the
+  target, its hits, and what the other inputs must be for this input to decide the result. A fully covered
+  one is a single line. A row is hit only when flipping that input alone changes the result, so a value
+  masked by a short circuit stays missed.
+- Beside a missed item is the exact text to exclude it. A combination takes the comment
+  `-- yavs cov exclude 10 (en = '1', n < 15)` and a condition or expression row
+  `-- yavs cov exclude row -0 (en = '1', n < 15)`, before the decision, which yavs checks against the inputs;
+  a conditional or selected assignment, where a comment is ambiguous, and the other kinds take a row for an
+  `--exclude` file. These texts are tested by pasting them.
+- Excluded items show as `excluded`, with the reason, not as missed.
+
+The entries follow, worst first, in the form of the diagnostics. Where one cause explains several items,
+such as a branch arm with statements inside it, they are listed under the cause:
+
+```
+note: signal did not toggle fully: `rst`
+ --> cov_report.vhd:7:14
+  |
+7 |   signal en, rst : bit := '0';
+  |              ^^^ declared here
+  |
+  = note: rst: no transition, and it ended at 0: stuck at 0
+  = help: drive rst to 1 and back to 0
+
+note: branch arm never taken: `if rst = '1'`
+  --> cov_report.vhd:25:8
+   |
+25 |     if rst = '1' then
+   |        ^^^^^^^^^ never taken
+   |
+   = note: the other arms: `elsif en = '1' and n < 15` ran 1 time, `elsif n > 100` ran 0 times, `(no arm taken)` ran 2 times
+   = note: this explains 1 item more, which cannot run until it does:
+           line 26: statement `n <= 0;`
+   = help: `rst = '1'` was never true when this ran: make it true
+
+note: condition not fully covered: `en = '1' and n < 15`
+  --> cov_report.vhd:27:24
+   |
+27 |     elsif en = '1' and n < 15 then
+   |                        ^^^^^^ here
+   |
+   = note: seen deciding the result: en = '1' at 0, en = '1' at 1, n < 15 at 1
+   = help: make `n < 15` 0 with en = '1' is 1
+
+cov_report: 16 of 56 items not covered (6 branch, 1 combination, 1 condition, 4 statement, 4 toggle)
+```
+
+A state or transition of a state machine has a row in its own table and an entry; the database holds its file and
+line, not a column, so it says so where the source would be. A tip says only what the data supports. Where the data does not say, the tip says so: a statement that
+is in no branch arm and never ran says the data does not tell what kept it from running. A toggle reports
+the level the scalar ended at; merged runs that ended differently are not called stuck. With more than one
+test, an entry names the tests that came closest, which reached the decision and went elsewhere. Without
+the sources, embedded or on disk, an entry says so and prints the rest, and a file edited since the run
+is not underlined at the wrong place.
+
+`--uncovered` is the row format to paste into an exclusion file, one row per item, and with the HTML report
+it also gives the result an input decides alone.
 
 Source paths are relative to the current directory (`--root DIR` changes that; a file outside it keeps
 its full path). A branch is named by its arm in the source: `if cond`, `elsif cond`, `else`, `when
@@ -71,6 +184,7 @@ tells you whether one of the two tests adds nothing the other lacks.
 | `--cov-toggle-max=N` | leave signals with more than `N` scalars (default 65536, for example large memories) out of toggle coverage |
 | `--cov-test=NAME` | the name of this run's test in the database |
 | `--cov-exclude-translate-off` | also leave `translate_off` ... `translate_on` regions out |
+| `--cov-embed-sources` | store the text of the source files in the database, so `yavs cov report --html` needs no checkout. Off by default: **the source text then travels with the database**, so think of who gets the file. Needs `--cov` |
 
 `--cov` cannot be combined with a debug session (`--dap`, `--interactive`, `--do`) yet: the run stops before time 0 with a "not implemented" error (exit 2).
 
@@ -86,13 +200,18 @@ Report options:
 
 | Option | Output |
 |--------|--------|
-| (none) | totals such as `statements 18/24 75.0%` for each kind the database holds, one line per instance or package, then the excluded items with their reasons |
-| `--cobertura FILE.xml` | Cobertura XML for CI services, one entry per source line (it has no toggles, so those are only in the text and HTML reports) |
+| (none) | a table with `Kind`, `Items`, `Hit`, `Missed` and `Coverage` for each kind the database holds and the total; one line per instance or package with its total and each kind; then a count of what never ran and a count of what is excluded |
+| `--detailed` | also, per instance after `--below`, `--kind` and the exclusions, a table per kind with every item and an entry with source and tip for what never ran (see What is left to do). Cannot be combined with `--total`, `--uncovered`, `--tests` or `--exclusions` |
+| `--cobertura FILE.xml` | Cobertura XML for CI services, one entry per source line (it has no toggles, so those are only in the text and HTML reports). A line whose statement is left out by `--kind` or an exclusion takes its hits from its branches and condition rows |
 | `--html DIR` | static pages that open from disk (`index.html`) |
+| `--json FILE` | JSON with every kind and the tests (see Exports) |
+| `--lcov FILE` | an LCOV tracefile: lines and branches (see Exports) |
+| `--sonarqube FILE` | a SonarQube generic coverage report: lines and branches (see Exports). Not validated against a real scanner |
 | `--root DIR` | the prefix stripped from the source paths in every report (default: the current directory) |
 | `--kind=LIST` (newer than 0.11.0) | report only these kinds (`statement`, `branch`, `toggle`, `condition`, `expression`, `combination`, `fsm`, comma separated); `--total` and `--fail-under` then count only them |
 | `--total` (newer than 0.11.0) | print only the total coverage as one percentage such as `74.3%`: the items that ran over all items, after exclusions; cannot be combined with `--uncovered` or `--tests` |
-| `--fail-under=PCT` (newer than 0.11.0) | exit with status 1 when the total is below PCT (`80`, `92.5`); the report is printed as usual and `error[E0114]: coverage 70.0% is below the required 80.0%` follows on standard error. With `--total` the percentage is printed too |
+| `--fail-under=PCT` (newer than 0.11.0) | exit with status 1 when the total is below PCT (`80`, `92.5`); the report is printed as usual and `error[E0114]: coverage 70.0% is below the required 80.0%` follows on standard error. With `--total` the percentage is printed too. `--fail-under=statement:90,branch:80` sets a percentage per kind and names each kind that fails; a plain number may stand beside them (`--fail-under=85,branch:80`) |
+| `--below=PCT` | limit the table of instances and packages to those below PCT, worst first, with a total column and a line counting the rest (`2 of 4 at or above 100.0% left out`), or `no instance or package is below 100.0%`. Counts what the report counts (`--kind`, exclusions), rounded down. Totals and `--fail-under` do not change. Cannot be combined with `--total`, `--uncovered`, `--tests` or `--exclusions` |
 | `--uncovered[=yaml]` | one exclusion row per item that never ran, with file, line and the statement as a comment; `=yaml` prints a YAML exclusion file |
 | `--tests` | one row per item that ran, followed by `# tests:` and the tests that hit it; cannot be combined with `--uncovered` |
 | `--exclude FILE` | apply an exclusion file (see Excluding code); repeat it to apply several: the rules add up |
@@ -134,6 +253,20 @@ The percentages are rounded down, so a gate never passes by rounding up: 99.95% 
 example `--kind=statement,branch --fail-under=90`. A report with nothing to count, such as
 `--kind=toggle` on a database without toggles, is the error `E0115` rather than 0% or 100%.
 
+A gate per kind is `--fail-under=statement:90,branch:80`. Each kind is counted on its own, rounded
+down the same way, and every kind that falls short is named:
+
+```
+error[E0114]: statement coverage 82.6% is below the required 90.0%; branch coverage 62.5% is below the required 80.0%
+```
+
+A kind in that list that the database does not hold is `E0115` too.
+
+`yavs cov report all.ycov --below=100 --detailed` is the "what is left to do" view: every instance and package
+not fully covered, worst first, with its items. An instance at 99.95% is listed, as `99.9%`, because percentages round down;
+one at exactly 100% or with nothing to count is not. The text report has no per-file view, so the limit
+applies to instances only.
+
 ## Coverage from VUnit
 
 With the `vunit-yavs` package (a release newer than 0.11.0) the test runner collects, merges and checks coverage for you:
@@ -141,18 +274,63 @@ With the `vunit-yavs` package (a release newer than 0.11.0) the test runner coll
 ```python
 vu.set_sim_option("enable_coverage", True)      # or pass --yavs-cov to run.py
 vu.set_sim_option("yavs.cov_kind", ["statement", "branch"])   # optional, as --cov-kind
+vu.set_sim_option("yavs.cov_embed_sources", True)             # optional, as --cov-embed-sources
 vu.main(post_run=lambda results: results.merge_coverage("coverage"))
 ```
 
 Every simulation writes a database named after its test; `merge_coverage("coverage")` merges them
 into `coverage.ycov`. `--yavs-cov-kind fsm,assert` on the command line gives the kinds of tests without that option. `python run.py --yavs-cov-html cov-html --yavs-cov-fail-under 85` then also
 writes the HTML report and fails the run (exit status 1, after the test results are written) when
-the total is below 85%. Further arguments for `yavs cov report` go in
+the total is below 85%; `--yavs-cov-fail-under statement:90,branch:80` sets a percentage per kind; `--yavs-cov-below 100 --yavs-cov-detailed` is the view above, and in a script these go through `args`. Further arguments for `yavs cov report` go in
 `merge_coverage("coverage", args=["--cobertura", "coverage.xml"])`. Exclusions go in
 `args` too (`["--exclude", "waived.yaml", "--config", "coverage.yaml"]`) or on the command line as
 `--yavs-cov-exclude FILE` (repeatable) and `--yavs-cov-config FILE`. Coverage is not available
 under `--yavs-debug`.
 
+## Exports
+
+Every export leaves excluded items out, follows `--kind`, and has its paths after `--root`.
+
+**JSON** (`--json FILE`) holds every kind and the tests. The database itself is private to yavs and can change;
+this schema is what a tool should read, and its `version` goes up when a field changes meaning or goes away.
+
+```json
+{
+  "version": 1,
+  "tests": ["tb(test=a)"],
+  "totals": [
+    {"kind": "statement", "items": 23, "hit": 19, "missed": 4, "coverage": 82.6},
+    {"kind": "total", "items": 39, "hit": 29, "missed": 10, "coverage": 74.3}
+  ],
+  "items": [
+    {"kind": "statement", "instance": "tb.u1", "file": "tb.vhd", "line": 26, "column": 7, "hits": 0, "tests": [], "statement": "n <= 0;"}
+  ]
+}
+```
+
+| Field of an item | Kinds | Meaning |
+|------------------|-------|---------|
+| `kind`, `instance`, `file`, `line`, `hits`, `tests` | all | what and where, the count, the tests that hit it |
+| `column` | all | 1-based; 0 where the database holds no position |
+| `statement` | statement | the first line of its text |
+| `arm`, `arm_text` | branch | its number and how the source names it |
+| `signal`, `direction` | toggle | the scalar, `rise` or `fall` |
+| `input`, `value`, `expression_text`, `other_inputs` | condition, expression | the row: an input at 0 or 1, the whole decision, what the other inputs must be |
+| `inputs`, `pattern`, `expression_text` | combination | the inputs in source order, one symbol per input (`0`, `1`, `-`), the decision |
+| `signal`, `state`, or `signal`, `from`, `to` | fsm | the register and a state, or a transition |
+
+`coverage` is a percentage rounded down to one decimal, like every percentage here.
+Beside `items`, `unmeasured` lists what looks like a state machine and is not measured: `file`, `line` and `text`.
+Rows of `assert` and `wait until` conditions (`--cov-kind=assert`) are `condition` items.
+
+**LCOV** (`--lcov FILE`) has `DA` per line with a statement and `BRDA` per branch arm, summed over instances. It
+cannot hold toggles, conditions, expressions, combinations, state machines, instances or tests. This export is **not validated**: it
+follows the tracefile format of the LCOV documentation and no LCOV tool has read it here.
+
+**SonarQube** (`--sonarqube FILE`) is the generic coverage format of SonarSource's documentation, for
+`sonar.coverageReportPaths`: a `lineToCover` per line, with its branches. It cannot hold what LCOV cannot, and neither lists what was not measured as a state machine. This export is
+**not validated**: it follows the published format and no scanner has read it here. A scanner also ignores a path it has
+not indexed, so check that it indexes your VHDL files.
 ## State machines
 
 `--cov-kind=fsm` counts, per instance, how often the register of a state machine entered each state and
@@ -195,10 +373,14 @@ declaration. So it only ever counts as hit: the total grows with it, and a run w
 slightly higher percentage. A transition from a state to itself is never an item, since the value does
 not change and there is nothing to observe.
 
+In `--detailed`, a table lists each state and transition of an instance, and what never happened gets an entry:
+
 ```
-not covered:
-  fifo.vhd:16  fsm  state: spare          tb.dut
-  fifo.vhd:55  fsm  state: busy -> done   tb.dut
+fsm:
+  Line  Item                 Hits  Status
+  ----  -------------------  ----  ------
+  16    state: spare            0  MISSED
+  55    state: busy -> done     0  MISSED
 ```
 
 An exclusion row names the instance, the signal and the state or transition, and `*` matches in all three:
@@ -424,7 +606,7 @@ directory. In a text file the same rule is one row, without spaces in the patter
 of the database is warning `W0111`, with a near name if there is one. The older `file GLOB` row keeps its
 matching (any case, `*` crosses `/`, any trailing part of the path) and also takes a plain directory.
 
-Excluded items are left out of the totals and Cobertura and listed under "excluded" with their
+Excluded items are left out of the totals and Cobertura; the report counts them and `--detailed` shows them as `excluded`, with their
 reasons; the database keeps the raw counts. Rows match by instance, kind and the hash of the
 statement's text, so an exclusion stays valid when the statement moves; the file and line are only
 there to read (a stale line is warning `W0110`). `yavs cov report --uncovered DB` and
@@ -480,8 +662,7 @@ databases stay mergeable after edits elsewhere in the file. A statement exclusio
 way: it is matched by path and text hash, so it stays excluded when the statement moves, and the
 line number in the row is only for reading.
 
-**Toggle wording.** A toggle is `rise (0->1)` or `fall (1->0)` in every report; exclusion rows use
-`rise` and `fall`.
+**Toggle wording.** A toggle is `rise (0->1)` or `fall (1->0)` in the reports; exclusion rows use `rise` and `fall`.
 
 **Toggle values.** `'L'` counts as 0 and `'H'` as 1; other values are neither, so a change
 through `'Z'` or `'X'` counts nothing.
@@ -515,37 +696,42 @@ that edge, with or without `--cov`. Its edge test therefore counts one run at in
 plus one per edge.
 
 **The database.** The `.ycov` file is written at the end of the run whatever its outcome, and
-overwritten, never appended to. Its format may change between yavs versions.
+overwritten, never appended to. Its format is private to yavs and may change between versions; for
+another tool use an export. yavs reads the databases of older versions, and a database a newer yavs
+wrote is an error that names both format versions (`E0111`): re-run the simulation with this yavs, or
+report with the yavs that wrote it.
 
 **HTML report.** Static pages that open from disk. Missed lines are red, lines that ran in only
 some instances purple, lines with a missed branch arm or toggle yellow; click a line to see its
 items per instance, with counts and the tests that hit them. Each file also has a page with only
-its gaps. Sources are read from the paths stored in the database, so run the command where they
-resolve.
+its gaps. Sources come from the database when the run had `--cov-embed-sources`; otherwise they are read
+from the paths stored in the database, so run the command where they resolve (`E0113` if not). Merged
+databases of an edited file warn (`W0121`) and show the last text.
 
 **Percentages.** Every percentage is rounded down to one decimal (a gate must not round a missing
 item up). The total counts every item of every kind alike: toggles are one item per direction.
 
 **Exit status and diagnostics.** `yavs cov` exits 0, or 1 on an error, when `-Werror` turns a
-warning into an error, or when the total is below `--fail-under`; a malformed option, such as a
+warning into an error, or when the total or a kind is below `--fail-under`; a malformed option, such as a
 `--fail-under` that is not a number from 0 to 100, is a usage error with exit status 2.
 
 | Code | Meaning |
 |------|---------|
 | `E0110` | cannot write the output |
-| `E0111` | cannot read a database |
+| `E0111` | cannot read a database: it is unreadable, is not a database, or has a format version this yavs does not read |
 | `E0112` | an exclusion file cannot be read or has a bad row, or a `library`, `entity` or `process` row meets a database too old to hold those names; the message names the file and the line |
 | `E0138` | the file of `--config` cannot be read or has a bad key; the message names the file and the line |
-| `E0113` | HTML report cannot find a source file at its stored path; nothing is written |
-| `E0114` | the total coverage is below `--fail-under` (the report was printed) |
-| `E0115` | `--total` or `--fail-under` has no item to count: the database holds none of the `--kind`s |
+| `E0113` | HTML report cannot find a source file at its stored path and the database does not embed it; nothing is written |
+| `E0114` | the total coverage, or a kind in `--fail-under=KIND:PCT`, is below its requirement (the report was printed) |
+| `E0115` | `--total` or `--fail-under` has no item to count: the database holds none of the `--kind`s, or none of a kind `--fail-under` names |
 | `W0110` | an exclusion row's line number is stale (the statement is still matched by its hash) |
 | `W0111` | an exclusion row matches nothing, with the statement that probably replaced it (see Excluding code) |
 | `W0112` | a `coverage off` region is never closed, so it excludes the rest of the file |
 | `W0113` | a `coverage on` without a preceding `coverage off` |
-| `W0114` | an excluded item did run |
+| `W0114` | what a rule excludes did run: one warning per rule, with the number of items and the first one (`--exclusions` lists them) |
 | `W0115` | a signal was left out of toggle coverage because of `--cov-toggle-max` |
 | `W0120` | something looks like a state machine but is not one `--cov-kind=fsm` measures |
+| `W0121` | merged databases embed different text for one source file; the HTML report shows the last |
 
 **Tiers and threads.** Counts are the same in every tier and at any `--threads`.
 

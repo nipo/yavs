@@ -89,7 +89,9 @@ A coverage gate
     echo "coverage $(yavs cov report cov/all.ycov --total)"
 
 Below the limit the report is printed as usual and the exit status is 1. Percentages are rounded down, so
-a gate never passes by rounding up. With VUnit the same gate is one command line
+a gate never passes by rounding up. ``--fail-under=statement:90,branch:80`` gates each kind on its own and
+names the ones that fall short. ``--json``, ``--lcov`` and ``--sonarqube`` write other exports for your CI service
+(:doc:`coverage`; the LCOV and SonarQube exports have not been read by a real consumer). With VUnit the same gate is one command line
 (:doc:`vunit`):
 
 .. code-block:: bash

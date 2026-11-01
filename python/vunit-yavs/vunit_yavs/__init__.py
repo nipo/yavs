@@ -32,7 +32,7 @@ from vunit.exceptions import CompileError
 from vunit.ostools import Process
 from vunit import sim_if as vunit_sim_if
 from vunit.color_printer import NO_COLOR_PRINTER
-from vunit.sim_if import ListOfStringOption, Option, SimulatorInterface, StringOption, check_executable, hooks
+from vunit.sim_if import BooleanOption, ListOfStringOption, Option, SimulatorInterface, StringOption, check_executable, hooks
 from vunit.vhdl_standard import VHDL
 
 from .console import START, VunitCommands
@@ -105,8 +105,16 @@ def _exit_with_failure():
     os._exit(1)  # pylint: disable=protected-access
 
 
-def _percentage(text):
-    """argparse type of --yavs-cov-fail-under: 0 to 100, kept as written for yavs to check"""
+# The kinds yavs counts; test_real_yavs.py checks this list against the yavs in use
+_COV_KINDS = ("statement", "branch", "toggle", "condition", "expression", "combination", "fsm")
+
+
+# The exports of 'yavs cov report': the flag and what it writes
+_COV_EXPORTS = {"cobertura": "Cobertura XML", "json": "JSON", "lcov": "LCOV", "sonarqube": "SonarQube generic coverage"}
+
+
+def _plain_percentage(text):
+    """argparse type of --yavs-cov-below: 0 to 100, kept as written for yavs to check"""
     try:
         valid = 0 <= float(text) <= 100
     except ValueError:
@@ -116,21 +124,52 @@ def _percentage(text):
     return text
 
 
+def _percentage(text):
+    """argparse type of --yavs-cov-fail-under: PCT or KIND:PCT, comma separated, kept as written for yavs to check"""
+    for part in text.split(","):
+        kind, colon, number = part.rpartition(":")
+        if colon and kind not in _COV_KINDS:
+            raise argparse.ArgumentTypeError(f"{kind!r} is not a coverage kind; the kinds are {', '.join(_COV_KINDS)}")
+        try:
+            valid = 0 <= float(number) <= 100
+        except ValueError:
+            valid = False
+        if not valid:
+            raise argparse.ArgumentTypeError(
+                f"expected a percentage from 0 to 100 or KIND:PCT such as statement:90,branch:80, got {text!r}"
+            )
+    return text
+
+
 class CoverageArgs:  # pylint: disable=too-few-public-methods
     """
-    The coverage command line arguments: --yavs-cov, --yavs-cov-kind, --yavs-cov-html, --yavs-cov-fail-under,
-    --yavs-cov-exclude, --yavs-cov-config
+    The coverage command line arguments: --yavs-cov, --yavs-cov-kind, --yavs-cov-html, --yavs-cov-fail-under, --yavs-cov-below,
+    --yavs-cov-detailed, --yavs-cov-embed-sources, --yavs-cov-exclude, --yavs-cov-config
     """
 
     def __init__(  # pylint: disable=too-many-arguments
-        self, enabled=False, html=None, fail_under=None, exclude=None, config=None, kinds=None
+        self,
+        enabled=False,
+        html=None,
+        fail_under=None,
+        below=None,
+        detailed=False,
+        embed_sources=False,
+        exclude=None,
+        config=None,
+        exports=None,
+        kinds=None,
     ):
         self.enabled = enabled
         self.kinds = kinds
         self.html = html
         self.fail_under = fail_under
+        self.below = below
+        self.detailed = detailed
+        self.embed_sources = embed_sources
         self.exclude = exclude or []
         self.config = config
+        self.exports = exports or {}
 
 
 class YavsInterface(SimulatorInterface):
@@ -159,6 +198,7 @@ class YavsInterface(SimulatorInterface):
         ListOfStringOption("yavs.sim_flags"),
         PositiveIntegerOption("yavs.max_threads"),
         ListOfStringOption("yavs.cov_kind"),
+        BooleanOption("yavs.cov_embed_sources"),
         # Files of console commands, sourced at the points VUnit sources its init files
         ListOfStringOption("yavs.init_files.after_load"),
         ListOfStringOption("yavs.init_files.before_run"),
@@ -283,7 +323,35 @@ class YavsInterface(SimulatorInterface):
             default=None,
             metavar="PCT",
             help="Print the coverage report and exit with status 1 when results.merge_coverage() finds the total "
-            "coverage below PCT percent.",
+            "coverage below PCT percent, or a kind below its own (statement:90,branch:80).",
+        )
+        for flag, what in _COV_EXPORTS.items():
+            group.add_argument(
+                f"--yavs-cov-{flag}",
+                metavar="FILE",
+                default=None,
+                help=f"Write a {what} report to FILE when results.merge_coverage() reports.",
+            )
+        group.add_argument(
+            "--yavs-cov-embed-sources",
+            action="store_true",
+            default=False,
+            help="Store the source text in every coverage database, so the HTML report needs no checkout. The source "
+            "text then travels with the database.",
+        )
+        group.add_argument(
+            "--yavs-cov-below",
+            metavar="PCT",
+            type=_plain_percentage,
+            default=None,
+            help="Limit the table in the report of results.merge_coverage() to the instances below PCT percent, "
+            "worst first.",
+        )
+        group.add_argument(
+            "--yavs-cov-detailed",
+            action="store_true",
+            default=False,
+            help="The report of results.merge_coverage() also lists what never ran, under each instance.",
         )
         group.add_argument(
             "--yavs-cov-exclude",
@@ -351,6 +419,10 @@ class YavsInterface(SimulatorInterface):
                 kinds=getattr(args, "yavs_cov_kind", None),
                 html=getattr(args, "yavs_cov_html", None),
                 fail_under=getattr(args, "yavs_cov_fail_under", None),
+                below=getattr(args, "yavs_cov_below", None),
+                detailed=getattr(args, "yavs_cov_detailed", False),
+                exports={flag: getattr(args, f"yavs_cov_{flag}", None) for flag in _COV_EXPORTS},
+                embed_sources=getattr(args, "yavs_cov_embed_sources", False),
                 exclude=getattr(args, "yavs_cov_exclude", None),
                 config=getattr(args, "yavs_cov_config", None),
             ),
@@ -617,6 +689,8 @@ class YavsInterface(SimulatorInterface):
                 cmd += [f"--cov-kind={','.join(kinds)}"]
             elif self._coverage.kinds:
                 cmd += [f"--cov-kind={self._coverage.kinds}"]
+            if self._coverage.embed_sources or config.sim_options.get("yavs.cov_embed_sources", False):
+                cmd += ["--cov-embed-sources"]
             self._coverage_files.add(str(database))
 
         cmd += config.sim_options.get("yavs.global_flags", [])
@@ -694,9 +768,10 @@ class YavsInterface(SimulatorInterface):
         Merge the coverage databases of all simulations into file_name (".ycov" is added unless it ends so).
 
         args are further arguments for 'yavs cov report', which runs on the merged database when there are
-        any, or --yavs-cov-html, --yavs-cov-fail-under, --yavs-cov-exclude or --yavs-cov-config are given. A report
-        that fails, for example a total below --yavs-cov-fail-under, makes the run exit with status 1 once VUnit has
-        written its reports. Exclusions from a run script go in args: args=["--exclude", file, "--config", file].
+        any, or --yavs-cov-html, an export flag, --yavs-cov-fail-under, --yavs-cov-below, --yavs-cov-detailed,
+        --yavs-cov-exclude or --yavs-cov-config are given. A report that fails, for example a total below
+        --yavs-cov-fail-under, or a merge that fails, makes the run exit with status 1 once VUnit has written its
+        reports. Anything else for the report from a run script goes in args: args=["--exclude", file, "--lcov", file].
         """
         databases = []
         for database in sorted(self._coverage_files):
@@ -716,13 +791,23 @@ class YavsInterface(SimulatorInterface):
         yavs = str(Path(self._prefix) / self.executable)
 
         print(f"Merging {len(databases)} coverage databases into {merged}...")
-        subprocess.run([yavs, "cov", "merge", "-o", str(merged), *databases], check=True)
+        if subprocess.run([yavs, "cov", "merge", "-o", str(merged), *databases], check=False).returncode != 0:
+            # yavs said why; as for a failing report, VUnit still writes its reports first
+            atexit.register(_exit_with_failure)
+            return
 
         report = list(args or [])
         if self._coverage.html is not None:
             report += ["--html", self._coverage.html]
+        for flag, path in self._coverage.exports.items():
+            if path is not None:
+                report += [f"--{flag}", str(path)]
         if self._coverage.fail_under is not None:
             report += [f"--fail-under={self._coverage.fail_under}"]
+        if self._coverage.below is not None:
+            report += [f"--below={self._coverage.below}"]
+        if self._coverage.detailed:
+            report += ["--detailed"]
         for path in self._coverage.exclude:
             report += ["--exclude", str(path)]
         if self._coverage.config is not None:

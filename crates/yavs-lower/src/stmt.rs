@@ -83,8 +83,13 @@ impl Fx<'_, '_> {
 
     pub fn stmt(&mut self, id: StmtId) -> R<()> {
         let s = &self.db.stmts[id];
+        // What runs inside this statement is under the arm being lowered around it.
+        let saved = (self.cov_parent, self.cov_arm);
+        self.cov_parent = self.cov_arm;
         self.stmt_start(ir_kind(&s.kind), s.span);
-        self.stmt_kind(id)
+        let r = self.stmt_kind(id);
+        (self.cov_parent, self.cov_arm) = saved;
+        r
     }
 
     /// The statement's code, after its `Stmt` marker.

@@ -399,9 +399,9 @@ impl Fx<'_, '_> {
                         .cloned()
                         .collect(),
                 };
-                let item = self
-                    .cx
-                    .cover_cond(self.fb.program(), stmt, whole, kind, info, None);
+                let item =
+                    self.cx
+                        .cover_cond(self.fb.program(), stmt, kind, info, None, self.cov_parent);
                 first.get_or_insert(item);
             }
         }
@@ -420,10 +420,10 @@ impl Fx<'_, '_> {
                     let item = self.cx.cover_cond(
                         self.fb.program(),
                         stmt,
-                        whole,
                         CovKind::Combination(s),
                         info,
                         Some(index),
+                        self.cov_parent,
                     );
                     first.get_or_insert(item);
                 }

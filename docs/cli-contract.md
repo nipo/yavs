@@ -715,24 +715,25 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   `yavs.ycov`, relative to the working directory) after the simulation, whatever its exit
   status; an elaboration failure writes none. The file is overwritten, never appended to:
   one database per run, merged afterwards with `yavs cov merge A B ... -o OUT`. `yavs cov report
-  DB ... [--cobertura FILE.xml] [--html DIR] [--root DIR] [--kind LIST] [--total] [--fail-under PCT] [--exclude FILE]... [--config FILE] [--uncovered] [-W...]` prints a text summary on
-  stdout and writes Cobertura XML. The summary ends with the items that never ran in aligned
-  columns (`FILE:LINE  KIND  ITEM  INSTANCE`; a branch is named by its arm in the source:
-  `if C`, `elsif C`, `else`, `when CHOICES`, `(no arm taken)`, `loop body`; a toggle is `SIGNAL
-  rise (0->1)` or `fall (1->0)`). Source paths in the text reports, `--uncovered`, `--tests`
-  and the HTML report are relative to the current directory or to `--root DIR` (a file outside it
-  keeps its path; Cobertura keeps the stored paths). `--kind=LIST` (`statement`, `branch`,
+  DB ... [--cobertura FILE.xml] [--json FILE] [--lcov FILE] [--sonarqube FILE] [--html DIR] [--root DIR] [--kind LIST] [--total] [--fail-under PCT|KIND:PCT,...] [--below PCT] [--exclude FILE]... [--config FILE] [--uncovered] [-W...]` prints a text summary on
+  stdout and writes Cobertura XML. The summary is a table `Kind  Items  Hit  Missed  Coverage` of the kinds the database holds with a `total` row (`no coverage items` when it holds none) and a table with a line per instance or package;
+  then the number of items not covered and, with exclusions, the number excluded. `--detailed` (conflicts with `--total`, `--uncovered`, `--tests`, `--exclusions`) replaces the counts with a section per path, `=== PATH  (FILES) ===`: a table per kind with every item (`Line  Item  Hits  Status`, status `covered`, `MISSED` or `excluded`, a branch named by its arm in the source:
+  `if C`, `elsif C`, `else`, `when CHOICES`, `(no arm taken)`, `loop body`; a toggle is `SIGNAL rise (0->1)` or `fall (1->0)`, bits of one direction and count on one row as `s(0..7)`), per condition or expression a line when fully covered, else its input and row tables (`Row  Hits  Target  Other inputs must be`), per decision a table of its combinations, the text that excludes each missed item, then per finding a note in the form of the diagnostics, worst first, and a closing line. `--below=PCT` limits the table and the sections to paths under PCT, worst first, with a line counting the rest; totals and gates are unchanged. This text is for reading and may change: `--uncovered` and `--tests` stay one row per item. Source paths in the text reports, `--uncovered`, `--tests`, the HTML report
+  and the exports are relative to the current directory or to `--root DIR` (a file outside it
+  keeps its path), and so are the paths in every export, Cobertura included. `--kind=LIST` (`statement`, `branch`,
   `toggle`, `condition`, `expression`) keeps only those items in every report. `--total` prints
   only the percentage of items that ran over all items, after exclusions and `--kind`, rounded
   down to one decimal (`74.3%`); it conflicts with `--uncovered` and `--tests`. `--fail-under
   PCT` (0 to 100, decimals allowed) exits 1 with `E0114` (`coverage 70.0% is below the
-  required 80.0%`, after the normal output) when that total is lower; a PCT that is not a number
-  in range is a clap usage error with exit status 2. A total with no item to count (`--total`
-  or `--fail-under` with a `--kind` the database lacks) is `E0115`, exit 1. `--html DIR` writes a static HTML report (`index.html`,
+  required 80.0%`, after the normal output) when that total is lower; `--fail-under=KIND:PCT,...`
+  (beside or instead of the plain number) does the same per kind, counted as `--kind=KIND --total` counts, and the message names every
+  requirement that failed (`branch coverage 50.0% is below the required 80.0%`); a PCT that is not a number
+  in range, an unknown kind or a repeat is a clap usage error with exit status 2. A kind `--fail-under` names with no items is `E0115`. A total with no item to count (`--total`
+  or `--fail-under` with a `--kind` the database lacks) is `E0115`, exit 1. `--cov-embed-sources` (`run`, needs `--cov`) stores the sources in the database. `--html DIR` writes a static HTML report (`index.html`,
   `src-N.html` per source file in name order; inline CSS and one inline script, no external
   resources, no timestamp, so equal databases give equal bytes; source paths shown relative to
-  the current directory or to `--root DIR`, as in the text reports); sources are read from the paths in the
-  database at report time and an unreadable one is `E0113` with nothing written. `--uncovered` prints instead one exclusion row per item that
+  the current directory or to `--root DIR`, as in the text reports); embedded sources are used, others are read from the paths in the
+  database at report time and an unreadable one is `E0113` with nothing written; different embedded text for one path across merged databases is `W0121`, the last wins. `--uncovered` prints instead one exclusion row per item that
   never ran (`statement|branch INSTANCE ID FILE:LINE   # text`, `condition|expression INSTANCE HEX12.OCC ROW FILE:LINE   # input, value, result, condition`, `toggle PATH SCALAR rise|fall
   # never rise (0->1)|fall (1->0) (FILE:LINE)`, or `toggle PATH SCALAR   # never toggled` when both
   directions never happened); `--uncovered=yaml` prints the same items as a YAML exclusion file
@@ -770,8 +771,8 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   ...`) and per test its items and the items no other test hit. `yavs cov` exits 0, or 1 with `E0111` (a database cannot be
   read), `E0114`, `E0115`, `E0112` (an exclusion file cannot be read or has a malformed row), `E0138` (`--config`) or `E0110` (a file
   cannot be written), or when `-Werror` makes a warning an error; `run` exits at least 1 when the database cannot be written (`E0110`). The
-  database format (a `yavs-coverage 11` line, a tests section of `test`, id, name lines with
-  ids numbering the names in sorted order, then one tab-separated item per line: kind `s` or
+  database format (a `yavs-coverage 12` line, a tests section of `test`, id, name lines with
+  ids numbering the names in sorted order, with `--cov-embed-sources` a `source`, path, text line per source file (`\\`, newline, return and tab escaped), then per item an `at` line after it (line, column, byte start, byte end, hex hash of those bytes, the arm around it `HASH.OCC.ARM` or `-`, its statement `HASH.OCC` or `-`, what the other inputs must be, the toggle's last level, `d` when a directive can waive it) and one tab-separated item per line: kind `s` or
   `bN`, path, statement text hash, occurrence, count, tests, line, file, statement text for
   display; conditions and expressions: kind `cN` or `eN` (N = 2 * input + value), the same fields with the
   input's text before the display text (the result the input decides alone, a space, the whole
@@ -780,9 +781,10 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   the condition fields, the input texts separated by U+001F before the display text, and last the
   in-source waivers (`-` for none; else rule, reason, file and line separated by U+001F, waivers
   by U+001E); tests is the comma-separated ids of the tests that hit the item, `-` for none) is
-  yavs's own and may change with its version line; versions 2 to 5 are still read (2 and 3 without
+  yavs's own and may change with its version line; versions 2 to 11 are still read (2 to 11 without embedded sources and `at` lines, 2 and 3 without
   tests, 2 to 4 without conditions, 2 to 5 without combinations and in-source exclusions, so
-  `cov report --exclusions` says it has no record). Cobertura output has no toggles and no
+  `cov report --exclusions` says it has no record); any other `yavs-coverage N` line is `E0111` with a note
+  naming N, the versions this yavs reads, and to re-run or use the yavs that wrote it (`cov merge`, `report`, `rank` alike). Cobertura output has no toggles and no
   combinations.
 
   `--cov-kind=combination` (#883) counts, per condition or logic expression with two or more
