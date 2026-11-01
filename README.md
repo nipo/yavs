@@ -1,4 +1,4 @@
-# yavs
+<h1 align="center">YAVS - Yet Another VHDL Simulator</h1>
 
 [![Documentation](https://img.shields.io/readthedocs/yavs?label=documentation)](https://yavs.readthedocs.io)
 [![Repository](https://img.shields.io/badge/github-ru551n%2Fyavs-blue?logo=github)](https://github.com/ru551n/yavs)
