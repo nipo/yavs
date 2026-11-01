@@ -832,6 +832,210 @@ architecture rtl of ent is\n  signal s : std_logic;\nbegin\nend;\n";
     }
 }
 
+const ENT_E: &str = "entity e is end entity;\n";
+
+fn arch_says(text: &str) -> String {
+    format!(
+        "architecture a of e is begin\n  process begin report \"{text}\"; wait; end process;\nend architecture;\n"
+    )
+}
+
+fn pkg_c(v: u32) -> String {
+    format!("package pr is constant c : integer := {v}; end package;\n")
+}
+
+const USES_E_A: &str = "entity t is end entity;\narchitecture s of t is begin u : entity work.e(a); end architecture;\n";
+const USES_P: &str = "use work.pr.all;\nentity t is end entity;\narchitecture a of t is begin\n  \
+process begin report \"c=\" & integer'image(c); wait; end process;\nend architecture;\n";
+const USES_P_X: &str = "use work.pr.all;\nentity x is end entity;\narchitecture a of x is begin\n  \
+process begin report \"x c=\" & integer'image(c); wait; end process;\nend architecture;\n";
+const USES_P_AND_X: &str = "use work.pr.all;\nentity t is end entity;\narchitecture a of t is begin\n  \
+u : entity work.x;\n  process begin report \"t c=\" & integer'image(c); wait; end process;\nend architecture;\n";
+
+/// Writes `files`, analyzes `order` one call each, and runs `t` cold and warm: both print `want`.
+fn runs_as(name: &str, files: &[(&str, String)], order: &[&str], want: &[&str]) {
+    let e = Env::new(name);
+    for (f, text) in files {
+        std::fs::write(e.tmp.join(f), text).expect("write");
+    }
+    for f in order {
+        let o = e.yavs(&["analyze", "--work", &e.work(), f]);
+        assert_eq!(o.code, 0, "{name}: {f}: {o:?}");
+    }
+    for round in ["cold", "warm"] {
+        let o = e.run_top("t", &[]);
+        assert_eq!(o.code, 0, "{name} {round}: {o:?}");
+        for w in want {
+            assert!(o.stdout.contains(w), "{name} {round}: wants {w}: {o:?}");
+        }
+    }
+}
+
+/// A run uses the units the library holds: the last analyzed of each name. A unit analysed against
+/// an earlier version is analysed again (13.5), and the old copy in a file that lost it never runs
+/// (#1054), whatever the order of the closure. `docs/design/lrm-checks.md` L174.
+#[test]
+fn a_run_uses_the_last_analyzed_unit_of_each_name() {
+    let f = |a: &str| arch_says(a) + &pkg_c(1);
+    let s = |t: &str| t.to_string();
+    // Nothing is obsolete here: `t` needs the two files in the order `g`, `f`.
+    let t = format!("use work.qr.all;\nuse work.pr.all;\n{USES_E_A}");
+    let q = "package qr is constant k : integer := 5; end package;\n";
+    let g = arch_says("NEW") + q;
+    let files = [
+        ("e.vhd", s(ENT_E)),
+        ("f.vhd", f("OLD")),
+        ("g.vhd", g),
+        ("t.vhd", t),
+    ];
+    runs_as(
+        "reana_nothing_obsolete",
+        &files,
+        &["e.vhd", "f.vhd", "g.vhd", "t.vhd"],
+        &["NEW"],
+    );
+    // The file with the old copy analysed last has the current unit.
+    runs_as(
+        "reana_old_file_last",
+        &files,
+        &["e.vhd", "g.vhd", "f.vhd", "t.vhd"],
+        &["OLD"],
+    );
+    // The issue's case: a package replaced under a user.
+    runs_as(
+        "reana_package",
+        &[
+            ("p1.vhd", pkg_c(1)),
+            ("p2.vhd", pkg_c(2)),
+            ("t.vhd", s(USES_P)),
+        ],
+        &["p1.vhd", "t.vhd", "p2.vhd"],
+        &["c=2"],
+    );
+    // The old copy shares a file with a user, which is analysed again against the new one.
+    runs_as(
+        "reana_old_copy_with_user",
+        &[
+            ("f.vhd", pkg_c(1) + USES_P_X),
+            ("p2.vhd", pkg_c(2)),
+            ("t.vhd", s(USES_P_AND_X)),
+        ],
+        &["f.vhd", "p2.vhd", "t.vhd"],
+        &["x c=2", "t c=2"],
+    );
+    // One name twice in one file, with a user between the two.
+    runs_as(
+        "reana_twice_in_file",
+        &[("f.vhd", pkg_c(1) + USES_P + &pkg_c(2))],
+        &["f.vhd"],
+        &["c=2"],
+    );
+    // An architecture replaced under the instance (and the configuration) naming it.
+    let conf = "configuration t of top is\n  for s\n    for u : e use entity work.e(a); end for;\n  end for;\nend configuration;\n";
+    let top = "entity top is end entity;\narchitecture s of top is\n  component e is end component;\nbegin\n  u : e;\nend architecture;\n";
+    runs_as(
+        "reana_arch_config",
+        &[
+            ("e.vhd", s(ENT_E)),
+            ("f1.vhd", arch_says("F1") + conf),
+            ("top.vhd", s(top)),
+            ("f2.vhd", arch_says("F2")),
+        ],
+        &["e.vhd", "top.vhd", "f1.vhd", "f2.vhd"],
+        &["F2"],
+    );
+    // An entity replaced: its architecture is analysed again against the new one.
+    runs_as(
+        "reana_entity",
+        &[
+            ("e.vhd", s(ENT_E)),
+            ("a.vhd", arch_says("A")),
+            ("t.vhd", s(USES_E_A)),
+            ("e2.vhd", s(ENT_E)),
+        ],
+        &["e.vhd", "a.vhd", "t.vhd", "e2.vhd"],
+        &["A"],
+    );
+    // A package body in the file of the package's old copy: analysed against the new package.
+    let pf = "package pr is function f return integer; end package;\npackage body pr is\n  function f return integer is begin return 7; end function;\nend package body;\n";
+    let p2 = "package pr is function f return integer; constant c : integer := 3; end package;\n";
+    let tb = "use work.pr.all;\nentity t is end entity;\narchitecture a of t is begin\n  process begin report \"f=\" & integer'image(f) & \" c=\" & integer'image(c); wait; end process;\nend architecture;\n";
+    runs_as(
+        "reana_body",
+        &[("f.vhd", s(pf)), ("p2.vhd", s(p2)), ("t.vhd", s(tb))],
+        &["f.vhd", "p2.vhd", "t.vhd"],
+        &["f=7 c=3"],
+    );
+    // A package takes the name of an entity: one name space of primary units.
+    runs_as(
+        "reana_other_kind",
+        &[
+            ("p1.vhd", s("entity pr is end entity;\n")),
+            ("p2.vhd", pkg_c(2)),
+            ("t.vhd", s(USES_P)),
+        ],
+        &["p1.vhd", "p2.vhd", "t.vhd"],
+        &["c=2"],
+    );
+}
+
+/// Same files, same closure order, other owner of the unit: the cache key tells them apart.
+#[test]
+fn analysing_a_file_again_changes_which_copy_a_warm_run_uses() {
+    let e = Env::new("reana_owner");
+    let g = format!(
+        "use work.pr.all;\npackage qr is constant k : integer := c; end package;\n{}",
+        arch_says("NEW")
+    );
+    let t = format!("use work.qr.all;\n{USES_E_A}");
+    for (f, text) in [
+        // Package `z` keeps `e.vhd` before `f.vhd` whichever file holds `a`.
+        ("e.vhd", format!("{ENT_E}package z is end package;\n")),
+        ("f.vhd", arch_says("OLD") + "use work.z.all;\n" + &pkg_c(1)),
+        ("g.vhd", g),
+        ("t.vhd", t),
+    ] {
+        std::fs::write(e.tmp.join(f), text).expect("write");
+        assert_eq!(e.yavs(&["analyze", "--work", &e.work(), f]).code, 0, "{f}");
+    }
+    for (again, want) in [
+        (None, "NEW"),
+        (Some("f.vhd"), "OLD"),
+        (Some("g.vhd"), "NEW"),
+    ] {
+        if let Some(f) = again {
+            assert_eq!(e.yavs(&["analyze", "--work", &e.work(), f]).code, 0, "{f}");
+        }
+        for round in ["cold", "warm"] {
+            let o = e.run_top("t", &[]);
+            assert_eq!(o.code, 0, "{again:?} {round}: {o:?}");
+            assert!(o.stdout.contains(want), "{again:?} {round}: {o:?}");
+        }
+    }
+}
+
+/// A unit that no longer analyses against what replaced its dependency fails the run, with the
+/// error of that analysis (13.5: it must be analysed again before it is used).
+#[test]
+fn a_unit_that_does_not_fit_the_replacement_fails_the_run() {
+    let e = Env::new("reana_breaks");
+    let p2 = "package pr is constant d : integer := 2; end package;\n".to_string();
+    for (f, text) in [
+        ("p1.vhd", pkg_c(1)),
+        ("t.vhd", USES_P.to_string()),
+        ("p2.vhd", p2),
+    ] {
+        std::fs::write(e.tmp.join(f), text).expect("write");
+        assert_eq!(e.yavs(&["analyze", "--work", &e.work(), f]).code, 0, "{f}");
+    }
+    let o = e.run_top("t", &[]);
+    assert_eq!(o.code, 2, "{o:?}");
+    assert!(
+        o.stderr.contains("E1100") && o.stderr.contains("t.vhd"),
+        "{o:?}"
+    );
+}
+
 /// A hit does not read the text of the sources (they are verified by size and modification time
 /// and decoded lazily): a run that has nothing to show works with a source nobody can read now.
 #[cfg(unix)]

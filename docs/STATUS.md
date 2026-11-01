@@ -31,7 +31,7 @@ A message that names two different types, subtypes, subprograms or other declara
 
 ### One analysis per unit in a session (#991, 2026-11-01)
 
-A file of a closure analyzes all its units, so an unused architecture may load a package on demand before the closure reaches the package's own file. That file keeps the loaded units instead of analyzing them again. Types that print the same name now show where each is declared.
+A run uses the units the library holds: a file that lost a unit to a later file is analysed without its old copy, and a unit analysed before its dependency was replaced is analysed again (#1053, #1054, LRM 13.5). Otherwise a file of a closure analyzes all its units, so an unused architecture may load a package on demand before the closure reaches the package's own file. That file keeps the loaded units instead of analyzing them again. Types that print the same name now show where each is declared.
 
 The file is the same however it is spelled (#1016): a named file that reached the loaded unit through `..` or a symlink kept it only on a cache hit, and without the cache a second copy rejected valid code. The analysed-unit cache keys on the absolute path and an entry holds no spelling of its unit's own file, so units analyzed by relative name hit in `elab` and `run`; a file has one manifest entry however it is spelled, so a unit dropped from it is `L0031` (#1031, `crates/yavs/tests/cache.rs`). Known gaps: `..` and symlinks are a miss for the first analysis under them (time only); an edited file the manifest knows by a symlink of another name stays as a second entry (`L0034`).
 

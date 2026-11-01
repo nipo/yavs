@@ -55,6 +55,10 @@ pub struct ClosureFile {
     pub hash: String,
     /// Standard to re-parse this file with.
     pub std: String,
+    /// The units a `partial` file still holds, as the library index lists them (empty for a file
+    /// that holds all of its units): which of two copies of a unit runs depends on it, so the
+    /// key of the compilation cache holds it.
+    pub kept: String,
 }
 
 type Node = (String, UnitKind, String); // library, kind, key
@@ -436,6 +440,13 @@ pub fn closure(libs: &Libraries, top: &UnitRef) -> Result<Vec<ClosureFile>> {
             path,
             hash: fe.hash.to_string(),
             std: fe.std.to_string(),
+            kept: if fe.partial {
+                fe.units()
+                    .map(|u| format!("{:?} {}\n", u.kind, u.key))
+                    .collect()
+            } else {
+                String::new()
+            },
         });
     }
     Ok(out)

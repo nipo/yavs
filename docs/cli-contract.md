@@ -175,6 +175,8 @@ directly (`docs/design/vhdl-93.md`).
   time goes unnoticed (as with build tools in general); re-analyze such a file. A file recorded without
   the two fields (one edited right before it was analyzed) is always hashed.
 
+- Units analyzed again: the library holds the last analyzed unit of each name, and any primary unit replaces another of its name. `run`/`elab` use those units: a unit analyzed before something it depends on was replaced is analyzed again against the new one (LRM 13.5, no diagnostic), a unit that no longer fits fails the run with that analysis's error, and the old copy in a file that lost a unit is not analyzed (`docs/decisions.md` "A run uses the units the library holds").
+
 ### Compilation cache
 
 `yavs elab` and `yavs run` keep what analysis of the design's closure produced in the work
@@ -184,7 +186,7 @@ analyzing the sources again; the output, the diagnostics (warnings included) and
 identical to a run without it, at any `--threads`.
 
 - The key is a hash of the yavs build, `--std`, `--relaxed`, `--psl`, `--encoding`, `-D` and every file of the
-  closure (library, path, recorded content hash, standard). Editing a file (or any file it depends
+  closure (library, path, recorded content hash, standard, and the units it still holds if a later file took some). Editing a file (or any file it depends
   on) is found by the content hash check of the closure (`L0034`, re-analyze it); an entry also records
   the bytes of the built-in `std` and `ieee` files it was made from and is used only if they are
   unchanged. Entries of another

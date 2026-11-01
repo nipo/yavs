@@ -140,6 +140,24 @@ an object with an unconstrained subtype (``W1325``) and a signal parameter's act
 static name (``W1361``). Pass it to ``analyze`` and also to ``run`` and ``elab``, which read the files
 again.
 
+A unit analyzed again
+---------------------
+
+Other tools can stop a run when a unit was analyzed before something it depends on was analyzed
+again, and ask you to analyze it again. ``yavs run`` does that itself, as it reads the files of the
+design again: each name means the unit analyzed last, for a package, an entity and an architecture
+alike, and the units that use it are checked against that version. If one no longer fits, the run
+fails with the error of that analysis, at the line that no longer fits.
+
+.. code-block:: bash
+
+    yavs analyze --work=work:build pkg_v1.vhd tb.vhd
+    yavs analyze --work=work:build pkg_v2.vhd   # defines the same package again
+    yavs run --work=work:build tb               # tb uses the package of pkg_v2.vhd
+
+Two files that define the same architecture of an entity are the common way to meet this by accident:
+the instances and configurations that name the architecture all run the one from the file analyzed last.
+
 Process order
 -------------
 

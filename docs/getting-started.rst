@@ -197,6 +197,8 @@ Analyze files in dependency order, packages before the units that use them. A li
 
 * After you edit a file, analyze it again before ``run``: ``run`` stops with ``L0034`` for a file
   that changed since it was analyzed.
+* You do not have to analyze what depends on it: ``run`` reads the files of the design again, so
+  every unit is checked against the current version of what it uses (:doc:`migrating`).
 * ``std`` and ``ieee`` (with ``numeric_std``, ``fixed_pkg``, ``float_pkg``, the VITAL and the
   Synopsys packages) are built in; there is nothing to compile for them.
 * A testbench with a free-running clock and no ``finish`` or ``stop`` never ends by itself: add

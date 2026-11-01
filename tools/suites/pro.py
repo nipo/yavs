@@ -11,6 +11,8 @@ Library, testbench and test files are analyzed in script order into per-library 
 `--out`; each test is then simulated with `yavs run` under timeout and systemd-run (MemoryMax=4G).
 Pass = exit status 0 and the library's own summary line with zero errors. Results go to
 `OUT/results.tsv`, logs to `OUT/run/<n>/log.txt`. Python stdlib only; nothing is copied into the repo.
+The scripts analyze each test right before running it; here a test whose units a later test file defines
+again (TbStream_SendGetRandom1 of AxiStream) runs with the later file's units, the ones the library holds.
 """
 import argparse, os, re, subprocess, sys, time
 from concurrent.futures import ThreadPoolExecutor

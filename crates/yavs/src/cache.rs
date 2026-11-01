@@ -49,7 +49,7 @@ fn key(kind: &str, opts: &Options, files: &[ClosureFile]) -> Key {
     }
     let cwd = std::env::current_dir().unwrap_or_default();
     for f in files {
-        k.text(&f.library).text(&f.hash).text(&f.std);
+        k.text(&f.library).text(&f.hash).text(&f.std).text(&f.kept);
         // A relative path means a different file from another directory.
         if f.path.is_relative() {
             k.text(&cwd.to_string_lossy());

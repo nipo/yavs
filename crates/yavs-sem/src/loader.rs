@@ -705,7 +705,7 @@ impl Db {
         rev: LangRev,
         hash: Option<&str>,
     ) -> Result<Vec<UnitRecord>, Reported> {
-        self.analyze_file_with(work, path, rev, hash, false)
+        self.analyze_file_with(work, path, rev, hash, false, false)
     }
 
     /// [`Db::analyze_file_hashed`] for a caller that wants the records only (`yavs analyze`): a
@@ -719,7 +719,7 @@ impl Db {
         rev: LangRev,
         hash: Option<&str>,
     ) -> Result<Vec<UnitRecord>, Reported> {
-        self.analyze_file_with(work, path, rev, hash, true)
+        self.analyze_file_with(work, path, rev, hash, true, false)
     }
 
     fn analyze_file_with(
@@ -729,6 +729,7 @@ impl Db {
         rev: LangRev,
         hash: Option<&str>,
         lazy: bool,
+        owned_only: bool,
     ) -> Result<Vec<UnitRecord>, Reported> {
         let name = ident(work);
         let lib =
@@ -755,6 +756,18 @@ impl Db {
                     .collect()
             }
         };
+        let mut keys: Vec<UnitKey> = keys;
+        // A run wants what the library holds: of a unit declared twice in the file, the last copy,
+        // which a unit between the two copies also sees once it is analysed again (13.5).
+        let mut replaced_here = Vec::new();
+        if owned_only {
+            self.drop_replaced(lib, path, &mut keys);
+            for i in (0..keys.len()).rev() {
+                if keys[i + 1..].contains(&keys[i]) {
+                    replaced_here.push(keys.remove(i));
+                }
+            }
+        }
         // A unit an earlier file of this session loaded on demand from this file stays: analyzing
         // it again makes a second copy of its types, which the units already bound to the first
         // cannot use (#991).
@@ -777,7 +790,11 @@ impl Db {
         }
         let before = self.error_count();
         let mut ids = Vec::new();
-        self.later_in_file = keys.iter().map(|&k| (lib, k)).collect();
+        self.later_in_file = keys
+            .iter()
+            .filter(|k| !replaced_here.contains(k))
+            .map(|&k| (lib, k))
+            .collect();
         self.dup_in_file = (0..keys.len())
             .filter(|&i| keys[..i].contains(&keys[i]))
             .map(|i| (lib, keys[i]))
@@ -826,6 +843,21 @@ impl Db {
             return Err(Reported);
         }
         Ok(ids.into_iter().map(|u| self.unit_record(u)).collect())
+    }
+
+    /// Of a file the library index marks `partial`, keeps the keys of the units the file still
+    /// holds: a later file replaced the others (13.5), and their old copies must not run (#1054).
+    fn drop_replaced(&self, lib: LibId, path: &Path, keys: &mut Vec<UnitKey>) {
+        let source = &self.libs[lib].source;
+        let LibSource::Manifest(m) = source else {
+            return;
+        };
+        let Ok(abs) = std::path::absolute(path) else {
+            return;
+        };
+        if m.file(&abs).is_some_and(|f| f.partial) {
+            keys.retain(|&k| self.locate_in(source, k).is_some_and(|(p, _)| p == abs));
+        }
     }
 
     /// Reads the file again when a unit an earlier file loaded from it has since been replaced by
@@ -882,7 +914,7 @@ impl Db {
                 continue;
             };
             if self
-                .analyze_file_hashed(&f.library, &f.path, rev, Some(&f.hash))
+                .analyze_file_with(&f.library, &f.path, rev, Some(&f.hash), false, true)
                 .is_err()
             {
                 r = Err(Reported);
