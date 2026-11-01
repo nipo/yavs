@@ -362,6 +362,7 @@ impl Session {
             .into_iter()
             .filter(|&d| d != digest)
             .collect();
+        dead.extend(m.remove_other_spellings(&path, hash));
         dead.extend(m.take_units(&units));
         m.push_file(path_s, hash, standard, stamp, digest, &units);
         st.dirty = true;

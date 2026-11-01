@@ -1531,3 +1531,336 @@ fn entries_are_the_same_in_every_process() {
         }
     }
 }
+
+// How a file is spelled (#1031). The analysed-unit cache keys on the absolute path and an entry holds
+// no spelling of the unit's own file: the replay uses the session's.
+
+const PKG_K: &str = "package p is\n  constant K : integer := {K};\nend;\n";
+const TB_K: &str = "use work.p.all;\nentity tb is end;\narchitecture a of tb is\nbegin\n  process\n    variable v : bit_vector(0 to 3);\n  begin\n    if false then v(5) := '1'; end if;\n    report \"K=\" & integer'image(K);\n    wait;\n  end process;\nend;\n";
+
+fn at(dir: &Path, args: &[&str]) -> Out {
+    let o = Command::new(env!("CARGO_BIN_EXE_yavs"))
+        .current_dir(dir)
+        .env_remove("YAVS_STDLIB")
+        .env("YAVS_LOG", "debug")
+        .args(["--color", "never"])
+        .args(args)
+        .output()
+        .expect("run");
+    Out {
+        code: o.status.code().unwrap_or(-1),
+        stdout: String::from_utf8_lossy(&o.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&o.stderr).into_owned(),
+    }
+}
+
+fn ok(o: Out) -> Out {
+    assert_eq!(o.code, 0, "{o:?}");
+    o
+}
+
+/// A work library at `lib`, as an option.
+fn work(lib: &Path) -> String {
+    format!("--work=work:{}", lib.display())
+}
+
+fn pkg_k(k: u32) -> String {
+    PKG_K.replace("{K}", &k.to_string())
+}
+
+fn entries_of(lib: &Path) -> usize {
+    std::fs::read_to_string(lib.join("yavs-lib.toml"))
+        .expect("index")
+        .matches("[[file]]")
+        .count()
+}
+
+/// The same relative name from two directories, with other content of the same size, never reads
+/// the other's unit, in either order and however often: the wrong-result guard.
+#[test]
+fn a_relative_name_in_another_directory_is_another_file() {
+    let t = tempdir("spell-dirs");
+    let lib = t.join("lib");
+    let w = work(&lib);
+    for (d, k) in [("d1", 1), ("d2", 2)] {
+        std::fs::create_dir(t.join(d)).unwrap();
+        std::fs::write(t.join(d).join("x.vhd"), pkg_k(k)).unwrap();
+        std::fs::write(t.join(d).join("tb.vhd"), TB_K).unwrap();
+    }
+    for (d, k) in [("d1", 1), ("d2", 2), ("d1", 1), ("d2", 2), ("d2", 2)] {
+        let dir = t.join(d);
+        ok(at(&dir, &["analyze", "--std=2008", &w, "x.vhd", "tb.vhd"]));
+        for _ in 0..3 {
+            let o = ok(at(&dir, &["run", &w, "tb"]));
+            assert!(o.stdout.contains(&format!("K={k}")), "{d}: {o:?}");
+        }
+        let cold = ok(at(&dir, &["run", "--no-cache", &w, "tb"]));
+        assert!(cold.stdout.contains(&format!("K={k}")), "{d}: {cold:?}");
+    }
+}
+
+/// Files with the same text in two directories keep their own place in a diagnostic.
+#[test]
+fn the_same_text_in_another_directory_keeps_its_own_path() {
+    let t = tempdir("spell-same");
+    let lib = t.join("lib");
+    let w = work(&lib);
+    for d in ["d1", "d2"] {
+        std::fs::create_dir(t.join(d)).unwrap();
+        std::fs::write(t.join(d).join("x.vhd"), pkg_k(1)).unwrap();
+        std::fs::write(t.join(d).join("tb.vhd"), TB_K).unwrap();
+    }
+    for (d, other) in [("d1", "d2"), ("d2", "d1"), ("d1", "d2")] {
+        let dir = t.join(d);
+        let o = ok(at(&dir, &["analyze", "--std=2008", &w, "x.vhd", "tb.vhd"]));
+        assert!(o.stderr.contains(" --> tb.vhd:8:"), "{d}: {o:?}");
+        let o = ok(at(&dir, &["elab", &w, "tb"]));
+        let here = format!(" --> {}:8:", dir.join("tb.vhd").display());
+        assert!(o.stderr.contains(&here), "{d}: {o:?}");
+        assert!(
+            !o.stderr.contains(&t.join(other).display().to_string()),
+            "{d}: {o:?}"
+        );
+    }
+}
+
+/// `elab` and `run` read what `analyze` kept under any spelling, since the manifest records the
+/// absolute form of it, and the result is the one without the cache.
+#[test]
+fn every_spelling_of_a_file_hits_in_elab() {
+    let t = tempdir("spell-hit");
+    std::fs::create_dir(t.join("sub")).unwrap();
+    std::fs::write(t.join("x.vhd"), pkg_k(3)).unwrap();
+    std::fs::write(t.join("tb.vhd"), TB_K).unwrap();
+    let abs = t.join("x.vhd").display().to_string();
+    let mut spellings = vec!["x.vhd", "./x.vhd", "sub/../x.vhd", abs.as_str()];
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(&*t, t.join("link")).unwrap();
+        spellings.push("link/x.vhd");
+    }
+    for (i, s) in spellings.iter().enumerate() {
+        let lib = t.join(format!("lib{i}"));
+        let w = work(&lib);
+        ok(at(&t, &["analyze", "--std=2008", &w, s, "tb.vhd"]));
+        let o = ok(at(&t, &["elab", &w, "tb"]));
+        assert!(
+            o.stderr.contains("debug: units: hit work.p ")
+                && o.stderr.contains("debug: units: hit work.tb/a ")
+                && !o.stderr.contains("debug: units: miss work."),
+            "{s}: {}",
+            o.stderr
+        );
+        let run = ok(at(&t, &["run", &w, "tb"]));
+        let cold = ok(at(&t, &["run", "--no-cache", &w, "tb"]));
+        assert_eq!(run.stdout, cold.stdout, "{s}");
+        assert!(run.stdout.contains("K=3"), "{s}: {run:?}");
+    }
+}
+
+/// `link/../x.vhd` with `link` a symlink to another directory is that directory's parent's file: a
+/// key that resolved `..` by the text would read `x.vhd` of this directory instead.
+#[cfg(unix)]
+#[test]
+fn dots_after_a_symlink_are_the_file_the_system_opens() {
+    let t = tempdir("spell-dotlink");
+    let lib = t.join("lib");
+    let w = work(&lib);
+    std::fs::create_dir_all(t.join("far/deep")).unwrap();
+    std::os::unix::fs::symlink(t.join("far/deep"), t.join("link")).unwrap();
+    std::fs::write(t.join("x.vhd"), pkg_k(1)).unwrap();
+    std::fs::write(t.join("far/x.vhd"), pkg_k(2)).unwrap();
+    std::fs::write(t.join("tb.vhd"), TB_K).unwrap();
+    for (s, k) in [
+        ("x.vhd", 1),
+        ("link/../x.vhd", 2),
+        ("x.vhd", 1),
+        ("link/../x.vhd", 2),
+    ] {
+        ok(at(&t, &["analyze", "--std=2008", &w, s, "tb.vhd"]));
+        for _ in 0..2 {
+            let o = ok(at(&t, &["run", &w, "tb"]));
+            assert!(o.stdout.contains(&format!("K={k}")), "{s}: {o:?}");
+        }
+    }
+}
+
+/// An entry made under one spelling and read under another shows the session's spelling, in a
+/// warning kept in the entry and in a label into a file only read for its text when it is shown.
+#[test]
+fn diagnostics_show_the_spelling_of_the_session() {
+    let t = tempdir("spell-diag");
+    let lib = t.join("lib");
+    let w = work(&lib);
+    std::fs::create_dir(t.join("sub")).unwrap();
+    std::fs::write(
+        t.join("a.vhd"),
+        "package a is\n  constant K : integer := 7;\nend;\n",
+    )
+    .unwrap();
+    std::fs::write(
+        t.join("c.vhd"),
+        "package c is\n  constant K : integer := 9;\nend;\n",
+    )
+    .unwrap();
+    std::fs::write(t.join("tb.vhd"), TB_K.replace("work.p", "work.a")).unwrap();
+    let bad = "use work.a.all;\nuse work.c.all;\nentity u is end;\narchitecture r of u is\n  constant Z : integer := K;\nbegin end;\n";
+    std::fs::write(t.join("u.vhd"), bad).unwrap();
+    // Made under the absolute names, and the sources old enough to be trusted without a read.
+    let name = |f: &str| t.join(f).display().to_string();
+    ok(at(
+        &t,
+        &[
+            "analyze",
+            "--std=2008",
+            &w,
+            &name("a.vhd"),
+            &name("c.vhd"),
+            &name("tb.vhd"),
+        ],
+    ));
+    for f in ["a.vhd", "c.vhd", "tb.vhd"] {
+        age(&t.join(f));
+    }
+    ok(at(
+        &t,
+        &[
+            "analyze",
+            "--std=2008",
+            &w,
+            &name("a.vhd"),
+            &name("c.vhd"),
+            &name("tb.vhd"),
+        ],
+    ));
+
+    let sub = t.join("sub");
+    for (dir, pre) in [(&*t, ""), (&*t, "./"), (&*t, "sub/../"), (&*sub, "../")] {
+        let f = |n: &str| format!("{pre}{n}");
+        let o = ok(at(
+            dir,
+            &["analyze", "--std=2008", &w, &f("a.vhd"), &f("tb.vhd")],
+        ));
+        assert!(
+            o.stderr.contains(&format!(" --> {}:8:", f("tb.vhd"))),
+            "{pre}: {o:?}"
+        );
+        assert!(o.stderr.contains("v(5) := '1'"), "{pre}: {o:?}");
+        assert!(!o.stderr.contains(&name("tb.vhd")), "{pre}: {o:?}");
+
+        let o = at(
+            dir,
+            &[
+                "analyze",
+                "--std=2008",
+                &w,
+                &f("a.vhd"),
+                &f("c.vhd"),
+                &f("u.vhd"),
+            ],
+        );
+        assert_eq!(o.code, 1, "{pre}: {o:?}");
+        assert!(
+            o.stderr.contains(&format!("::: {}:2:12", f("a.vhd"))),
+            "{pre}: {o:?}"
+        );
+        assert!(
+            o.stderr.contains(&format!("::: {}:2:12", f("c.vhd"))),
+            "{pre}: {o:?}"
+        );
+        assert!(
+            o.stderr.contains("constant K : integer := 7;"),
+            "{pre}: {o:?}"
+        );
+        assert!(
+            o.stderr.contains("constant K : integer := 9;"),
+            "{pre}: {o:?}"
+        );
+    }
+}
+
+/// What is unreadable is named as the session knows it: the manifest's path for a unit loaded on
+/// demand, the spelling on the command line for a named file, never another spelling of it.
+#[test]
+fn cannot_read_names_the_path_of_the_session() {
+    let t = tempdir("spell-read");
+    let lib = t.join("lib");
+    let w = work(&lib);
+    std::fs::write(t.join("x.vhd"), pkg_k(1)).unwrap();
+    std::fs::write(t.join("tb.vhd"), TB_K).unwrap();
+    ok(at(&t, &["analyze", "--std=2008", &w, "./x.vhd", "tb.vhd"]));
+    std::fs::remove_file(t.join("x.vhd")).unwrap();
+    let o = at(&t, &["analyze", "--std=2008", &w, "tb.vhd"]);
+    assert_eq!(o.code, 1, "{o:?}");
+    let want = format!("cannot read source file `{}`", t.join("x.vhd").display());
+    assert!(o.stderr.contains(&want), "{o:?}");
+    let o = at(&t, &["analyze", "--std=2008", &w, "./x.vhd"]);
+    assert_eq!(o.code, 1, "{o:?}");
+    assert!(o.stderr.contains("./x.vhd"), "{o:?}");
+    assert!(
+        !o.stderr.contains(&t.join("x.vhd").display().to_string()),
+        "{o:?}"
+    );
+}
+
+/// A file analyzed under a second spelling replaces its entry: a unit dropped from it is unknown
+/// (`L0031`), not a stale file (`L0034`).
+#[test]
+fn a_file_has_one_entry_however_spelled() {
+    const TWO: &str = "package a is\n  constant K : integer := 7;\nend;\npackage b is\n  constant L : integer := 8;\nend;\n";
+    const ONE: &str = "package a is\n  constant K : integer := 7;\nend;\n";
+    let t = tempdir("spell-one");
+    std::fs::create_dir(t.join("sub")).unwrap();
+    std::fs::write(
+        t.join("t.vhd"),
+        "use work.a.all;\nentity t is end;\narchitecture r of t is begin end;\n",
+    )
+    .unwrap();
+    std::fs::write(t.join("ub.vhd"), "use work.b.all;\nentity ub is end;\n").unwrap();
+    let mut spellings = vec!["sub/../x.vhd", "./x.vhd"];
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(&*t, t.join("link")).unwrap();
+        spellings.push("link/x.vhd");
+    }
+    for (i, s) in spellings.iter().enumerate() {
+        let lib = t.join(format!("lib{i}"));
+        let w = work(&lib);
+        std::fs::write(t.join("x.vhd"), TWO).unwrap();
+        ok(at(
+            &t,
+            &["analyze", "--std=2008", &w, "x.vhd", "t.vhd", "ub.vhd"],
+        ));
+        assert_eq!(entries_of(&lib), 3, "{s}");
+        std::fs::write(t.join("x.vhd"), ONE).unwrap();
+        ok(at(&t, &["analyze", "--std=2008", &w, s]));
+        assert_eq!(entries_of(&lib), 3, "{s}");
+        let o = at(&t, &["elab", &w, "ub"]);
+        assert_ne!(o.code, 0, "{s}: {o:?}");
+        assert!(
+            o.stderr.contains("L0031") && !o.stderr.contains("L0034"),
+            "{s}: {o:?}"
+        );
+        ok(at(&t, &["elab", &w, "t"]));
+    }
+    // Two names of one file in one call, and a symlink of another name.
+    let lib = t.join("libboth");
+    let w = work(&lib);
+    ok(at(
+        &t,
+        &["analyze", "--std=2008", &w, "x.vhd", "sub/../x.vhd"],
+    ));
+    assert_eq!(entries_of(&lib), 1);
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(t.join("x.vhd"), t.join("alias.vhd")).unwrap();
+        ok(at(&t, &["analyze", "--std=2008", &w, "alias.vhd"]));
+        assert_eq!(entries_of(&lib), 1);
+        ok(at(&t, &["analyze", "--std=2008", &w, "x.vhd"]));
+        assert_eq!(entries_of(&lib), 1);
+    }
+    // Different files with one name stay two entries.
+    std::fs::write(t.join("sub/x.vhd"), "package other is\nend;\n").unwrap();
+    ok(at(&t, &["analyze", "--std=2008", &w, "sub/x.vhd"]));
+    assert_eq!(entries_of(&lib), 2);
+}

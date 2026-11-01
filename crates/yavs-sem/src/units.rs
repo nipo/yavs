@@ -57,7 +57,7 @@ use crate::{LangRev, UnitStore};
 pub type Hash = [u8; 32];
 
 /// The layout of entries; part of every identity.
-const FORMAT: u32 = 11;
+const FORMAT: u32 = 12;
 
 /// Entries of `Db::new` (index 0 of these arenas): the same in every session.
 const BASE: [u32; KINDS] = [0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0];
@@ -157,7 +157,9 @@ enum PStep {
     /// A file the unit reads: registered by the replay unless the session has it already.
     File {
         lib: Symbol,
-        path: String,
+        /// `None`: the unit's own file. An entry does not hold its spelling (its stub has no path):
+        /// the replay uses the session's (`Planned::own`), as an analysis from source would (#1031).
+        path: Option<String>,
         stub: FileStub,
         diags: u32,
     },
@@ -332,14 +334,18 @@ fn key_text(k: UnitKey) -> String {
     }
 }
 
-/// The path as the key holds it: a relative path means another file from another directory.
+/// The path as the key holds it: absolute, as the manifest records it, so that `elab` and `run` find
+/// what `analyze` kept under a relative name, and that name from another directory is another file.
+/// No `..` or symlink is resolved: such a spelling is a miss, never another file's entry (#1031).
 fn path_text(p: &Path) -> String {
-    if p.is_relative() && !p.starts_with(crate::stdlib::EMBEDDED) {
-        let cwd = std::env::current_dir().unwrap_or_default();
-        format!("{}\n{}", cwd.display(), p.display())
-    } else {
-        p.display().to_string()
+    if p.starts_with(crate::stdlib::EMBEDDED) {
+        return p.display().to_string();
     }
+    std::path::absolute(p)
+        .as_deref()
+        .unwrap_or(p)
+        .display()
+        .to_string()
 }
 
 impl Db {
@@ -1241,10 +1247,16 @@ impl Db {
                         for d in &fc.diags {
                             put(&mut body, d)?;
                         }
+                        // `full_key`: a file other than the unit's own is one the build holds.
+                        let own = f.path.as_ref().is_some_and(|(p, _)| p == path);
+                        let mut stub = self.sources.get(*file).stub();
+                        if own {
+                            stub.path.clear();
+                        }
                         steps.push(PStep::File {
                             lib: self.libs[*lib].name.key,
-                            path: path.display().to_string(),
-                            stub: self.sources.get(*file).stub(),
+                            path: (!own).then(|| path.display().to_string()),
+                            stub,
                             diags: fc.diags.len() as u32,
                         });
                     }
@@ -1689,12 +1701,17 @@ impl EntryCache {
     const MAX: usize = 4096;
 }
 
+/// An entry and the file of its unit as this session spells it.
+type Located = (Arc<Entry>, std::path::PathBuf);
+
 /// A unit the replay will load: where its entries go.
 struct Planned {
     serial: u32,
     lib: Symbol,
     key: UnitKey,
     entry: Arc<Entry>,
+    /// The unit's own file as this session spells it.
+    own: std::path::PathBuf,
     runs: Runs,
     files: Vec<FileId>,
 }
@@ -1707,7 +1724,7 @@ struct Plan {
     units: FxHashMap<(Symbol, UnitKey), Planned>,
     libs: FxHashMap<Symbol, (LibId, DeclId)>,
     files: FxHashMap<(Symbol, String), FileId>,
-    entries: FxHashMap<(Symbol, UnitKey), Option<Arc<Entry>>>,
+    entries: FxHashMap<(Symbol, UnitKey), Option<Located>>,
     /// The sources of the libraries the replay makes.
     srcs: FxHashMap<Symbol, LibSource>,
 }
@@ -1717,11 +1734,12 @@ impl Db {
         self.lib_by_key.get(&name).copied().flatten()
     }
 
-    /// The entry of `(lib, key)` if it is one for the unit as it is now.
-    fn entry_for(&self, lib: LibId, key: UnitKey) -> Result<Arc<Entry>, String> {
+    /// The entry of `(lib, key)` if it is one for the unit as it is now, and the unit's file.
+    fn entry_for(&self, lib: LibId, key: UnitKey) -> Result<Located, String> {
         let (path, rev) = self.locate(lib, key).ok_or("not found")?;
         let hash = self.content_hash(lib, &path).ok_or("no content hash")?;
-        self.entry_at(lib, key, &path, &hash, rev)
+        let e = self.entry_at(lib, key, &path, &hash, rev)?;
+        Ok((e, path))
     }
 
     /// Whether the unit has an entry, without reading it.
@@ -1794,7 +1812,7 @@ impl Db {
     }
 
     /// The entry of unit `key` of library `lib`, which the replay makes.
-    fn planned_entry(&self, p: &mut Plan, lib: Symbol, key: UnitKey) -> Option<Arc<Entry>> {
+    fn planned_entry(&self, p: &mut Plan, lib: Symbol, key: UnitKey) -> Option<Located> {
         if let std::collections::hash_map::Entry::Vacant(v) = p.srcs.entry(lib) {
             v.insert(self.lib_source(lib.as_str())?.ok()?);
         }
@@ -1804,7 +1822,8 @@ impl Db {
         }
         let (path, rev) = self.locate_in(src, key)?;
         let hash = self.content_hash_in(src, &path)?;
-        self.entry_named(lib, key, &path, &hash, rev).ok()
+        let e = self.entry_named(lib, key, &path, &hash, rev).ok()?;
+        Some((e, path))
     }
 
     /// The stub of file `path` of `lib` (content hash `hash`) when every unit of `keys` has an
@@ -1829,11 +1848,14 @@ impl Db {
             match first {
                 Some(PStep::File {
                     lib: l,
-                    path: p,
+                    path: None,
                     stub: s,
                     diags: 0,
-                }) if *l == name && *p == text => {
-                    stub.get_or_insert_with(|| s.clone());
+                }) if *l == name => {
+                    stub.get_or_insert_with(|| FileStub {
+                        path: text.clone(),
+                        ..s.clone()
+                    });
                 }
                 _ => return None,
             }
@@ -1875,14 +1897,14 @@ impl Db {
             srcs: Default::default(),
         };
         for (&k, rec) in keys.iter().zip(&recs) {
-            let e = self.entry_for(lib, k).ok()?;
+            let (e, own) = self.entry_for(lib, k).ok()?;
             if e.head.record != record_hash(rec) {
                 return None;
             }
             if p.units.contains_key(&(name, k)) {
                 continue;
             }
-            self.plan(&mut p, name, k, e).ok()?;
+            self.plan(&mut p, name, k, e, own).ok()?;
         }
         // Only the units of the file report (`yavs analyze` shows no warning of a unit it reads,
         // #584): what the units they load would print is not printed.
@@ -1912,7 +1934,9 @@ impl Db {
         lib: Symbol,
         key: UnitKey,
         entry: Arc<Entry>,
+        own: std::path::PathBuf,
     ) -> Result<(), String> {
+        let own_text = own.display().to_string();
         let serial = p.serials;
         p.serials += 1;
         let mut runs: [Vec<(u32, u32, u32)>; KINDS] = Default::default();
@@ -1926,6 +1950,7 @@ impl Db {
                 lib,
                 key,
                 entry: entry.clone(),
+                own,
                 runs: Default::default(),
                 files: Vec::new(),
             },
@@ -1945,6 +1970,7 @@ impl Db {
                     }
                 }
                 PStep::File { lib: l, path, .. } => {
+                    let path = path.as_ref().unwrap_or(&own_text);
                     let have = p.files.get(&(*l, path.clone())).copied().or_else(|| {
                         let lid = self.lib_named(*l)?;
                         self.files
@@ -2019,11 +2045,11 @@ impl Db {
                             e
                         }
                     };
-                    let e = e.ok_or_else(|| format!("no entry for {}", key_text(dk)))?;
+                    let (e, own) = e.ok_or_else(|| format!("no entry for {}", key_text(dk)))?;
                     if e.head.full != *full {
                         return Err(format!("{dl}.{} has another entry", key_text(dk)));
                     }
-                    self.plan(p, dl, dk, e)?;
+                    self.plan(p, dl, dk, e, own)?;
                 }
             }
         }
@@ -2098,7 +2124,7 @@ impl Db {
             return None;
         }
         let name = self.libs[lib].name.key;
-        let e = match self.entry_for(lib, key) {
+        let (e, own) = match self.entry_for(lib, key) {
             Ok(e) => e,
             Err(why) => {
                 store.note(&|| format!("miss {name}.{}: {why}", key_text(key)));
@@ -2115,7 +2141,7 @@ impl Db {
             entries: Default::default(),
             srcs: Default::default(),
         };
-        if let Err(why) = self.plan(&mut p, name, key, e) {
+        if let Err(why) = self.plan(&mut p, name, key, e, own) {
             store.note(&|| format!("miss {name}.{}: {why}", key_text(key)));
             return None;
         }
@@ -2326,11 +2352,21 @@ impl Db {
                     }
                     if (f.0 as usize) == self.sources.len() {
                         let lid = self.lib_named(*lib).ok_or("library missing")?;
+                        let (path, stub) = match path {
+                            Some(p) => (std::path::PathBuf::from(p), stub.clone()),
+                            None => {
+                                let stub = FileStub {
+                                    path: pl.own.display().to_string(),
+                                    ..stub.clone()
+                                };
+                                (pl.own.clone(), stub)
+                            }
+                        };
                         let id = self
                             .sources
-                            .add_stub(stub.clone(), |p| crate::stdlib::read(Path::new(p)));
+                            .add_stub(stub, |p| crate::stdlib::read(Path::new(p)));
                         self.note_file(id);
-                        let k = (lid, std::path::PathBuf::from(path));
+                        let k = (lid, path);
                         let hash = if matches!(self.libs[lid].source, LibSource::StdDir(_)) {
                             Some(builtin_hash(&k.1))
                         } else {

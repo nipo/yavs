@@ -199,6 +199,11 @@ impl UnitKind {
     }
 }
 
+/// Whether two paths name one file: `..` and symlinks count, which `std::path::absolute` leaves.
+pub fn same_file(a: &Path, b: &Path) -> bool {
+    a == b || matches!((a.canonicalize(), b.canonicalize()), (Ok(a), Ok(b)) if a == b)
+}
+
 /// A string of the index: where it is in [`Manifest::arena`].
 #[derive(Clone, Copy, Debug)]
 struct Span(u32, u32);
@@ -549,6 +554,28 @@ impl Manifest {
     /// The digests of the records the index names.
     pub(crate) fn record_digests(&self) -> impl Iterator<Item = u128> + '_ {
         self.files.iter().map(|f| f.record)
+    }
+
+    /// Forget the entries of the file at `path` under another spelling (`..`, a symlink), so that a
+    /// file has one entry (#1031); the digests of their records. Only a candidate is resolved: an
+    /// entry of the same file name, or of the content `hash` (a symlink of another name).
+    // ponytail: an edited file that the index knows by a symlink of another name stays as a second
+    // entry (L0034, its help clears it); a resolved path in the index would close that.
+    pub(crate) fn remove_other_spellings(&mut self, path: &Path, hash: &str) -> Vec<u128> {
+        let mut gone = Vec::new();
+        let mut i = 0;
+        while i < self.files.len() {
+            let f = self.file_at(i);
+            if f.path != path
+                && (f.path.file_name() == path.file_name() || f.hash == hash)
+                && same_file(f.path, path)
+            {
+                gone.push(self.remove_at(i));
+            } else {
+                i += 1;
+            }
+        }
+        gone
     }
 
     /// Forget `path`; the digest of the record it had.

@@ -33,7 +33,7 @@ A message that names two different types, subtypes, subprograms or other declara
 
 A file of a closure analyzes all its units, so an unused architecture may load a package on demand before the closure reaches the package's own file. That file keeps the loaded units instead of analyzing them again. Types that print the same name now show where each is declared.
 
-The file is the same however it is spelled (#1016): a named file that reached the loaded unit through `..` or a symlink kept it only on a cache hit, and without the cache a second copy rejected valid code. Known gap: the analysed-unit cache still keys on the spelling, so units analyzed by relative name miss on the first two runs of a closure; a file analyzed by two spellings leaves a dropped unit under the old entry, which reports `L0034` instead of `L0031`. Neither changes a verdict.
+The file is the same however it is spelled (#1016): a named file that reached the loaded unit through `..` or a symlink kept it only on a cache hit, and without the cache a second copy rejected valid code. The analysed-unit cache keys on the absolute path and an entry holds no spelling of its unit's own file, so units analyzed by relative name hit in `elab` and `run`; a file has one manifest entry however it is spelled, so a unit dropped from it is `L0031` (#1031, `crates/yavs/tests/cache.rs`). Known gaps: `..` and symlinks are a miss for the first analysis under them (time only); an edited file the manifest knows by a symlink of another name stays as a second entry (`L0034`).
 
 ### Dotted paths (#975, 2026-10-31)
 

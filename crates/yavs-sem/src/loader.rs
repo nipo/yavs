@@ -9,7 +9,7 @@ use rustc_hash::FxHashMap as HashMap;
 use std::path::{Path, PathBuf};
 
 use yavs_diag::{Diagnostic, FileId, Span};
-use yavs_lib::{Manifest, UnitKind as LibKind, UnitRecord, UnitRef};
+use yavs_lib::{Manifest, UnitKind as LibKind, UnitRecord, UnitRef, same_file};
 use yavs_syntax::Symbol;
 use yavs_syntax::ast::{self, Ident};
 
@@ -1110,11 +1110,6 @@ impl Db {
         rec.weak = unit.weak_refs.clone();
         rec
     }
-}
-
-/// Whether two paths name one file: `..` and symlinks count, which `std::path::absolute` leaves.
-fn same_file(a: &Path, b: &Path) -> bool {
-    a == b || matches!((a.canonicalize(), b.canonicalize()), (Ok(a), Ok(b)) if a == b)
 }
 
 fn lib_kind(k: UnitKind) -> LibKind {
