@@ -13472,3 +13472,23 @@ Written by Claude. Nothing of this is on the branch but this entry; whether the 
 - **What reaches users at auto:** little today. Generated code was 6.2 percent of Microwatt's simulation thread and 3.7 of GRLIB's in runs with a census build, whose counters slow the interpreter, so those shares are indicative. The big processes stay interpreted.
 - **The interpreter, same idea:** not built. `SigRead1` is 5.3 percent of Microwatt's interpreter window at about 70 instructions per op (census of the performance plan). The crate has no `unsafe`, so a fixed form could remove the element type and range tests, not the bounds tests of the signal tables. Under 1 percent [estimate].
 - **Not measured:** the correctness gate beyond one test of every form against the interpreter (kept with the patch), GRLIB cycles with a band, the prototype on top of the cold block layout or the constant `LCopy` now on the branch.
+
+## Cranelift: cold continuations (yavs-clift `cold.rs`, #1046, 2026-11-02)
+
+Written by Claude. On branch `perf/iterative`; whether it reaches `main` is the maintainer's decision.
+
+- **Decision:** before a body is compiled, a block all of whose predecessors are cold becomes cold, and a conditional edge from a cold block to a hot block goes through a cold block of its own. Only flags and jump-only blocks change. Cranelift gives a split edge the coldness of its successor only, which is why the second half is needed.
+- **Why:** a slow path's continuation (`Gen::call_go` makes it) was not marked, so it sat in the hot stream and hot code jumped over it with a taken forward conditional. A predictor that no longer knows such a branch guesses fall-through and misses. The hot path is now the fall-through.
+- **Bars, set first:** on GRLIB and Microwatt branch misses per 1000 instructions down at least 15 percent, L1i at least 8, cycles at least 5 with the band excluding 1.0, instructions within 0.5 percent; no test's cycles up beyond its band; cold compile at most +3 percent.
+- **Result, kept.** Change alone on the merge base of the branch with `main` (2c523cd8), `window.py --full`, `--tier=auto`, pristine world per variant, simulation thread, core 9 or 11, CCD1 not quiet: load 6 to 40, up to five simulators on the CCD. Two copies of the base ran beside the change, so each row has two ratios and an A/A:
+
+  | whole run | cycles, against each base, 95 percent band | A/A cycles | instructions | branch misses per 1000 | L1i per 1000 | L1i tag misses per 1000 | to sim1, cycles |
+  |---|---|---:|---:|---:|---:|---:|---:|
+  | GRLIB, 6 rounds | 0.845 [0.807, 0.884], 0.878 [0.851, 0.905] | 0.962 [0.945, 0.980] | 0.997 | 0.637, 0.644 | 0.779, 0.806 | 0.809, 0.818 | 3.30 and 3.19, then 2.77 |
+  | Microwatt, 4 rounds | 0.916 [0.894, 0.940], 0.873 [0.796, 0.958] | 1.050 [0.979, 1.126] | 1.000 | 0.705, 0.698 | 0.877, 0.834 | 0.826, 0.813 | 3.93 and 4.11, then 3.58 |
+
+- **Nothing small slowed:** the nine windows (5 rounds, cycle geomean 0.964 +-3.1) have no test above its band, highest `sc5_timestamp` 1.013 +-5.2. Twelve head-to-head designs, core 8, 6 rounds: `rec_pair` 0.985 +-1.0; highest `xor_sig` 1.018 +-2.3, `compute_h2h` 1.014 +-3.6 and `rtl_chain` 1.011 +-1.1, read again on core 10 over 16 rounds as 0.994, 1.002 and 0.996. `lfsr64_xor` instructions 0.951: a compile outcome, not this layout.
+- **Cold compile:** user CPU, fresh world, all compiled to 5 us, cores 8 and 10, 8 pairs: GRLIB 1.022 [1.006, 1.037], Microwatt 1.012 [0.989, 1.035]. Under `auto` from a fresh world, GRLIB to 300 us, 8 pairs: 0.997 [0.966, 1.028]. The point values pass; the bands reach just past 3 percent.
+- **Results cannot change:** difftest 612 of 612 on interpreter, Cranelift, `yavs-auto` and `yavs-auto-warm` at 1 and 4 threads with the verifier on; external lists 995 and 455 pass.
+- **Plainly:** the two copies of one base differ by up to 5 percent in whole-run cycles, more than the earlier study's A/A of 1.001 and 1.004, with instructions equal: that is noise, or the copies' worlds differing. The Microwatt window read instructions 1.028 and the generic L1i column on small designs moves up to 1.39 on tiny counts, so neither is a verdict. Whole runs decide.
+

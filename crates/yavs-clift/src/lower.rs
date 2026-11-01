@@ -385,6 +385,7 @@ impl Jit {
     /// Compile `ctx` into `fid`: linked from the compilation cache when it has the function
     /// (`cache.rs`), else compiled, and stored when there is a cache.
     fn define_code(&mut self, fid: ClifId, ctx: &mut Context) -> Result<(), String> {
+        crate::cold::propagate(&mut ctx.func);
         let Some(store) = crate::cache::store() else {
             return self
                 .module
