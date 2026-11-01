@@ -198,7 +198,7 @@ identical to a run without it, at any `--threads`.
   entries not used for an hour go first, oldest first; then, most recently used first, entries not used
   for 10 s. A suite larger than the limit runs through its designs in order, and this keeps the
   designs that fit warm, where removing the least recently used would remove each entry just before
-  its next use (#1027). A suite far over the limit is not cured by this: measured at about six times the limit, later runs cost 10 to 14 percent more instructions than the first. With nothing older than 10 s, or for an entry bigger than the limit, the new
+  its next use (#1027). A suite far over the limit is not cured by this: measured with the 4 GiB limit, later runs cost 3 percent fewer instructions than the first at about 2.4 times the limit, 1 percent more at about 3.6 times and 7 to 8 percent more at about 6 times (#1034). With nothing older than 10 s, or for an entry bigger than the limit, the new
   entry is not stored; a new version of an entry that is there always goes in. A library
   directory that cannot be written (read-only mount, no permission) is simply not cached into;
   reading from it works as before.

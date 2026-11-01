@@ -13300,9 +13300,7 @@ code in the compilation cache" and the 512 notes.
 - **Rejected: refusing every new entry at the limit.** It never evicts, but a design that does not fit loses the reuse between
   its own test cases, which a first run depends on: at 2.3 times the limit the first run cost 19 percent more instructions and
   later runs were 15 percent over the policy above.
-- **Known gap:** about six times over the limit, later runs still cost 10 to 14 percent more instructions than the first
-  (15 to 19 percent with the old limit), so split such a suite into libraries (#1034). The window counts wall time, so what
-  is removed at the limit moves with the host's load.
+- **Known gap:** about six times over the limit, later runs cost 7 to 8 percent more instructions than the first, so split such a suite into libraries. Measured and explained in "A suite far over the limit" (#1034). The window counts wall time, so what is removed moves with load.
 - **A put looks before it writes**, so a refused entry costs no write, and the `.swept` marker holds "full" until the next look,
   so a full directory is not listed by every put.
 
@@ -13342,3 +13340,16 @@ The body of a function says how it reaches its native callees: directly (so Cran
 - **Primary units share one name space.** `Manifest::take_units` took a replaced unit from the index only when the kinds matched, so an entity stayed next to the package that replaced it and `use work.p.all` found the entity (`E1104`). Any primary unit now replaces any other of that name (13.5, 12.3).
 - **Effect on real suites.** Nothing is rejected that was accepted before, except a unit that only worked through the stale copy. `tools/suites/pro.py` analyses all files before it runs, which the library's own scripts do not do (they analyse each test right before running it), so `TbStream_SendGetRandom1` of AxiStream runs with the architecture of `TbStream_AxiSendGetRandom1.vhd`, which defines `TestCtrl(SendGetRandom1)` again: the library holds that one. sim1 stops on that test.
 - **For the maintainer.** An error for an obsolete unit (as sim1 gives) stays possible: it would need a record format change, so every library has to be analysed again, and it would stop this OSVVM test and any flow that analyses everything up front.
+
+## A suite far over the limit (yavs-cache, CLI, #1034, 2026-11-02)
+
+Whether a warm run can be kept from being slower than a cold one at any size, with the real 4 GiB limit (`docs/STATUS.md` "A suite far over the limit").
+
+- **Decision: no change to the store or the stages; state the bound and the advice.** At about 2.4 times the limit warm is 3 percent cheaper than cold, at 3.6 times 1 percent dearer, at 6 times 7 to 8 percent dearer. Larger suites were not run. Nothing tried closes that, and each thing tried made a measured case worse. The maintainer's goal of "never slower" is not met.
+- **Why:** the first run of a suite runs a testbench's test cases one after the other, so a design that does not fit still reuses its entries for as long as it runs. A later run is ordered by the test runner from its history of run times: over five copies of the suite, 616 groups of one testbench in a row became 6280. What a design that does not fit stored is then gone before its next test case. With the runner's history switched off the same warm pass took 12653 G against 12959 G cold, 2.4 percent below; with it, 13636 G, 5.2 percent above. The store's part is doing its job: the hits are the share that fits (22 percent of the runs at about 5 times the limit).
+- **Tried and not taken,** each measured:
+  - A closure under a made library keeping its own entries (dropping `library_made`): 17 percent over cold at about 5 times the limit, against 5.2. Each entry is written and removed again before its next use: the shortcut is right.
+  - Forgetting a note with its entry, so a design that does not fit is stored on its second run as in a first run: 5.1 percent against 5.2, no gain.
+  - A read not refreshing an entry's time between 30 s and half an hour, so that what a suite reads every pass stays behind what the pass writes: 1 percent under cold at 2.4 times the limit, where the unchanged store gives 3 percent under, so it costs about 2 percent there.
+  - Refusing new entries was not retried: #1027 measured 19 percent on a first run.
+- **What could close it, not done:** a run that needs no entries of the design's own to be cheap (the design part of a lowering stored apart from the library, which `docs/decisions.md` "Library stages" lists as a ceiling), or a run order that keeps a testbench's test cases together, which belongs to the test runner.

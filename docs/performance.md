@@ -71,7 +71,7 @@ Among the hand-written RTL designs, clocked designs with very many cheap process
 
 - **Large suites with many testbenches in one library.** A change after these runs (`d789ead2`, the compile cache keeps up to 4 GiB per library directory) made warm runs of such suites
   faster, in particular a full Open Logic run. The figures above are one testbench per run and were taken before it, so they say nothing about it. Measurements of whole suites
-  are in [issue 1029](https://github.com/ru551n/yavs/issues/1029); they were not repeated for this page. A suite far over the limit can still be slower warm than cold
+  are in [issue 1029](https://github.com/ru551n/yavs/issues/1029); they were not repeated for this page. A suite more than about three times over the limit is slower warm than cold, by 7 to 8 percent in instructions at six times
   ([issue 1034](https://github.com/ru551n/yavs/issues/1034)).
 - Waves and coverage on, other tiers than `--tier=auto`, and more than one thread were not measured here.
 - The comparisons with B and C are of 2026-10-28.

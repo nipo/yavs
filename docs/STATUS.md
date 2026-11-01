@@ -41,6 +41,26 @@ The file is the same however it is spelled (#1016): a named file that reached th
 
 Every path yavs writes is dotted through `yavs_diag::dotted`: reports, errors, hierarchy, hang report, activity, profile, coverage reports, JSON. The kernel holds the dotted names; `'path_name`, `'instance_name`, `{i}`, VHPI names, the coverage database and `dataId` keep colons. Both forms are accepted as input. `tools/difftest` normalises the process path.
 
+### A suite far over the limit (#1034, 2026-11-02)
+
+**A warm run is not always cheaper than a cold one: above about three times the limit it is dearer, 7 to 8 percent at six times.** Larger suites were not run. No code changed: `docs/decisions.md` "A suite far over the limit" has the reasons and what was tried.
+
+Real 4 GiB limit, a real suite that large: Open Logic's 122 testbenches copied under new names, N copies in one library, 6867 test cases each, fixed seed, user instructions with compile threads, untimed. Wall is on a host at load 10 to 30 and says little.
+
+| copies, disk wanted, times over the limit | cold | later runs | against cold | wall s, cold then later |
+|---|---:|---:|---:|---:|
+| 8, about 10 GB, 2.4 | 22584 G | 21895 G, 21987 G | -3.1, -2.6 percent | 896, 1035, 1062 |
+| 12, about 14 GB, 3.6 | 37234 G | 37513 G | +0.8 percent | 1550, 1234 |
+| 20, about 24 GB, 6 | 72247 G | 77276 G, 77949 G | +7.0, +7.9 percent | 4213, 5316, 4157 |
+
+The crossover lies between 2.4 and 3.6 times. The 8 and 12 copy rows are 9c3646ec, -p 4 and -p 6. The 20 copy row is 383ac32e, before #1035, -p 8: not repeated on 9c3646ec, which took about 2 percent off both cold and warm on one copy. As a check that #1035 does not change the picture, 5 copies at a 1 GiB limit, built on 9c3646ec, -p 2, gave 12957 G then 13647 G, and again 12959 G then 13636 G, 5.2 percent over.
+
+Why, on that 5 copy suite, every store access traced: over the pass the runs of one testbench come in 616 groups cold and 6280 warm, because the test runner orders a later run by its history of run times. With the history switched off, a warm pass took **12653 G, 2.4 percent below cold**, where with it 13636 G. Warm `sem` hits are 1390 of 6318 runs, 22 percent, the share that fits.
+
+Tried, 5 copies at 1 GiB unless said: keeping entries for closures under a made library 12724 G then 14906 G (+17 percent); forgetting a note with its entry 12837 G then 13492 G (+5.1); no refresh on a read between 30 s and half an hour, at 8 copies and 4 GiB, 22651 G then 22421 G (-1.0, where nothing gave -3.1).
+
+Pass and fail per test case were the same in every pass of every series. The failures are all one testbench, `olo_base_rate_limit_tb`; the original's failing configuration also fails on sim1 at this seed, and the copies, which draw other random numbers, were not run on sim1. Not run: Windows, a suite over 6 times, a design with test cases over 10 s at the limit.
+
 ### Compiled code of an unchanged suite (#1035, 2026-11-01)
 
 `obj/` grew about 10 MB per warm pass of Open Logic for a reason not found until now. Two causes, found by tracing every store
@@ -103,7 +123,7 @@ warm passes: next section (#1035). Warm passes with a fixed seed: 2061 G, 2060 G
 
 A suite larger than the limit, measured by building with a smaller limit (instructions of cold, then later passes): about 2.3
 times over, 512 MiB: 2512 G, then 2419 G and 2465 G, and 2526 G, then 2371 to 2422 G. About 6 times over, 200 MiB: 2529 G, then
-2782 to 2877 G and still rising, so **later runs are 10 to 14 percent over the first** (the old limit: 15 to 19). The crossover
+2782 to 2877 G and still rising, so **later runs are 10 to 14 percent over the first** (the old limit: 15 to 19; with the real limit, 7 to 8: section above). The crossover
 lies between these two points and was not measured. With `IN_USE` at 1 s, keeping the window as small against the limit as
 10 s is against 4 GiB: 2536 G, then 2765 G and 2750 G, 9 percent over, so a suite six times over 4 GiB may do a little better
 than the shipped policy measured here; that size was not run. The window counts wall time, so these counts move with load (33 to 40

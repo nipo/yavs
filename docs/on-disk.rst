@@ -49,9 +49,12 @@ compiled code. The first run of a design notes it, the second stores it, later r
   more than once, so a suite of 120 testbenches in one library uses a little over 1 GB. Parallel runs can
   pass the limit by what they write in about 5 seconds.
 * At the limit yavs first removes entries not used for an hour, and then the entries of the design that ran
-  last, not the oldest ones. A suite larger than the limit therefore keeps the part that fits warm, and writes
-  only the rest again on each run. Measured at about 2.3 times the limit, later runs took 2 to 4 percent fewer
-  instructions than the first. At about six times the limit they took 10 to 14 percent more: split such a
+  last, not the oldest ones. A suite larger than the limit therefore keeps the part that fits warm, and runs
+  the rest without reuse. Measured with the 4 GiB limit: at about 2.4 times the limit later runs took 3 percent fewer
+  instructions than the first, at about 3.6 times 1 percent more, at about 6 times 7 to 8 percent more. So
+  **a suite more than about three times over the limit is slower warm than cold.** Larger suites were not run.
+  The reason is the order of the tests: a test runner that orders later runs by earlier run times separates the
+  test cases of a testbench, so what a design that does not fit stored is gone before its next test case. Split such a
   suite into several libraries, each with its own limit.
 * Running an unchanged suite again reuses what is stored. Compiled code keeps growing for some runs, by less
   each time, as functions become hot enough to compile for the first time; measured on a suite of 120 testbenches

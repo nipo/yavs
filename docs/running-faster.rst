@@ -31,8 +31,9 @@ test cases of the same testbench, reuse it. Short tests then mostly skip analysi
 * An edited file, a different yavs or different options make a new entry; nothing has to be
   cleaned by hand. ``--no-cache`` turns the cache off for one run, and
   ``yavs cache clean --work=NAME:PATH`` empties it.
-* The cache has a size limit per library directory, and a large suite may use more than a GB of disk
-  (:doc:`on-disk`).
+* The cache has a size limit per library directory, and a large suite may use more than a GB of disk.
+  A suite more than about three times over the limit is slower warm than cold, by 7 to 8 percent at six
+  times: split it into several libraries (:doc:`on-disk`).
 * The analyzed ``std`` and ``ieee`` packages are kept once per user (:doc:`on-disk`).
 * Analyze the files of one library and standard in one ``analyze`` call rather than one call per
   file: the call shares its work.
