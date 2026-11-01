@@ -145,7 +145,7 @@ fn run_merge_report() {
         text.starts_with("statements 18/24 75.0%\nbranches   8/15 53.3%\n"),
         "{text}"
     );
-    assert!(text.contains(":cov_run:u2   2/4 50.0%"), "{text}");
+    assert!(text.contains("cov_run.u2    2/4 50.0%"), "{text}");
     let xml = std::fs::read_to_string(tmp.join("a.xml")).expect("xml");
     assert!(
         xml.contains(
@@ -249,7 +249,7 @@ fn exclusions() {
     assert!(!out.contains("not covered"), "{out}");
 
     // Coarse forms: `*` instance and a whole instance.
-    std::fs::write(tmp.join("ex2.txt"), rows.replace(":cov_excl", "*")).expect("write");
+    std::fs::write(tmp.join("ex2.txt"), rows.replace("cov_excl", "*")).expect("write");
     let (_, out, err) = report(&tmp, &["--exclude", "ex2.txt"]);
     assert!(err.is_empty() && out.contains("excluded (2"), "{out}{err}");
     std::fs::write(tmp.join("ex3.txt"), "instance :cov_excl\n").expect("write");
@@ -389,7 +389,7 @@ fn toggle_coverage() {
     // Only toggles; the cap leaves `v` (two scalars) out with W0115.
     let err = run(&["--cov=t.ycov", "--cov-kind=toggle", "--cov-toggle-max=1"]);
     assert!(
-        err.contains("warning[W0115]") && err.contains(":cov_toggle:v"),
+        err.contains("warning[W0115]") && err.contains("cov_toggle.v"),
         "{err}"
     );
     let t = read(&tmp.join("t.ycov"));
@@ -411,12 +411,12 @@ fn toggle_coverage() {
     let toggle_rows: Vec<_> = rows.lines().filter(|l| l.starts_with("toggle ")).collect();
     assert!(
         rows.lines()
-            .any(|l| l.starts_with("toggle :cov_toggle v(1)   # never toggled")),
+            .any(|l| l.starts_with("toggle cov_toggle v(1)   # never toggled")),
         "{rows}"
     );
     assert!(
         rows.lines()
-            .any(|l| l.starts_with("toggle :cov_toggle s fall   # never fall (1->0)")),
+            .any(|l| l.starts_with("toggle cov_toggle s fall   # never fall (1->0)")),
         "{rows}"
     );
     assert_eq!(toggle_rows.len(), 6, "{rows}");
@@ -515,7 +515,7 @@ fn per_test_attribution() {
     let o = yavs(&tmp, &["cov", "report", "m.ycov", "--tests"]);
     let t = String::from_utf8(o.stdout).expect("utf-8");
     assert!(
-        t.lines().any(|l| l.starts_with("branch :cov_run ")
+        t.lines().any(|l| l.starts_with("branch cov_run ")
             && l.contains("cov_run.vhd:51")
             && l.ends_with("# tests: cov_run, named")),
         "{t}"
@@ -576,9 +576,9 @@ fn html_report() {
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
     let index = page(&tmp, "index.html");
     assert!(index.contains("<title>Coverage report</title>"), "{index}");
-    assert!(index.contains(">:cov_run:u1</td>") && index.contains("href=\"src-0.html\""));
+    assert!(index.contains(">cov_run.u1</td>") && index.contains("href=\"src-0.html\""));
     assert!(
-        !index.contains(":cov_run:u2</td>"),
+        !index.contains("cov_run.u2</td>"),
         "excluded instance is not listed"
     );
     assert!(index.contains("2 tests: cov_run, cov_run(n=0)"), "{index}");
@@ -598,7 +598,7 @@ fn html_report() {
         "{src}"
     );
     assert!(
-        src.contains("<code>statement :cov_run ") && src.contains(" cov_run.vhd:56 "),
+        src.contains("<code>statement cov_run ") && src.contains(" cov_run.vhd:56 "),
         "{src}"
     );
     assert!(src.contains("class=\"cp\">copy row</button>"), "{src}");
@@ -620,7 +620,7 @@ fn html_report() {
     assert!(!src.contains("class=\"it ") && !src.contains("<tr id=\"L1\" class=\"\" tabindex"));
     // Counts per instance and tests in the popup.
     assert!(
-        src.contains("<h4>branch arm 0: loop body</h4><table><tr class=\"\"><td>:cov_run</td><td class=\"n\">3</td><td class=\"dim\">tests: cov_run</td>"),
+        src.contains("<h4>branch arm 0: loop body</h4><table><tr class=\"\"><td>cov_run</td><td class=\"n\">3</td><td class=\"dim\">tests: cov_run</td>"),
         "{src}"
     );
     // Excluded items are greyed, with the (escaped) reason.
@@ -691,7 +691,7 @@ fn html_report() {
         "{part}"
     );
     assert!(
-        part.contains("<tr class=\"\"><td>:cov_run:u1</td><td class=\"n\">2</td>"),
+        part.contains("<tr class=\"\"><td>cov_run.u1</td><td class=\"n\">2</td>"),
         "{part}"
     );
     assert!(part.contains(".legend .inst{"), "{part}");
@@ -726,11 +726,11 @@ fn html_toggles() {
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
     let src = page(&tmp, "src-0.html");
     assert!(
-        src.contains("<h4>toggle v(1) rise (0-&gt;1)</h4><table><tr class=\"miss\"><td>:cov_toggle</td><td class=\"n\">0</td>"),
+        src.contains("<h4>toggle v(1) rise (0-&gt;1)</h4><table><tr class=\"miss\"><td>cov_toggle</td><td class=\"n\">0</td>"),
         "{src}"
     );
     assert!(
-        src.contains("<code>toggle :cov_toggle v(1)   # never toggled"),
+        src.contains("<code>toggle cov_toggle v(1)   # never toggled"),
         "{src}"
     );
     assert!(page(&tmp, "index.html").contains("toggles"));

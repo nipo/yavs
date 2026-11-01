@@ -141,7 +141,7 @@ fn path_and_instance_names() {
         ":instance_path_names(t):A1@Leaf(A):"
     );
     assert_eq!(e.nets.objs.len(), 3);
-    assert_eq!(e.leaf_name(crate::LeafId(0)), ":instance_path_names:A1:S");
+    assert_eq!(e.leaf_name(crate::LeafId(0)), "instance_path_names.A1.S");
 }
 
 const GENERICS: &str = "
@@ -574,7 +574,7 @@ fn restart_is_identical() {
         assert_eq!(first, run(&b));
         // A collapsed `in` port is no kernel signal of its own.
         assert_eq!(
-            first.iter().any(|s| s.starts_with(":btop:u1:a")),
+            first.iter().any(|s| s.starts_with("btop.u1.a")),
             !collapse,
             "{first:?}"
         );
@@ -1159,7 +1159,7 @@ fn external_port_actual_is_a_signal_name() {
             .find(|&l| e.leaf_name(l).ends_with(n))
             .expect(n)
     };
-    let (hidden, i) = (id(":l:hidden"), id(":m:i"));
+    let (hidden, i) = (id("l.hidden"), id("m.i"));
     let one = Range::new(0, 1);
     assert_eq!(e.nets.ports.len(), 1);
     let p = &e.nets.ports[0];
@@ -1298,7 +1298,7 @@ fn port_part_formal_conversion_unconstrained() {
         .build_with(yavs_kernel::Config::default(), |_, _| Ok(Box::new(Idle)))
         .expect("build");
     sim.run_for(yavs_kernel::Time::ns(1)).expect("run");
-    let id = sim.signal_id(":t:u:o").expect("o");
+    let id = sim.signal_id("t.u.o").expect("o");
     let yavs_kernel::Value::Logic(o) = sim.value(id).expect("value") else {
         panic!("logic")
     };
@@ -1339,15 +1339,15 @@ fn port_conversions() {
         sim.value(id).expect("value")
     };
     assert_eq!(
-        v(&sim, ":t:u:i"),
+        v(&sim, "t.u.i"),
         yavs_kernel::Value::Bytes(10i32.to_le_bytes().to_vec())
     );
     assert_eq!(
-        v(&sim, ":t:u:r"),
+        v(&sim, "t.u.r"),
         yavs_kernel::Value::Bytes(3f64.to_le_bytes().to_vec())
     );
     // o = 5 > 0, so y is '1' (code 3).
-    let yavs_kernel::Value::Logic(y) = v(&sim, ":t:y") else {
+    let yavs_kernel::Value::Logic(y) = v(&sim, "t.y") else {
         panic!("logic")
     };
     assert_eq!(y.get(0) as u8, 3);
@@ -1397,7 +1397,7 @@ fn resolution_function_in_a_block() {
     e.lower(&mut db).expect("lower block resolver");
     let mut sim = e.build(yavs_kernel::Config::default()).expect("build");
     sim.run_for(yavs_kernel::Time::ns(1)).expect("run");
-    let signal = sim.signal_id(":t:b:s").expect("block signal");
+    let signal = sim.signal_id("t.b.s").expect("block signal");
     assert_eq!(
         sim.value(signal).expect("value"),
         yavs_kernel::Value::Bytes(1i32.to_le_bytes().to_vec())
@@ -1901,7 +1901,7 @@ fn external_names_in_processes_bind_late() {
     let (mut db, e) = elab("ext_direct", &src, "t", &[]);
     let p = &e.procs[0];
     let s = e.nets.drivers[p.drivers[0]].leaf;
-    assert!(e.leaf_name(s).ends_with(":u:s"));
+    assert!(e.leaf_name(s).ends_with(".u.s"));
     let top = crate::Top {
         entity: e.top.entity,
         arch: e.top.arch,
@@ -3044,7 +3044,7 @@ end;"
     )
 }
 
-const ABR: [&str; 3] = [":t:a", ":t:b", ":t:r"];
+const ABR: [&str; 3] = ["t.a", "t.b", "t.r"];
 
 #[test]
 fn wide_signals_nothing_asks_the_history_of_are_lean() {
@@ -3063,11 +3063,11 @@ fn wide_signals_nothing_asks_the_history_of_are_lean() {
 #[test]
 fn a_part_asked_the_history_of_is_not_lean() {
     for (stmts, who) in [
-        ("t1 := a(5)'last_event;", ":t:a"),
-        ("t1 := a(7 downto 3)'last_event;", ":t:a"),
-        ("t1 := a(i)'last_event;", ":t:a"),
-        ("v := a(7 downto 0)'last_value;", ":t:a"),
-        ("t1 := b'last_event; t1 := r(0 to 0)'last_event;", ":t:r"),
+        ("t1 := a(5)'last_event;", "t.a"),
+        ("t1 := a(7 downto 3)'last_event;", "t.a"),
+        ("t1 := a(i)'last_event;", "t.a"),
+        ("v := a(7 downto 0)'last_value;", "t.a"),
+        ("t1 := b'last_event; t1 := r(0 to 0)'last_event;", "t.r"),
     ] {
         let l = lean_leaves(&wide_design("", stmts));
         let want: Vec<_> = ABR.into_iter().filter(|&s| s != who).collect();
@@ -3087,13 +3087,13 @@ fn history_through_an_alias_a_field_or_a_port_part() {
     ));
     // The alias of a part marks a, the alias of the whole signal does not mark r, a field marks
     // the record.
-    assert_eq!(l, [":t:b", ":t:r"]);
+    assert_eq!(l, ["t.b", "t.r"]);
     // An alias with a subtype indication re-bases the index range: marked like a part.
     let l = lean_leaves(&wide_design(
         "alias w2 : std_logic_vector(99 downto 0) is b;",
         "t1 := w2'last_event;",
     ));
-    assert_eq!(l, [":t:a", ":t:r"]);
+    assert_eq!(l, ["t.a", "t.r"]);
     // A whole formal that is part of its actual marks the actual.
     let src = "library ieee; use ieee.std_logic_1164.all;
 entity child is port (d : in std_logic_vector(99 downto 0)); end;
@@ -3122,7 +3122,7 @@ architecture x of t is
 begin
   u1 : entity work.child port map (d => a);
 end;";
-    assert_eq!(lean_leaves(src), [":t:a", ":t:b"]);
+    assert_eq!(lean_leaves(src), ["t.a", "t.b"]);
 }
 
 #[test]
@@ -3137,7 +3137,7 @@ fn a_whole_array_of_composites_is_asked_part_by_part() {
         "t1 := m'last_event; t1 := rs'last_event; t1 := g'last_event;",
     ));
     // m has 128 elements in one leaf, marked; rs is marked; g is a record of whole leaves.
-    assert_eq!(l, [":t:a", ":t:b", ":t:g.d", ":t:r"]);
+    assert_eq!(l, ["t.a", "t.b", "t.g.d", "t.r"]);
 }
 
 #[test]

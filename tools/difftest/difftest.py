@@ -169,6 +169,28 @@ def yavs_fatal(out, err):
     return "\n".join(out.splitlines() + fatal), "\n".join(keep)
 
 
+def lrm_path(p):
+    """A dotted yavs process path in the reference simulators' form: `tb.g(1).p` is `:tb:g(1):p`.
+    Dots in an extended identifier or a generate index stay, so the comparison stays exact."""
+    out, ext, depth, quoted = [":"], False, 0, 0
+    for c in p:
+        sep = False
+        if quoted:
+            quoted -= 1
+        elif ext:
+            ext = c != "\\"
+        elif c == "\\":
+            ext = True
+        elif c in "()":
+            depth += 1 if c == "(" else -1
+        elif c == "'" and depth:
+            quoted = 2
+        else:
+            sep = c == "." and not depth
+        out.append(":" if sep else c)
+    return "".join(out)
+
+
 def norm_msg(m):
     return "Assertion violation" if m == "Assertion violation." else m  # sim1 adds a full stop
 
@@ -240,7 +262,7 @@ def normalise(rc, out, err, yavs=False):
                 t = FMT1_TRACE.match(line)
                 if t:
                     if t.group(1) == "Process" and cur[3] == "-":
-                        cur[3] = t.group(2)
+                        cur[3] = lrm_path(t.group(2))
                     flush()
                 else:
                     cur[4] += "\n" + line
@@ -249,7 +271,7 @@ def normalise(rc, out, err, yavs=False):
                 t = FMT1_TRACE.match(line)
                 if t:
                     if t.group(1) == "Process" and cur[3] == "-":
-                        cur[3] = t.group(2)
+                        cur[3] = lrm_path(t.group(2)) if yavs else t.group(2)
                 elif not FMT1_SNIP.match(line):
                     cur[4] += "\n" + line
                 continue

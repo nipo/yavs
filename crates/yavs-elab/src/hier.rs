@@ -158,15 +158,16 @@ impl Hierarchy {
         }
     }
 
-    /// `label:` of each scope from the root to `s`, components left out, appended to `out`.
-    fn push_path(&self, s: ScopeId, case: Case, out: &mut String) {
+    /// `label` and `sep` of each scope from the root to `s`, components left out, appended to
+    /// `out`.
+    fn push_path(&self, s: ScopeId, case: Case, sep: char, out: &mut String) {
         let sc = self.scope(s);
         if let Some(p) = sc.parent {
-            self.push_path(p, case, out);
+            self.push_path(p, case, sep, out);
         }
         if !matches!(sc.kind, ScopeKind::Component { .. }) {
             self.push_label(s, case, out);
-            out.push(':');
+            out.push(sep);
         }
     }
 
@@ -185,8 +186,22 @@ impl Hierarchy {
     pub fn path_name(&self, s: ScopeId, case: Case) -> String {
         let mut out = String::with_capacity(48);
         out.push(':');
-        self.push_path(s, case, &mut out);
+        self.push_path(s, case, ':', &mut out);
         out
+    }
+
+    /// A scope's path as yavs's own texts write it: `top.u1.g(0)`, what `yavs_diag::dotted` makes
+    /// of [`Self::path_name`], without the second string: every process and signal has a name.
+    pub fn dotted_in(&self, s: ScopeId, case: Case) -> String {
+        let mut out = String::with_capacity(48);
+        self.push_path(s, case, '.', &mut out);
+        out.pop();
+        out
+    }
+
+    /// [`Self::dotted_in`] in the original spelling.
+    pub fn dotted(&self, s: ScopeId) -> String {
+        self.dotted_in(s, Case::Original)
     }
 
     /// `'instance_name` of a scope: `:top(arch):u1@leaf(a):g(0):`.

@@ -840,13 +840,17 @@ fn print_hierarchy(db: &Db, e: &yavs_elab::Elaborated) {
         if matches!(sc.kind, yavs_elab::ScopeKind::Component { .. }) {
             continue;
         }
-        s.push_str(&e.hier.instance_name(id, db, Case::Original));
+        s.push_str(&yavs_diag::dotted(&e.hier.instance_name(
+            id,
+            db,
+            Case::Original,
+        )));
         s.push('\n');
         for &o in &sc.objs {
             let l = e.nets.obj(o);
             s.push_str(&format!(
-                "{}{} ({})\n",
-                e.hier.path_name(id, Case::Original),
+                "{}.{} ({})\n",
+                e.hier.dotted(id),
                 l.name.text,
                 object_kind(l.kind)
             ));
@@ -2411,8 +2415,16 @@ fn observers(
         None => None,
         Some(path) => {
             let sel = yavs_wave::Selection {
-                include: a.wave_include.clone(),
-                exclude: a.wave_exclude.clone(),
+                include: a
+                    .wave_include
+                    .iter()
+                    .map(|p| yavs_diag::dotted(p))
+                    .collect(),
+                exclude: a
+                    .wave_exclude
+                    .iter()
+                    .map(|p| yavs_diag::dotted(p))
+                    .collect(),
                 max_array_elems: a.wave_max_array,
             };
             let mut cfg = yavs_wave::WaveConfig::default();

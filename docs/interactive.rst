@@ -129,7 +129,7 @@ Break on a value
     breakpoint 1: tb.cnt
     yavs> run
     ** Error: 25000000fs+1: q is not high
-        Process :tb:check
+        Process tb.check
     data breakpoint at 25 ns, delta 1: tb.cnt = "0011"
     yavs> examine cnt
     "0011"
@@ -143,7 +143,7 @@ Find who drives an X
 
     yavs> run 30 ns
     ** Error: 25000000fs+1: q is not high
-        Process :tb:check
+        Process tb.check
     step at 30 ns, delta 0
     yavs> examine q
     'U'
@@ -187,7 +187,7 @@ Stop on a failing assertion
     stop at assertions and reports of severity error, failure
     yavs> run
     ** Error: 25000000fs+1: q is not high
-        Process :tb:check
+        Process tb.check
     assertion of severity error at 25 ns, delta 1, /work/tb.vhd:53: q is not high
     yavs> where
     time 25 ns, delta 1
@@ -208,7 +208,7 @@ Read a past value
 
     yavs> run 30 ns
     ** Error: 25000000fs+1: q is not high
-        Process :tb:check
+        Process tb.check
     step at 30 ns, delta 0
     yavs> examine cnt @ 12 ns
     "0001"
@@ -280,7 +280,7 @@ Diagnose a run
 
     yavs> run 30 ns
     ** Error: 25000000fs+1: q is not high
-        Process :tb:check
+        Process tb.check
     step at 30 ns, delta 0
     yavs> waits
       process        state    waits for         at

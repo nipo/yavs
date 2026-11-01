@@ -21,7 +21,7 @@
 use std::collections::BTreeMap;
 
 use crate::{Database, Entry, Key, Kind};
-use yavs_diag::Diagnostic;
+use yavs_diag::{Diagnostic, dotted};
 
 mod yaml;
 pub use yaml::parse as parse_yaml;
@@ -177,7 +177,7 @@ fn item_rule(
             return Err(bad("expected a pattern of `0`, `1` and `-`, one per input"));
         }
         return Ok(Rule::Combination {
-            glob: glob.to_string(),
+            glob: dotted(glob),
             hex: p[0].to_ascii_lowercase(),
             occ: num(p[1])?,
             pattern: pattern.to_string(),
@@ -192,7 +192,7 @@ fn item_rule(
     };
     Ok(Rule::Item {
         kind,
-        glob: glob.to_string(),
+        glob: dotted(glob),
         hex: p[0].to_ascii_lowercase(),
         occ: num(p[1])?,
         arm,
@@ -236,11 +236,11 @@ pub fn parse(text: &str) -> Result<Vec<Row>, String> {
                 at.first().copied(),
                 &bad,
             )?,
-            ["toggle", g, sig] => Rule::Toggle(g.to_string(), sig.to_string(), None),
+            ["toggle", g, sig] => Rule::Toggle(dotted(g), sig.to_string(), None),
             ["toggle", g, sig, d] => {
-                Rule::Toggle(g.to_string(), sig.to_string(), Some(direction(d, &bad)?))
+                Rule::Toggle(dotted(g), sig.to_string(), Some(direction(d, &bad)?))
             }
-            ["instance", g] => Rule::Instance(g.to_string()),
+            ["instance", g] => Rule::Instance(dotted(g)),
             ["unit", u] => Rule::Unit(u.to_string()),
             ["file", g] => Rule::File(g.to_string()),
             [
@@ -283,7 +283,10 @@ fn pattern_matches(pattern: &str, k: &Key) -> bool {
         })
 }
 
+/// Whether rule `r` takes the item. A rule's instance glob is dotted when read, so a row may use
+/// either form of a path.
 fn matches(r: &Rule, k: &Key, e: &Entry) -> bool {
+    let path = k.shown();
     match r {
         Rule::Item {
             kind,
@@ -303,7 +306,7 @@ fn matches(r: &Rule, k: &Key, e: &Entry) -> bool {
             kind_ok
                 && k.occ == *occ
                 && format!("{:016x}", k.hash).starts_with(hex)
-                && glob(g, &k.path)
+                && glob(g, &path)
         }
         Rule::Combination {
             glob: g,
@@ -315,21 +318,17 @@ fn matches(r: &Rule, k: &Key, e: &Entry) -> bool {
             matches!(k.kind, Kind::Combination(_))
                 && k.occ == *occ
                 && format!("{:016x}", k.hash).starts_with(hex)
-                && glob(g, &k.path)
+                && glob(g, &path)
                 && pattern_matches(pattern, k)
         }
         Rule::Toggle(g, sig, d) => {
             matches!(k.kind, Kind::Toggle(r) if d.is_none_or(|d| d == r))
-                && glob(g, &k.path)
+                && glob(g, &path)
                 && glob(sig, &k.sig)
         }
         Rule::Instance(g) => {
             k.path.starts_with(':')
-                && (glob(g, &k.path)
-                    || k.path
-                        .match_indices(':')
-                        .skip(1)
-                        .any(|(i, _)| glob(g, &k.path[..i])))
+                && (glob(g, &path) || path.match_indices('.').any(|(i, _)| glob(g, &path[..i])))
         }
         Rule::Unit(u) => k.path.eq_ignore_ascii_case(u),
         Rule::File(g) => {
@@ -446,15 +445,15 @@ fn partner<'a>(db: &'a Database, k: &Key) -> Option<&'a Entry> {
 /// An item as an exclusion row, without the trailing comment.
 pub fn head(k: &Key, e: &Entry) -> String {
     let id = format!("{:012x}.{}", k.hash >> 16, k.occ);
+    let path = k.shown();
     match k.kind {
-        Kind::Statement => format!("statement {} {id} {}:{}", k.path, e.file, e.line),
-        Kind::Branch(a) => format!("branch {} {id}.{a} {}:{}", k.path, e.file, e.line),
-        Kind::Toggle(r) => format!("toggle {} {} {}", k.path, k.sig, dir_word(r)),
-        Kind::Condition(r) => format!("condition {} {id} {r} {}:{}", k.path, e.file, e.line),
-        Kind::Expression(r) => format!("expression {} {id} {r} {}:{}", k.path, e.file, e.line),
+        Kind::Statement => format!("statement {path} {id} {}:{}", e.file, e.line),
+        Kind::Branch(a) => format!("branch {path} {id}.{a} {}:{}", e.file, e.line),
+        Kind::Toggle(r) => format!("toggle {path} {} {}", k.sig, dir_word(r)),
+        Kind::Condition(r) => format!("condition {path} {id} {r} {}:{}", e.file, e.line),
+        Kind::Expression(r) => format!("expression {path} {id} {r} {}:{}", e.file, e.line),
         Kind::Combination(_) => format!(
-            "combination {} {id} {} {}:{}",
-            k.path,
+            "combination {path} {id} {} {}:{}",
             crate::pattern(k),
             e.file,
             e.line
@@ -498,7 +497,7 @@ pub fn miss_row(db: &Database, k: &Key, e: &Entry) -> Option<String> {
     let c = miss_comment(db, k, e)?;
     let h = match k.kind {
         // Both directions missed: one row for the scalar, no direction.
-        Kind::Toggle(_) if both_missed(db, k) => format!("toggle {} {}", k.path, k.sig),
+        Kind::Toggle(_) if both_missed(db, k) => format!("toggle {} {}", k.shown(), k.sig),
         _ => head(k, e),
     };
     Some(format!("{h}   # {c}\n"))
@@ -517,12 +516,12 @@ pub fn miss_yaml(db: &Database, k: &Key, e: &Entry) -> Option<String> {
     Some(match k.kind {
         Kind::Statement => format!(
             "  - kind: statement   # {c}\n    instance: {}\n    hash: {}\n    line: {at}\n",
-            q(&k.path),
+            q(&k.shown()),
             q(&id)
         ),
         Kind::Branch(a) => format!(
             "  - kind: branch   # {c}\n    instance: {}\n    hash: {}\n    line: {at}\n",
-            q(&k.path),
+            q(&k.shown()),
             q(&format!("{id}.{a}"))
         ),
         Kind::Condition(r) | Kind::Expression(r) => format!(
@@ -532,18 +531,18 @@ pub fn miss_yaml(db: &Database, k: &Key, e: &Entry) -> Option<String> {
             } else {
                 "expression"
             },
-            q(&k.path),
+            q(&k.shown()),
             q(&id)
         ),
         Kind::Combination(_) => format!(
             "  - kind: combination   # {c}\n    instance: {}\n    hash: {}\n    pattern: {}\n    line: {at}\n",
-            q(&k.path),
+            q(&k.shown()),
             q(&id),
             q(&crate::pattern(k))
         ),
         Kind::Toggle(r) => format!(
             "  - kind: toggle   # {c}\n    instance: {}\n    signal: {}\n{}",
-            q(&k.path),
+            q(&k.shown()),
             q(&k.sig),
             if both_missed(db, k) {
                 String::new()
@@ -890,8 +889,8 @@ mod tests {
         }
         // A scalar missed one way names the direction; missed both ways, none.
         let u = d.uncovered();
-        assert!(u.contains("toggle :t a rise   # never rise (0->1)"), "{u}");
-        assert!(u.contains("toggle :t b   # never toggled"), "{u}");
+        assert!(u.contains("toggle t a rise   # never rise (0->1)"), "{u}");
+        assert!(u.contains("toggle t b   # never toggled"), "{u}");
         assert_eq!(u.lines().count(), 2, "{u}");
         let y = d.uncovered_yaml();
         assert!(y.contains("signal: \"a\"\n    direction: rise\n"), "{y}");

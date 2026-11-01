@@ -1995,9 +1995,12 @@ fn put(
     kind: OpKind,
 ) -> Result<(), String> {
     let s = &sh.design.sigs[k];
-    let leaves = s
-        .part(paths, whole)
-        .ok_or_else(|| format!("this is a bug in yavs: a value of `{}` not encoded", s.path))?;
+    let leaves = s.part(paths, whole).ok_or_else(|| {
+        format!(
+            "this is a bug in yavs: a value of `{}` not encoded",
+            console::dotted(&s.path)
+        )
+    })?;
     queue(sh, at, Op { kind, leaves });
     Ok(())
 }
@@ -2294,13 +2297,13 @@ fn hierarchy(sh: &Shared) -> Json {
         let reg = &sh.design.regions[r];
         json!({
             "name": reg.name,
-            "path": reg.path,
+            "path": console::dotted(&reg.path),
             "kind": reg.kind,
             "regions": reg.children.iter().map(|&c| region(sh, c)).collect::<Vec<_>>(),
-            "processes": reg.procs,
+            "processes": reg.procs.iter().map(|p| console::dotted(p)).collect::<Vec<_>>(),
             "signals": reg.sigs.iter().map(|&k| {
                 let s = &sh.design.sigs[k];
-                json!({"name": s.name, "path": s.path, "type": s.ty})
+                json!({"name": s.name, "path": console::dotted(&s.path), "type": s.ty})
             }).collect::<Vec<_>>(),
         })
     }
@@ -2417,7 +2420,7 @@ fn wave_subscribe(sh: &Shared, req: &Json) {
         a[k].as_array()
             .into_iter()
             .flatten()
-            .filter_map(|g| g.as_str().map(String::from))
+            .filter_map(|g| g.as_str().map(console::dotted))
             .collect()
     };
     let mut sel = yavs_wave::Selection {
@@ -3098,7 +3101,9 @@ fn one_run(
         Err(err) => return Err(Box::new(e.runtime_diagnostic(&err))),
     };
     let _ = sh.interrupt.set(sim.interrupt());
-    let names: Vec<String> = e.procs.iter().map(|p| e.proc_name(p)).collect();
+    let names = (e.procs.iter())
+        .map(|p| console::dotted(&e.proc_name(p)))
+        .collect();
     sim.subscribe(Box::new(Output {
         sh: sh.clone(),
         names,

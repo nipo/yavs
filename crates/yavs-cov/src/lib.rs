@@ -73,7 +73,7 @@ impl Kind {
 /// The identity of an item, the same in every run of the design.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Key {
-    /// Instance path (`:top:u1`) or package (`work.pkg`).
+    /// Instance path (`:top:u1`) or package (`work.pkg`), stored form; [`Key::shown`] for texts.
     pub path: String,
     pub kind: Kind,
     /// FNV-1a of the statement's source text.
@@ -84,6 +84,14 @@ pub struct Key {
     /// Conditions and expressions: the text of the row's input. Empty for statements and
     /// branches.
     pub sig: String,
+}
+
+impl Key {
+    /// The path as reports show it: `top.u1`. The database keeps the stored form, which tells an
+    /// instance from a package and stays mergeable with older databases.
+    pub fn shown(&self) -> String {
+        yavs_diag::dotted(&self.path)
+    }
 }
 
 /// Where an item is and how often it ran.
@@ -844,7 +852,7 @@ impl Database {
                             "{} {} of {} ({}:{}) is excluded at {}:{} in one database and required in the other",
                             k.kind.name(),
                             pattern(&k),
-                            k.path,
+                            k.shown(),
                             x.file,
                             x.line,
                             w[0].file,
@@ -993,7 +1001,12 @@ impl Database {
                 .collect();
         }
         s.push('\n');
-        let w = per.keys().map(|p| p.len()).max().unwrap_or(0).max(4);
+        let w = per
+            .keys()
+            .map(|p| yavs_diag::dotted(p).len())
+            .max()
+            .unwrap_or(0)
+            .max(4);
         // The toggles column is padded only when a column follows.
         let pad = if fc || fe || fm { 20 } else { 0 };
         let _ = write!(
@@ -1015,7 +1028,8 @@ impl Database {
         for (p, c) in &per {
             let _ = write!(
                 s,
-                "{p:w$}  {:<20}  {:<20}  {:<pad$}",
+                "{:w$}  {:<20}  {:<20}  {:<pad$}",
+                yavs_diag::dotted(p),
                 col(c[0], c[1]),
                 col(c[2], c[3]),
                 col(c[4], c[5])
@@ -1051,7 +1065,7 @@ impl Database {
                     format!("{}:{}", e.file, e.line),
                     k.kind.name().to_string(),
                     item,
-                    k.path.clone(),
+                    k.shown(),
                 ]
             })
             .collect();

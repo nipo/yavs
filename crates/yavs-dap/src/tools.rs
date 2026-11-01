@@ -46,10 +46,7 @@ fn row<const N: usize>(x: [&str; N]) -> Vec<String> {
     x.iter().map(|s| s.to_string()).collect()
 }
 
-/// A design path (`:top:u1:s`) as the console writes it (`top.u1.s`).
-fn dotted(path: &str) -> String {
-    path.trim_matches(':').replace(':', ".")
-}
+use yavs_diag::dotted;
 
 fn place(file: &str, line: usize) -> String {
     let p = std::path::Path::new(file);
@@ -495,7 +492,7 @@ fn declared_rows(sh: &Shared, d: yavs_sem::DeclId) -> Vec<Vec<String>> {
 
 fn describe_variable(sh: &Shared, at: &At<'_, '_>, name: &str) -> Result<String, String> {
     // `tb.counter.total`, as `find variables` lists it: known wherever the session stands.
-    let dotted_name = name.replace(':', ".");
+    let dotted_name = dotted(name);
     if let Some((proc, var)) = dotted_name.trim_matches('.').rsplit_once('.')
         && let Some(d) = process_variable(sh, proc, var)
     {
@@ -614,7 +611,7 @@ pub(crate) fn examine_path(
 
 /// Whether `pattern` selects dotted path `p`: with a `.` over the whole path, else its last name.
 pub(crate) fn path_matches(pattern: &str, p: &str) -> bool {
-    let pat = pattern.replace(':', ".");
+    let pat = dotted(pattern);
     let pat = pat.trim_matches('.');
     if pat.contains('.') {
         yavs_wave::glob_match(pat, p) || yavs_wave::glob_match(&format!("**.{pat}"), p)
@@ -883,9 +880,7 @@ fn wave_name(sh: &Shared, at: &At<'_, '_>, name: &str) -> String {
             part.to_ascii_lowercase()
         );
     }
-    name.replace(':', ".")
-        .trim_matches('.')
-        .to_ascii_lowercase()
+    dotted(name).trim_matches('.').to_ascii_lowercase()
 }
 
 /// `trace x NAME`.
@@ -1157,7 +1152,9 @@ pub(crate) fn activity_file(sh: &Shared, file: &str) -> Result<(), String> {
         return Ok(());
     };
     let names = yavs_elab::ActivityNames {
-        procs: sh.elab.procs.iter().map(|p| sh.elab.proc_name(p)).collect(),
+        procs: (sh.elab.procs.iter())
+            .map(|p| dotted(&sh.elab.proc_name(p)))
+            .collect(),
         signals: sh.signal_names(),
     };
     let t = sh.elab.proc_table();
@@ -1172,7 +1169,9 @@ pub(crate) fn activity(sh: &Shared) -> String {
     };
     let t = sh.elab.proc_table();
     let names = yavs_elab::ActivityNames {
-        procs: sh.elab.procs.iter().map(|p| sh.elab.proc_name(p)).collect(),
+        procs: (sh.elab.procs.iter())
+            .map(|p| dotted(&sh.elab.proc_name(p)))
+            .collect(),
         signals: sh.signal_names(),
     };
     yavs_elab::activity_text(&sh.elab, &t, &a.runs(), &a.events(), &names, &sh.db.sources)

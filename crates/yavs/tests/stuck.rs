@@ -304,7 +304,7 @@ fn sigusr1_prints_a_report_and_the_run_goes_on() {
         text.contains("W3101") && text.contains("simulation status at"),
         "{text}"
     );
-    assert!(text.contains(":stuck_signal:go"), "{text}");
+    assert!(text.contains("stuck_signal.go"), "{text}");
     let _ = std::fs::remove_dir_all(&t);
 }
 
@@ -403,7 +403,7 @@ fn sigint_ends_spin(tier: Option<&str>) {
 #[test]
 fn a_field_of_a_record_is_reported_alone() {
     let e = snapshot("stuck_record", &["--hang-report"], "stuck_record", 0);
-    assert!(e.contains("waits for an event on :stuck_record:r.b"), "{e}");
+    assert!(e.contains("waits for an event on stuck_record.r.b"), "{e}");
     assert!(e.contains("never had an event; it has no driver"), "{e}");
 }
 
@@ -418,7 +418,7 @@ fn hang_report_points_at_the_wait_of_each_process() {
     // The statement each process stands at, not the first one of its body.
     assert!(e.contains("wait for 100 us"), "{e}");
     assert!(
-        e.contains(":stuck_forever:_p0 waits for :stuck_forever:clk"),
+        e.contains("stuck_forever._p0 waits for stuck_forever.clk"),
         "{e}"
     );
 }

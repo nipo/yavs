@@ -221,7 +221,7 @@ fn counts_threads_and_reports() {
         "{miss}"
     );
     assert!(
-        miss.lines().all(|l| l.starts_with("condition :cov_fec ")),
+        miss.lines().all(|l| l.starts_with("condition cov_fec ")),
         "{miss}"
     );
 
@@ -357,10 +357,10 @@ fn exclusions_per_row() {
     assert!(
         rows.lines()
             .next()
-            .is_some_and(|l| l.starts_with("condition :d ") && l.contains("d.vhd:8   # a is 1")),
+            .is_some_and(|l| l.starts_with("condition d ") && l.contains("d.vhd:8   # a is 1")),
         "{rows}"
     );
-    assert!(rows.contains("expression :d "), "{rows}");
+    assert!(rows.contains("expression d "), "{rows}");
 
     // The text rows and the YAML entries exclude exactly the misses.
     let (_, yaml, _) = report(&tmp, &["--uncovered=yaml"]);

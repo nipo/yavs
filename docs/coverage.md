@@ -34,10 +34,10 @@ never ran, with the source text that says what each one is:
 
 ```
 not covered:
-  tb.vhd:6   toggle     rst fall (1->0)                                        :tb
-  tb.vhd:24  branch     if rst = '1'                                           :tb
-  tb.vhd:25  statement  count <= 0;                                            :tb
-  tb.vhd:26  condition  count < 15 is 0 (result 0) in en = '1' and count < 15  :tb
+  tb.vhd:6   toggle     rst fall (1->0)                                        tb
+  tb.vhd:24  branch     if rst = '1'                                           tb
+  tb.vhd:25  statement  count <= 0;                                            tb
+  tb.vhd:26  condition  count < 15 is 0 (result 0) in en = '1' and count < 15  tb
 ```
 
 Source paths are relative to the current directory (`--root DIR` changes that; a file outside it keeps
@@ -230,7 +230,7 @@ coverage exclusions: 2 rules, 3 requirements excluded
        rule:    condition (valid=false, ready=true)
        reason:  impossible handshake
        matches: 1 requirement, 0 of them ran
-         :tb:dut  src/fifo.vhd:43  valid is false, ready is true  in valid and ready  [0 hits]
+         tb.dut  src/fifo.vhd:43  valid is false, ready is true  in valid and ready  [0 hits]
   ...
 kind         before       excluded   after
 combination  5/8 62.5%    3 (1 ran)  2/5 40.0%
@@ -265,9 +265,9 @@ Outside the source, give `yavs cov report` or `yavs cov rank` an `--exclude FILE
 from `--uncovered`, optionally with a reason after `#`:
 
 ```
-branch :tb:dut:u_fsm  c41e09a7b3d2.0.3  src/fsm.vhd:88   # unreachable: state is one-hot
-toggle :tb:dut data(*) fall
-instance :tb:u_debug*                                    # debug logic
+branch tb.dut.u_fsm  c41e09a7b3d2.0.3  src/fsm.vhd:88   # unreachable: state is one-hot
+toggle tb.dut data(*) fall
+instance tb.u_debug*                                    # debug logic
 file */generated/*.vhd
 unit work.pkg_tools
 ```
@@ -279,15 +279,15 @@ patterns. A file whose name ends in `.yaml` or `.yml` is read as YAML:
 ```yaml
 exclude:
   - kind: branch
-    instance: ":tb:dut:u_fsm"
+    instance: "tb.dut.u_fsm"
     hash: "c41e09a7b3d2.0.3"
     reason: unreachable, state is one-hot
   - kind: toggle
-    instance: ":tb:dut"
+    instance: "tb.dut"
     signal: "data(*)"
     direction: fall        # optional: rise or fall, default both
   - kind: instance
-    instance: ":tb:u_debug*"
+    instance: "tb.u_debug*"
 ```
 
 Excluded items are left out of the totals and Cobertura and listed under "excluded" with their
@@ -318,7 +318,7 @@ the tests that hit each item.
 
 ## Details
 
-**Where counts go.** Code is counted per instance and shown under its path (`:tb:u_dut`);
+**Where counts go.** Code is counted per instance and shown under its path (`tb.u_dut`);
 package code once under `library.package`. The `std` and `ieee` libraries are not counted.
 Items are identified by their path and the text of their statement, not their position, so
 databases stay mergeable after edits elsewhere in the file. A statement exclusion works the same

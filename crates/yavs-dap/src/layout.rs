@@ -30,6 +30,6 @@ pub fn load(
         .lines()
         .map(str::trim)
         .filter(|l| !l.is_empty() && !l.starts_with('#'))
-        .map(String::from);
+        .map(yavs_diag::dotted);
     Ok(lines.partition(|l| known(l)))
 }

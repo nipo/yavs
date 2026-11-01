@@ -18,7 +18,7 @@ vhpi:   d:m=9
 vhpi:   un=8
 vhpi: read a protected object: error: vhpi_get_value: a protected object has no value; call its methods
 ** Note: 0fs+0: m=9
-    Process :top:d
+    Process top.d
 vhpi: end of initialization
 vhpi:   p:n=0
 vhpi:   p:v=00000000
@@ -35,11 +35,11 @@ vhpi:   un=8
 vhpi:   @work:pkg:pv=1010
 vhpi:   @work:pkg:pv(3)=3
 ** Note: 5000000fs+0: n=1 v=00000001 r.a=2 r.b=0000 r.t=2000000 fs b=false s=abc
-    Process :top:p
+    Process top.p
 ** Note: 5000000fs+0: sv=6 pv=1010
-    Process :top:sh
+    Process top.sh
 ** Note: 10000000fs+0: k=3
-    Process :top:q
+    Process top.q
 vhpi: t=12
 vhpi:   p:n=1
 vhpi:   p:v=00000001
@@ -76,15 +76,15 @@ vhpi: release a variable: error: vhpi_put_value: a variable is deposited, not fo
 vhpi: deposit too short: error: vhpi_put_value: format vhpiBinStrVal: 3 elements for an array of 8
 vhpi: deposit in a read-only phase: error: vhpi_put_value: no writes in a read-only phase (end of time step, end of simulation)
 ** Note: 15000000fs+0: n=101 v=10100110 r.a=84 r.b=0010 r.t=7000000 fs b=true s=xyz
-    Process :top:p
+    Process top.p
 ** Note: 15000000fs+0: sv=-2 pv=101X
-    Process :top:sh
+    Process top.sh
 ** Note: 20000000fs+0: k=10
-    Process :top:q
+    Process top.q
 ** Note: 25000000fs+0: n=102 v=10100111 r.a=168 r.b=0010 r.t=7000000 fs b=true s=xyz
-    Process :top:p
+    Process top.p
 ** Note: 25000000fs+0: sv=-1 pv=101X
-    Process :top:sh
+    Process top.sh
 vhpi: t=30
 vhpi:   p:n=102
 vhpi:   p:v=10100111
@@ -101,5 +101,5 @@ vhpi:   un=8
 vhpi:   @work:pkg:pv=101X
 vhpi:   @work:pkg:pv(3)=3
 ** Note: 30000000fs+0: k=11
-    Process :top:q
+    Process top.q
 ** Note: 30000000fs+0: FINISH called with status 0

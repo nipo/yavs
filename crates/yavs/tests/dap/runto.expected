@@ -45,7 +45,7 @@
 > yavs/stepTimestep {}
 < {"body":{},"command":"yavs/stepTimestep","request_seq":16,"success":true,"type":"response"}
 < {"body":{"allThreadsContinued":true,"threadId":1},"event":"continued","type":"event"}
-< {"body":{"category":"stdout","output":"** Note: 30000000fs+0: done\n    Process :tb:p\n"},"event":"output","type":"event"}
+< {"body":{"category":"stdout","output":"** Note: 30000000fs+0: done\n    Process tb.p\n"},"event":"output","type":"event"}
 < {"body":{"allThreadsStopped":true,"description":"step at 30 ns, delta 0","reason":"step"},"event":"stopped","type":"event"}
 > continue {}
 < {"body":{"allThreadsContinued":true},"command":"continue","request_seq":17,"success":true,"type":"response"}

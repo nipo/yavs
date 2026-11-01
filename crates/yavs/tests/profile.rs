@@ -55,7 +55,7 @@ fn names_the_hot_process_and_line() {
             .skip_while(|l| !l.starts_with("profile: processes"))
             .nth(2)
             .unwrap_or_else(|| panic!("no process row:\n{err}"));
-        assert!(first.contains(":profile:hot"), "{first}\n{err}");
+        assert!(first.contains("profile.hot"), "{first}\n{err}");
         assert!(
             first.contains(&format!("profile.vhd:{HOT_LINE}")),
             "{first}"
@@ -64,7 +64,7 @@ fn names_the_hot_process_and_line() {
             serde_json::from_str(&std::fs::read_to_string(t.join("p.json")).expect("file"))
                 .expect("json");
         let p = &j["processes"][0];
-        assert_eq!(p["path"], ":profile:hot");
+        assert_eq!(p["path"], "profile.hot");
         assert_eq!(p["line"], HOT_LINE);
         assert!(
             p["file"]
@@ -73,7 +73,7 @@ fn names_the_hot_process_and_line() {
         );
         assert!(j["samples"].as_u64() > Some(0));
         assert!(p["samples"].as_u64() > j["processes"][1]["samples"].as_u64());
-        assert_eq!(j["instances"][0]["path"], ":profile");
+        assert_eq!(j["instances"][0]["path"], "profile");
         // The interpreter names the statement it spends its time in (compiled code has none).
         if extra.contains(&"--tier=interp") {
             let l = &j["lines"][0];

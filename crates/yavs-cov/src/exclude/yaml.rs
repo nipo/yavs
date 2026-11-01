@@ -204,11 +204,11 @@ fn entry(line: usize, n: Node) -> Result<Row, String> {
             &bad,
         )?,
         "toggle" => Rule::Toggle(
-            find("instance").unwrap_or_default().into(),
+            yavs_diag::dotted(find("instance").unwrap_or_default()),
             find("signal").unwrap_or_default().into(),
             find("direction").map(|d| direction(d, &bad)).transpose()?,
         ),
-        "instance" => Rule::Instance(find("instance").unwrap_or_default().into()),
+        "instance" => Rule::Instance(yavs_diag::dotted(find("instance").unwrap_or_default())),
         "unit" => Rule::Unit(find("unit").unwrap_or_default().into()),
         _ => Rule::File(find("file").unwrap_or_default().into()),
     };

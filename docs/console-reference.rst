@@ -267,7 +267,7 @@ the same way; a file may ``source`` others. In both:
     status 0
     $ yavs run --work=work:lib tb --do "run; quit"; echo "status $?"
     ** Error: 25000000fs+1: q is not high
-        Process :tb:check
+        Process tb.check
     the simulation ended at 80 ns, delta 0
     status 1
     $ yavs run --work=work:lib tb --do "run 5 ns; quit 3"; echo "status $?"
@@ -366,7 +366,7 @@ process's variables are: a variable in the condition is an unknown name. A condi
     data breakpoint at 15 ns, delta 1: tb.cnt = "0010"
     yavs> run
     ** Error: 25000000fs+1: q is not high
-        Process :tb:check
+        Process tb.check
     the simulation ended at 80 ns, delta 0
     yavs> run
     the simulation has ended: `restart` runs it again, `quit` leaves
@@ -611,7 +611,7 @@ delete assert`` removes it.
     stop at assertions and reports of severity error, failure
     yavs> run
     ** Error: 25000000fs+1: q is not high
-        Process :tb:check
+        Process tb.check
     assertion of severity error at 25 ns, delta 1, /work/tb.vhd:53: q is not high
     yavs> where
     time 25 ns, delta 1
@@ -791,7 +791,7 @@ elements. It is the way to read a process variable outside its process.
 
     yavs> run 30 ns
     ** Error: 25000000fs+1: q is not high
-        Process :tb:check
+        Process tb.check
     step at 30 ns, delta 0
     yavs> examine cnt @ 12 ns
     "0001"
@@ -1334,7 +1334,7 @@ is one. A signal with no driver says so.
 
     yavs> run 30 ns
     ** Error: 25000000fs+1: q is not high
-        Process :tb:check
+        Process tb.check
     step at 30 ns, delta 0
     yavs> drivers q
     tb.q : STD_LOGIC = 'U', declared at tb.vhd:30
@@ -1446,7 +1446,7 @@ signal read made the value. A signal with no unknown value says so.
 
     yavs> run 30 ns
     ** Error: 25000000fs+1: q is not high
-        Process :tb:check
+        Process tb.check
     step at 30 ns, delta 0
     yavs> trace x q
     tb.q = 'U', since 0 fs, declared at tb.vhd:30
@@ -1513,7 +1513,7 @@ at the end of a run: ``--assert-summary``.
       no assertion failed and no report was made
     yavs> run 30 ns
     ** Error: 25000000fs+1: q is not high
-        Process :tb:check
+        Process tb.check
     step at 30 ns, delta 0
     yavs> asserts
     Assertion summary: 0 failures, 1 error, 0 warnings, 0 notes

@@ -550,10 +550,10 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   current time or absolute), `yavs/stepDelta` and `yavs/stepTimestep` (no arguments); each
   answers, sends `continued`, and the next `stopped` event's `description` gives the time and
   delta. Signal breakpoints are DAP data breakpoints (`supportsDataBreakpoints`; `dataId` is
-  the signal's lower-case path `:top:u1:s`) and the custom request `yavs/setSignalBreakpoints`
+  the signal's lower-case path, stored as `:top:u1:s`) and the custom request `yavs/setSignalBreakpoints`
   (`breakpoints: [{signal, value?}]`, `frameId` for names seen from a process; it replaces its
   own set): a stop after the cycle in which the signal changed (to `value`), reason `data
-  breakpoint`, `text` `PATH = VALUE` (a dotted path, as in thread and frame names and the answers below; `dataId` keeps the `:top:u1:s` form). `yavs/force` (`signal`, `value`, `mode` `in` or `out`,
+  breakpoint`, `text` `PATH = VALUE` (a dotted path, as in thread and frame names and the answers below; `dataId` keeps the stored `:top:u1:s` form, which a client treats as opaque). `yavs/force` (`signal`, `value`, `mode` `in` or `out`,
   default `in`), `yavs/deposit` (`signal`, `value`) and `yavs/release` (`signal`, `mode`; no mode ends a force of either) act on
   a signal or a part of one (`signal` a name seen from `frameId` or the stopped process, or a
   path, optionally followed by fields, integer indices and a final slice in the signal's
@@ -786,6 +786,14 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   the exclusion report of in-source directives and `--exclude` rows together (JSON `"version": 1`),
   and `--html` adds `exclusions.html`; exclusion files take `combination INSTANCE HEX12.OCC
   PATTERN` rows.
+
+### Paths in output
+
+Every hierarchical path yavs writes itself is dotted, through one helper (`yavs_diag::dotted`): `tb.gen(1).u.p`, the index of a for-generate in parentheses as in `'path_name` (the label `gen(1)` is one level; `gen(':')`, an index of a character type, keeps its literal; an extended identifier keeps what it holds). That holds for report and assert lines (`    Process tb.gen(1).u.p`), `Function resolution of tb.s`, runtime errors and all diagnostics with their labels and notes, `--print-hierarchy` (a region in the instance form, `tb(a).gen(1).u@leaf(a)`; an object with its kind, `tb.gen(1).u.q (port out)`), `--hang-report`, `--activity` and `--profile` (text and JSON), coverage reports, rows and exclusions, wave notes, the debugger, and JSON output (`--message-format=json`, `--activity=FILE`, `--profile=FILE`, `yavs/hierarchy`, `cov report --exclusions=json`): one form, so what a report prints can be pasted into a console, a filter or an exclusion row.
+
+Colons stay where something other than yavs's own text defines them or nobody reads them: the values of `'path_name` and `'instance_name` (the LRM's form, compared with the reference simulators) and the `{i}` of `SetVhdlAssertFormat` (the same kind of value in a report's own text), the VHPI names (`vhpiFullNameP`), the coverage database (a stored key that tells an instance from a package; older databases stay mergeable), and a data breakpoint's `dataId` (an opaque protocol id; the client shows `description`, dotted).
+
+Every place that takes a path takes both forms: `:tb:u:s` and `tb.u.s` are the same in console and debugger commands, `--wave-include` and `--wave-exclude`, wave layout files, `yavs/waveSubscribe`, and the instance globs of coverage exclusion rows (text and YAML).
 
 ## 5a. `yavs lint`
 

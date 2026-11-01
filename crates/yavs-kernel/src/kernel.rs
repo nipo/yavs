@@ -717,7 +717,7 @@ pub(crate) struct ProcMeta {
     pub by_timeout: bool,
     /// Has been resumed since initialisation (`SimControl::order`).
     pub resumed: bool,
-    /// Instance nesting of the process (colons in its path name; `SimControl::order`).
+    /// Instance nesting of the process (levels of its path name; `SimControl::order`).
     pub depth: u32,
     /// Resumes for an event only on this edge (`Builder::edge_trigger`).
     pub trigger: Option<crate::EdgeTrigger>,

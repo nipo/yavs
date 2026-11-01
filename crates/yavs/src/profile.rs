@@ -170,9 +170,7 @@ impl Sampler {
         let mut inst: HashMap<&str, u64> = HashMap::new();
         for &(p, n) in &procs {
             let name = names.get(p as usize).map_or("?", |x| x.0.as_str());
-            *inst
-                .entry(name.rsplit_once(':').map_or(name, |x| x.0))
-                .or_default() += n;
+            *inst.entry(yavs_diag::parent(name)).or_default() += n;
         }
         let mut inst: Vec<_> = inst.into_iter().collect();
         inst.sort_by_key(|&(p, n)| (std::cmp::Reverse(n), p));

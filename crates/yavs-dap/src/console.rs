@@ -1822,13 +1822,10 @@ fn viewer_name(sh: &Shared, at: &At<'_, '_>, name: &str) -> Result<String, Strin
     {
         return Ok(format!("{}.{name}", dotted(&sh.design.regions[t].path)));
     }
-    Ok(name.trim_matches(':').replace(':', "."))
+    Ok(dotted(name))
 }
 
-/// A design path (`:top:u1:s`) as the viewer writes it.
-pub(crate) fn dotted(path: &str) -> String {
-    path.trim_matches(':').replace(':', ".")
-}
+pub(crate) use yavs_diag::dotted;
 
 /// Tell the viewer of a stop: it reloads, moves its cursor, marks a breakpoint and colours the
 /// stopped process's signals.

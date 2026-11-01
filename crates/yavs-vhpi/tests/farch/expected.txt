@@ -3,4 +3,4 @@ elab: process kind=1082 drivers kind=1033 1 delay=2
 elab: vhpi_create: a port of mode in has no driver
 late: vhpi_create: processes and drivers are created while a foreign architecture is elaborated (its elabf or execf)
 ** Note: 11000000fs+0: farch ok
-    Process :top:_p0
+    Process top._p0

@@ -2212,6 +2212,7 @@ dependencies = [
  "rayon",
  "serde",
  "smallvec",
+ "yavs-diag",
  "yavs-logic",
  "yavs-prefetch",
 ]

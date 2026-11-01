@@ -231,7 +231,7 @@ impl Report {
                 .items
                 .iter()
                 .take(SHOWN)
-                .map(|(k, _)| k.path.chars().count())
+                .map(|(k, _)| k.shown().chars().count())
                 .max()
                 .unwrap_or(0);
             for (k, e) in r.items.iter().take(SHOWN) {
@@ -239,7 +239,7 @@ impl Report {
                 let _ = writeln!(
                     s,
                     "         {:w$}  {}:{}  {}  [{} hit{}{}]",
-                    k.path,
+                    k.shown(),
                     e.file,
                     e.line,
                     item_words(k, e),
@@ -339,7 +339,7 @@ impl Report {
                     "{}\n      {{\"kind\": \"{}\", \"instance\": {}, \"location\": {}, \"hits\": {}, \"tests\": [{}]",
                     if j > 0 { "," } else { "" },
                     k.kind.name(),
-                    json_str(&k.path),
+                    json_str(&k.shown()),
                     json_str(&format!("{}:{}", e.file, e.line)),
                     e.count,
                     tests.join(", ")
@@ -423,7 +423,7 @@ impl Report {
                 let _ = writeln!(
                     b,
                     "<tr><td>{}</td><td>{}:{}</td><td>{}</td><td class=\"n\">{}</td><td class=\"dim\">{}</td></tr>",
-                    crate::html::esc(&k.path),
+                    crate::html::esc(&k.shown()),
                     crate::html::esc(&e.file),
                     e.line,
                     crate::html::esc(&item_words(k, e)),

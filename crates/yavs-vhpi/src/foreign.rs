@@ -719,7 +719,9 @@ pub(crate) fn elaborate(e: &yavs_elab::Elaborated) -> Result<Vec<yavs_elab::ExtP
         let Some(f) = found else {
             return Err(format!(
                 "foreign architecture `{} {}` of instance {} is not registered",
-                fa.library, fa.model, path
+                fa.library,
+                fa.model,
+                yavs_diag::dotted(&path)
             ));
         };
         insts.push((path, f));

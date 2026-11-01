@@ -1111,7 +1111,7 @@ def self_test():
     finally:
         B.timed = real_timed
     assert r["sim1"]["wall"] == 1.0 and r["yavs"]["wall"] == 1.0 and r["bad"]["wall"] is None and "lacks /validated/" in r["bad"]["tail"], r
-    yv = ["hi\n", "  indented console line\n", "** Note: 0fs+0: boot\n", "    Process :tb:x\n", "** Warning: 1ns+0: w\n", "  Process :y\n", "bye\n"]
+    yv = ["hi\n", "  indented console line\n", "** Note: 0fs+0: boot\n", "    Process tb.x\n", "** Warning: 1ns+0: w\n", "  Process y\n", "bye\n"]
     assert console_of(yv) == "hi\n  indented console line\nbye\n", console_of(yv)
     with tempfile.TemporaryDirectory() as qd:  # a quiet test: the console is read from the output file, which is then removed
         (Path(qd) / OUT).write_text("".join(yv))

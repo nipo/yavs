@@ -136,7 +136,7 @@ fn waits_says_where_each_process_stands() {
     let (out, err, _) = session(&d, &[], "run 30 ns; waits; quit");
     let row = out
         .lines()
-        .find(|l| l.contains("debug_tools.check"))
+        .find(|l| l.contains("debug_tools.check") && !l.contains("Process "))
         .expect(&out);
     assert!(
         row.contains("waiting") && row.contains("debug_tools.cnt"),
@@ -253,7 +253,7 @@ fn break_assert_stops_at_the_report_with_the_stack() {
         "{err}"
     );
     assert!(err.contains("debug_tools.vhd:43: cnt reached 3"), "{err}");
-    assert!(out.contains(":debug_tools:check"), "{out}");
+    assert!(out.contains("debug_tools.check"), "{out}");
     assert!(out.contains("assert: severity error, failure"), "{out}");
     // The warning is below it: the run goes on to the end.
     assert!(

@@ -133,7 +133,7 @@ async function main() {
 
   // The hierarchy: a custom request, and a scope whose regions expand.
   const h = await dc.customRequest('yavs/hierarchy');
-  assert.deepEqual([h.body.regions[0].name, h.body.regions[0].processes], ['tb', [':tb:p', ':tb:q']]);
+  assert.deepEqual([h.body.regions[0].name, h.body.regions[0].processes], ['tb', ['tb.p', 'tb.q']]);
   const roots = (await dc.variablesRequest({
     variablesReference: scopes.body.scopes[3].variablesReference,
   })).body.variables;

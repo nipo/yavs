@@ -1085,7 +1085,7 @@ fn elab_and_run() {
         "-gMSG=enabled_test_cases : a,b/c\\d.e",
     ]);
     assert_eq!(code, 0, "{err}");
-    assert!(out.contains(":top:u:s"), "{out}");
+    assert!(out.contains("top.u.s"), "{out}");
     let rsp = tmp.join("args.rsp");
     std::fs::write(&rsp, format!("{lib}\ntop\n-gN=4\n-gnope=1\n")).expect("rsp");
     let (code, err, _) = yavs(&["elab", &format!("@{}", rsp.display())]);
@@ -1106,8 +1106,8 @@ fn elab_and_run() {
     assert_eq!(code, 1, "{err}");
     assert_eq!(
         out,
-        "** Note: 0fs+0: hi\n    Process :busy:_p0\n** Error: 1000000fs+0: bad\n    Process :busy:_p0\n\
-         ** Note: 2000000fs+0: after\n    Process :busy:_p0\n"
+        "** Note: 0fs+0: hi\n    Process busy._p0\n** Error: 1000000fs+0: bad\n    Process busy._p0\n\
+         ** Note: 2000000fs+0: after\n    Process busy._p0\n"
     );
     // `--exit-severity=error` stops at the error.
     let (code, _, out) = yavs(&["run", &lib, "--exit-severity=error", "busy"]);
@@ -2235,4 +2235,78 @@ fn named_architecture_of_an_entity_visible_through_use_all() {
     let work = format!("--work=work:{}/work", t.path().display());
     let o = yavs_cmd(&["elab", "--std=2008", &work, "top"]);
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+}
+
+/// Every path yavs writes is dotted, the LRM's attribute values keep their colons, and a path
+/// typed with colons still selects (#975).
+#[test]
+fn paths_are_dotted_except_the_lrm_attributes() {
+    let tmp = std::env::temp_dir().join(format!("yavs_cli_dotted_{}", std::process::id()));
+    std::fs::create_dir_all(&tmp).expect("dir");
+    let src = tmp.join("t.vhd");
+    std::fs::write(
+        &src,
+        r"
+entity leaf is end;
+architecture a of leaf is
+  signal \a:b.c\ : bit;
+  signal v : bit_vector(1 to 2);
+begin
+  p : process begin
+    report \a:b.c\'path_name & ' ' & \a:b.c\'instance_name;
+    wait;
+  end process;
+end;
+entity t is end;
+architecture a of t is
+  type e is ('x', ':');
+begin
+  g : for i in 1 to 1 generate u : entity work.leaf; end generate;
+  h : for c in e range ':' to ':' generate
+    q : process begin report e'image(c); wait; end process;
+  end generate;
+end;
+",
+    )
+    .expect("write");
+    let lib = format!("--work=work:{}", tmp.join("w").display());
+    let yavs = |args: &[&str]| {
+        let o = yavs_cmd(args);
+        (
+            o.status.code().expect("exit code"),
+            String::from_utf8_lossy(&o.stderr).into_owned(),
+            String::from_utf8_lossy(&o.stdout).into_owned(),
+        )
+    };
+    let (code, err, _) = yavs(&["analyze", "--std=2008", &lib, &src.to_string_lossy()]);
+    assert_eq!(code, 0, "{err}");
+    let (code, err, out) = yavs(&["run", "--std=2008", &lib, "--print-hierarchy", "t"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("    Process t.g(1).u.p\n"), "{out}");
+    assert!(out.contains("t.g(1).u.\\a:b.c\\ (signal)\n"), "{out}");
+    assert!(out.contains("t(a).g(1).u@leaf(a).p\n"), "{out}");
+    assert!(
+        out.contains(": :t:g(1):u:\\a:b.c\\ :t(a):g(1):u@leaf(a):\\a:b.c\\\n"),
+        "{out}"
+    );
+    assert!(out.contains("    Process t.h(':').q\n"), "{out}");
+    // A wave filter takes a path in either form.
+    for filter in [":t:g(1):u:*", "t.g(1).u.*"] {
+        let wave = tmp.join("w.fst");
+        let (code, err, _) = yavs(&[
+            "run",
+            "--std=2008",
+            &lib,
+            &format!("--wave={}", wave.display()),
+            &format!("--wave-include={filter}"),
+            "--wave-max-array=1",
+            "t",
+        ]);
+        assert_eq!(code, 0, "{filter}: {err}");
+        assert!(
+            err.contains("`t.g(1).u.v` is not recorded"),
+            "{filter}: {err}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&tmp);
 }

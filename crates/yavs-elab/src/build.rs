@@ -14,11 +14,12 @@ fn usage(m: String) -> SimError {
 }
 
 impl Elaborated {
-    /// Kernel signal names: the leaf's object path, plus record fields.
+    /// Kernel signal names, as texts show them: the leaf's object path, plus record fields.
     pub fn leaf_name(&self, l: crate::LeafId) -> String {
         let leaf = self.nets.leaf(l);
         let o = self.nets.obj(leaf.obj);
-        let mut n = self.hier.path_name(o.scope, Case::Original);
+        let mut n = self.hier.dotted(o.scope);
+        n.push('.');
         n.push_str(o.name.text.as_str());
         let mut shape = &o.shape;
         for &f in &leaf.path {
@@ -369,10 +370,9 @@ impl Elaborated {
                 },
             };
             let proc_waits = proc.several_waits();
-            let name = self.hier.path_name(p.scope, Case::Lrm);
-            let name = name.strip_suffix(':').unwrap_or(&name);
+            let name = self.hier.dotted_in(p.scope, Case::Lrm);
             let pid = b.process_boxed(
-                name,
+                &name,
                 ProcFlags {
                     postponed: p.postponed,
                     serial: false,

@@ -37,7 +37,7 @@
 > yavs/runUntil {"time":"11 ns"}
 < {"body":{},"command":"yavs/runUntil","request_seq":18,"success":true,"type":"response"}
 < {"body":{"allThreadsContinued":true,"threadId":2},"event":"continued","type":"event"}
-< {"body":{"category":"stdout","output":"** Note: 11000000fs+0: n=6 b=A d=06 q=A7 t=0 fs r.a=9\n    Process :vals:p\n"},"event":"output","type":"event"}
+< {"body":{"category":"stdout","output":"** Note: 11000000fs+0: n=6 b=A d=06 q=A7 t=0 fs r.a=9\n    Process vals.p\n"},"event":"output","type":"event"}
 < {"body":{"allThreadsStopped":true,"description":"step at 11 ns, delta 0","reason":"step"},"event":"stopped","type":"event"}
 > evaluate {"expression":":vals:q"}
 < {"body":{"evaluateName":"vals.q","result":"\"10100111\"","type":"STD_ULOGIC_VECTOR","variablesReference":0},"command":"evaluate","request_seq":19,"success":true,"type":"response"}
@@ -53,7 +53,7 @@
 < {"body":{"signal":"vals.d(7)","value":"'0'"},"command":"yavs/deposit","request_seq":24,"success":true,"type":"response"}
 > continue {}
 < {"body":{"allThreadsContinued":true},"command":"continue","request_seq":25,"success":true,"type":"response"}
-< {"body":{"category":"stdout","output":"** Note: 12000000fs+0: q=26 big(299)=7\n    Process :vals:p\n"},"event":"output","type":"event"}
+< {"body":{"category":"stdout","output":"** Note: 12000000fs+0: q=26 big(299)=7\n    Process vals.p\n"},"event":"output","type":"event"}
 < {"body":{"category":"console","output":"the session ended with exit status 0\n"},"event":"output","type":"event"}
 < {"body":{"exitCode":0},"event":"exited","type":"event"}
 < {"body":{},"event":"terminated","type":"event"}

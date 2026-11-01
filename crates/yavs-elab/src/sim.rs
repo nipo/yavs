@@ -984,7 +984,8 @@ impl Elaborated {
         self.start = None;
     }
 
-    /// The path of a process instance as reports and the debugger show it: `:top:u1:p`.
+    /// The LRM path of a process instance, the debugger's key for it: `:top:u1:p`. Texts show
+    /// the dotted form.
     pub fn proc_name(&self, p: &crate::ProcInst) -> String {
         let n = self.hier.path_name(p.scope, crate::Case::Lrm);
         n.strip_suffix(':').unwrap_or(&n).to_string()
@@ -1301,7 +1302,7 @@ impl Elaborated {
                     .ok_or_else(|| {
                         sim_err(format!(
                             "{}: processes inside generates and blocks are not lowered yet",
-                            self.hier.path_name(p.scope, crate::Case::Original)
+                            self.hier.dotted(p.scope)
                         ))
                     })?;
                 // One driver slot per kernel signal of each longest static prefix, in order
@@ -1310,7 +1311,7 @@ impl Elaborated {
                 if entries.len() != pir.drivers.len() {
                     return Err(sim_err(format!(
                         "{}: {} driver slots lowered, {} elaborated",
-                        self.hier.path_name(p.scope, crate::Case::Original),
+                        self.hier.dotted(p.scope),
                         pir.drivers.len(),
                         entries.len()
                     )));
@@ -1437,7 +1438,7 @@ impl Elaborated {
         ds: &[yavs_kernel::DriverId],
         inst: Arc<InstData>,
     ) -> Result<InterpProcess, SimError> {
-        let path = || self.hier.path_name(p.scope, crate::Case::Original);
+        let path = || self.hier.dotted(p.scope);
         let (pir, a) = u
             .processes
             .iter()
@@ -1759,7 +1760,7 @@ impl Elaborated {
                 None => {
                     return Err(sim_err(format!(
                         "internal error: a range of a type of region {} was not elaborated",
-                        self.hier.path_name(i, crate::Case::Original)
+                        self.hier.dotted(i)
                     )));
                 }
             }

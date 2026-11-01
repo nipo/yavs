@@ -35,7 +35,7 @@ Analyze once per standard, then run:
 .. code-block:: text
 
     ** Note: 1000000fs+0: b is 4
-        Process :mixed_tb:_p1
+        Process mixed_tb._p1
     ** Note: 1000000fs+0: FINISH called with status 0
 
 Both files can be in one library, or in several. With the wrong standard a file stops at once:

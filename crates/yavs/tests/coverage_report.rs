@@ -50,16 +50,16 @@ fn text_report_names_arms_and_aligns_columns() {
     let out = text(&o.stdout);
     let want = "\
 not covered:
-  cov_report.vhd:25  branch     if rst = '1'    :cov_report
-  cov_report.vhd:25  branch     elsif n > 100   :cov_report
-  cov_report.vhd:26  statement  n <= 0;         :cov_report
-  cov_report.vhd:30  statement  n <= 0;         :cov_report
-  cov_report.vhd:37  branch     when others     :cov_report
-  cov_report.vhd:40  statement  v := 3;         :cov_report
-  cov_report.vhd:42  branch     else            :cov_report
-  cov_report.vhd:45  statement  v := 0;         :cov_report
-  cov_report.vhd:53  branch     (no arm taken)  :cov_report
-  cov_report.vhd:54  branch     when others     :cov_report
+  cov_report.vhd:25  branch     if rst = '1'    cov_report
+  cov_report.vhd:25  branch     elsif n > 100   cov_report
+  cov_report.vhd:26  statement  n <= 0;         cov_report
+  cov_report.vhd:30  statement  n <= 0;         cov_report
+  cov_report.vhd:37  branch     when others     cov_report
+  cov_report.vhd:40  statement  v := 3;         cov_report
+  cov_report.vhd:42  branch     else            cov_report
+  cov_report.vhd:45  statement  v := 0;         cov_report
+  cov_report.vhd:53  branch     (no arm taken)  cov_report
+  cov_report.vhd:54  branch     when others     cov_report
 ";
     assert!(out.ends_with(want), "{out}");
     assert!(

@@ -658,7 +658,7 @@ impl Builder {
                 st,
                 result: Ok(()),
             }));
-            let depth = p.name.trim_matches(':').matches(':').count() as u32;
+            let depth = yavs_diag::depth(&p.name);
             names.push(p.name);
             idles.push(p.idle);
             guards.push(p.guard);

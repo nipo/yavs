@@ -212,7 +212,7 @@ pub fn pages(
             b,
             "<tr><td style=\"padding-left:{}rem\">{}</td>{}</tr>",
             0.7 + depth as f64,
-            esc(p),
+            esc(&yavs_diag::dotted(p)),
             t.cells(fec)
         );
     }
@@ -291,7 +291,7 @@ fn popup(db: &Database, n: usize, its: &[LineItem], summary: &str) -> String {
             };
             format!(
                 "{w} in {}: {}",
-                k.path,
+                k.shown(),
                 e.text.split_once(' ').map_or(&e.text[..], |x| x.1)
             )
         } else {
@@ -342,9 +342,9 @@ fn popup(db: &Database, n: usize, its: &[LineItem], summary: &str) -> String {
             );
         } else {
             let at = if matches!(k.kind, Kind::Combination(_)) {
-                format!("{}: {}", k.path, crate::combination_words(k))
+                format!("{}: {}", k.shown(), crate::combination_words(k))
             } else {
-                k.path.clone()
+                k.shown()
             };
             let _ = write!(
                 b,

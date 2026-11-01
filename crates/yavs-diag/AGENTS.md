@@ -16,7 +16,7 @@ Read the root `AGENTS.md` first. This file is for an agent about to change `crat
 
 ## 2. Map
 
-Everything is in `src/lib.rs` (about 530 lines) except `src/shared.rs`.
+Everything is in `src/lib.rs` (about 530 lines) except `src/shared.rs` and `src/path.rs`.
 
 | Item | Role |
 |---|---|
@@ -26,6 +26,7 @@ Everything is in `src/lib.rs` (about 530 lines) except `src/shared.rs`.
 | `Diagnostic::error/warning/new`, `with_primary`, `with_secondary`, `with_note`, `with_help` | Builder |
 | `MessageFormat` (`Human`, `Short`, `Json`), `ColorChoice::use_color` (TTY and `NO_COLOR`) | Output options |
 | `render(sources, diag, format, color) -> String` | The one renderer; ends with a newline |
+| `dotted`, `colons`, `parent`, `depth` (`path.rs`) | The one form of a hierarchical path in yavs's own texts (`tb.g(1).u`, #975); a separator inside an extended identifier or a generate index is part of the name |
 | `suggest::{similar, suggest, tail, help, distance}` (`suggest.rs`) | The one "did you mean" helper (rule 35): every name lookup in every crate uses it (`yavs_sem::suggest` re-exports it); `tail` is the one-string form for configuration errors |
 | `Buffer`, `Slice`, `sharing` (`shared.rs`) | Shared immutable bytes (a mapped cache entry) and ranges of them that a deserializer run under `sharing` hands out instead of copies; used by the compilation cache (`docs/decisions.md` "Zero-copy cache entries") |
 

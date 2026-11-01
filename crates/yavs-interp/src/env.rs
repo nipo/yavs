@@ -829,8 +829,9 @@ impl Format {
                     None => format!("{now_fs} fs"),
                     Some((fs, name)) => format!("{} {name}", fmt_g15(now_fs as f64 / *fs as f64)),
                 },
-                // The instance path: the process name without its label.
-                _ => proc.rsplit_once(':').map_or(proc, |(i, _)| i).to_string(),
+                // The instance path, in the LRM's form like `'path_name`: the process without
+                // its label.
+                _ => yavs_diag::colons(yavs_diag::parent(proc)),
             };
             let pad = (*width as i64) - v.chars().count() as i64;
             let (l, r) = match align {

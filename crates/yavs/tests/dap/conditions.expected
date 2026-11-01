@@ -38,7 +38,7 @@
 < {"body":{"breakpoints":[]},"command":"setDataBreakpoints","request_seq":16,"success":true,"type":"response"}
 > continue {"threadId":1}
 < {"body":{"allThreadsContinued":true},"command":"continue","request_seq":17,"success":true,"type":"response"}
-< {"body":{"category":"stdout","output":"** Note: 30000000fs+0: done\n    Process :tb:p\n"},"event":"output","type":"event"}
+< {"body":{"category":"stdout","output":"** Note: 30000000fs+0: done\n    Process tb.p\n"},"event":"output","type":"event"}
 < {"body":{"category":"console","output":"the session ended with exit status 0\n"},"event":"output","type":"event"}
 < {"body":{"exitCode":0},"event":"exited","type":"event"}
 < {"body":{},"event":"terminated","type":"event"}

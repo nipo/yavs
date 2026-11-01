@@ -22,8 +22,8 @@ use yavs_syntax::ast::{ExternalClass, Ident};
 
 use crate::eval::{Model, Val, leaf_values, parse_override};
 use crate::hier::{
-    Case, DriverDecl, ImplicitKind, Leaf, LeafId, LeafRes, ObjId, ObjKind, PortEdge, ProcIdx,
-    ScopeId, ScopeKind, Sel, Shape, SigObj, Whole,
+    DriverDecl, ImplicitKind, Leaf, LeafId, LeafRes, ObjId, ObjKind, PortEdge, ProcIdx, ScopeId,
+    ScopeKind, Sel, Shape, SigObj, Whole,
 };
 use crate::{ElabConfig, Elaborated, ProcInst, Top, VarObj, codes};
 
@@ -713,10 +713,7 @@ impl Elab<'_> {
     /// Attach the instance path to an error (fail clearly: where in the hierarchy).
     fn ctx(&self, s: ScopeId, mut d: Box<Diagnostic>) -> Box<Diagnostic> {
         if !d.notes.iter().any(|n| n.starts_with("in instance")) {
-            d = Box::new(d.with_note(format!(
-                "in instance {}",
-                self.m.hier.path_name(s, Case::Original)
-            )));
+            d = Box::new(d.with_note(format!("in instance {}", self.m.hier.dotted(s))));
         }
         d
     }
@@ -4633,15 +4630,14 @@ impl Elab<'_> {
                         let o = self.m.nets.obj(leaf.obj);
                         let span = self.db.decls[o.decl].span;
                         let describe = |s: &Src| match s {
-                            Src::Process(scope) => format!(
-                                "source: process {}",
-                                self.m.hier.path_name(*scope, Case::Original)
-                            ),
+                            Src::Process(scope) => {
+                                format!("source: process {}", self.m.hier.dotted(*scope))
+                            }
                             Src::Port(obj) => {
                                 let f = self.m.nets.obj(*obj);
                                 format!(
-                                    "source: port {}{}",
-                                    self.m.hier.path_name(f.scope, Case::Original),
+                                    "source: port {}.{}",
+                                    self.m.hier.dotted(f.scope),
                                     f.name.text
                                 )
                             }
@@ -4650,8 +4646,8 @@ impl Elab<'_> {
                             Diagnostic::error(
                                 codes::MULTIPLE_SOURCES,
                                 format!(
-                                    "unresolved signal `{}{}` has several sources",
-                                    self.m.hier.path_name(o.scope, Case::Original),
+                                    "unresolved signal `{}.{}` has several sources",
+                                    self.m.hier.dotted(o.scope),
                                     o.name.text
                                 ),
                             )
@@ -5328,14 +5324,14 @@ impl Model {
                 fail(format!(
                     "no elaborated region `{}` in {}",
                     name.text,
-                    self.hier.path_name(cur, Case::Original)
+                    self.hier.dotted(cur)
                 ))
             })?;
         }
         let missing = |m: &Self| {
             fail(format!(
                 "{} has no {what} `{}` (yet)",
-                m.hier.path_name(cur, Case::Original),
+                m.hier.dotted(cur),
                 last.text
             ))
         };

@@ -115,7 +115,7 @@ pub fn toggles(db: &Db, e: &Elaborated, max: u64) -> (Toggles, Vec<Skipped>) {
             );
             if out.len() as u64 > max {
                 skipped.push(Skipped {
-                    path: format!("{path}:{}", obj.name.text),
+                    path: yavs_diag::dotted(&format!("{path}:{}", obj.name.text)),
                     elems: out.len() as u64,
                 });
                 continue;

@@ -393,7 +393,7 @@ end;
     c.request("configurationDone", json!({}));
     let out = c.event("output");
     assert_eq!(
-        out["body"]["output"], "** Note: 0fs+0: before\n    Process :t:named\n",
+        out["body"]["output"], "** Note: 0fs+0: before\n    Process t.named\n",
         "{out}"
     );
     let out = c.event("output");
@@ -488,7 +488,7 @@ end;
         "{waits}"
     );
     let h = c.request("yavs/hierarchy", json!({}));
-    assert!(h["body"].to_string().contains(":t:_p4"), "{h}");
+    assert!(h["body"].to_string().contains("t._p4"), "{h}");
     let c2 = c.send("continue", json!({"threadId": tid}));
     let out =
         c.until(|m| m["event"] == "output" && m["body"]["output"].to_string().contains("here"));
@@ -496,7 +496,7 @@ end;
         out["body"]["output"]
             .as_str()
             .unwrap_or("")
-            .contains("Process :t:_p4"),
+            .contains("Process t._p4"),
         "{out}"
     );
     c.until(|m| m["type"] == "response" && m["request_seq"] == c2 || m["event"] == "exited");

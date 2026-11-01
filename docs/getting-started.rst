@@ -32,9 +32,9 @@ of the simulation:
 .. code-block:: text
 
     ** Note: 32000000fs+0: hello, count is 3
-        Process :hello_tb:check
+        Process hello_tb.check
     ** Note: 32000000fs+0: done
-        Process :hello_tb:check
+        Process hello_tb.check
     ** Note: 32000000fs+0: FINISH called with status 0
 
 Each report shows its severity, the simulation time in femtoseconds (``32000000fs`` is 32 ns), the
@@ -53,9 +53,9 @@ Override the generic so that the assertion fails:
 .. code-block:: text
 
     ** Note: 32000000fs+0: hello, count is 3
-        Process :hello_tb:check
+        Process hello_tb.check
     ** Failure: 32000000fs+0: expected 5, got 3
-        Process :hello_tb:check
+        Process hello_tb.check
 
 A ``failure`` stops the simulation and the exit status is 1, so a script or test runner sees the
 test as failed. An ``error`` report does not stop the run, but the exit status is still 1 at the

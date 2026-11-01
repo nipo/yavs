@@ -341,7 +341,7 @@ fn exclusion_files_take_combination_rows() {
     assert!(
         rows_text
             .lines()
-            .any(|l| l.starts_with("combination :cov_comb ") && l.contains(" 11 ")),
+            .any(|l| l.starts_with("combination cov_comb ") && l.contains(" 11 ")),
         "{rows_text}"
     );
     // Pasting the report back excludes exactly those requirements.

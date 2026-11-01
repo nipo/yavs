@@ -10,6 +10,7 @@ description = "yavs simulation kernel: the VHDL LRM 14.7 cycle with parallel pro
 serde.workspace = true
 rayon.workspace = true
 smallvec.workspace = true
+yavs-diag.workspace = true
 yavs-logic.workspace = true
 yavs-prefetch.workspace = true
 

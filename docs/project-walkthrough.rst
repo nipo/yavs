@@ -74,7 +74,7 @@ library:
 .. code-block:: text
 
     ** Note: 335000000fs+0: wrapped 2 times at 335000000 fs
-        Process :counter_tb:main
+        Process counter_tb.main
     ** Note: 335000000fs+0: FINISH called with status 0
 
 The exit status is 0.
@@ -155,8 +155,8 @@ Run with ``--cov``, then report on the database it writes:
     toggles    0/0 -
 
     path             statements            branches              toggles
-    :counter_tb      10/10 100.0%          3/3 100.0%            0/0 -
-    :counter_tb:dut  8/8 100.0%            5/5 100.0%            0/0 -
+    counter_tb       10/10 100.0%          3/3 100.0%            0/0 -
+    counter_tb.dut   8/8 100.0%            5/5 100.0%            0/0 -
     rtl.counter_pkg  1/1 100.0%            0/0 -                 0/0 -
 
 :doc:`coverage` has the other kinds, HTML reports, merging runs and exclusions.

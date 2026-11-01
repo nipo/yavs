@@ -1,4 +1,4 @@
-warning[W3102]: process :stuck_nowait:p has no wait statement and no sensitivity list
+warning[W3102]: process stuck_nowait.p has no wait statement and no sensitivity list
  --> $DIR/stuck_nowait.vhd:7:5
   |
 7 |     report "once";

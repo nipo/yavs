@@ -13,8 +13,8 @@ vhpi: put NULL value: error: vhpi_put_value: NULL value_p
 vhpi: put hex: ok
 vhpi: value change on constant: error: vhpi_register_cb: a value-change callback needs a signal, a port or a sub-element of one
 ** Note: 0fs+0: d=0
-    Process :top:_p1
+    Process top._p1
 ** Note: 0fs+0: rst='1'
-    Process :top:_p2
+    Process top._p2
 vhpi: put in read-only phase: error: vhpi_put_value: no writes in a read-only phase (end of time step, end of simulation)
 ** Note: 0fs+1: FINISH called with status 0

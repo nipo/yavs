@@ -30,9 +30,11 @@
 //! summary lines such as "aborting due to 2 previous errors" and the informational note
 //! that gives the seed of a shuffled run.
 
+mod path;
 mod shared;
 pub mod suggest;
 
+pub use path::{colons, depth, dotted, parent};
 pub use shared::{Buffer, Slice, sharing};
 
 use std::fmt::Write as _;

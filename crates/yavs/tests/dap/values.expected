@@ -66,13 +66,13 @@
 < {"body":{"evaluateName":"vals.r","namedVariables":2,"result":"(a => 7, b => \"01ZX\")","type":"rec_t","variablesReference":4294967296},"command":"evaluate","request_seq":30,"success":true,"type":"response"}
 > continue {"threadId":2}
 < {"body":{"allThreadsContinued":true},"command":"continue","request_seq":31,"success":true,"type":"response"}
-< {"body":{"category":"stdout","output":"** Note: 11000000fs+0: n=42 b=F d=A5 q=FF t=5000000 fs r.a=7\n    Process :vals:p\n"},"event":"output","type":"event"}
+< {"body":{"category":"stdout","output":"** Note: 11000000fs+0: n=42 b=F d=A5 q=FF t=5000000 fs r.a=7\n    Process vals.p\n"},"event":"output","type":"event"}
 < {"body":{"allThreadsStopped":true,"description":"breakpoint at 11 ns, delta 0","reason":"breakpoint","threadId":2},"event":"stopped","type":"event"}
 > yavs/release {"signal":"q"}
 < {"body":{"signal":"vals.q"},"command":"yavs/release","request_seq":32,"success":true,"type":"response"}
 > continue {"threadId":2}
 < {"body":{"allThreadsContinued":true},"command":"continue","request_seq":33,"success":true,"type":"response"}
-< {"body":{"category":"stdout","output":"** Note: 12000000fs+0: q=A5 big(299)=9\n    Process :vals:p\n"},"event":"output","type":"event"}
+< {"body":{"category":"stdout","output":"** Note: 12000000fs+0: q=A5 big(299)=9\n    Process vals.p\n"},"event":"output","type":"event"}
 < {"body":{"category":"console","output":"the session ended with exit status 0\n"},"event":"output","type":"event"}
 < {"body":{"exitCode":0},"event":"exited","type":"event"}
 < {"body":{},"event":"terminated","type":"event"}
