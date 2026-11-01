@@ -171,7 +171,7 @@ python3 -I tools/realbench/window.py --self-test
 
 With no variant it builds this checkout. A checkout's build stays in `~/.cache/yavs-window-build-<hash>`: delete it when your task ends. `--bar COUNTER:RATIO` is the largest passing ratio to the first variant, per test and on the geomean; repeat it for several counters. Ratios are to the first variant, plus `cyc/sim1` and `ins/sim1`. Counters are the simulation thread (`--no-inherit`, as in the baseline); compile threads are not in them, so a change that compiles more must also run with `--inherit` or wall. `--window T0,T1` replaces the window to calibrate. `--no-sim1` leaves out sim1.
 
-Total for two variants plus sim1, all nine tests, one round: **541 s** (setup 14 s, next to another timed job on CCD1, 2026-11-01). GRLIB and Microwatt are most of it (about 3.5 and 4.5 minutes); the other seven take about a minute. Each yavs variant runs two warm-ups to T1, then T1 and T0.
+Total for two variants plus sim1, all nine tests, one round: **541 s** (setup 14 s, next to another timed job on CCD1, 2026-11-01). GRLIB and Microwatt are most of it (193 and 225 s); the other seven take 108 s. Each yavs variant runs two warm-ups to T1, then T1 and T0.
 
 ### Validation, 2026-11-01, e8289fd1, Cranelift cells only
 
