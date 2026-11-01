@@ -13,7 +13,7 @@ use yavs_interp::{
     CallVal, DebugSession, InstData, InstSig, InterpProcess, ProcDriver, Runtime, SharedState,
 };
 use yavs_kernel::{Config, ErrorKind, SimControl, SimError};
-use yavs_lower::{LowerOptions, Lowerer, UnitIr, package_prefix, subprogram_element};
+use yavs_lower::{LowerOptions, Lowerer, UnitIr, own_element, package_prefix, subprogram_element};
 use yavs_sem::{Db, UnitId};
 
 use crate::Elaborated;
@@ -915,12 +915,7 @@ impl Elaborated {
                             .get(s.index())
                             .is_some_and(|m| m.contains_key(&d))
                 });
-                let name = db.decls[d].name.to_string().to_ascii_lowercase();
-                let own = match &db.decls[d].kind {
-                    // A subprogram names itself with its profile and a trailing colon.
-                    DeclKind::Subprogram(_) => format!("{}:", subprogram_element(db, d)),
-                    _ => name,
-                };
+                let own = own_element(db, d);
                 // An item of a package or package instance is named by its package (16.2.5):
                 // `:lib:pkg:` for a library unit, else the declaring region plus the instance.
                 let (pkg, lib) = package_prefix(db, db.decls[d].scope);
@@ -932,7 +927,16 @@ impl Elaborated {
                 } else {
                     String::new()
                 };
-                let local = if pkg.is_empty() { local } else { pkg };
+                // A local package keeps what is around it, a process label included.
+                let local = if pkg.is_empty() {
+                    local
+                } else {
+                    let outer = outside_local_package(db, db.decls[d].scope);
+                    format!(
+                        "{}{pkg}",
+                        outer.map_or(String::new(), |o| local_prefix(db, o))
+                    )
+                };
                 format!("{}{local}{own}", text(declared.unwrap_or(region)))
             }
         }
@@ -2140,6 +2144,27 @@ fn local_prefix(db: &Db, scope: yavs_sem::ScopeId) -> String {
         sc = sd.parent;
     }
     parts.iter().rev().map(String::as_str).collect()
+}
+
+/// The scope the outermost local package around `scope` is declared in.
+fn outside_local_package(db: &Db, scope: yavs_sem::ScopeId) -> Option<yavs_sem::ScopeId> {
+    use yavs_sem::scope::ScopeKind as S;
+    let mut out = None;
+    let mut sc = Some(scope);
+    while let Some(s) = sc {
+        let sd = &db.scopes[s];
+        match sd.kind {
+            S::PackageBody => {
+                sc = db.body_package(s);
+                continue;
+            }
+            S::Package | S::Instance => out = sd.parent,
+            S::Subprogram | S::Loop | S::SeqBlock | S::Protected | S::ProtectedBody => {}
+            _ => break,
+        }
+        sc = sd.parent;
+    }
+    out
 }
 
 /// The interpreter's `resolution_limit` for the kernel's resolution (`yavs run --resolution`).

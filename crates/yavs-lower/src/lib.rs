@@ -21,7 +21,7 @@ mod force;
 mod foreign;
 mod gather;
 pub use foreign::vhpi_model;
-pub use pathname::{library_package_item_name, package_prefix, subprogram_element};
+pub use pathname::{library_package_item_name, own_element, package_prefix, subprogram_element};
 mod func;
 mod pathname;
 mod protected;

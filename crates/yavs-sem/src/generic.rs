@@ -214,6 +214,9 @@ pub(crate) struct Remap {
     /// First subtypes of formal types (a `subtype s is T` inherits the actual's constraint).
     /// Ordered: a hash set writes its elements in another order in every session.
     formal_firsts: std::collections::BTreeSet<SubtypeId>,
+    /// The declaration a generic package's body names itself by: `'path_name` and
+    /// `'instance_name` of it keep naming the generic package (#1010).
+    own_package: Option<DeclId>,
     /// Clone subprogram bodies (the body pass) or leave them pending (visible part).
     bodies: bool,
     changed: bool,
@@ -2861,6 +2864,7 @@ impl Db {
                     r.scopes.insert(ctx, iscope);
                 }
                 r.decls.insert(bdecl, site);
+                r.own_package = Some(bdecl);
                 let s = self.r_scope(r, bscope);
                 self.fix_bodies(r);
                 Some(s)
@@ -2873,6 +2877,7 @@ impl Db {
             } => {
                 let bscope = *bscope;
                 r.decls.insert(g, site);
+                r.own_package = Some(g);
                 let s = self.r_scope(r, bscope);
                 self.fix_bodies(r);
                 Some(s)
@@ -3717,6 +3722,7 @@ impl Db {
         match p {
             AttrPrefix::Subtype(s) => AttrPrefix::Subtype(self.r_subtype(r, s)),
             AttrPrefix::Expr(e) => AttrPrefix::Expr(self.r_expr(r, e)),
+            AttrPrefix::Entity(d) if r.own_package == Some(d) => AttrPrefix::Entity(d),
             AttrPrefix::Entity(d) => AttrPrefix::Entity(self.r_decl(r, d)),
         }
     }

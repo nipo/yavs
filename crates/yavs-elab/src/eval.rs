@@ -634,6 +634,12 @@ impl Model {
                 // instantiation (LRM 16.2.5): it names the instance whose generics
                 // are being bound (`actual_of`), not the parent the actual is
                 // evaluated in. Another label's name is not known yet (#619).
+                if let Some(text) = yavs_lower::library_package_item_name(db, *d) {
+                    return Ok(Val::Array(ArrayConst {
+                        bounds: [(1, Direction::To, text.len() as i64)].into(),
+                        elems: Elems::Bytes(text.into_bytes().into()),
+                    }));
+                }
                 let i = if matches!(db.decls[*d].kind, DeclKind::Label(_)) {
                     match self.actual_of {
                         Some(i) if db.decls[*d].name.key() == self.hier.scope(i).name.key => i,

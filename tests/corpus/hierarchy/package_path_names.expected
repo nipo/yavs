@@ -1,0 +1,25 @@
+exit	0
+diag	note	0	0	:package_path_names:_p0	a.li.p :package_path_names:li:
+diag	note	0	0	:package_path_names:_p0	a.li.i :package_path_names(test):li:
+diag	note	0	0	:package_path_names:_p0	a.lp.p :package_path_names:lp:
+diag	note	0	0	:package_path_names:_p0	a.plain.p :work:package_path_names_plain:
+diag	note	0	0	:package_path_names:_p0	p.li.p :package_path_names:li:
+diag	note	0	0	:package_path_names:_p0	p.li.i :package_path_names(test):li:
+diag	note	0	0	:package_path_names:_p0	p.lp.p :package_path_names:lp:
+diag	note	0	0	:package_path_names:_p0	p.lp.i :package_path_names(test):lp:
+diag	note	0	0	:package_path_names:_p0	p.lp.sn :package_path_names:lp:
+diag	note	0	0	:package_path_names:_p0	p.lp.si :package_path_names(test):lp:
+diag	note	0	0	:package_path_names:_p0	p.gi.p :work:package_path_names_gi:
+diag	note	0	0	:package_path_names:_p0	p.gi.i :work:package_path_names_gi:
+diag	note	0	0	:package_path_names:_p0	p.pl.p :work:package_path_names_plain:
+diag	note	0	0	:package_path_names:_p0	p.pl.i :work:package_path_names_plain:
+diag	note	0	0	:package_path_names:_p0	n.ci :work:package_path_names_plain:n:
+diag	note	0	0	:package_path_names:_p0	n.cn :work:package_path_names_plain:
+diag	note	0	0	:package_path_names:_p0	nl.kp :work:package_path_names_plain:nl:k
+diag	note	0	0	:package_path_names:_p0	ni.kp :work:package_path_names_oi:ni:k
+diag	note	0	0	:package_path_names:_p0	li.n.mp :package_path_names:li:n:m
+diag	note	1000000	0	:package_path_names:lab	pi.kp :package_path_names:lab:pi:k
+diag	note	1000000	0	:package_path_names:lab	pi.p :package_path_names:lab:pi:
+diag	note	1000000	0	:package_path_names:lab	pi.i :package_path_names(test):lab:pi:
+diag	note	2000000	0	:package_path_names:_p1	pu.kp :package_path_names::pu:k
+diag	note	2000000	0	:package_path_names:_p1	pu.p :package_path_names::pu:

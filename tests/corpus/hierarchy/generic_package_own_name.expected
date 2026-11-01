@@ -1,0 +1,22 @@
+exit	0
+diag	note	0	0	:generic_package_own_name:_p0	gi.ci :work:generic_package_own_name_gp:
+diag	note	0	0	:generic_package_own_name:_p0	gi.cp :work:generic_package_own_name_gp:
+diag	note	0	0	:generic_package_own_name:_p0	gi.fi :work:generic_package_own_name_gp:
+diag	note	0	0	:generic_package_own_name:_p0	gi.fp :work:generic_package_own_name_gp:
+diag	note	0	0	:generic_package_own_name:_p0	gi.kp :work:generic_package_own_name_gi:k
+diag	note	0	0	:generic_package_own_name:_p0	gi.fk :work:generic_package_own_name_gi:k
+diag	note	0	0	:generic_package_own_name:_p0	gi.fself :work:generic_package_own_name_gi:fself[return string]:
+diag	note	0	0	:generic_package_own_name:_p0	li.ci :work:generic_package_own_name_gp:
+diag	note	0	0	:generic_package_own_name:_p0	li.cp :work:generic_package_own_name_gp:
+diag	note	0	0	:generic_package_own_name:_p0	li.fi :work:generic_package_own_name_gp:
+diag	note	0	0	:generic_package_own_name:_p0	li.fp :work:generic_package_own_name_gp:
+diag	note	0	0	:generic_package_own_name:_p0	plain.ci :work:generic_package_own_name_plain:
+diag	note	0	0	:generic_package_own_name:_p0	plain.fp :work:generic_package_own_name_plain:
+diag	note	1000000	0	:generic_package_own_name:b1:p	b.ci :work:generic_package_own_name_gp:
+diag	note	1000000	0	:generic_package_own_name:b1:p	b.cp :work:generic_package_own_name_gp:
+diag	note	1000000	0	:generic_package_own_name:b1:p	b.fi :work:generic_package_own_name_gp:
+diag	note	1000000	0	:generic_package_own_name:b1:p	b.fp :work:generic_package_own_name_gp:
+diag	note	2000000	0	:generic_package_own_name:g1(0):b2:p	g.ci :work:generic_package_own_name_gp:
+diag	note	2000000	0	:generic_package_own_name:g1(0):b2:p	g.cp :work:generic_package_own_name_gp:
+diag	note	2000000	0	:generic_package_own_name:g1(0):b2:p	g.fi :work:generic_package_own_name_gp:
+diag	note	2000000	0	:generic_package_own_name:g1(0):b2:p	g.fp :work:generic_package_own_name_gp:

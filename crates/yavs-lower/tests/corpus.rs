@@ -120,6 +120,8 @@ const PASS: &[&str] = &[
     "composite/aggregate_target_ranges",
     "composite/aggregate_target_ranges_signal",
     "composite/aggregate_target_self",
+    "hierarchy/generic_package_own_name",
+    "hierarchy/package_path_names",
     "composite/aggregate_target_records",
     "composite/aggregate_target_records_sub",
     "composite/aggregate_target_records_hand",

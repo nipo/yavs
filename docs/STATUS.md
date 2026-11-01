@@ -10642,6 +10642,11 @@ then searched per leaf, so a signal array took work and memory per element, seve
 whole function once per block that a dirty state crossed, so a chain of `n` branches took `n` walks: quadratic. It is a worklist now, and `forward_hits` sweeps backwards.
 The optimised code is the same. No work counter covers elaboration or the optimiser, so no bound guards these two; `composite/init_leaves` guards the values.
 
+
 ## Composite elements of aggregate targets (#1011, 2026-11-01)
 
 A record signal, an array of records or an array of arrays is an element of an aggregate signal target through the path of a whole target (`record_elem`, `target_part`, `drive_part` in `stmt.rs`), with every length checked first. Matrices of records and of logic arrays, and 2008 pieces of arrays of records, work for variables and signals; guarded assignments through any aggregate target disconnect per element. Non-static choices and pieces in matrix targets stay `E2001`. References: the first differs on named fields, matrices and pieces (known and catalogued), the second crashes on most of these forms; the hand-checked results are in `composite/aggregate_target_records_hand`.
+
+## Names of packages (#1010, 2026-11-01)
+
+`'path_name` and `'instance_name` of a package: one last element (`own_element`), a colon for a package; a library package from any region is `:lib:pkg:` (it was the reading instance's path); a generic package named by itself is `:lib:gp:` in declaration and body; items nested in a library package are static text, so its initialisation reads no instance data. The reading in the declaration of a generic package splits the references and is open for the maintainer (L173).

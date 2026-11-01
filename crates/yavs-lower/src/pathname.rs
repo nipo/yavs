@@ -4,6 +4,7 @@
 
 use yavs_sem::Db;
 use yavs_sem::decl::DeclKind;
+use yavs_sem::scope::ScopeKind;
 
 /// `name[type,type return type]` (LRM 16.2.5, lower case): a subprogram's path element. The type
 /// marks are the declared subtypes (`std_logic`, `natural`), not their base types, separated by a
@@ -30,6 +31,8 @@ pub fn subprogram_element(db: &Db, d: yavs_sem::DeclId) -> String {
 pub fn package_prefix(db: &Db, scope: yavs_sem::ScopeId) -> (String, Option<String>) {
     use yavs_sem::scope::ScopeKind as S;
     let mut parts = Vec::new();
+    // The elements up to the outermost local package: the path when no library unit holds it.
+    let mut local: Option<String> = None;
     let mut sc = Some(scope);
     while let Some(s) = sc {
         let sd = &db.scopes[s];
@@ -63,7 +66,7 @@ pub fn package_prefix(db: &Db, scope: yavs_sem::ScopeId) -> (String, Option<Stri
                         .to_string()
                         .to_ascii_lowercase())
                 ));
-                return (parts.iter().rev().map(String::as_str).collect(), None);
+                local = Some(parts.iter().rev().map(String::as_str).collect());
             }
             (S::Instance, Some(o))
                 if matches!(db.decls[o].kind, yavs_sem::decl::DeclKind::PackageInst(_)) =>
@@ -72,13 +75,26 @@ pub fn package_prefix(db: &Db, scope: yavs_sem::ScopeId) -> (String, Option<Stri
                     "{}:",
                     db.decls[o].name.to_string().to_ascii_lowercase()
                 ));
-                return (parts.iter().rev().map(String::as_str).collect(), None);
+                local = Some(parts.iter().rev().map(String::as_str).collect());
             }
             _ => break,
         }
         sc = sd.parent;
     }
-    (String::new(), None)
+    (local.unwrap_or_default(), None)
+}
+
+/// The last path element of named entity `d`: a subprogram or a package ends in a colon, as a
+/// region does (LRM 16.2.5, #1010), an object does not.
+pub fn own_element(db: &Db, d: yavs_sem::DeclId) -> String {
+    let name = db.decls[d].name.to_string().to_ascii_lowercase();
+    match &db.decls[d].kind {
+        DeclKind::Subprogram(_) => format!("{}:", subprogram_element(db, d)),
+        DeclKind::Package { .. } | DeclKind::PackageInst(_) | DeclKind::GenericPackage(_) => {
+            format!("{name}:")
+        }
+        _ => name,
+    }
 }
 
 /// The whole `'path_name` / `'instance_name` of `d` when it is an item of a library-unit package
@@ -86,19 +102,19 @@ pub fn package_prefix(db: &Db, scope: yavs_sem::ScopeId) -> (String, Option<Stri
 pub fn library_package_item_name(db: &Db, d: yavs_sem::DeclId) -> Option<String> {
     let decl = &db.decls[d];
     let own = match &decl.kind {
-        // The package itself is named by its library and name (#1007).
+        // A package is named by its library, also a generic one by itself in an instance: both
+        // references name it so in a subprogram body (#1010).
         DeclKind::Unit(u)
             if matches!(
                 db.scopes[db.units[*u].scope].kind,
-                yavs_sem::scope::ScopeKind::Package | yavs_sem::scope::ScopeKind::PackageBody
+                ScopeKind::Package | ScopeKind::PackageBody
             ) =>
         {
             let u = &db.units[*u];
             return Some(format!(":{}:{}:", db.libs[u.lib].name.key, u.name.key));
         }
         DeclKind::Unit(_) | DeclKind::Label(_) => return None,
-        DeclKind::Subprogram(_) => format!("{}:", subprogram_element(db, d)),
-        _ => decl.name.to_string().to_ascii_lowercase(),
+        _ => own_element(db, d),
     };
     let (pkg, lib) = package_prefix(db, decl.scope);
     Some(format!("{}{pkg}{own}", lib?))
