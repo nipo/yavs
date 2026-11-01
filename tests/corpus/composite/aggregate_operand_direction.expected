@@ -1,0 +1,38 @@
+exit	0
+diag	note	1000000	0	:aggregate_operand_direction:_p3	eq low first true
+diag	note	1000000	0	:aggregate_operand_direction:_p3	eq high first false
+diag	note	1000000	0	:aggregate_operand_direction:_p3	eq on the left true
+diag	note	1000000	0	:aggregate_operand_direction:_p3	ne true
+diag	note	1000000	0	:aggregate_operand_direction:_p3	lt false
+diag	note	1000000	0	:aggregate_operand_direction:_p3	le false
+diag	note	1000000	0	:aggregate_operand_direction:_p3	gt true
+diag	note	1000000	0	:aggregate_operand_direction:_p3	ge false
+diag	note	1000000	0	:aggregate_operand_direction:_p3	positional true
+diag	note	1000000	0	:aggregate_operand_direction:_p3	ascending type true
+diag	note	1000000	0	:aggregate_operand_direction:_p3	ascending type reversed false
+diag	note	1000000	0	:aggregate_operand_direction:_p3	subtype high first false
+diag	note	1000000	0	:aggregate_operand_direction:_p3	subtype low first true
+diag	note	1000000	0	:aggregate_operand_direction:_p3	bits high first false
+diag	note	1000000	0	:aggregate_operand_direction:_p3	bits low first true
+diag	note	1000000	0	:aggregate_operand_direction:_p3	enum index high first false
+diag	note	1000000	0	:aggregate_operand_direction:_p3	enum index low first true
+diag	note	1000000	0	:aggregate_operand_direction:_p3	element of an array false
+diag	note	1000000	0	:aggregate_operand_direction:_p3	qualified true
+diag	note	1000000	0	:aggregate_operand_direction:_p3	function 7
+diag	note	1000000	0	:aggregate_operand_direction:_p3	function left 3
+diag	note	1000000	0	:aggregate_operand_direction:_p3	unconstrained formal 0
+diag	note	1000000	0	:aggregate_operand_direction:_p3	default 9
+diag	note	1000000	0	:aggregate_operand_direction:_p3	return 4
+diag	note	1000000	0	:aggregate_operand_direction:_p3	return others 11
+diag	note	1000000	0	:aggregate_operand_direction:_p3	proc 13
+diag	note	1000000	0	:aggregate_operand_direction:_p3	proc 14
+diag	note	1000000	0	:aggregate_operand_direction:_p3	assign 7
+diag	note	1000000	0	:aggregate_operand_direction:_p3	conditional 1
+diag	note	1000000	0	:aggregate_operand_direction:_p3	allocator 15
+diag	note	1000000	0	:aggregate_operand_direction:_p3	dereference 16
+diag	note	1000000	0	:aggregate_operand_direction:_p3	signal init 2
+diag	note	1000000	0	:aggregate_operand_direction:_p3	waveform 1
+diag	note	1000000	0	:aggregate_operand_direction:_p3	conditional waveform 7
+diag	note	1000000	0	:aggregate_operand_direction:_p3	selected waveform 8
+diag	note	1000000	0	:aggregate_operand_direction:_p3	record field 5
+diag	note	1000000	0	:aggregate_operand_direction:_p3	array element 6

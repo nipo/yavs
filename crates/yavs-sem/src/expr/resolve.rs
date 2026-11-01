@@ -743,8 +743,8 @@ impl Db {
         let Some(s) = self.decls[callee].kind.subprogram() else {
             return self.poison_expr();
         };
-        let formals: smallvec::SmallVec<[TypeId; 2]> =
-            s.params.iter().map(|p| self.base(p.subtype)).collect();
+        let formals: smallvec::SmallVec<[crate::ids::SubtypeId; 2]> =
+            s.params.iter().map(|p| p.subtype).collect();
         let ret = s.ret.unwrap_or(self.poison.subtype);
         let implicit = matches!(s.body, crate::decl::Body::Implicit(_));
         // 9.4.3: a pure function call with globally static actuals is globally static
@@ -761,7 +761,13 @@ impl Db {
         for (k, (o, f)) in operands.iter().zip(formals).enumerate() {
             let id = match pre.get(&k) {
                 Some(&id) => id,
-                None => self.resolve(scope, o, Expected::Type(f)),
+                // The formal of a declared operator is a context, like a function's; a
+                // predefined one's is the type alone (lrm-checks L170).
+                None if implicit => {
+                    let t = self.base(f);
+                    self.resolve(scope, o, Expected::Type(t))
+                }
+                None => self.resolve_in(scope, o, f),
             };
             stat = stat.min(self.exprs[id].stat);
             hargs.push(Arg {
@@ -804,7 +810,9 @@ impl Db {
                     {
                         st
                     }
-                    _ => self.types[t].first_subtype,
+                    // A constrained array type is no context: an operand, say, takes the
+                    // direction of the index subtype (lrm-checks L170, #1009).
+                    _ => self.types[t].base_subtype,
                 };
                 let mut r = Resolver { scope };
                 crate::expr::aggregate::resolve_aggregate(self, &mut r, assocs, ctx, e.span)
