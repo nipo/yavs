@@ -99,6 +99,15 @@ impl Fake {
         f.iter().filter(|m| m["command"] == cmd).cloned().collect()
     }
 
+    /// Waits until yavs has sent `cmd`; fails after `limit`.
+    fn wait_for(&self, cmd: &str, limit: Duration) {
+        let t0 = Instant::now();
+        while self.first(cmd).is_null() {
+            assert!(t0.elapsed() < limit, "no `{cmd}` within {limit:?}");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
     /// Serve one connection until it closes.
     fn serve(&self, s: TcpStream, events: &[Value]) {
         let mut w = s.try_clone().expect("clone");
@@ -540,6 +549,9 @@ fn a_stalled_viewer_is_told_and_catches_up() {
     *fake.stall.lock().expect("lock") = Some(("reload".into(), held));
     let (addr, t) = fake.listen(vec![]);
     let mut s = Session::start(&d, &addr, 200);
+    // The viewer takes the stop at the start in before the run goes on: one that came to it late
+    // would reload for it and again for the breakpoint (#980).
+    fake.wait_for("set_cursor", SHORT);
     s.send("break tb.vhd:23");
     s.send("run");
     let t0 = Instant::now();
