@@ -616,7 +616,9 @@ Arguments:
 
 .. option:: --exclude=FILE
 
-   Leave out the items an exclusion file lists (rows pasted from ``--uncovered``; a ``.yaml`` or ``.yml`` file is read as YAML).
+   Leave out the items an exclusion file lists (rows pasted from ``--uncovered``; a ``.yaml`` or ``.yml`` file is read as YAML). Repeatable: the rules of all files add up. A file that cannot be read or has a bad row is ``E0112``.
+
+   May be repeated.
 
 .. option:: --exclusions, --exclusions=text|json
 
@@ -640,7 +642,7 @@ Arguments:
 
    May be repeated.
 
-Diagnostics named above: ``E0114``, ``E0115``; ``yavs --explain CODE`` explains each.
+Diagnostics named above: ``E0112``, ``E0114``, ``E0115``; ``yavs --explain CODE`` explains each.
 
 ``yavs cov rank``
 -----------------
@@ -659,13 +661,17 @@ Arguments:
 
 .. option:: --exclude=FILE
 
-   Leave out the items an exclusion file lists.
+   Leave out the items an exclusion file lists. Repeatable: the rules of all files add up. A file that cannot be read or has a bad row is ``E0112``.
+
+   May be repeated.
 
 .. option:: -W FLAG
 
    Warning control, as for ``analyze``: ``-Werror``, ``-Wno-CODE``, ...
 
    May be repeated.
+
+Diagnostics named above: ``E0112``; ``yavs --explain CODE`` explains each.
 
 ``yavs lint``
 -------------

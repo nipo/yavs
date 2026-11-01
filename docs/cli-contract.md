@@ -715,7 +715,7 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   `yavs.ycov`, relative to the working directory) after the simulation, whatever its exit
   status; an elaboration failure writes none. The file is overwritten, never appended to:
   one database per run, merged afterwards with `yavs cov merge A B ... -o OUT`. `yavs cov report
-  DB ... [--cobertura FILE.xml] [--html DIR] [--root DIR] [--kind LIST] [--total] [--fail-under PCT] [--exclude FILE] [--uncovered] [-W...]` prints a text summary on
+  DB ... [--cobertura FILE.xml] [--html DIR] [--root DIR] [--kind LIST] [--total] [--fail-under PCT] [--exclude FILE]... [--uncovered] [-W...]` prints a text summary on
   stdout and writes Cobertura XML. The summary ends with the items that never ran in aligned
   columns (`FILE:LINE  KIND  ITEM  INSTANCE`; a branch is named by its arm in the source:
   `if C`, `elsif C`, `else`, `when CHOICES`, `(no arm taken)`, `loop body`; a toggle is `SIGNAL
@@ -736,7 +736,7 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   never ran (`statement|branch INSTANCE ID FILE:LINE   # text`, `condition|expression INSTANCE HEX12.OCC ROW FILE:LINE   # input, value, result, condition`, `toggle PATH SCALAR rise|fall
   # never rise (0->1)|fall (1->0) (FILE:LINE)`, or `toggle PATH SCALAR   # never toggled` when both
   directions never happened); `--uncovered=yaml` prints the same items as a YAML exclusion file
-  (`exclude:` list of `kind`/`instance`/`hash`/`line` or `signal`/`direction` maps); `--exclude FILE` takes the
+  (`exclude:` list of `kind`/`instance`/`hash`/`line` or `signal`/`direction` maps); `--exclude FILE` (repeatable: the rules of all files add up, in the order given) takes the
   items such a file lists out of the summary and the Cobertura report and lists them under
   "excluded" (format and warnings `W0110`, `W0111`, `W0114`: `docs/coverage.md` "Excluding code");
   the file is read as YAML when its name ends in `.yaml` or `.yml` (any case), else as text rows,
@@ -752,7 +752,7 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   `-grunner_cfg=...` generic (`,,` is a comma), else `TOP` or `TOP(g1=v1,g2=v2)` with the `-g`
   generics in command-line order. `cov merge` keeps per item the tests that hit it (matched by
   name); `cov report --tests` prints instead one exclusion row per item that ran, with
-  `# tests: A, B`; `yavs cov rank DB... [--exclude FILE] [-W...]` prints a greedy minimal set
+  `# tests: A, B`; `yavs cov rank DB... [--exclude FILE]... [-W...]` prints a greedy minimal set
   of tests reaching the same coverage (`  NAME  +NEW  SO_FAR/HIT` per pick, then `not needed:
   ...`) and per test its items and the items no other test hit. `yavs cov` exits 0, or 1 with `E0111` (a database cannot be
   read), `E0114`, `E0115`, `E0112` (an exclusion file cannot be read or has a malformed row) or `E0110` (a file

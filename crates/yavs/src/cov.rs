@@ -103,9 +103,10 @@ pub enum Command {
         #[arg(long, value_name = "PCT", value_parser = percentage)]
         fail_under: Option<u64>,
         /// Leave out the items an exclusion file lists (rows pasted from `--uncovered`; a
-        /// `.yaml` or `.yml` file is read as YAML).
+        /// `.yaml` or `.yml` file is read as YAML). Repeatable: the rules of all files add up. A
+        /// file that cannot be read or has a bad row is `E0112`.
         #[arg(long, value_name = "FILE")]
-        exclude: Option<PathBuf>,
+        exclude: Vec<PathBuf>,
         /// Print the exclusion report instead of the summary: every rule that takes requirements
         /// out of the totals (`-- yavs coverage exclude` directives and the rows of `--exclude`)
         /// with its origin, reason, what it matched, how often that ran, and the totals before
@@ -142,9 +143,10 @@ pub enum Command {
     /// Rank the tests of merged databases: a minimal set reaching the same coverage, and
     /// what each test alone covers.
     Rank {
-        /// Leave out the items an exclusion file lists.
+        /// Leave out the items an exclusion file lists. Repeatable: the rules of all files add
+        /// up. A file that cannot be read or has a bad row is `E0112`.
         #[arg(long, value_name = "FILE")]
-        exclude: Option<PathBuf>,
+        exclude: Vec<PathBuf>,
         /// Warning control, as for `analyze`: `-Werror`, `-Wno-CODE`, ...
         #[arg(short = 'W', value_name = "FLAG")]
         warn: Vec<String>,
@@ -223,17 +225,17 @@ fn write(path: &PathBuf, text: String) -> Result<(), Box<Diagnostic>> {
 /// Excluded items with the reasons of their rows.
 type Excluded = Vec<(yavs_cov::Key, yavs_cov::Entry, String)>;
 
-/// `db` without the items the exclusion file lists and the in-source directives waive, those
+/// `db` without the items the exclusion files list and the in-source directives waive, those
 /// items, and the report of every rule.
 fn excluded(
     out: &mut Out,
     db: Database,
-    exclude: Option<PathBuf>,
+    exclude: &[PathBuf],
 ) -> Result<(Database, Excluded, yavs_cov::exclusions::Report), Box<Diagnostic>> {
-    let (rows, name) = match &exclude {
-        None => (Vec::new(), String::new()),
-        Some(p) => {
-            let fail = |m: String| {
+    let files = exclude
+        .iter()
+        .map(|p| {
+            yavs_cov::exclude::Rules::read(p).map_err(|m| {
                 Box::new(
                     Diagnostic::error(
                         EXCLUDE_ERROR,
@@ -241,24 +243,10 @@ fn excluded(
                     )
                     .with_note(m),
                 )
-            };
-            let yaml = p
-                .extension()
-                .is_some_and(|e| e.eq_ignore_ascii_case("yaml") || e.eq_ignore_ascii_case("yml"));
-            let rows = std::fs::read_to_string(p)
-                .map_err(|e| e.to_string())
-                .and_then(|t| {
-                    if yaml {
-                        yavs_cov::exclude::parse_yaml(&t)
-                    } else {
-                        yavs_cov::exclude::parse(&t)
-                    }
-                })
-                .map_err(fail)?;
-            (rows, p.display().to_string())
-        }
-    };
-    let a = yavs_cov::exclude::apply(&db, &rows, &name);
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let a = yavs_cov::exclude::apply(&db, &files);
     for w in &a.warnings {
         out.emit(&SourceMap::default(), w);
     }
@@ -396,7 +384,7 @@ struct Report {
     cobertura: Option<PathBuf>,
     html: Option<PathBuf>,
     root: Option<PathBuf>,
-    exclude: Option<PathBuf>,
+    exclude: Vec<PathBuf>,
     exclusions: Option<ExclusionsFormat>,
     kinds: Vec<String>,
     uncovered: Option<UncoveredFormat>,
@@ -406,7 +394,7 @@ struct Report {
 }
 
 fn report(out: &mut Out, db: Database, r: Report) -> Result<(), Box<Diagnostic>> {
-    let (db, mut excluded, mut exclusions) = excluded(out, db, r.exclude)?;
+    let (db, mut excluded, mut exclusions) = excluded(out, db, &r.exclude)?;
     let db = if r.kinds.is_empty() {
         db
     } else {
@@ -510,7 +498,7 @@ pub fn run(c: Command, format: MessageFormat, color: bool) -> ExitCode {
         } => out
             .set_warn(&warn)
             .and_then(|()| merged(&inputs))
-            .and_then(|db| excluded(&mut out, db, exclude))
+            .and_then(|db| excluded(&mut out, db, &exclude))
             .map(|(db, ..)| print!("{}", db.rank())),
     };
     match r {

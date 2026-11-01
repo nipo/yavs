@@ -78,7 +78,7 @@ tells you whether one of the two tests adds nothing the other lacks.
 |---------|--------------|
 | `yavs cov merge a.ycov b.ycov -o all.ycov` | adds up the counts of the runs and keeps, for every item, the tests that hit it |
 | `yavs cov report all.ycov [options]` | merges its inputs, then reports (options below) |
-| `yavs cov rank all.ycov [--exclude FILE]` | prints a small set of tests that reaches the same coverage, the tests that set does not need, and per test how many items it hit and how many no other test hit |
+| `yavs cov rank all.ycov [--exclude FILE]...` | prints a small set of tests that reaches the same coverage, the tests that set does not need, and per test how many items it hit and how many no other test hit |
 
 Report options:
 
@@ -93,7 +93,7 @@ Report options:
 | `--fail-under=PCT` (newer than 0.11.0) | exit with status 1 when the total is below PCT (`80`, `92.5`); the report is printed as usual and `error[E0114]: coverage 70.0% is below the required 80.0%` follows on standard error. With `--total` the percentage is printed too |
 | `--uncovered[=yaml]` | one exclusion row per item that never ran, with file, line and the statement as a comment; `=yaml` prints a YAML exclusion file |
 | `--tests` | one row per item that ran, followed by `# tests:` and the tests that hit it; cannot be combined with `--uncovered` |
-| `--exclude FILE` | apply an exclusion file (see Exclusions) |
+| `--exclude FILE` | apply an exclusion file (see Excluding code); repeat it to apply several: the rules add up |
 | `--exclusions[=json]` | print the exclusion report instead of the summary (see The exclusion report); the HTML report gets the same page |
 
 ## Coverage in CI
@@ -223,7 +223,8 @@ the number it left out.
 ## The exclusion report
 
 `yavs cov report DB --exclusions` lists every rule that takes requirements out of the totals, the
-directives in the source and the rows of `--exclude FILE` together:
+directives in the source and the rows of every `--exclude FILE` together, each with the file and line it
+came from:
 
 ```
 coverage exclusions: 2 rules, 3 requirements excluded
@@ -263,8 +264,9 @@ x <= y; -- coverage off-line
 ends it, and `coverage off-line` leaves out the statements starting on its line.
 `-- yavs coverage ...` is accepted as a synonym.
 
-Outside the source, give `yavs cov report` or `yavs cov rank` an `--exclude FILE`. Copy rows
-from `--uncovered`, optionally with a reason after `#`:
+Outside the source, give `yavs cov report` or `yavs cov rank` an `--exclude FILE`, as many as you
+like: the rules of all the files add up, in the order given, and the exclusion report names the file
+and line of each. Copy rows from `--uncovered`, optionally with a reason after `#`:
 
 ```
 branch tb.dut.u_fsm  c41e09a7b3d2.0.3  src/fsm.vhd:88   # unreachable: state is one-hot
@@ -364,7 +366,7 @@ warning into an error, or when the total is below `--fail-under`; a malformed op
 |------|---------|
 | `E0110` | cannot write the output |
 | `E0111` | cannot read a database |
-| `E0112` | bad exclusion file |
+| `E0112` | an exclusion file cannot be read or has a bad row; the message names the file and the line |
 | `E0113` | HTML report cannot find a source file at its stored path; nothing is written |
 | `E0114` | the total coverage is below `--fail-under` (the report was printed) |
 | `E0115` | `--total` or `--fail-under` has no item to count: the database holds none of the `--kind`s |

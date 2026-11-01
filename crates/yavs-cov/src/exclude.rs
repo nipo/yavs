@@ -19,6 +19,7 @@
 //! counts.
 
 use std::collections::BTreeMap;
+use std::path::Path;
 
 use crate::{Database, Entry, Key, Kind};
 use yavs_diag::{Diagnostic, dotted};
@@ -93,6 +94,33 @@ pub struct Row {
     line: usize,
 }
 
+/// The rows of one exclusion file. Rules of several files add up.
+#[derive(Debug)]
+pub struct Rules {
+    /// The file as the user named it, for messages and the exclusion report.
+    pub name: String,
+    pub rows: Vec<Row>,
+}
+
+impl Rules {
+    /// Read an exclusion file: YAML when its name ends in `.yaml` or `.yml`, else text rows. The
+    /// error names the line.
+    pub fn read(path: &Path) -> Result<Rules, String> {
+        let yaml = path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("yaml") || e.eq_ignore_ascii_case("yml"));
+        let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+        Ok(Rules {
+            name: path.display().to_string(),
+            rows: if yaml {
+                parse_yaml(&text)?
+            } else {
+                parse(&text)?
+            },
+        })
+    }
+}
+
 /// One exclusion rule and what it matched: a row of an exclusion file, or a directive in the
 /// source.
 pub struct Use {
@@ -112,7 +140,7 @@ pub struct Applied {
     /// The excluded items with the reason of the row that took them out.
     pub excluded: Vec<(Key, Entry, String)>,
     pub warnings: Vec<Diagnostic>,
-    /// Every rule, those of the exclusion file in file order after the in-source ones.
+    /// Every rule: the in-source ones, then those of the exclusion files, in the order given.
     pub uses: Vec<Use>,
 }
 
@@ -342,7 +370,11 @@ fn matches(r: &Rule, k: &Key, e: &Entry) -> bool {
 /// Take the items the rows match, and those an in-source directive waives, out of `db`, with
 /// warnings for rows that match nothing, moved lines and excluded items that ran. An item more
 /// than one rule matches is excluded once; every rule is kept in [`Applied::uses`].
-pub fn apply(db: &Database, rows: &[Row], exfile: &str) -> Applied {
+pub fn apply(db: &Database, files: &[Rules]) -> Applied {
+    let rows: Vec<(&str, &Row)> = files
+        .iter()
+        .flat_map(|f| f.rows.iter().map(|r| (f.name.as_str(), r)))
+        .collect();
     let mut out = Applied {
         kept: Database {
             tests: db.tests.clone(),
@@ -364,7 +396,7 @@ pub fn apply(db: &Database, rows: &[Row], exfile: &str) -> Applied {
                 .push(k.clone());
             hit.get_or_insert(w.reason.clone());
         }
-        for (i, r) in rows.iter().enumerate() {
+        for (i, (exfile, r)) in rows.iter().enumerate() {
             if matches(&r.rule, k, e) {
                 seen[i].push(k.clone());
                 hit.get_or_insert(r.reason.clone());
@@ -412,7 +444,7 @@ pub fn apply(db: &Database, rows: &[Row], exfile: &str) -> Applied {
             items,
         });
     }
-    for (r, items) in rows.iter().zip(seen) {
+    for ((exfile, r), items) in rows.iter().zip(seen) {
         if items.is_empty() {
             out.warnings.push(Diagnostic::warning(
                 STALE,
@@ -633,6 +665,12 @@ pub fn excluded_text(ex: &[(Key, Entry, String)]) -> String {
 mod tests {
     use super::*;
 
+    /// `apply` with the rows of one file called `ex`.
+    fn apply1(d: &Database, rows: Vec<Row>) -> Applied {
+        let name = "ex".to_string();
+        apply(d, &[Rules { name, rows }])
+    }
+
     fn db() -> Database {
         let mut d = Database::default();
         for (p, kind, hash, line, count) in [
@@ -673,7 +711,7 @@ mod tests {
         let d = db();
         // `--uncovered` rows with MISS-free shape are the exclusion file.
         let rows = parse(&d.uncovered()).unwrap();
-        let a = apply(&d, &rows, "ex");
+        let a = apply1(&d, rows);
         assert_eq!(a.excluded.len(), 3);
         assert_eq!(a.kept.items.len(), 1);
         assert!(
@@ -689,7 +727,7 @@ mod tests {
         let t = "statement * abcdef012345.0 src/a.vhd:99 # moved, and u2 ran\n\
                  branch :t:u1 111122223333.0.3\n\
                  instance :t:u1\nunit WORK.pkg\nfile a.vhd\n";
-        let a = apply(&d, &parse(t).unwrap(), "ex");
+        let a = apply1(&d, parse(t).unwrap());
         let codes: Vec<_> = a.warnings.iter().map(|w| w.code).collect();
         // moved twice (u1, u2), hit once (u2), stale once (arm 3).
         assert_eq!(
@@ -718,7 +756,7 @@ mod tests {
             "file sub\\a.vhd",
             "file src/*/a.vhd",
         ] {
-            let a = apply(&d, &parse(&format!("{row}\r\n")).unwrap(), "ex");
+            let a = apply1(&d, parse(&format!("{row}\r\n")).unwrap());
             assert!(a.kept.items.is_empty(), "{row}");
         }
     }
@@ -738,8 +776,8 @@ mod tests {
     fn yaml_round_trips_the_uncovered_report() {
         let d = db();
         let y = d.uncovered_yaml();
-        let a = apply(&d, &parse_yaml(&y).unwrap(), "ex");
-        let b = apply(&d, &parse(&d.uncovered()).unwrap(), "ex");
+        let a = apply1(&d, parse_yaml(&y).unwrap());
+        let b = apply1(&d, parse(&d.uncovered()).unwrap());
         assert_eq!(a.excluded.len(), 3);
         assert_eq!(
             a.excluded.iter().map(|x| &x.0).collect::<Vec<_>>(),
@@ -777,7 +815,7 @@ mod tests {
         assert_eq!(rows[0].reason, "no");
         assert_eq!(rows[4].reason, "on");
         assert_eq!(rows[0].line, 2);
-        let a = apply(&d, &rows, "ex");
+        let a = apply1(&d, rows);
         // u2 statement (ran, line moved), u1 branch, pkg; toggle, instance and file match nothing.
         assert_eq!(a.excluded.len(), 3);
         let codes: Vec<_> = a.warnings.iter().map(|w| w.code).collect();
@@ -896,18 +934,18 @@ mod tests {
         assert!(y.contains("signal: \"a\"\n    direction: rise\n"), "{y}");
         assert_eq!(y.matches("direction").count(), 1, "{y}");
         for rows in [parse(&u).unwrap(), parse_yaml(&y).unwrap()] {
-            let a = apply(&d, &rows, "ex");
+            let a = apply1(&d, rows);
             assert_eq!(a.excluded.len(), 3, "a rise, b rise and fall");
             assert!(a.warnings.is_empty());
         }
         // One direction only; W0114 per excluded direction that ran.
-        let a = apply(&d, &parse("toggle :t * fall\n").unwrap(), "ex");
+        let a = apply1(&d, parse("toggle :t * fall\n").unwrap());
         assert_eq!(a.excluded.len(), 3);
         assert_eq!(a.warnings.iter().filter(|w| w.code == HIT).count(), 2);
-        let a = apply(&d, &parse("toggle :t c\n").unwrap(), "ex");
+        let a = apply1(&d, parse("toggle :t c\n").unwrap());
         assert_eq!(a.warnings.iter().filter(|w| w.code == HIT).count(), 2);
         let y = "exclude:\n  - {kind: toggle, instance: ':t', signal: c, direction: rise}\n";
-        let a = apply(&d, &parse_yaml(y).unwrap(), "ex");
+        let a = apply1(&d, parse_yaml(y).unwrap());
         assert_eq!(a.excluded.len(), 1);
         assert!(parse("toggle :t c up\n").is_err());
         assert!(parse_yaml(&y.replace("rise", "up")).is_err());
