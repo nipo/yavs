@@ -10,7 +10,7 @@ error[E3009]: division by zero
 16 |     v := h(1);
    |     ---------- called from here
    |
-   = note: at 3 ns, delta 0, in process runtime_error._p0
+   = note: at 3 ns, delta 0, in process runtime_error.process (runtime_error.vhd:12)
 
 error: aborting due to 1 previous error
 

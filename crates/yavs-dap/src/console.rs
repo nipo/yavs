@@ -1172,9 +1172,9 @@ fn where_text(sh: &Shared, at: &At<'_, '_>) -> String {
                 _ => "before time 0\n".to_string(),
             };
             let procs = sh.session().processes();
-            t += &procs
-                .get(s.process)
-                .map_or("?".to_string(), |p| dotted(&p.name));
+            t += &procs.get(s.process).map_or("?".to_string(), |p| {
+                crate::thread_label(sh, &p.name).to_string()
+            });
             if let Some(l) = sh.design.loc(s.stmt) {
                 t += &format!(", {}:{}", l.path, l.line);
             }

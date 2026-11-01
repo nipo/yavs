@@ -180,7 +180,7 @@ fn trace_x_follows_a_real_unknown_to_where_it_starts() {
     let (out, _, _) = session(&d, &[], "run 30 ns; trace x bus_s; trace x cnt; quit");
     assert!(
         out.contains(
-            "element (1): process debug_tools._p2 drives '0' and process debug_tools._p3 drives '1'"
+            "element (1): process debug_tools.bus_s <= ... (debug_tools.vhd:28) drives '0' and process debug_tools.bus_s(1 downto 0) <= ... (debug_tools.vhd:29) drives '1'"
         ),
         "{out}"
     );

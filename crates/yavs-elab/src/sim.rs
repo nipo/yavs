@@ -848,9 +848,7 @@ impl Elaborated {
                 let region = self.hier.scope(p.scope).parent?;
                 let name = self.hier.instance_name(region, db, crate::Case::Lrm);
                 let name = name.strip_suffix(':').unwrap_or(&name).to_string();
-                let dotted = self.hier.dotted_in(p.scope, crate::Case::Lrm);
-                let key = yavs_diag::parent(&dotted).to_string();
-                Some((key, name))
+                Some((self.proc_label(p), name))
             })
             .collect()
     }
@@ -1016,6 +1014,11 @@ impl Elaborated {
     pub fn proc_name(&self, p: &crate::ProcInst) -> String {
         let n = self.hier.path_name(p.scope, crate::Case::Lrm);
         n.strip_suffix(':').unwrap_or(&n).to_string()
+    }
+
+    /// What every text calls a process (`Hierarchy::proc_label`).
+    pub fn proc_label(&self, p: &crate::ProcInst) -> String {
+        self.hier.proc_label(p, crate::Case::Lrm)
     }
 
     fn build_runtime_with(
@@ -1330,7 +1333,7 @@ impl Elaborated {
                     .ok_or_else(|| {
                         sim_err(format!(
                             "{}: processes inside generates and blocks are not lowered yet",
-                            self.hier.dotted(p.scope)
+                            self.proc_label(p)
                         ))
                     })?;
                 // One driver slot per kernel signal of each longest static prefix, in order
@@ -1339,7 +1342,7 @@ impl Elaborated {
                 if entries.len() != pir.drivers.len() {
                     return Err(sim_err(format!(
                         "{}: {} driver slots lowered, {} elaborated",
-                        self.hier.dotted(p.scope),
+                        self.proc_label(p),
                         pir.drivers.len(),
                         entries.len()
                     )));
@@ -1466,7 +1469,7 @@ impl Elaborated {
         ds: &[yavs_kernel::DriverId],
         inst: Arc<InstData>,
     ) -> Result<InterpProcess, SimError> {
-        let path = || self.hier.dotted(p.scope);
+        let path = || self.proc_label(p);
         let (pir, a) = u
             .processes
             .iter()

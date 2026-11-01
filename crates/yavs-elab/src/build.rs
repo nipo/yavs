@@ -382,6 +382,9 @@ impl Elaborated {
                 &own,
                 proc,
             );
+            if p.what.is_some() {
+                b.process_label(pid, self.proc_label(p));
+            }
             if let Some(reads) = &p.guard {
                 let r: Vec<_> = reads.iter().map(|&(l, r)| nets.kpart(l, r)).collect();
                 b.guard_process(pid, &r);

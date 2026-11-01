@@ -981,7 +981,7 @@ fn scopes(sh: &Shared, at: &At<'_, '_>, req: &Json) {
 }
 
 /// What the Threads view and the Call Stack call the process named `name`.
-fn thread_label<'a>(sh: &'a Shared, name: &'a str) -> &'a str {
+pub(crate) fn thread_label<'a>(sh: &'a Shared, name: &'a str) -> &'a str {
     sh.design.proc(name).map_or(name, |p| &p.label)
 }
 
@@ -1312,7 +1312,10 @@ fn region_vars(sh: &Shared, at: &At<'_, '_>, regions: &[usize], r: Option<usize>
             ProcState::Waiting => "waiting",
             ProcState::Terminated => "terminated",
         });
-        let name = p.rsplit(':').next().unwrap_or(p);
+        // The label without its region, which the tree shows above it.
+        let shown = thread_label(sh, p);
+        let region = console::dotted(p.rsplit_once(':').map_or(p.as_str(), |x| x.0));
+        let name = shown.strip_prefix(&format!("{region}.")).unwrap_or(shown);
         out.push(json!({
             "name": name,
             "value": format!("process, {}", state.unwrap_or("?")),
@@ -3116,9 +3119,7 @@ fn one_run(
         Err(err) => return Err(Box::new(e.runtime_diagnostic(&err))),
     };
     let _ = sh.interrupt.set(sim.interrupt());
-    let names = (e.procs.iter())
-        .map(|p| console::dotted(&e.proc_name(p)))
-        .collect();
+    let names = (e.procs.iter()).map(|p| e.proc_label(p)).collect();
     sim.subscribe(Box::new(Output {
         sh: sh.clone(),
         names,

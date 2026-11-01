@@ -81,10 +81,10 @@ fn sources(at: &At<'_, '_>, s: SignalId) -> Option<SignalSources> {
 }
 
 fn proc_name(sh: &Shared, p: ProcId) -> String {
-    sh.elab
-        .procs
-        .get(p.0 as usize)
-        .map_or_else(|| "a foreign process".to_string(), |x| sh.elab.proc_name(x))
+    sh.elab.procs.get(p.0 as usize).map_or_else(
+        || "a foreign process".to_string(),
+        |x| sh.elab.proc_label(x),
+    )
 }
 
 /// The statements of process `p` that assign `sig` (or pass it to a procedure that does), and
@@ -259,7 +259,7 @@ pub(crate) fn drivers(sh: &Shared, at: &At<'_, '_>, name: &str) -> Result<String
             };
             match src.owner {
                 Some(p) => rows.push(vec![
-                    format!("process {}{idx}", dotted(&proc_name(sh, p))),
+                    format!("process {}{idx}", proc_name(sh, p)),
                     format!("{value}{off}"),
                     assign_places(sh, p, sig).join(", "),
                 ]),
@@ -523,10 +523,16 @@ fn describe_variable(sh: &Shared, at: &At<'_, '_>, name: &str) -> Result<String,
         };
         let (t, v, _) = crate::local(sh, st, i, l.name)
             .ok_or_else(|| format!("`{name}` cannot be read here"))?;
-        let mut rows = vec![vec![
-            "kind".to_string(),
-            format!("variable of {}", st.frames.func_name(i).unwrap_or("?")),
-        ]];
+        // Frame 0 is the process itself.
+        let owner = if i == 0 {
+            let procs = sh.session().processes();
+            let p = procs.get(st.process);
+            p.map_or("?", |p| crate::thread_label(sh, &p.name))
+                .to_string()
+        } else {
+            st.frames.func_name(i).unwrap_or("?").to_string()
+        };
+        let mut rows = vec![vec!["kind".to_string(), format!("variable of {owner}")]];
         // A process's own variable has its declaration; a subprogram's locals do not say.
         match proc
             .as_deref()
@@ -637,7 +643,7 @@ fn all_variables(sh: &Shared) -> Vec<(String, String)> {
         for l in func.iter().flat_map(|f| &f.locals) {
             // Not the compiler's own slots.
             if !l.name.starts_with('_') && l.name != "self" {
-                let what = format!("variable of {}", dotted(&name));
+                let what = format!("variable of {}", sh.elab.proc_label(p));
                 out.push((format!("{}.{}", dotted(&name), l.name), what));
             }
         }
@@ -783,7 +789,12 @@ pub(crate) fn waits(sh: &Shared, at: &At<'_, '_>) -> String {
         let loc = (p.wait)
             .and_then(|s| sh.design.loc(s))
             .map_or_else(String::new, |l| place(&l.path, l.line as usize));
-        rows.push(vec![dotted(&p.name), state.to_string(), what, loc]);
+        rows.push(vec![
+            crate::thread_label(sh, &p.name).to_string(),
+            state.to_string(),
+            what,
+            loc,
+        ]);
     }
     table(&rows).trim_end().to_string()
 }
@@ -948,7 +959,7 @@ fn conflicts(sh: &Shared, sig: &Sig, i: &SignalSources) -> Vec<String> {
         let chars: Vec<char> = text.trim_matches('"').chars().collect();
         let who = src.owner.map_or_else(
             || "a port".to_string(),
-            |p| format!("process {}", dotted(&proc_name(sh, p))),
+            |p| format!("process {}", proc_name(sh, p)),
         );
         for (k, c) in chars.iter().rev().enumerate() {
             per.entry(src.range.offset + k as u32)
@@ -1115,7 +1126,7 @@ impl Trace<'_, '_, '_> {
         let sh = self.sh;
         let at = self.at;
         let places = assign_places(sh, p, sig).join(", ");
-        let name = dotted(&proc_name(sh, p));
+        let name = proc_name(sh, p);
         let pad = " ".repeat(depth * 2);
         let _ = writeln!(
             self.out,
@@ -1153,7 +1164,7 @@ pub(crate) fn activity_file(sh: &Shared, file: &str) -> Result<(), String> {
     };
     let names = yavs_elab::ActivityNames {
         procs: (sh.elab.procs.iter())
-            .map(|p| dotted(&sh.elab.proc_name(p)))
+            .map(|p| sh.elab.proc_label(p))
             .collect(),
         signals: sh.signal_names(),
     };
@@ -1170,7 +1181,7 @@ pub(crate) fn activity(sh: &Shared) -> String {
     let t = sh.elab.proc_table();
     let names = yavs_elab::ActivityNames {
         procs: (sh.elab.procs.iter())
-            .map(|p| dotted(&sh.elab.proc_name(p)))
+            .map(|p| sh.elab.proc_label(p))
             .collect(),
         signals: sh.signal_names(),
     };

@@ -204,6 +204,15 @@ impl Hierarchy {
         self.dotted_in(s, Case::Original)
     }
 
+    /// What every text calls a process: its dotted path, or for one without a label what it is
+    /// and where (`tb.clk <= ... (tb.vhd:17)`). What is looked up keeps the path.
+    pub fn proc_label(&self, p: &crate::ProcInst, case: Case) -> String {
+        match (&p.what, self.scope(p.scope).parent) {
+            (Some(what), Some(region)) => format!("{}.{what}", self.dotted_in(region, case)),
+            _ => self.dotted_in(p.scope, case),
+        }
+    }
+
     /// `'instance_name` of a scope: `:top(arch):u1@leaf(a):g(0):`.
     pub fn instance_name(&self, s: ScopeId, db: &yavs_sem::Db, case: Case) -> String {
         let mut out = String::from(":");

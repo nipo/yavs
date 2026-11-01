@@ -53,6 +53,8 @@ pub struct PortConv {
 
 struct ProcDecl {
     name: String,
+    /// How many regions its path sits below the top (the name may be a label: `process_label`).
+    depth: u32,
     flags: ProcFlags,
     process: Box<dyn Process>,
     drivers: Vec<DriverId>,
@@ -394,6 +396,7 @@ impl Builder {
             ..flags
         };
         self.procs.push(ProcDecl {
+            depth: yavs_diag::depth(name),
             name: name.to_string(),
             flags,
             process,
@@ -403,6 +406,12 @@ impl Builder {
             guard: None,
         });
         pid
+    }
+
+    /// What every text calls process `p` when its path says nothing to a reader. Its place in
+    /// the order of processes stays that of the path.
+    pub fn process_label(&mut self, p: ProcId, label: String) {
+        self.procs[p.0 as usize].name = label;
     }
 
     /// Process `p` resumes for an event only when `t` holds ([`EdgeTrigger`]); the caller
@@ -658,7 +667,7 @@ impl Builder {
                 st,
                 result: Ok(()),
             }));
-            let depth = yavs_diag::depth(&p.name);
+            let depth = p.depth;
             names.push(p.name);
             idles.push(p.idle);
             guards.push(p.guard);

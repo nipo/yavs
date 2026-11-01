@@ -132,7 +132,7 @@ impl Elaborated {
             if func.flags.contains(FuncFlags::MAY_SUSPEND) {
                 continue;
             }
-            let name = yavs_diag::dotted(&self.proc_name(&self.procs[k]));
+            let name = self.proc_label(&self.procs[k]);
             let mut d = Diagnostic::warning(
                 "W3102",
                 format!("process {name} has no wait statement and no sensitivity list"),

@@ -853,13 +853,10 @@ impl Format {
                 },
                 // The instance, as `'instance_name` of the region around the process (#982), as
                 // sim1. No process around the report: nothing but its name to go by.
-                _ => {
-                    let region = yavs_diag::parent(proc);
-                    match instances.get(region) {
-                        Some(name) => name.clone(),
-                        None => yavs_diag::colons(region),
-                    }
-                }
+                _ => match instances.get(proc) {
+                    Some(name) => name.clone(),
+                    None => yavs_diag::colons(yavs_diag::parent(proc)),
+                },
             };
             let pad = (*width as i64) - v.chars().count() as i64;
             let (l, r) = match align {

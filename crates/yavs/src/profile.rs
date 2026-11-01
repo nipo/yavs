@@ -50,11 +50,24 @@ struct Tally {
     lines: HashMap<(u32, u32), u64>,
 }
 
+/// What the tables call an IR function: the body of a process without a label has only an
+/// internal name; the place next to it says which one.
+fn shown(name: &str) -> String {
+    match name.strip_prefix("_p") {
+        Some(n) if !n.is_empty() && n.bytes().all(|c| c.is_ascii_digit()) => {
+            "process without a label".to_string()
+        }
+        _ => name.to_string(),
+    }
+}
+
 pub struct Sampler {
     stop: Arc<AtomicBool>,
     thread: std::thread::JoinHandle<Tally>,
     start: Instant,
     prof: Arc<Profile>,
+    /// The region of each process (a label does not say where its region ends).
+    regions: Vec<String>,
 }
 
 impl Sampler {
@@ -62,6 +75,7 @@ impl Sampler {
         prof: Arc<Profile>,
         funcs: Option<impl Fn(&mut Vec<(FuncId, bool)>) + Send + 'static>,
         lines: Option<impl Fn(&mut Vec<(FuncId, u32)>) + Send + 'static>,
+        regions: Vec<String>,
     ) -> Sampler {
         let stop = Arc::new(AtomicBool::new(false));
         let (flag, p) = (stop.clone(), prof.clone());
@@ -107,6 +121,7 @@ impl Sampler {
             thread,
             start: Instant::now(),
             prof,
+            regions,
         }
     }
 
@@ -153,13 +168,13 @@ impl Sampler {
             let owner = prog
                 .funcs
                 .get(info.func)
-                .map_or(String::new(), |o| o.name.clone());
+                .map_or(String::new(), |o| shown(&o.name));
             Some((file.path.clone(), file.line_col(info.span.start).0, owner))
         };
         let pct = |n: u64| 100.0 * n as f64 / t.ticks.max(1) as f64;
         let name_of = |f: u32| {
             rt.and_then(|r| r.prog.raw(FuncId(f)))
-                .map_or_else(|| format!("#{f}"), |f| f.name.clone())
+                .map_or_else(|| format!("#{f}"), |f| shown(&f.name))
         };
         let at = |p: &Option<(String, usize)>| {
             p.as_ref()
@@ -170,7 +185,10 @@ impl Sampler {
         let mut inst: HashMap<&str, u64> = HashMap::new();
         for &(p, n) in &procs {
             let name = names.get(p as usize).map_or("?", |x| x.0.as_str());
-            *inst.entry(yavs_diag::parent(name)).or_default() += n;
+            let region = self.regions.get(p as usize).map(String::as_str);
+            *inst
+                .entry(region.unwrap_or_else(|| yavs_diag::parent(name)))
+                .or_default() += n;
         }
         let mut inst: Vec<_> = inst.into_iter().collect();
         inst.sort_by_key(|&(p, n)| (std::cmp::Reverse(n), p));

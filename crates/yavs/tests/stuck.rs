@@ -418,7 +418,7 @@ fn hang_report_points_at_the_wait_of_each_process() {
     // The statement each process stands at, not the first one of its body.
     assert!(e.contains("wait for 100 us"), "{e}");
     assert!(
-        e.contains("stuck_forever._p0 waits for stuck_forever.clk"),
+        e.contains("stuck_forever.clk <= ... (stuck_forever.vhd:6) waits for stuck_forever.clk"),
         "{e}"
     );
 }
@@ -491,7 +491,7 @@ fn activity_lists_the_busiest_processes_and_signals() {
         assert!(e.contains("summary_asserts.clk"), "{e}");
         let row = e
             .lines()
-            .find(|l| l.contains("summary_asserts.clk"))
+            .find(|l| l.contains("summary_asserts.clk  "))
             .expect(&e);
         assert!(row.trim_start().starts_with("6 "), "{e}");
         let j: serde_json::Value =

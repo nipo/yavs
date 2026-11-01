@@ -82,7 +82,9 @@ A name in a command is a signal, a variable, a part of one, or a path:
   signal; the dotted form is what ``find`` and the messages print. Case does not matter, and a
   leading ``:`` starts a path of colons. A path may also start from where the name is looked up:
   ``u_reg.q`` from a process of ``tb``, or between cycles.
-* A variable of a process has the path ``PROCESS.NAME``: ``tb.counter.total``. ``find variables``
+* A variable of a process has the path ``PROCESS.NAME``: ``tb.counter.total``. In a process without
+  a label, which tables call ``tb.process (tb.vhd:34)``, ``PROCESS`` is an internal name that fits a
+  path: ``tb._p0.total``, as ``find variables`` lists it. ``find variables``
   lists them. At a stop in that process ``total`` is enough.
 * A shared variable is a name like a signal: seen from the process stopped in, or by its path
   (``tb.tally``). One of a package has the path ``LIBRARY.PACKAGE.NAME``; ``PACKAGE.NAME`` is
@@ -1343,9 +1345,9 @@ is one. A signal with no driver says so.
       resolved by resolved
     yavs> drivers level
     tb.level : STD_LOGIC_VECTOR = "X1", declared at tb.vhd:32
-      driver          value  assigned at
-      process tb._p1  "01"   tb.vhd:47
-      process tb._p2  "11"   tb.vhd:48
+      driver                               value  assigned at
+      process tb.level <= ... (tb.vhd:47)  "01"   tb.vhd:47
+      process tb.level <= ... (tb.vhd:48)  "11"   tb.vhd:48
       resolved by resolved (per element)
     yavs> drivers enable
     tb.enable : STD_LOGIC = 'U', declared at tb.vhd:29
@@ -1386,23 +1388,23 @@ Prints one row per process: its state (``waiting``, ``ended`` after ``wait;``, `
 .. code-block:: text
 
     yavs> waits
-      process        state        waits for  at
-      tb._p0         not started
-      tb.u_reg.flop  not started
-      tb.counter     not started
-      tb._p1         not started
-      tb._p2         not started
-      tb.check       not started
+      process                      state        waits for  at
+      tb.clk <= ... (tb.vhd:34)    not started
+      tb.u_reg.flop                not started
+      tb.counter                   not started
+      tb.level <= ... (tb.vhd:47)  not started
+      tb.level <= ... (tb.vhd:48)  not started
+      tb.check                     not started
     yavs> run 12 ns
     step at 12 ns, delta 0
     yavs> waits
-      process        state    waits for         at
-      tb._p0         waiting  tb.clk, tb.cnt    tb.vhd:34
-      tb.u_reg.flop  waiting  tb.u_reg.clk      tb.vhd:12
-      tb.counter     waiting  tb.clk            tb.vhd:38
-      tb._p1         ended    nothing: `wait;`  tb.vhd:47
-      tb._p2         waiting  tb.cnt            tb.vhd:48
-      tb.check       waiting  tb.cnt            tb.vhd:52
+      process                      state    waits for         at
+      tb.clk <= ... (tb.vhd:34)    waiting  tb.clk, tb.cnt    tb.vhd:34
+      tb.u_reg.flop                waiting  tb.u_reg.clk      tb.vhd:12
+      tb.counter                   waiting  tb.clk            tb.vhd:38
+      tb.level <= ... (tb.vhd:47)  ended    nothing: `wait;`  tb.vhd:47
+      tb.level <= ... (tb.vhd:48)  waiting  tb.cnt            tb.vhd:48
+      tb.check                     waiting  tb.cnt            tb.vhd:52
 
 .. _console-trace:
 
@@ -1521,13 +1523,13 @@ at the end of a run: ``--assert-summary``.
       error         1  tb.vhd:53  q is not high
     yavs> activity
     Process activations: 33 runs in all, 6 shown
-      runs      %  name           place
-        10   30.3  tb._p0         tb.vhd:34
-         7   21.2  tb.counter     tb.vhd:41
-         7   21.2  tb.u_reg.flop  tb.vhd:14
-         4   12.1  tb._p2         tb.vhd:48
-         4   12.1  tb.check       tb.vhd:52
-         1    3.0  tb._p1         tb.vhd:47
+      runs      %  name                         place
+        10   30.3  tb.clk <= ... (tb.vhd:34)    tb.vhd:34
+         7   21.2  tb.counter                   tb.vhd:41
+         7   21.2  tb.u_reg.flop                tb.vhd:14
+         4   12.1  tb.check                     tb.vhd:52
+         4   12.1  tb.level <= ... (tb.vhd:48)  tb.vhd:48
+         1    3.0  tb.level <= ... (tb.vhd:47)  tb.vhd:47
     Signal activity: 17 events in all, 4 shown
       events      %  name          place
            6   35.3  tb.clk        tb.vhd:28

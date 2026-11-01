@@ -869,17 +869,27 @@ fn object_kind(k: yavs_elab::ObjKind) -> String {
 
 fn print_hierarchy(db: &Db, e: &yavs_elab::Elaborated) {
     use yavs_elab::Case;
+    let what: std::collections::HashMap<_, _> = (e.procs.iter())
+        .filter_map(|p| Some((p.scope, p.what.as_ref()?)))
+        .collect();
     let mut s = String::new();
     for (i, sc) in e.hier.scopes.iter().enumerate() {
         let id = yavs_elab::ScopeId(i as u32);
         if matches!(sc.kind, yavs_elab::ScopeKind::Component { .. }) {
             continue;
         }
-        s.push_str(&yavs_diag::dotted(&e.hier.instance_name(
-            id,
-            db,
-            Case::Original,
-        )));
+        let unlabelled = what.get(&id);
+        match (unlabelled, sc.parent) {
+            (Some(what), Some(region)) => {
+                let region = e.hier.instance_name(region, db, Case::Original);
+                s.push_str(&format!("{}.{what}", yavs_diag::dotted(&region)));
+            }
+            _ => s.push_str(&yavs_diag::dotted(&e.hier.instance_name(
+                id,
+                db,
+                Case::Original,
+            ))),
+        }
         s.push('\n');
         for &o in &sc.objs {
             let l = e.nets.obj(o);
@@ -2123,6 +2133,14 @@ fn run_design(
             .with_note(err.to_string()),
         );
     }
+    let regions: Vec<String> = cfg_profile
+        .iter()
+        .flat_map(|_| &e.procs)
+        .map(|p| {
+            let region = e.hier.scope(p.scope).parent.unwrap_or(p.scope);
+            e.hier.dotted_in(region, yavs_elab::Case::Lrm)
+        })
+        .collect();
     // Nothing below reads the elaborated model but its IR (run-time diagnostics) unless a
     // plugin, the waveform recorder or coverage does (#421).
     if a.vhpi.is_empty() && a.wave.is_none() && a.cov.is_none() {
@@ -2135,6 +2153,7 @@ fn run_design(
             p,
             rt.as_ref().map(|rt| rt.profile_sampler()),
             rt.as_ref().map(|rt| rt.line_sampler()),
+            regions,
         )
     });
     let max = a.hang_report.unwrap_or(30);

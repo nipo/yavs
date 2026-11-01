@@ -11,7 +11,6 @@ use yavs_kernel::{Elem, LogicVec, Range, SigRef, SignalId, Value};
 use yavs_logic::StdULogic;
 use yavs_sem::Db;
 use yavs_sem::decl::{DeclKind, Designator, ObjRole};
-use yavs_sem::hir::StmtKind;
 use yavs_sem::stat::{ConstValue, Elems};
 use yavs_sem::types::{Direction, TypeKind};
 use yavs_std::types::{
@@ -493,44 +492,6 @@ fn shown_path(path: &str, source_map: &[(String, String)]) -> String {
     map.map_or(p, |(_, to)| absolute(to))
 }
 
-/// The name of a process in the Threads view and the Call Stack: its dotted path, or for one without
-/// a label, what it is and where (`tb.clk <= ... (tb.vhd:17)`). Reports and everything that takes a
-/// name keep `Elaborated::proc_name` (#942).
-fn thread_label(
-    db: &Db,
-    path: &str,
-    stmt: yavs_sem::StmtId,
-    source_map: &[(String, String)],
-) -> String {
-    let dotted = crate::console::dotted(path);
-    let (region, last) = dotted.rsplit_once('.').unwrap_or(("", &dotted));
-    if !last.starts_with('_') {
-        return dotted;
-    }
-    let st = &db.stmts[stmt];
-    let f = db.sources.get(st.span.file);
-    // The source as written, on one line.
-    let text = |s: yavs_diag::Span| {
-        let (a, b) = (f.text_offset(s.start), f.text_offset(s.end));
-        let t = f.text().get(a..b).unwrap_or_default();
-        t.split_whitespace().collect::<Vec<_>>().join(" ")
-    };
-    let what = match &st.kind {
-        StmtKind::Process { .. } => "process".to_string(),
-        StmtKind::ConcAssert { .. } => "assert".to_string(),
-        StmtKind::ConcSignalAssign { target, .. } => {
-            format!("{} <= ...", text(db.exprs[target.expr].span))
-        }
-        StmtKind::ConcProcCall { call, .. } => format!("{}(...)", db.decls[call.callee].name),
-        // The equivalent process of a port's expression: its statement is the instance.
-        _ => return dotted,
-    };
-    let shown = shown_path(&f.path, source_map);
-    let file = std::path::Path::new(&shown).file_name();
-    let file = file.map_or(shown.clone().into(), |n| n.to_string_lossy());
-    format!("{region}.{what} ({file}:{})", f.line_col(st.span.start).0)
-}
-
 impl Design {
     /// `source_map`: source paths as compiled, and as the debugger shows and takes them.
     pub fn new(db: &Db, e: &Elaborated, prog: &Program, source_map: &[(String, String)]) -> Design {
@@ -623,7 +584,7 @@ impl Design {
         for p in &e.procs {
             let inst = e.instance_of(p.scope);
             let mut pr = Proc {
-                label: thread_label(db, &e.proc_name(p), p.stmt, source_map),
+                label: e.proc_label(p),
                 ..Proc::default()
             };
             let mut cur = e.hier.scope(p.scope).parent;

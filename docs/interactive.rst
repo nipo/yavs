@@ -166,15 +166,15 @@ Find who drives an X
     values from files, subprogram parameters, or which signal read made this value.
     yavs> drivers level
     tb.level : STD_LOGIC_VECTOR = "X1", declared at tb.vhd:32
-      driver          value  assigned at
-      process tb._p1  "01"   tb.vhd:47
-      process tb._p2  "11"   tb.vhd:48
+      driver                               value  assigned at
+      process tb.level <= ... (tb.vhd:47)  "01"   tb.vhd:47
+      process tb.level <= ... (tb.vhd:48)  "11"   tb.vhd:48
       resolved by resolved (per element)
     yavs> trace x level
     tb.level = "X1", since 25 ns, declared at tb.vhd:32
-      element (1): process tb._p1 drives '0' and process tb._p2 drives '1', which resolve to 'X'
+      element (1): process tb.level <= ... (tb.vhd:47) drives '0' and process tb.level <= ... (tb.vhd:48) drives '1', which resolve to 'X'
     Where it starts:
-      tb.level: element (1): process tb._p1 drives '0' and process tb._p2 drives '1', which resolve to 'X'
+      tb.level: element (1): process tb.level <= ... (tb.vhd:47) drives '0' and process tb.level <= ... (tb.vhd:48) drives '1', which resolve to 'X'
     It follows drivers and the signals their processes name. It cannot see variables,
     values from files, subprogram parameters, or which signal read made this value.
 
@@ -295,22 +295,22 @@ Diagnose a run
         Process tb.check
     step at 30 ns, delta 0
     yavs> waits
-      process        state    waits for         at
-      tb._p0         waiting  tb.clk, tb.cnt    tb.vhd:34
-      tb.u_reg.flop  waiting  tb.u_reg.clk      tb.vhd:12
-      tb.counter     waiting  tb.clk            tb.vhd:38
-      tb._p1         ended    nothing: `wait;`  tb.vhd:47
-      tb._p2         waiting  tb.cnt            tb.vhd:48
-      tb.check       ended    nothing: `wait;`  tb.vhd:54
+      process                      state    waits for         at
+      tb.clk <= ... (tb.vhd:34)    waiting  tb.clk, tb.cnt    tb.vhd:34
+      tb.u_reg.flop                waiting  tb.u_reg.clk      tb.vhd:12
+      tb.counter                   waiting  tb.clk            tb.vhd:38
+      tb.level <= ... (tb.vhd:47)  ended    nothing: `wait;`  tb.vhd:47
+      tb.level <= ... (tb.vhd:48)  waiting  tb.cnt            tb.vhd:48
+      tb.check                     ended    nothing: `wait;`  tb.vhd:54
     yavs> activity
     Process activations: 33 runs in all, 6 shown
-      runs      %  name           place
-        10   30.3  tb._p0         tb.vhd:34
-         7   21.2  tb.counter     tb.vhd:41
-         7   21.2  tb.u_reg.flop  tb.vhd:14
-         4   12.1  tb._p2         tb.vhd:48
-         4   12.1  tb.check       tb.vhd:52
-         1    3.0  tb._p1         tb.vhd:47
+      runs      %  name                         place
+        10   30.3  tb.clk <= ... (tb.vhd:34)    tb.vhd:34
+         7   21.2  tb.counter                   tb.vhd:41
+         7   21.2  tb.u_reg.flop                tb.vhd:14
+         4   12.1  tb.check                     tb.vhd:52
+         4   12.1  tb.level <= ... (tb.vhd:48)  tb.vhd:48
+         1    3.0  tb.level <= ... (tb.vhd:47)  tb.vhd:47
     Signal activity: 17 events in all, 4 shown
       events      %  name          place
            6   35.3  tb.clk        tb.vhd:28

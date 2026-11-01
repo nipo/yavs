@@ -505,14 +505,14 @@ end;
         st["body"]["stackFrames"][0]["name"], "t.process (t.vhd:16)",
         "{st}"
     );
-    // The paths stay: the console's tables, and a report.
+    // The console's tables and a report say the same; a lookup keeps the path.
     let repl = |e: &str| json!({"expression": e, "context": "repl"});
     let waits = c.request("evaluate", repl("waits"));
     assert!(
         waits["body"]["result"]
             .as_str()
             .unwrap_or("")
-            .contains("t._p4"),
+            .contains("t.process (t.vhd:16)"),
         "{waits}"
     );
     let h = c.request("yavs/hierarchy", json!({}));
@@ -524,7 +524,7 @@ end;
         out["body"]["output"]
             .as_str()
             .unwrap_or("")
-            .contains("Process t._p4"),
+            .contains("Process t.process (t.vhd:16)"),
         "{out}"
     );
     c.until(|m| m["type"] == "response" && m["request_seq"] == c2 || m["event"] == "exited");

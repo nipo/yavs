@@ -4487,8 +4487,55 @@ impl Elab<'_> {
         self.set_drivers(idx, refs)
     }
 
+    /// What a process without a label is and where, for texts (#942, #992). Statements of one
+    /// region on one line that read alike also get a column.
+    fn unlabelled_process(&self, region: ScopeId, st: StmtId) -> Box<str> {
+        let stmt = &self.db.stmts[st];
+        let f = self.db.sources.get(stmt.span.file);
+        // The source as written, on one line.
+        let text = |s: Span| {
+            let (a, b) = (f.text_offset(s.start), f.text_offset(s.end));
+            let t = f.text().get(a..b).unwrap_or_default();
+            t.split_whitespace().collect::<Vec<_>>().join(" ")
+        };
+        let what = match &stmt.kind {
+            StmtKind::Process { .. } => "process".to_string(),
+            StmtKind::ConcAssert { .. } => "assert".to_string(),
+            StmtKind::ConcSignalAssign { target, .. } => {
+                format!("{} <= ...", text(self.db.exprs[target.expr].span))
+            }
+            StmtKind::ConcProcCall { call, .. } => {
+                format!("{}(...)", self.db.decls[call.callee].name)
+            }
+            // The guard process of a block.
+            _ => "GUARD <= ...".to_string(),
+        };
+        let path = std::path::Path::new(&f.path);
+        let file = path
+            .file_name()
+            .map_or(f.path.clone().into(), |n| n.to_string_lossy());
+        let (line, col) = f.line_col(stmt.span.start);
+        let shown = format!("{what} ({file}:{line})");
+        let same_line = |p: &&ProcInst| {
+            let s = self.db.stmts[p.stmt].span;
+            self.m.hier.scope(p.scope).parent == Some(region)
+                && s.file == stmt.span.file
+                && f.line_col(s.start).0 == line
+        };
+        let twin = self.procs.iter().rev().take_while(same_line);
+        if twin.into_iter().any(|p| p.what.as_deref() == Some(&shown)) {
+            return format!("{what} ({file}:{line}:{col})").into();
+        }
+        shown.into()
+    }
+
     /// A process instance without drivers yet.
     fn add_process(&mut self, s: ScopeId, st: StmtId, name: Ident, postponed: bool) -> ProcIdx {
+        let what = name
+            .text
+            .as_str()
+            .starts_with('_')
+            .then(|| self.unlabelled_process(s, st));
         let ps = self
             .m
             .hier
@@ -4496,6 +4543,7 @@ impl Elab<'_> {
         self.procs.push(ProcInst {
             scope: ps,
             stmt: st,
+            what,
             postponed,
             drivers: Vec::new(),
             lsps: Vec::new(),
@@ -4631,7 +4679,12 @@ impl Elab<'_> {
                         let span = self.db.decls[o.decl].span;
                         let describe = |s: &Src| match s {
                             Src::Process(scope) => {
-                                format!("source: process {}", self.m.hier.dotted(*scope))
+                                let p = self.procs.iter().find(|p| p.scope == *scope);
+                                let name = p.map_or_else(
+                                    || self.m.hier.dotted(*scope),
+                                    |p| self.m.hier.proc_label(p, crate::Case::Original),
+                                );
+                                format!("source: process {name}")
                             }
                             Src::Port(obj) => {
                                 let f = self.m.nets.obj(*obj);

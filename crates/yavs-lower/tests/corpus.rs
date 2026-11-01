@@ -677,7 +677,9 @@ fn simulate(file: &Path) -> Result<String, String> {
             };
             // The reference names the process only for an error inside a subprogram (#506).
             let path = match (&e.process, e.trace.len() > 1) {
-                (Some((_, p)), true) => yavs_diag::colons(p),
+                (Some((p, _)), true) => names
+                    .get(p.0 as usize)
+                    .map_or_else(|| "-".to_string(), Clone::clone),
                 _ => "-".to_string(),
             };
             writeln!(

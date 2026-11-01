@@ -172,6 +172,9 @@ pub struct ProcInst {
     pub scope: ScopeId,
     /// The process or concurrent statement.
     pub stmt: StmtId,
+    /// For a process without a label, what texts call it inside its region
+    /// ([`Elaborated::proc_label`]): `clk <= ... (tb.vhd:17)`.
+    pub what: Option<Box<str>>,
     pub postponed: bool,
     /// Indices into `NetGraph::drivers` owned by this process (merged per leaf).
     pub drivers: Vec<usize>,

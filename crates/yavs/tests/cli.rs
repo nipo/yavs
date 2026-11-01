@@ -1106,8 +1106,8 @@ fn elab_and_run() {
     assert_eq!(code, 1, "{err}");
     assert_eq!(
         out,
-        "** Note: 0fs+0: hi\n    Process busy._p0\n** Error: 1000000fs+0: bad\n    Process busy._p0\n\
-         ** Note: 2000000fs+0: after\n    Process busy._p0\n"
+        "** Note: 0fs+0: hi\n    Process busy.process (t.vhd:6)\n** Error: 1000000fs+0: bad\n    Process busy.process (t.vhd:6)\n\
+         ** Note: 2000000fs+0: after\n    Process busy.process (t.vhd:6)\n"
     );
     // `--exit-severity=error` stops at the error.
     let (code, _, out) = yavs(&["run", &lib, "--exit-severity=error", "busy"]);
@@ -2436,4 +2436,75 @@ end;
         );
     }
     let _ = std::fs::remove_dir_all(&tmp);
+}
+
+/// A process without a label is called by what it is and where, the same in every text and at any
+/// thread count; `'path_name` stays the LRM's (#992).
+#[test]
+fn unlabelled_processes_read_the_same_everywhere() {
+    let tmp = tempdir("unlabelled");
+    let src = "entity t is end;
+architecture a of t is
+  signal clk : bit := '0';
+  function res(v : bit_vector) return bit is begin return v(v'left); end function;
+  subtype rbit is res bit;
+  signal q : rbit;
+  signal r : bit;
+  type rec is record f : bit; end record;
+  signal x : rec;
+begin
+  clk <= not clk after 5 ns when now < 20 ns;
+  q <= clk; r <= clk; q <= r;
+  x.f <= clk;
+  assert now < 1 hr;
+  process
+    variable v : integer := 0;
+  begin
+    report v'path_name;
+    wait;
+  end process;
+  lab : process begin wait; end process;
+end;
+";
+    std::fs::write(tmp.join("t.vhd"), src).unwrap();
+    let yavs = |args: &[&str]| {
+        let o = Command::new(env!("CARGO_BIN_EXE_yavs"))
+            .args(["--color", "never"])
+            .args(args)
+            .current_dir(&*tmp)
+            .output()
+            .expect("run");
+        let text = String::from_utf8_lossy(&o.stdout).into_owned();
+        (
+            o.status.code().expect("code"),
+            text + &String::from_utf8_lossy(&o.stderr),
+        )
+    };
+    let (code, out) = yavs(&["analyze", "--std=2008", "--work=work:lib", "t.vhd"]);
+    assert_eq!(code, 0, "{out}");
+    let run = |extra: &[&str]| {
+        let base = ["run", "--std=2008", "--work=work:lib", "--activity"];
+        let (code, out) = yavs(&[&base[..], extra, &["t"]].concat());
+        assert_eq!(code, 0, "{out}");
+        out
+    };
+    let out = run(&["--print-hierarchy"]);
+    for line in [
+        "t(a).clk <= ... (t.vhd:11)\n",
+        "t(a).q <= ... (t.vhd:12)\n",
+        "t(a).r <= ... (t.vhd:12)\n",
+        // A statement that reads like another of its line gets a column.
+        "t(a).q <= ... (t.vhd:12:23)\n",
+        "t(a).x.f <= ... (t.vhd:13)\n",
+        "t(a).assert (t.vhd:14)\n",
+        "t(a).process (t.vhd:15)\n",
+        "t(a).lab\n",
+        "    Process t.process (t.vhd:15)\n",
+        ": :t::v\n",
+        "t.clk <= ... (t.vhd:11)",
+    ] {
+        assert!(out.contains(line), "{line}: {out}");
+    }
+    assert!(!out.contains("_p"), "{out}");
+    assert_eq!(run(&["--threads=1"]), run(&["--threads=4"]));
 }

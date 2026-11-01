@@ -139,7 +139,7 @@ FMT2_CTL = re.compile(r"^simulation (finished|stopped) @(\d+)([a-z]+)(?: with st
 FMT2_ERR = re.compile(r"^\w+:error: (.*)$")
 FMT2_INFO = re.compile(r"^\w+:info: ")
 YAVS_RTE = re.compile(r"^error\[(?:E3\d{3}|E9999)\]: (.*)$")
-YAVS_AT = re.compile(r"^\s*= note: at (\d+) ([a-z]+), delta (\d+)(?:, in process (\S+))?")
+YAVS_AT = re.compile(r"^\s*= note: at (\d+) ([a-z]+), delta (\d+)(?:, in process (.+))?")
 
 
 def yavs_fatal(out, err):
@@ -167,6 +167,18 @@ def yavs_fatal(out, err):
             keep.append(lines[i])
         i += 1
     return "\n".join(out.splitlines() + fatal), "\n".join(keep)
+
+
+# A process without a label: yavs says what it is and where (`tb.clk <= ... (tb.vhd:17)`), sim1
+# gives it a number. Neither is a name to compare.
+YAVS_UNLABELLED = re.compile(r"\(\S+:\d+(:\d+)?\)\s*$")
+SIM1_UNLABELLED = re.compile(r":_p\d+$")
+
+
+def process_path(line, trace, yavs):
+    if yavs:
+        return "-" if YAVS_UNLABELLED.search(line) else lrm_path(trace.group(2))
+    return trace.group(2)
 
 
 def lrm_path(p):
@@ -262,7 +274,7 @@ def normalise(rc, out, err, yavs=False):
                 t = FMT1_TRACE.match(line)
                 if t:
                     if t.group(1) == "Process" and cur[3] == "-":
-                        cur[3] = lrm_path(t.group(2))
+                        cur[3] = process_path(line, t, True)
                     flush()
                 else:
                     cur[4] += "\n" + line
@@ -271,7 +283,7 @@ def normalise(rc, out, err, yavs=False):
                 t = FMT1_TRACE.match(line)
                 if t:
                     if t.group(1) == "Process" and cur[3] == "-":
-                        cur[3] = lrm_path(t.group(2)) if yavs else t.group(2)
+                        cur[3] = process_path(line, t, yavs)
                 elif not FMT1_SNIP.match(line):
                     cur[4] += "\n" + line
                 continue
@@ -300,6 +312,7 @@ def mask(lines, ignore):
         if f[0] == "diag" and len(f) == 6:
             if "delta" in ignore: f[3] = "-"
             if "path" in ignore: f[4] = "-"
+            if SIM1_UNLABELLED.search(f[4]): f[4] = "-"
             if "fatalmsg" in ignore and f[1] == "fatal": f[2] = f[3] = f[5] = "-"
             if "time" in ignore: f[2] = "-"
         if f[0] == "err" and "stderr" in ignore:
@@ -315,7 +328,10 @@ def mask(lines, ignore):
             j = max(j, i + 1)
             # With paths, a stable sort by process keeps each process's own order; without
             # them (sim2) only the text is left to sort by.
-            by = (lambda l: l) if "path" in ignore else (lambda l: l.split("\t")[4])
+            # Nor for unlabelled processes, which all have the path "-".
+            def by(l):
+                path = l.split("\t")[4]
+                return l if "path" in ignore or path == "-" else path
             out += sorted(res[i:j], key=by) if keys[i] is not None else res[i:j]
             i = j
         res = out
