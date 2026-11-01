@@ -7,9 +7,11 @@
 //! the analyser). Only the leaf is recognised here, never an `and` chain around it.
 
 use crate::db::Db;
+use crate::decl::{Alias, DeclKind};
 use crate::hir::{Actual, Arg, AttrPrefix, ExprKind, PredefAttr};
 use crate::ids::ExprId;
 use crate::stat::ConstValue;
+use crate::types::TypeKind;
 
 /// A recognised edge test.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -202,9 +204,23 @@ impl Db {
         }
     }
 
+    /// `e`, or the name it denotes when it is an object alias that keeps the indices of that
+    /// name (no array subtype of its own, which would renumber them).
+    pub fn unaliased(&self, mut e: ExprId) -> ExprId {
+        while let ExprKind::Obj(d) = self.exprs[e].kind
+            && let DeclKind::Alias(Alias::Object { target, subtype }) = &self.decls[d].kind
+            && subtype
+                .is_none_or(|st| !matches!(self.types[self.base(st)].kind, TypeKind::Array { .. }))
+        {
+            e = *target;
+        }
+        e
+    }
+
     /// Whether `a` and `b` are the same signal name: the same object, field selections and
     /// indices that are the same constants or objects (reading them twice gives one value).
     pub fn same_name(&self, a: ExprId, b: ExprId) -> bool {
+        let (a, b) = (self.unaliased(a), self.unaliased(b));
         if a == b {
             return true;
         }

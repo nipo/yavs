@@ -95,7 +95,7 @@ impl Fx<'_, '_> {
         let Some((x, pos @ (2 | 3))) = db.level_of(until) else {
             return Ok(None);
         };
-        let ExprKind::Obj(d) = db.exprs[x].kind else {
+        let ExprKind::Obj(d) = db.exprs[db.unaliased(x)].kind else {
             return Ok(None);
         };
         match sens {

@@ -3195,6 +3195,11 @@ user's performance priority:
 - Off (`Config::edge_triggers`) with `--cov`, `--dap` and `--vhpi`: statement coverage, a
   debugger and foreign callbacks can see the skipped activation. Output is otherwise unchanged;
   the statistics count fewer process runs.
+- Through an object alias (#1001, 2026-11-01): `x` in every edge form may be an alias of the
+  signal, of an element or of a part (with or without a subtype, also a renumbering one; an alias of
+  an alias). The element comes from `Db::static_lsp`, the longest static prefix the alias already
+  resolves for sensitivity lists, so the trigger and the sensitivity list cannot disagree on it. The
+  two names of one signal may be mixed (`c'event and x = '1'`).
 - More shapes (#420): the edge may be on a static element of a signal (`v(2)`, `r.f`, a
   generate index), the sensitivity list may hold other signals (they resume the process as
   before; the trigger only keeps a resumption without the edge from running it), the condition

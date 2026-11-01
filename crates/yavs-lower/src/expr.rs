@@ -1102,6 +1102,10 @@ impl<'a> Fx<'a, '_> {
 
     pub fn sig_dope(&mut self, d: DeclId, span: Span) -> R<Option<Reg>> {
         if let Some((t, st)) = self.alias_target(d) {
+            // Not by lowering the name: that would leave its reference unused in the code.
+            if !ty::is_array(self.db, self.db.base(self.db.exprs[t].subtype)) {
+                return Ok(None);
+            }
             let Some(dope) = self.dope_of_signal(t)? else {
                 return Ok(None);
             };

@@ -528,6 +528,20 @@ case!(
     ]
 );
 
+// The forms of `edge_forms` through object aliases (#1001): the edge trigger of the signal itself,
+// so each process runs on its edge only (2532 runs without it).
+case!(
+    edge_alias,
+    "edges=",
+    &[],
+    [
+        ("cycles", Max(415)),
+        ("process_runs", Max(1680)),
+        ("wakes", Max(1665)),
+        ("ops", Max(16860)),
+    ]
+);
+
 /// The same register written with each spelling of the clock edge costs the same work, the
 /// `wait until` form included (#767): `ops` of the four are equal (the wait form skips the
 /// first activation's edge test), with a ceiling for each.
@@ -549,6 +563,23 @@ fn edge_cost_parity() {
         (
             "wait_until",
             "process begin wait until rising_edge(clk); q(i) <= not q(i); end process;",
+        ),
+        // The same through an object alias (#1001).
+        (
+            "alias_rising_edge",
+            "process (clk) alias c : std_logic is clk; begin if rising_edge(c) then q(i) <= not q(i); end if; end process;",
+        ),
+        (
+            "alias_event",
+            "process (clk) alias c : std_logic is clk; begin if c'event and clk = '1' then q(i) <= not q(i); end if; end process;",
+        ),
+        (
+            "alias_stable",
+            "process (clk) alias c : std_logic is clk; begin if not c'stable and c = '1' then q(i) <= not q(i); end if; end process;",
+        ),
+        (
+            "alias_wait_until",
+            "process alias c : std_logic is clk; begin wait until rising_edge(c); q(i) <= not q(i); end process;",
         ),
     ];
     let template = include_str!("perf/edge_cost.vhd");

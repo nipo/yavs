@@ -10626,3 +10626,9 @@ Debugger tools (#944): the console has `drivers`, `describe`, `find`, `waits`, `
 ### Readable names and messages (#992, #993, #997, #998)
 
 A process without a label reads as what it is and where in every text (`tb.clk <= ... (tb.vhd:17)`, `Elaborated::proc_label`); variable paths, `yavs/hierarchy`, waves and VHPI keep `_pN`. A coverage directive after code on its line is `E2024`. `E3009` names the VHDL subprogram, `--threads=auto` says it is not implemented (#901). vunit-yavs refuses a wrong combination with one line and no traceback.
+## Edge triggers through aliases (#1001, 2026-11-01)
+
+A clock read through an object alias has the edge trigger of the clock: `rising_edge`, `falling_edge`, `'event` and `not 'stable` with a level,
+`wait until` and the reset branch, through an alias of the signal, an element or a part, renumbered or not. A scalar alias lowers
+as its signal and leaves no unused reference behind. Tests: `process/edge_alias` in the corpus (differential), `edge_alias` and
+`edge_cost_parity` in `crates/yavs/tests/perf.rs`. Statements after the clocked `if` remain without a trigger (kernel work, not an alias matter).

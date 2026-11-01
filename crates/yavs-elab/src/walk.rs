@@ -4320,14 +4320,8 @@ impl Elab<'_> {
 
     /// The leaf and element a static signal name denotes.
     fn static_elem(&mut self, s: ScopeId, e: ExprId) -> Option<(LeafId, u32)> {
-        let db: &Db = &*self.db;
-        let (d, path) = self.static_signal(e)?;
-        let l = Lsp {
-            root: ObjRoot::Decl(d),
-            path: path.into(),
-            stat: Staticness::Globally,
-            span: db.exprs[e].span,
-        };
+        // Through an object alias too (LRM 6.6.2): the prefix sees the element it denotes.
+        let l = self.db.static_lsp(e)?;
         self.lsp_elem(s, &l)
     }
 

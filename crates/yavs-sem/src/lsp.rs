@@ -75,6 +75,18 @@ impl Db {
         })
     }
 
+    /// [`Db::lsp`] of a name that is static as a whole, through aliases; `None` when a
+    /// non-static step ends the prefix before the end of the name.
+    pub fn static_lsp(&self, e: ExprId) -> Option<Lsp> {
+        let (root, path, stat, cut) = self.lsp_parts(e)?;
+        (!cut).then(|| Lsp {
+            root,
+            path: path.into(),
+            stat,
+            span: self.exprs[e].span,
+        })
+    }
+
     /// `(root, path, staticness, cut)`; `cut` once a non-static step was met.
     pub(crate) fn lsp_parts(&self, e: ExprId) -> Option<(ObjRoot, Vec<LspStep>, Staticness, bool)> {
         match &self.exprs[e].kind {
