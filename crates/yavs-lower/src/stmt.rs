@@ -689,14 +689,7 @@ impl Fx<'_, '_> {
                 let want = self.addr(Space::Inst, off);
                 let val = self.expr(e)?;
                 let (data, vd) = self.arr(val, span)?;
-                let dims = ty::array_of(db, db.base(st)).map_or(1, |x| x.1);
-                let m = self.msg(&what, Dir::To);
-                self.emit(Inst::SubtypeCheck {
-                    dope: vd,
-                    want,
-                    dims,
-                    what: m,
-                });
+                self.check_value_desc(db.base(st), tid, vd, want, &what, span)?;
                 let size = self.size_of(tid, want);
                 let fifteen = self.int(15);
                 let r = self.bin(IntOp::Add, size, fifteen);
@@ -774,15 +767,10 @@ impl Fx<'_, '_> {
         let t = db.base(st);
         let x = self.expr(e)?;
         let (data, vd) = self.arr(x, span)?;
-        if let (Some(off), Some((_, dims))) = (dope, ty::array_of(db, t)) {
+        if let Some(off) = dope {
             let want = self.addr(Space::Inst, off);
-            let what = self.msg("port actual", Dir::To);
-            self.emit(Inst::SubtypeCheck {
-                dope: vd,
-                want,
-                dims,
-                what,
-            });
+            let tid = self.ty(t, span)?;
+            self.check_value_desc(t, tid, vd, want, "port actual", span)?;
         }
         for (k, (path, lst)) in ty::leaves(db, st).into_iter().enumerate() {
             let leaf = crate::RecLeaf {
@@ -1722,46 +1710,6 @@ impl Fx<'_, '_> {
         exact.or_else(same).or_else(prefix)
     }
 
-    /// [`Fx::check_desc`] of a value's descriptor `vd` against the target's `want`; when the
-    /// check is more than one length (a record, or an array of records with array fields), the
-    /// descriptors that are the same bytes pass with one comparison.
-    fn check_value_desc(
-        &mut self,
-        t: yavs_sem::TypeId,
-        tid: yavs_ir::TyId,
-        vd: Reg,
-        want: Reg,
-        name: &str,
-        span: Span,
-    ) -> R<()> {
-        let types = self.fb.program().types();
-        let deep = match types.get(tid) {
-            Some(Ty::Array {
-                elem, elem_desc, ..
-            }) => elem_desc.is_none() && Ty::needs_desc(types, *elem),
-            _ => true,
-        };
-        let bytes = Ty::desc_size(types, tid).filter(|_| deep);
-        let Some(bytes) = bytes else {
-            return self.check_desc(t, tid, vd, want, name, span);
-        };
-        let (slow, join) = (self.block(), self.block());
-        let n = self.int(bytes as i64);
-        let same = self.reg(RegTy::I64);
-        self.emit(Inst::MemEq {
-            dst: same,
-            a: vd,
-            b: want,
-            n,
-        });
-        self.branch(same, join, slow);
-        self.at(slow);
-        self.check_desc(t, tid, vd, want, name, span)?;
-        self.jump(join);
-        self.at(join);
-        Ok(())
-    }
-
     /// The leaf table of target `target` (selections `steps` of record signal `d`) and the first
     /// driver slot of its leaves, when `SigScatter` drives all of it: a record or an array of
     /// records of a shape the table takes, and its leaves are consecutive among the `covered` ones
@@ -2625,14 +2573,9 @@ impl Fx<'_, '_> {
                 (Some(dope), Some(size)) => {
                     let val = self.expr(v)?;
                     let (data, vd) = self.arr(val, span)?;
-                    let dims = ty::array_of(db, db.base(st)).map_or(1, |x| x.1);
-                    let m = self.msg(what, Dir::To);
-                    self.emit(Inst::SubtypeCheck {
-                        dope: vd,
-                        want: dope,
-                        dims,
-                        what: m,
-                    });
+                    let t = db.base(st);
+                    let tid = self.ty(t, span)?;
+                    self.check_value_desc(t, tid, vd, dope, what, span)?;
                     self.emit(Inst::Copy {
                         dst: va,
                         src: data,

@@ -2546,16 +2546,7 @@ impl Fx<'_, '_> {
                     let da = self.addr(Space::Pkg(p), dslot);
                     if !desc.is_empty() {
                         self.emit(Inst::CopyConst { dst: da, c });
-                        if ty::is_array(db, t) {
-                            let dims = ty::array_of(db, t).map_or(1, |x| x.1);
-                            let what = self.msg(&ty::obj_desc(db, d), yavs_ir::Dir::To);
-                            self.emit(Inst::SubtypeCheck {
-                                dope: vdope,
-                                want: da,
-                                dims,
-                                what,
-                            });
-                        }
+                        self.check_value_desc(t, tid, vdope, da, &ty::obj_desc(db, d), span)?;
                     }
                     let dst = self.addr(Space::Pkg(p), off);
                     let n = self.int(i64::from(lsize));

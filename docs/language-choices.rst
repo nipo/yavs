@@ -34,6 +34,17 @@ yavs, with what to do about each.
    * - VHDL-1993 code that relies on rules VHDL-2008 relaxed
      - Error ``E1007`` under ``--std=93``, naming the 1993 rule.
      - Analyze the file with ``--std=2008``.
+   * - A record or array value whose field or element has another length than its target's, on
+       an assignment, a parameter or a qualified expression
+     - Error: ``E1405`` when both lengths are static, ``E3009`` at run time otherwise. The value is
+       never truncated.
+     - Make both sides the same length. A design that passed on another simulator may have
+       relied on the truncation: the error names the statement and both lengths.
+   * - A named aggregate as an operand of a predefined operator, ``c = (3 => a, 2 => b, ...)``, with
+       ``c`` of a constrained array type declared ``downto``
+     - The aggregate runs in the direction of the index subtype, so its leftmost element is its
+       lowest index, not ``3``. ``others`` there is ``E1325``.
+     - Qualify it, ``t'(3 => a, 2 => b, ...)``, to give it the type's direction.
    * - A static index out of range or a constant overflow in code that may be dead
      - Warning (``W1404``, ``W1401``); the check still runs if the code runs.
      - ``-Werror=W1404`` makes it an error.

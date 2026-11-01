@@ -18,6 +18,14 @@ use yavs_sem::{Db, LangRev, Options};
 
 /// Corpus files whose output matches sim1's exactly.
 const PASS: &[&str] = &[
+    "composite/record_length_var",
+    "composite/record_length_var_short",
+    "composite/record_length_second_field",
+    "composite/record_length_nested",
+    "composite/record_length_array_of_records",
+    "composite/record_length_out_param",
+    "composite/record_lengths_equal",
+    "composite/record_lengths_equal_target",
     "composite/aggregate_operand_direction",
     "hierarchy/package_own_name",
     "protected/access_method_call_2019",

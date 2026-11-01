@@ -324,10 +324,10 @@ impl Fx<'_, '_> {
 
     // ---- descriptors ----
 
-    /// The descriptor an array parameter of subtype `st` sees for an actual with descriptor
-    /// `dope`: the subtype's own when it is constrained, else its dimensions from the actual
-    /// and its constrained elements from the subtype (`ow(open)(7 downto 0)`). Every
-    /// constrained level's length is checked against the actual's (LRM 5.3.2.2, 6.5.6.2).
+    /// The descriptor a composite parameter of subtype `st` sees for an actual with descriptor
+    /// `dope`: the subtype's own where it is constrained, else the actual's bounds
+    /// (`ow(open)(7 downto 0)`, a partly constrained record). Every constrained level's length
+    /// is checked against the actual's (LRM 5.3.2.2, 6.5.6.2).
     pub(crate) fn param_dope(
         &mut self,
         st: SubtypeId,
@@ -336,46 +336,24 @@ impl Fx<'_, '_> {
         span: Span,
     ) -> R<Reg> {
         let db = self.db;
-        let partial = matches!(
-            &db.subtypes[st].constraint,
-            Constraint::Array { dims: None, elem } if !matches!(**elem, Constraint::None)
-        );
+        let open = match &db.subtypes[st].constraint {
+            Constraint::None => true,
+            Constraint::Array { dims: None, elem } => matches!(**elem, Constraint::None),
+            _ => false,
+        };
+        let t = db.base(st);
+        let tid = self.ty(t, span)?;
+        if open || !Ty::needs_desc(self.fb.program().types(), tid) {
+            return Ok(dope);
+        }
         let want = match self.subtype_dope(st, span)? {
             Some(w) => w,
-            None if partial => match self.desc_of(st, Some(dope), span)? {
+            None => match self.desc_of(st, Some(dope), span)? {
                 Some(w) => w,
                 None => return Err(self.cx.ice(span, "partial formal without a descriptor")),
             },
-            None => return Ok(dope),
         };
-        let what = self.msg(name, yavs_ir::Dir::To);
-        let mut t = db.base(st);
-        let mut c = db.subtypes[st].constraint.clone();
-        let mut tid = self.ty(t, span)?;
-        let mut off = 0;
-        while let Some(Ty::Array {
-            elem,
-            elem_desc,
-            dims,
-        }) = self.fb.program().types().get(tid).cloned()
-        {
-            if !matches!(c, Constraint::Array { dims: None, .. } | Constraint::None) {
-                let (d, w) = (self.offset(dope, off), self.offset(want, off));
-                self.emit(Inst::SubtypeCheck {
-                    dope: d,
-                    want: w,
-                    dims,
-                    what,
-                });
-            }
-            if elem_desc.is_some() || !Ty::needs_desc(self.fb.program().types(), elem) {
-                break;
-            }
-            off += 24 * u32::from(dims);
-            tid = elem;
-            let (est, ec) = elem_constraint(db, t, &c);
-            (t, c) = (db.base(est), ec);
-        }
+        self.check_value_desc(t, tid, dope, want, name, span)?;
         Ok(want)
     }
 
@@ -1321,6 +1299,14 @@ impl Fx<'_, '_> {
         self.store(ds, p, Width::B8);
         let hs = self.offset(slot, 16);
         self.store(hs, h, Width::B8);
+        // Static bounds: reads take the descriptor from the pool, so checks and layouts fold.
+        let c = &db.subtypes[o.subtype].constraint;
+        if let Some(b) = static_desc(db, self.fb.program(), t, c, tid)
+            && !b.is_empty()
+        {
+            let k = self.fb.program().konst(yavs_ir::ConstData::Bytes(b));
+            self.cx.const_dope.insert(d, k);
+        }
         Ok(())
     }
 
@@ -1370,6 +1356,49 @@ impl Fx<'_, '_> {
             }
             _ => {}
         }
+        Ok(())
+    }
+
+    /// [`Fx::check_desc`] of a value's descriptor `vd` against the target's `want`; when the
+    /// check is more than one length (a record, or an array of records with array fields), the
+    /// descriptors that are the same bytes pass with one comparison.
+    pub(crate) fn check_value_desc(
+        &mut self,
+        t: yavs_sem::TypeId,
+        tid: yavs_ir::TyId,
+        vd: Reg,
+        want: Reg,
+        name: &str,
+        span: Span,
+    ) -> R<()> {
+        if vd == want {
+            return Ok(());
+        }
+        let types = self.fb.program().types();
+        let deep = match types.get(tid) {
+            Some(Ty::Array {
+                elem, elem_desc, ..
+            }) => elem_desc.is_none() && Ty::needs_desc(types, *elem),
+            _ => true,
+        };
+        let bytes = Ty::desc_size(types, tid).filter(|&n| deep && n > 24);
+        let Some(bytes) = bytes else {
+            return self.check_desc(t, tid, vd, want, name, span);
+        };
+        let (slow, join) = (self.block(), self.block());
+        let n = self.int(bytes as i64);
+        let same = self.reg(RegTy::I64);
+        self.emit(Inst::MemEq {
+            dst: same,
+            a: vd,
+            b: want,
+            n,
+        });
+        self.branch(same, join, slow);
+        self.at(slow);
+        self.check_desc(t, tid, vd, want, name, span)?;
+        self.jump(join);
+        self.at(join);
         Ok(())
     }
 

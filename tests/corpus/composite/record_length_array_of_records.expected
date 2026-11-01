@@ -1,0 +1,2 @@
+exit	1
+diag	fatal	0	0	:record_length_array_of_records:_p0	value length 4 does not match variable S length 3

@@ -4384,6 +4384,16 @@ impl<'a> Opt<'a> {
                     self.pfact = Some((d, 0, self.nid << 32 | n));
                 }
             }
+            // Two constants of a known size, such as the descriptors of two record objects.
+            Inst::MemEq { dst, a, b, n } => {
+                if let Opn::K(n @ 1..=4096) = self.opn(n) {
+                    let (mut x, mut y) = (vec![0u8; n as usize], vec![0u8; n as usize]);
+                    if self.read_at(self.opn(a), 0, &mut x) && self.read_at(self.opn(b), 0, &mut y)
+                    {
+                        self.make_const(pc, dst, i64::from(x == y));
+                    }
+                }
+            }
             // Two descriptors of known, equal lengths: the check passes.
             Inst::SubtypeCheck {
                 dope, want, dims, ..

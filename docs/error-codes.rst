@@ -363,7 +363,7 @@ Semantic analysis (E1 and W1)
    * - _`W1404`
      - A static index is outside the static range of the array; the code may be dead, so this is checked again at runtime.
    * - _`E1405`
-     - The static lengths of the two sides differ.
+     - The static lengths of the two sides differ, for a whole array or for an element or field of a composite value.
    * - _`E1410`
      - The expression must be locally static here.
    * - _`E1501`
@@ -571,7 +571,7 @@ Run time (E3 and W3)
    * - _`E3008`
      - A port conversion function failed or returned a value of the wrong size.
    * - _`E3009`
-     - A VHDL runtime error: bound check, overflow, null access, division by zero and the like.
+     - A VHDL runtime error: bound check, length mismatch of an array, record field or element, overflow, null access, division by zero and the like.
    * - _`E3010`
      - The model, the simulation configuration or a control request is invalid.
    * - _`W3101`

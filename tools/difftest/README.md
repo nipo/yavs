@@ -69,7 +69,7 @@ non-ASCII characters, multi-line reports mixed with other stdout).
 
 `diag` covers report/assert output, `finish`/`stop` calls (severity `finish` or `stop`, message
 = status) and fatal runtime errors. Normalisation: severity lowercased; time converted to
-femtoseconds from whatever unit the simulator printed; the reference simulator source snippets, "Process/Procedure"
+femtoseconds from whatever unit the simulator printed; the reference simulator source snippets, its `Type T at file:line` line, "Process/Procedure"
 traces and the second reference simulator `instance:`/`from:` lines dropped (the first process trace gives `path`);
 a yavs process path turned into the reference form (`tb.g(1).p` is `:tb:g(1):p`, `lrm_path`; message text untouched);
 the reference simulator's trailing full stop on "Assertion violation." removed and the path of that default assert

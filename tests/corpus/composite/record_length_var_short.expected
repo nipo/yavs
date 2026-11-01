@@ -1,0 +1,2 @@
+exit	1
+diag	fatal	0	0	:record_length_var_short:_p0	value length 3 does not match target length 4

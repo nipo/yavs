@@ -93,7 +93,7 @@ codes! {
     OVERFLOW = "E1401", "Static integer or physical arithmetic overflows 64 bits.";
     LITERAL_RANGE = "E1402", "A literal is too large to represent.";
     OUT_OF_SUBTYPE = "E1403", "A static value lies outside the static subtype it is converted to.";
-    LENGTH_MISMATCH = "E1405", "The static lengths of the two sides differ.";
+    LENGTH_MISMATCH = "E1405", "The static lengths of the two sides differ, for a whole array or for an element or field of a composite value. Give the value the target's length, or change the target's constraint.";
     NOT_STATIC = "E1410", "The expression must be locally static here.";
     // E15xx generics
     NOT_GENERIC = "E1501", "The named unit is not a generic unit.";

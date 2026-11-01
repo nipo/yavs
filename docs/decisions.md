@@ -1943,6 +1943,16 @@ which tools/difftest parses.
   expression, ...): lowering uses sem's result subtype for `AggBounds::Named`, not the
   index subtype's direction, so `v := (7 => o, 6 downto 0 => '0')` with
   `v : bit_vector(7 downto 0)` sets `v(7)`.
+  A constrained array type alone is no such context (maintainer, 2026-11-01, #1009, lrm-checks L170):
+  an aggregate with no context subtype takes the base subtype, so an operand of a predefined operator
+  runs in the index subtype's direction and its `others` is `E1325`. A declared operator's formal is a
+  context like a function's.
+- **Every composite value is checked in one place** (`Fx::check_value_desc`, #1005, lrm-checks L171):
+  assignment, parameters, qualified expressions, allocators and force compare the whole descriptor
+  against the target's, one comparison when they are the same bytes and a walk per level only when
+  they are not, so a design without open fields gets no new instruction. Nothing else emits a length
+  check of a value that may have open elements. The static lengths are `E1405`, walked by
+  `Db::static_mismatch`.
 - **Signal parameters with records in their type** (#215) pass one signal reference per leaf
   of the formal (in leaf order, each two cells, so the interpreter's parameter copying is
   unchanged), then for `out`/`inout` the caller's driver slot of the first leaf (leaf `k`

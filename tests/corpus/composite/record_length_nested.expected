@@ -1,0 +1,2 @@
+exit	1
+diag	fatal	0	0	:record_length_nested:_p0	value length 4 does not match target length 3

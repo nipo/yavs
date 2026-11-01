@@ -3443,13 +3443,9 @@ impl<'a> Fx<'a, '_> {
                     }
                     let t = self.ty(db.base(p.subtype), es)?;
                     if Ty::needs_desc(self.fb.program().types(), t) {
-                        let mut desc = part.desc;
-                        // A constrained array formal takes its own bounds (LRM 4.2.2.3).
-                        if ty::array_of(db, db.base(p.subtype)).is_some() {
-                            desc =
-                                self.param_dope(p.subtype, desc, &p.name.text.to_string(), es)?;
-                        }
-                        cells.push(desc);
+                        // A constrained formal takes its own bounds (LRM 4.2.2.3).
+                        let name = p.name.text.to_string();
+                        cells.push(self.param_dope(p.subtype, part.desc, &name, es)?);
                     }
                 }
                 Shape::Arr => {
@@ -3495,9 +3491,7 @@ impl<'a> Fx<'a, '_> {
                             }
                         },
                     };
-                    if ty::array_of(db, db.base(p.subtype)).is_some() {
-                        dope = self.param_dope(p.subtype, dope, &p.name.text.to_string(), es)?;
-                    }
+                    dope = self.param_dope(p.subtype, dope, &p.name.text.to_string(), es)?;
                     self.array_cells(conv, data, dope, &mut cells);
                 }
             }
@@ -3508,12 +3502,8 @@ impl<'a> Fx<'a, '_> {
     /// The descriptor of an array signal actual as the formal `p` sees it.
     fn sig_formal_dope(&mut self, p: &Param, dope: Option<Reg>, span: Span) -> R<Option<Reg>> {
         let Some(d) = dope else { return Ok(None) };
-        if ty::array_of(self.db, self.db.base(p.subtype)).is_some() {
-            return self
-                .param_dope(p.subtype, d, &p.name.text.to_string(), span)
-                .map(Some);
-        }
-        Ok(Some(d))
+        self.param_dope(p.subtype, d, &p.name.text.to_string(), span)
+            .map(Some)
     }
 
     pub(crate) fn native(
@@ -5645,16 +5635,17 @@ impl<'a> Fx<'a, '_> {
                 dope,
                 off,
                 tid,
-                dims,
+                ..
             } => {
                 let (vd, vp) = self.arr(v, span)?;
-                let m = self.msg(what, Dir::To);
-                self.emit(Inst::SubtypeCheck {
-                    dope: vp,
-                    want: dope,
-                    dims,
-                    what: m,
-                });
+                let t = self.db.base(from);
+                // A record names no object: which field differs is in neither name.
+                let what = if ty::is_array(self.db, t) {
+                    what
+                } else {
+                    "target"
+                };
+                self.check_value_desc(t, tid, vp, dope, what, span)?;
                 let (size, count) = self.layout(tid, dope);
                 if self.is_logic(tid) {
                     let z = self.int(0);
@@ -5695,17 +5686,17 @@ impl<'a> Fx<'a, '_> {
                 Ok(v)
             }
             V::A(d, p) => {
-                let Some(want) = self.subtype_dope(to, span)? else {
+                let t = db.base(to);
+                let want = match db.subtypes[to].constraint {
+                    Constraint::None => None,
+                    _ if self.is_general(t, span)? => self.desc_of(to, Some(p), span)?,
+                    _ => self.subtype_dope(to, span)?,
+                };
+                let Some(want) = want else {
                     return Ok(v);
                 };
-                let dims = ty::array_of(db, db.base(to)).map_or(0, |x| x.1);
-                let what = self.msg(&ty::subtype_name(db, to), Dir::To);
-                self.emit(Inst::SubtypeCheck {
-                    dope: p,
-                    want,
-                    dims,
-                    what,
-                });
+                let tid = self.ty(t, span)?;
+                self.check_value_desc(t, tid, p, want, &ty::subtype_name(db, to), span)?;
                 Ok(V::A(d, want))
             }
         }

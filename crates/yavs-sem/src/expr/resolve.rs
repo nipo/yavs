@@ -240,34 +240,23 @@ impl Db {
 
     /// `E1403`: a static scalar value outside the static subtype it goes into (4.3).
     pub(crate) fn check_in_subtype(&mut self, id: ExprId, st: crate::ids::SubtypeId) {
-        if let Some(crate::stat::ConstValue::Array(a)) = self.value(id)
-            && let crate::types::Constraint::Array {
-                dims: Some(dims), ..
-            } = &self.subtypes[st].constraint
-            && let Some((want, got)) =
-                dims.iter()
-                    .zip(a.bounds.iter())
-                    .find_map(|(rc, &(l, d, r))| {
-                        let crate::types::RangeC::Explicit { left, dir, right } = rc else {
-                            return None;
-                        };
-                        let w = len(
-                            self.value(*left)?.as_int()?,
-                            *dir,
-                            self.value(*right)?.as_int()?,
-                        );
-                        let g = len(l, d, r);
-                        (w != g).then_some((w, g))
-                    })
+        // 4.3: both lengths static, so the run-time length check would always fail.
+        if let Some(v) = self.value(id).cloned()
+            && let Some((field, want, got)) =
+                self.static_mismatch(&v, self.base(st), &self.subtypes[st].constraint)
         {
-            // 4.3: both lengths static, so the run-time length check would always fail.
+            let target = match field {
+                Some(f) => format!("field `{f}` of the target"),
+                None => "the target".to_string(),
+            };
             let span = self.exprs[id].span;
             self.report(
                 Diagnostic::error(
                     diag::LENGTH_MISMATCH,
-                    format!("length mismatch: the target has {want} elements, the value {got}"),
+                    format!("length mismatch: {target} has {want} elements, the value {got}"),
                 )
-                .with_primary(span, format!("{got} elements")),
+                .with_primary(span, format!("{got} elements"))
+                .with_help("give the value the target's length, or change the target's constraint"),
             );
             return;
         }
@@ -312,6 +301,71 @@ impl Db {
                 )
                 .with_primary(span, "out of range"),
             );
+        }
+    }
+
+    /// The first array length of the static composite `v` of type `t` that differs from the
+    /// static constraint `c` or an element's or field's own: the innermost field, the
+    /// constraint's length, the value's (LRM 10.6.2.1, #1005).
+    fn static_mismatch(
+        &self,
+        v: &crate::stat::ConstValue,
+        t: crate::ids::TypeId,
+        c: &crate::types::Constraint,
+    ) -> Option<(Option<String>, i64, i64)> {
+        use crate::stat::{ConstValue as C, Elems};
+        use crate::types::Constraint as K;
+        match (v, &self.types[t].kind) {
+            (C::Array(a), TypeKind::Array { elem, .. }) => {
+                if let K::Array {
+                    dims: Some(dims), ..
+                } = c
+                    && let Some((want, got)) =
+                        dims.iter()
+                            .zip(a.bounds.iter())
+                            .find_map(|(rc, &(l, d, r))| {
+                                let crate::types::RangeC::Explicit { left, dir, right } = rc else {
+                                    return None;
+                                };
+                                let w = len(
+                                    self.value(*left)?.as_int()?,
+                                    *dir,
+                                    self.value(*right)?.as_int()?,
+                                );
+                                let g = len(l, d, r);
+                                (w != g).then_some((w, g))
+                            })
+                {
+                    return Some((None, want, got));
+                }
+                let ec = match c {
+                    K::Array { elem: ec, .. } if !matches!(**ec, K::None) => &**ec,
+                    _ => &self.subtypes[*elem].constraint,
+                };
+                let Elems::Runs(runs) = &a.elems else {
+                    return None;
+                };
+                runs.iter()
+                    .find_map(|(_, x)| self.static_mismatch(x, self.base(*elem), ec))
+            }
+            (C::Record(fs), TypeKind::Record { elems }) => fs
+                .iter()
+                .zip(elems.iter())
+                .enumerate()
+                .find_map(|(n, (x, e))| {
+                    let fc = match c {
+                        K::Record { elems: cs } => {
+                            cs.iter().find(|(i, _)| *i as usize == n).map(|(_, fc)| fc)
+                        }
+                        _ => None,
+                    };
+                    let fc = fc.unwrap_or(&self.subtypes[e.subtype].constraint);
+                    self.static_mismatch(x, self.base(e.subtype), fc)
+                        .map(|(inner, w, g)| {
+                            (inner.or_else(|| Some(e.name.text.to_string())), w, g)
+                        })
+                }),
+            _ => None,
         }
     }
 

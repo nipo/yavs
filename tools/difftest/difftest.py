@@ -131,8 +131,9 @@ def run(template, vhd, hdr, work, threads, shuffle, sandbox=True):
 # ---------------------------------------------------------------- normalise
 FMT1_HDR = re.compile(r"^\*\* (Note|Warning|Error|Failure|Fatal): (\d+)([a-z]+)\+(\d+): (.*)$")
 FMT1_TRACE = re.compile(r"^\s+(Process|Procedure|Function|Protected|Instance|Package|Port conversion)\b\s*(\S*)")
-# Source snippets, and the "Label L at file:line" line of a PSL directive with a report.
-FMT1_SNIP = re.compile(r"^\s*(>|\||\d+ \||Label \S+ at \S+:\d+$)")
+# Source snippets, the "Label L at file:line" line of a PSL directive with a report, and the
+# "Type T at file:line" line of a record length error.
+FMT1_SNIP = re.compile(r"^\s*(>|\||\d+ \||(Label|Type) \S+ at \S+:\d+$)")
 FMT1_CTL = re.compile(r"^(FINISH|STOP) called(?: with status (\d+))?$")
 FMT2_HDR = re.compile(r"^\S+?:\d+:\d+:@(\d+)([a-z]+):\((?:psl )?(?:report|assertion|assumption|cover) (\w+)\): (.*)$")
 FMT2_CTL = re.compile(r"^simulation (finished|stopped) @(\d+)([a-z]+)(?: with status (\d+))?$")

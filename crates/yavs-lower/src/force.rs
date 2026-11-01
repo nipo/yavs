@@ -3,15 +3,15 @@
 //! waveform-format element per range (bytes or plane blocks).
 
 use yavs_diag::Span;
-use yavs_ir::{Dir, ForceKind, Inst, Ty};
+use yavs_ir::{ForceKind, Inst, Ty};
 use yavs_sem::ExprId;
 use yavs_sem::decl::{DeclKind, ObjRole};
 use yavs_sem::hir::{Mode, ObjRoot, Rhs, Target};
 use yavs_syntax::ast::ForceMode;
 
+use crate::R;
 use crate::expr::SigPart;
 use crate::func::Fx;
-use crate::{R, ty};
 
 impl Fx<'_, '_> {
     /// The force mode: as written, else `out` when the target is (part of) a port of mode
@@ -102,16 +102,8 @@ impl Fx<'_, '_> {
             // applies the force to every scalar subelement).
             let x = self.expr(e)?;
             let (data, vd) = self.arr(x, span)?;
-            if let Some((_, dims)) = ty::array_of(db, p.t) {
-                let what = self.target_name(target.expr);
-                let m = self.msg(&what, Dir::To);
-                self.emit(Inst::SubtypeCheck {
-                    dope: vd,
-                    want: p.desc,
-                    dims,
-                    what: m,
-                });
-            }
+            let what = self.target_name(target.expr);
+            self.check_value_desc(p.t, p.tid, vd, p.desc, &what, span)?;
             for (leaf, sig, len) in &p.leaves {
                 let rel = &leaf.path[p.path.len()..];
                 let size = self.leaf_size(leaf, *len, span)?;
@@ -132,15 +124,10 @@ impl Fx<'_, '_> {
             Some(dope) => {
                 let x = self.expr(e)?;
                 let (data, vd) = self.arr(x, span)?;
-                let dims = ty::array_of(db, db.base(st)).map_or(1, |x| x.1);
+                let t = db.base(st);
+                let tid = self.ty(t, span)?;
                 let what = self.target_name(target.expr);
-                let m = self.msg(&what, Dir::To);
-                self.emit(Inst::SubtypeCheck {
-                    dope: vd,
-                    want: dope,
-                    dims,
-                    what: m,
-                });
+                self.check_value_desc(t, tid, vd, dope, &what, span)?;
                 data
             }
             None => {

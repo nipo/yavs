@@ -486,7 +486,7 @@ const EXPLAIN: &[(&str, &str)] = &[
     ),
     (
         "E3009",
-        "A VHDL runtime error: bound check, overflow, null access, division by zero and the like. The message and the call stack say where.",
+        "A VHDL runtime error: bound check, length mismatch of an array, record field or element, overflow, null access, division by zero and the like. The message and the call stack say where.",
     ),
     (
         "E3010",

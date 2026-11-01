@@ -1,0 +1,2 @@
+exit	1
+diag	fatal	0	0	:record_length_second_field:_p0	value length 2 does not match target length 3
