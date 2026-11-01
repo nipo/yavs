@@ -13363,3 +13363,30 @@ Written by Claude. On branch `perf/iterative`, approved as a plan by the maintai
 - **Promotion:** a frame object or a descriptor in a slot is never promoted to a register (`Opt::promote`): `Copy` and the logic writes reach them unseen. Found by `case_tab`; regression test `frame_objects_first`.
 - **Measured, 2026-11-01, Cranelift, against merge base 383ac32e; host load 15 to 30, other agents on the same cores, so cycles are weak:** instructions per clock of the micros, compiled: m9 13 094 to 7 340, net of the clock 1.04x m16 (bar 2x); m15 16 761 to 12 435; a procedure that may wait taking the record 23 211 to 14 777. One more record bit statement, compiled: 114 to 19 instructions, sim1 5.6. GRLIB window instructions 0.978, Microwatt 0.976. GRLIB whole runs, same build with the switch off, order alternated: 5 sets, switch off/on cycles 0.99 to 1.21, median 1.15, instructions 1.03. Against the merge base, 8 sets: cycles median 0.965 with an A/A of 1.03, range of a set 0.84 to 1.03. Interpreter on a callee taking the record: **6 to 7 percent more instructions** (m15, m17; cycles level within noise), because the address is decoded on each access; interpreter windows otherwise 0.985, 0.988.
 - **Why fixed sizes only, and no held pointers:** later plan steps. Frames do not move during an activation, so an address stays valid; registers do not live across a suspension, so nothing holds an object's old address at the switch.
+
+## The seam keeps its last gather and scatter of a whole record (yavs-interp, yavs-kernel, #1050, 2026-11-01)
+
+Step 5 of the iterative plan on `perf/iterative` (tracker #1046, candidates B4 and B5 of the design study #1048). Bars fixed first: instructions down at
+least 3 percent on GRLIB or Microwatt, no test up more than 1 percent, cycles not up.
+
+- **A bound plan used 16 times keeps what its last whole-value gather and scatter made** (`Gathered`, `Scattered` in `gather.rs`; `YAVS_SEAM_AFTER`; values up to
+  64 KiB). A gather compares each plane word it would read with the word it read last time and rebuilds the leaves of that group only; the value still goes to the
+  frame by copy. A scatter compares a run's bytes with its last miss and takes the planes it kept, not `leaf_planes`.
+- **No new semantic test, on purpose.** The plan named a stamp on the gather and a generation for force and deposit. Neither was needed for this much: the leaves
+  of a gather are a function of the plane word, read now, so a force or a deposit is a different word. A run's planes are a function of its bytes. Whether an equal
+  run is left out is still `Signal::direct_same_planes`, the kernel's own test against `cur` and the driving value (`skip_ok` covers `'transaction`, `'active` and
+  observers). A stamp would save the read of the signal too, and a missed write path would be a wrong result; not done.
+- **Runs of one scatter name different elements**, so what the scatter itself left on a driver does not stop its later equal runs being left out (`Ctx::direct_quiet`,
+  asked before the driver's first entry, then `Ctx::run_same`).
+- **Spans that share bytes keep no image:** the leaves of an array of records lie between each other, and a miss of one run wrote over the bytes another compared with:
+  a changed leaf was never driven. Found in review, `composite/sigrec_seam_array` is that shape.
+- `Signal::direct_same_planes` tests a block with no value built (`wide::block_is`). The reference simulator also compares a new value with the driver's before doing
+  anything; ours compares before conversion to planes, because its values are bytes and ours are not.
+- **Measured** against 383ac32e, Cranelift `--tier=auto`, core shared with a loaded host (load 15 to 60). Instructions, windows: GRLIB 0.967 to 0.977, Microwatt 0.910
+  to 1.003 (its own `auto` varies by world). Whole process to 700 us and 800 us, A and B started together, cores swapped, six pairs: instructions 0.983 and 0.949, cycles
+  geomean 1.001 (band 0.96 to 1.04) and 0.906 (band 0.75 to 1.10). So "cycles not up" is undecidable at this load (#1055), no rise seen. `--tier=interp`, which has no tier policy: GRLIB 0.978, Microwatt 0.961. Peak RSS not up on either. Estimated 10 to 15
+  percent; less than half of it holds: 30 percent of runs and groups are not plane words (one kernel signal per scalar or byte leaf), and each leaf that remains still
+  loads its signal.
+- **Not attributed: `vai_window_gen_interlock`** read 0.995 to 1.069 under `auto` over several sittings, against 0.978 to 1.016 for the same code again and a build with a dead branch, with cycles 0.95 to 1.04.
+  The seam is 0.1 percent of its instructions, `--tier=interp` reads 1.000, the images turned off on one binary read higher than on, and a build with only `block_is` read
+  0.986 and 1.026. So I read it as the compile outcome of `auto` (#673), not as this change, but I did not find what moves that outcome.
