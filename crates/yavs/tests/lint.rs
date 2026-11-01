@@ -628,6 +628,43 @@ fn every_report_format() {
 const PKG: &str = "package pk is\n  function f return integer;\nend package;\npackage body pk is\n  function f return integer is\n  begin\n  end function;\nend package body;\n";
 const USER: &str = "use work.pk.all;\nentity user is end entity;\narchitecture r of user is\n  constant c : integer := 1;\nbegin\n  p : process begin report integer'image(c); end process;\nend architecture;\n";
 
+/// A library whose order no longer works, as later files replaced a unit (#999): an earlier file
+/// reads it from the last, a file between brings its own, and the last is then read again. The
+/// cache changes nothing.
+#[test]
+fn a_replaced_unit_read_again_with_and_without_the_cache() {
+    let dir = tempdir("lint");
+    std::fs::write(dir.join("x.vhd"), "entity leaf is end entity;\n").unwrap();
+    std::fs::write(
+        dir.join("user.vhd"),
+        "entity top is end entity;\narchitecture r of top is begin u : entity work.leaf; end architecture;\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("later.vhd"),
+        "entity leaf is end entity;\narchitecture a of leaf is begin end architecture;\n",
+    )
+    .unwrap();
+    let analyze = yavs(
+        &dir,
+        &[
+            "analyze",
+            "--work=work:lib",
+            "x.vhd",
+            "user.vhd",
+            "later.vhd",
+        ],
+    );
+    assert!(analyze.status.success(), "{}", stderr(&analyze));
+    for extra in [&[][..], &["--no-cache"][..]] {
+        let mut args = vec!["lint", "--work=work:lib", "--message-format=short"];
+        args.extend(extra);
+        let o = yavs(&dir, &args);
+        assert_eq!(stderr(&o), "", "{extra:?}");
+        assert_eq!(status(&o), 0, "{extra:?}");
+    }
+}
+
 #[test]
 fn files_of_a_library_in_its_order_and_nothing_written() {
     let dir = tempdir("lint");

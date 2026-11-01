@@ -740,6 +740,7 @@ impl Db {
                 self.lib_by_key.insert(name.key, Some(l));
                 l
             };
+        self.forget_replaced(lib, path);
         let known = self.files.contains_key(&(lib, path.to_path_buf()));
         let keys = match self.warm_file(lib, path, rev, hash) {
             Some(keys) => keys,
@@ -825,6 +826,25 @@ impl Db {
             return Err(Reported);
         }
         Ok(ids.into_iter().map(|u| self.unit_record(u)).collect())
+    }
+
+    /// Reads the file again when a unit an earlier file loaded from it has since been replaced by
+    /// a third file: its syntax tree is used up, and the file must bring its own unit back (#999).
+    fn forget_replaced(&mut self, lib: LibId, path: &Path) {
+        let at = (lib, path.to_path_buf());
+        let Some(fc) = self.files.get(&at) else {
+            return;
+        };
+        let replaced = fc.units.iter().flatten().any(|(k, u)| {
+            u.is_none()
+                && matches!(
+                    self.libs[lib].units.get(k),
+                    Some(UnitSlot::Done(d)) if self.units[*d].file != fc.file
+                )
+        });
+        if replaced {
+            self.files.remove(&at);
+        }
     }
 
     /// Whether this session already analyzed unit `key` of `lib` from `path`; `known`: the session
