@@ -689,17 +689,14 @@ class YavsInterface(SimulatorInterface):
 
         return status
 
-    def merge_coverage(self, file_name, args=None, exclude=None, config=None):
+    def merge_coverage(self, file_name, args=None):
         """
         Merge the coverage databases of all simulations into file_name (".ycov" is added unless it ends so).
 
         args are further arguments for 'yavs cov report', which runs on the merged database when there are
-        any, exclude or config are given, or --yavs-cov-html, --yavs-cov-fail-under, --yavs-cov-exclude or
-        --yavs-cov-config are. A report that fails, for example a total below --yavs-cov-fail-under, makes the run
-        exit with status 1 once VUnit has written its reports.
-
-        exclude is an exclusion file or a list of them, added to those of --yavs-cov-exclude; config is a
-        configuration file for 'yavs cov report --config', and wins over --yavs-cov-config.
+        any, or --yavs-cov-html, --yavs-cov-fail-under, --yavs-cov-exclude or --yavs-cov-config are given. A report
+        that fails, for example a total below --yavs-cov-fail-under, makes the run exit with status 1 once VUnit has
+        written its reports. Exclusions from a run script go in args: args=["--exclude", file, "--config", file].
         """
         databases = []
         for database in sorted(self._coverage_files):
@@ -726,13 +723,10 @@ class YavsInterface(SimulatorInterface):
             report += ["--html", self._coverage.html]
         if self._coverage.fail_under is not None:
             report += [f"--fail-under={self._coverage.fail_under}"]
-        files = [exclude] if isinstance(exclude, (str, os.PathLike)) else list(exclude or [])
-        for path in [*self._coverage.exclude, *files]:
+        for path in self._coverage.exclude:
             report += ["--exclude", str(path)]
-        if config is None:
-            config = self._coverage.config
-        if config is not None:
-            report += ["--config", str(config)]
+        if self._coverage.config is not None:
+            report += ["--config", str(self._coverage.config)]
         if report and subprocess.run([yavs, "cov", "report", str(merged), *report], check=False).returncode != 0:
             # post_run runs before VUnit writes the JUnit report, which an exception here would skip
             atexit.register(_exit_with_failure)
@@ -774,23 +768,6 @@ class YavsInterface(SimulatorInterface):
                 sys.__stdout__.flush()
 
         return callback
-
-
-def _results_forward_coverage_keywords():
-    """
-    VUnit's Results.merge_coverage passes on file_name and args alone; this package's method takes more
-    (exclude, config), so results.merge_coverage must hand its keywords on. Without keywords nothing changes.
-    """
-    from vunit.ui.results import Results  # pylint: disable=import-outside-toplevel
-
-    def merge_coverage(self, file_name, args=None, **keywords):
-        self._simulator_if.merge_coverage(file_name=file_name, args=args, **keywords)  # pylint: disable=protected-access
-
-    merge_coverage.__doc__ = Results.merge_coverage.__doc__
-    Results.merge_coverage = merge_coverage
-
-
-_results_forward_coverage_keywords()
 
 
 def source_map_flags(project):

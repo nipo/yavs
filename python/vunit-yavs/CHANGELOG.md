@@ -4,8 +4,8 @@
 
 - `--yavs-lint` shows warning W0139, about unknown keys in `yavs-lint.yaml`, for the first library only. Needs a yavs
   with that warning.
-- `--yavs-cov-exclude FILE` (repeatable), `--yavs-cov-config FILE` and `results.merge_coverage(exclude=..., config=...)` apply
-  exclusion files and a coverage configuration to the report. Needs a yavs with repeatable `--exclude` and `--config`.
+- `--yavs-cov-exclude FILE` (repeatable) and `--yavs-cov-config FILE` apply exclusion files and a coverage configuration to
+  the report; a run script passes the same through `results.merge_coverage(file, args=["--exclude", f, "--config", g])`. Needs a yavs with repeatable `--exclude` and `--config`.
 - `yavs.cov_kind` takes `fsm` and `assert`, and `--yavs-cov-kind LIST` gives the kinds on the command line for tests
   without that option. Needs a yavs with state machine coverage.
 - A simulation ends with its test runner: yavs gets `--exit-on-stdin-close` and ends when the pipe the runner keeps to

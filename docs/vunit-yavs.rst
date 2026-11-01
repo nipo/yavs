@@ -133,16 +133,15 @@ them into ``coverage.ycov``. With ``--yavs-cov-html``, ``--yavs-cov-fail-under``
 reports on the merged database. The reports, exclusions and numbers are in :doc:`coverage`;
 a CI gate is ``python run.py --yavs-cov --yavs-cov-fail-under 85``.
 
-A run script names its exclusions in the call, and a person adds more on the command line:
+A run script passes exclusions in ``args``, and a person adds more on the command line:
 
 .. code-block:: python
 
    vu.main(post_run=lambda results: results.merge_coverage(
-       "coverage", exclude=["waived.yaml", "generated.txt"], config="coverage.yaml"))
+       "coverage", args=["--exclude", "waived.yaml", "--exclude", "generated.txt", "--config", "coverage.yaml"]))
 
-``exclude`` is one file or a list, added after those of ``--yavs-cov-exclude``. ``config`` wins over
-``--yavs-cov-config``. A bad file fails the report with its own error, and the run exits with status 1 after
-VUnit has written its reports. Either argument makes ``merge_coverage`` run the report.
+``--yavs-cov-exclude`` and ``--yavs-cov-config`` go after ``args``. A bad file fails the report with its own error, and
+the run exits with status 1 after VUnit has written its reports.
 
 Run scripts you do not write
 ----------------------------

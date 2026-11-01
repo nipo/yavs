@@ -2450,6 +2450,9 @@ scalars; the on-disk format is implementation-defined, so it is fixed here (yavs
 
 ## Coverage exclusions (yavs-cov, CLI, #351, user, 2026-10-19)
 
+- **No patch of the test runner (maintainer, 2026-11-01, #1020):** importing vunit-yavs does not replace
+  `Results.merge_coverage` or read `_simulator_if`. A run script passes `--exclude` and `--config` in `args`;
+  `run.py` has `--yavs-cov-exclude` and `--yavs-cov-config`.
 - **Row waivers in the source (maintainer, 2026-11-01, #1020):** `-- yavs cov exclude row -0-` (the short form a
   report suggests) and `row INPUT = VALUE` waive one condition or expression row. A keyword, not a marker symbol: a
   pattern with one symbol set is a valid combination waiver, and `row` also carries the long form. The kind words

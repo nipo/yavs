@@ -149,7 +149,7 @@ into `coverage.ycov`. `--yavs-cov-kind fsm,assert` on the command line gives the
 writes the HTML report and fails the run (exit status 1, after the test results are written) when
 the total is below 85%. Further arguments for `yavs cov report` go in
 `merge_coverage("coverage", args=["--cobertura", "coverage.xml"])`. Exclusions go in
-`merge_coverage("coverage", exclude=["waived.yaml"], config="coverage.yaml")` or on the command line as
+`args` too (`["--exclude", "waived.yaml", "--config", "coverage.yaml"]`) or on the command line as
 `--yavs-cov-exclude FILE` (repeatable) and `--yavs-cov-config FILE`. Coverage is not available
 under `--yavs-debug`.
 

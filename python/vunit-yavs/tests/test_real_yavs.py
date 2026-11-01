@@ -386,7 +386,7 @@ class TestRealYavs(unittest.TestCase):
     def test_coverage_exclusions_in_the_call_of_the_run_script(self):
         rows = self.tempdir / "rows.txt"
         rows.write_text("instance *\n", encoding="utf-8")
-        proc = self._coverage_run(RUN_PY_COVERAGE_EXCLUDE=str(rows))
+        proc = self._coverage_run(RUN_PY_COVERAGE_ARGS=f"--exclude {rows}")
         self.assertEqual(proc.returncode, 0, proc.stdout)
         self.assertIn("excluded (", proc.stdout)
 

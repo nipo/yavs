@@ -1,1 +1,1 @@
-vunit-yavs: `--yavs-cov-exclude FILE` (repeatable) and `--yavs-cov-config FILE` on the run script's command line, and `results.merge_coverage(exclude=..., config=...)`, apply exclusion files and a coverage configuration to the report.
+vunit-yavs: `--yavs-cov-exclude FILE` (repeatable) and `--yavs-cov-config FILE` on the run script's command line apply exclusion files and a coverage configuration to the report; a run script passes the same in `results.merge_coverage(file, args=[...])`.

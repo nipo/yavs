@@ -23,11 +23,7 @@ if "EXTRA_VHDL" in os.environ:
 
 def post_run(results):
     """Merge the coverage databases when the test asks for it"""
-    results.merge_coverage(
-        os.environ["RUN_PY_MERGE_COVERAGE"],
-        args=os.environ.get("RUN_PY_COVERAGE_ARGS", "").split(),
-        exclude=os.environ.get("RUN_PY_COVERAGE_EXCLUDE"),
-    )
+    results.merge_coverage(os.environ["RUN_PY_MERGE_COVERAGE"], args=os.environ.get("RUN_PY_COVERAGE_ARGS", "").split())
 
 
 VU.main(post_run=post_run if "RUN_PY_MERGE_COVERAGE" in os.environ else None)

@@ -10,6 +10,7 @@ Unit tests of the yavs interface
 
 import contextlib
 import importlib
+import inspect
 import io
 import os
 import subprocess
@@ -544,38 +545,23 @@ class TestYavsInterface(unittest.TestCase):
         (Path(self.output_path) / "yavs" / "coverage.ycov").write_text("db", encoding="utf-8")
         merged = str(Path(self.output_path) / "all.ycov")
         report = [str(Path("prefix") / "yavs"), "cov", "report", merged]
-        flags = ["--exclude", "flag.txt", "--exclude", "flag2.txt"]
+        flags = ["--exclude", "flag.txt", "--exclude", "flag2.txt", "--config", "flag.yaml"]
         with mock.patch("vunit_yavs.subprocess.run", autospec=True) as run:
             run.return_value.returncode = 0
             self.simif.merge_coverage(merged)
-            self.assertEqual(run.call_args.args[0], [*report, *flags, "--config", "flag.yaml"])
-            # One file or a list, after those of the flags; the argument wins over --yavs-cov-config
-            self.simif.merge_coverage(merged, exclude=Path("one.txt"), config=Path("mine.yaml"))
-            self.assertEqual(
-                run.call_args.args[0], [*report, *flags, "--exclude", "one.txt", "--config", "mine.yaml"]
-            )
-            self.simif.merge_coverage(merged, exclude=["a.txt", "b.yaml"])
-            self.assertEqual(
-                run.call_args.args[0],
-                [*report, *flags, "--exclude", "a.txt", "--exclude", "b.yaml", "--config", "flag.yaml"],
-            )
+            self.assertEqual(run.call_args.args[0], [*report, *flags])
+            # A run script's args come first
+            self.simif.merge_coverage(merged, args=["--exclude", "mine.txt"])
+            self.assertEqual(run.call_args.args[0], [*report, "--exclude", "mine.txt", *flags])
 
-    def test_merge_coverage_keywords_alone_make_a_report(self):
-        self._simulate_with_coverage()
-        (Path(self.output_path) / "yavs" / "coverage.ycov").write_text("db", encoding="utf-8")
-        merged = str(Path(self.output_path) / "all.ycov")
-        with mock.patch("vunit_yavs.subprocess.run", autospec=True) as run:
-            run.return_value.returncode = 0
-            self.simif.merge_coverage(merged, config="c.yaml")
-        self.assertEqual(run.call_args.args[0][1:], ["cov", "report", merged, "--config", "c.yaml"])
-
-    def test_results_forward_the_keywords(self):
+    def test_merge_coverage_takes_only_what_vunit_passes(self):
+        # Importing the package leaves VUnit's Results.merge_coverage alone
         from vunit.ui.results import Results  # pylint: disable=import-outside-toplevel
 
-        simif = mock.Mock()
-        results = Results(None, simif, {})
-        results.merge_coverage("x", args=["a"], exclude="e.txt", config="c.yaml")
-        simif.merge_coverage.assert_called_once_with(file_name="x", args=["a"], exclude="e.txt", config="c.yaml")
+        self.assertEqual(Results.merge_coverage.__module__, "vunit.ui.results")
+        self.assertEqual(
+            list(inspect.signature(YavsInterface.merge_coverage).parameters), ["self", "file_name", "args"]
+        )
 
     def test_merge_coverage_needs_a_database(self):
         with refused(self, "no simulation ran with coverage"):
