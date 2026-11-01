@@ -64,10 +64,10 @@ Control a run
   the end, ``--message-format=json`` makes that one JSON object for CI.
 * What keeps a simulation busy: ``--activity`` prints the processes that ran most often and the signals that
   changed most often, with ``--activity=FILE`` also as JSON. ``--profile`` measures time instead.
-
-These need a release newer than 0.11.0, except ``--hang-report`` and ``--profile`` themselves.
 * A testbench that may depend on process order: ``--shuffle`` runs the processes in a random order and prints the
   seed, so the run can be repeated with ``--shuffle=SEED``.
+
+``--assert-summary`` and ``--activity`` need a release newer than 0.11.0.
 
 Waves, coverage and debugging are options of ``run`` too: :doc:`waveforms`, :doc:`coverage`, :doc:`debugging`,
 :doc:`interactive`. Plugins are in :doc:`vhpi`, and speed in :doc:`running-faster`.

@@ -53,8 +53,8 @@ html_baseurl = os.environ.get("READTHEDOCS_CANONICAL_URL", "https://yavs.readthe
 llms_txt_uri_template = "{base_url}{docname}.html"
 llms_txt_summary = (
     "yavs (Yet Another VHDL Simulator) is a VHDL-1993/2008/2019 simulator written in Rust, "
-    "with a command line interface (analyze, elab, run), compiled-code tiers, coverage, FST "
-    "waveforms, DAP debugging and a VHPI plugin interface."
+    "with a command line interface (analyze, elab, run, lint), a debugger console, DAP debugging, "
+    "live waveforms in Surfer, compiled-code tiers, coverage, FST waveforms and a VHPI plugin interface."
 )
 
 html_theme = "sphinx_rtd_theme"
