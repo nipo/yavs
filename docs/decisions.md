@@ -12795,6 +12795,7 @@ duplicate implementations without changing diagnostics (issue #894; implemented 
 - Windows: every crate, `lib/`, and the build files (`Cargo.toml`, `Cargo.lock`, `.cargo/`, `ci.yml`). This replaces the crate list of "CI matrix": a Windows-only bug in `yavs-lint` (d0e8826a), a crate not on that list, is why a list is not safe. Off: `tools/`, `editors/vscode/`, other workflows, docs and test data under `crates/*/tests`. A `python/vunit-yavs` change runs only `vunit-yavs` on Windows. The nightly run covers the rest within a day. The pattern is `WINDOWS` in `tools/ci-plan.py`.
 - `conformance.yml` has a `paths` filter, and a push of a tag or a manual run ignores it. It no longer cancels on main: half of its runs were cancelled by a newer push, so a result-changing commit often had no result and a report needed a quiet main.
 - Audit evidence: the comments on issue #1014.
+- Verified on real runs: 256762b1, a change to `ci.yml`, ran every Linux job and Windows; all four required checks passed, and its `conformance` run finished although newer commits arrived. Not verified by a run: the tag path of `conformance.yml` (GitHub documents that `paths` does not apply to tag pushes; the next release shows it).
 
 ## Vendor libraries from the user's install (#119, 2026-10-31)
 
