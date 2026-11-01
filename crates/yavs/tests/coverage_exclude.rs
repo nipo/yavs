@@ -133,3 +133,54 @@ fn a_bad_second_file_is_named() {
     let e = text(&o.stderr);
     assert!(e.contains("`bad.txt`") && e.contains("line 1:"), "{e}");
 }
+
+/// Patterns are relative to the file holding them, whatever the stored paths and the working
+/// directory are.
+#[test]
+fn file_patterns_are_relative_to_their_file() {
+    let tmp = tempdir("filelists");
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/cli/cov_report.vhd");
+    write(&tmp, "rtl/gen/x", "");
+    std::fs::copy(&src, tmp.join("rtl/gen/cov_report.vhd")).expect("copy");
+    // Analysed with an absolute path, so the database holds an absolute path.
+    let abs = tmp.join("rtl/gen/cov_report.vhd").display().to_string();
+    let lib = format!("--work=work:{}/lib", tmp.display());
+    let o = yavs(&tmp, &["analyze", &lib, &abs]);
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    let o = yavs(&tmp, &["run", &lib, "--cov=a.ycov", "cov_report"]);
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    write(
+        &tmp,
+        "rules/up.yaml",
+        "exclude:\n  - kind: file\n    files: ../rtl/gen\n",
+    );
+    write(&tmp, "dir.txt", "file rtl/gen\n");
+    write(
+        &tmp,
+        "except.txt",
+        "files rtl files_exclude rtl/gen/*.vhd\n",
+    );
+    write(&tmp, "elsewhere/x.txt", "files rtl/gen\n");
+    let total = |file: &str, cwd: &Path| {
+        let db = tmp.join("a.ycov").display().to_string();
+        let f = tmp.join(file).display().to_string();
+        yavs(cwd, &["cov", "report", &db, "--exclude", &f, "--uncovered"])
+    };
+    // A pattern reaches only below the directory of its file, as in a lint waiver.
+    let up = total("rules/up.yaml", &tmp);
+    assert!(text(&up.stderr).contains("W0111"), "{}", text(&up.stderr));
+    let o = total("dir.txt", &tmp);
+    assert_eq!(text(&o.stdout), "", "{}", text(&o.stderr));
+    // From another directory the file's own directory still counts.
+    let o = total("dir.txt", &tmp.join("rtl"));
+    assert_eq!(text(&o.stdout), "", "{}", text(&o.stderr));
+    let o = total("except.txt", &tmp);
+    assert!(!text(&o.stdout).is_empty(), "the file is excepted");
+    // Relative to the file: `rtl/gen` from another directory covers nothing.
+    let o = total("elsewhere/x.txt", &tmp);
+    let e = text(&o.stderr);
+    assert!(
+        e.contains("warning[W0111]") && e.contains("`rtl/gen`"),
+        "{e}"
+    );
+}

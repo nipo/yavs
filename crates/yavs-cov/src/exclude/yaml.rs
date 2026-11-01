@@ -11,12 +11,15 @@
 //!
 //! A `condition` or `expression` entry has `hash: "HEX12.OCC"` and `row: N` (2 * input + value).
 //! A `toggle` entry has `signal` instead of `hash` and an optional `direction: rise|fall`.
+//! A `file` entry has `file`, or `files` and `files_exclude` (one word or a list each), the keys
+//! of a lint waiver.
 //!
 //! Every value is read as the text it was written as, so `no`, `on` and a hash of digits only
 //! stay strings. The parser is `saphyr-parser` (events with line numbers), not a data model.
 
 use super::{ItemKind, Row, Rule, direction, item_rule};
 use saphyr_parser::{Event, Parser};
+use yavs_diag::files::normalize;
 use yavs_diag::suggest::tail;
 
 /// The kinds of exclusion an entry may have.
@@ -139,8 +142,16 @@ fn entry(line: usize, n: Node) -> Result<Row, String> {
         ));
     };
     let mut get: Vec<(usize, &str, &str)> = Vec::new();
+    // `files` and `files_exclude`, of a `file` entry: one word or a list.
+    let mut lists: Vec<(usize, &str, Vec<String>)> = Vec::new();
+    let is_file = fields
+        .iter()
+        .any(|(_, k, v)| k == "kind" && matches!(v, Node::Scalar(s) if s == "file"));
     for (l, k, v) in &fields {
         match v {
+            Node::Scalar(_) | Node::Seq(_) if is_file && (k == "files" || k == "files_exclude") => {
+                lists.push((*l, k, words(*l, k, v)?));
+            }
             Node::Scalar(s) => get.push((*l, k, s)),
             _ => return Err(err(*l, &format!("`{k}` must be a single value"))),
         }
@@ -166,7 +177,7 @@ fn entry(line: usize, n: Node) -> Result<Row, String> {
         ),
         "instance" => (&["kind", "instance", "reason"], &["instance"]),
         "unit" => (&["kind", "unit", "reason"], &["unit"]),
-        "file" => (&["kind", "file", "reason"], &["file"]),
+        "file" => (&["kind", "file", "reason"], &[]),
         _ => {
             let l = get.iter().find(|f| f.1 == "kind").map_or(line, |f| f.0);
             let kinds = KINDS.into_iter();
@@ -193,6 +204,15 @@ fn entry(line: usize, n: Node) -> Result<Row, String> {
             return Err(err(line, &format!("kind `{kind}` needs `{k}`")));
         }
     }
+    if kind == "file" && find("file").is_some_and(str::is_empty) {
+        return Err(err(line, "kind `file` needs `file`"));
+    }
+    if kind == "file" && find("file").is_some() == !lists.is_empty() {
+        return Err(err(
+            line,
+            "kind `file` needs `file`, or `files` and `files_exclude`, not both",
+        ));
+    }
     let bad = |m: &str| err(line, &format!("{m}: kind `{kind}`"));
     let rule = match kind {
         "statement" | "branch" | "condition" | "expression" | "combination" => item_rule(
@@ -210,7 +230,17 @@ fn entry(line: usize, n: Node) -> Result<Row, String> {
         ),
         "instance" => Rule::Instance(yavs_diag::dotted(find("instance").unwrap_or_default())),
         "unit" => Rule::Unit(find("unit").unwrap_or_default().into()),
-        _ => Rule::File(find("file").unwrap_or_default().into()),
+        _ if lists.is_empty() => Rule::File(find("file").unwrap_or_default().into()),
+        _ => {
+            let list = |key: &str| -> Vec<String> {
+                let of = lists.iter().filter(|x| x.1 == key);
+                of.flat_map(|x| x.2.iter().map(|p| normalize(p))).collect()
+            };
+            Rule::Files {
+                files: list("files"),
+                files_exclude: list("files_exclude"),
+            }
+        }
     };
     let text = std::iter::once(kind.to_string())
         .chain(
@@ -218,6 +248,7 @@ fn entry(line: usize, n: Node) -> Result<Row, String> {
                 .filter(|f| f.1 != "kind" && f.1 != "reason")
                 .map(|f| format!("{}={}", f.1, f.2)),
         )
+        .chain(lists.iter().map(|x| format!("{}={}", x.1, x.2.join(","))))
         .collect::<Vec<_>>()
         .join(" ");
     Ok(Row {
@@ -226,6 +257,23 @@ fn entry(line: usize, n: Node) -> Result<Row, String> {
         reason: find("reason").unwrap_or_default().trim().to_string(),
         line,
     })
+}
+
+/// A value that is one word or a list of them, none empty.
+fn words(line: usize, key: &str, v: &Node) -> Result<Vec<String>, String> {
+    let bad = || err(line, &format!("`{key}` must be a word or a list of them"));
+    let out = match v {
+        Node::Scalar(s) if !s.is_empty() => vec![s.clone()],
+        Node::Seq(items) if !items.is_empty() => items
+            .iter()
+            .map(|(_, n)| match n {
+                Node::Scalar(s) if !s.is_empty() => Ok(s.clone()),
+                _ => Err(bad()),
+            })
+            .collect::<Result<_, _>>()?,
+        _ => return Err(bad()),
+    };
+    Ok(out)
 }
 
 /// `s` as a YAML double-quoted scalar.

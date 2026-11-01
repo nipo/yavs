@@ -30,6 +30,7 @@
 //! summary lines such as "aborting due to 2 previous errors" and the informational note
 //! that gives the seed of a shuffled run.
 
+pub mod files;
 mod path;
 mod shared;
 pub mod suggest;

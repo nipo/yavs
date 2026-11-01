@@ -33,7 +33,7 @@ Read the root `AGENTS.md` first. This file is for an agent about to change `crat
 | A rule judges only what analysis folded; statically turned off code is not walked | No guessing about generics |
 | Predefined operators only for lint_741 and lint_781 | Overloads define their own behaviour |
 | Generic instances are not walked: their spans are the generic's | One finding per place |
-| `exclude` and a waiver's `files` share `Place::covered_by`; waivers also keep matching the reported path and a bare name | Directories mean the same in both; existing waiver files keep working |
+| `exclude` and a waiver's `files` share `yavs_diag::files::Place::covered_by`, coverage exclusion files too; waivers also keep matching the reported path and a bare name | Directories mean the same everywhere; existing waiver files keep working |
 
 ## 4. Invariants and pitfalls
 

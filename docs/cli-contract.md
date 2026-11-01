@@ -740,7 +740,11 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   items such a file lists out of the summary and the Cobertura report and lists them under
   "excluded" (format and warnings `W0110`, `W0111`, `W0114`: `docs/coverage.md` "Excluding code");
   the file is read as YAML when its name ends in `.yaml` or `.yml` (any case), else as text rows,
-  with the same meaning (`E0112` names the line of a bad entry).
+  with the same meaning (`E0112` names the line of a bad entry). `file` rows and entries take a plain
+  directory; `files` and `files_exclude` (YAML under `kind: file`, one word or a list; text rows
+  `files P... [files_exclude P...]`, `files_exclude P...`) use the matching of lint waivers
+  (`yavs_diag::files`), relative to the exclusion file, and a pattern that covers no source file of the
+  database is `W0111`.
   Exclusions apply when reporting; databases keep raw counts. `--cov-exclude-translate-off`
   (`run`) also leaves `translate_off`/`translate_on` regions out; unbalanced `-- coverage`
   pragmas are `W0112`/`W0113`. `--cov-kind=statement,branch,toggle,condition,expression` (`run`, default `statement,branch,toggle`)

@@ -1481,7 +1481,7 @@ impl Affix {
         } else {
             format!("**{a}")
         };
-        crate::config::glob(p.as_bytes(), name.as_bytes())
+        yavs_diag::files::glob(p.as_bytes(), name.as_bytes())
     }
 }
 

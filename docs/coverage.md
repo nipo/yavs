@@ -276,8 +276,8 @@ file */generated/*.vhd
 unit work.pkg_tools
 ```
 
-Row types are `statement`, `branch`, `condition`, `expression`, `combination`, `toggle`, `instance`, `unit`
-and `file`; `*` and `?` match in instance paths, toggle paths, signal names and file
+Row types are `statement`, `branch`, `condition`, `expression`, `combination`, `toggle`, `instance`, `unit`,
+`file`, `files` and `files_exclude`; `*` and `?` match in instance paths, toggle paths, signal names and file
 patterns. A file whose name ends in `.yaml` or `.yml` is read as YAML:
 
 ```yaml
@@ -292,7 +292,21 @@ exclude:
     direction: fall        # optional: rise or fall, default both
   - kind: instance
     instance: "tb.u_debug*"
+  - kind: file
+    files: [rtl/generated, "rtl/**/old_*.vhd"]
+    files_exclude: rtl/generated/keep.vhd
+    reason: generated code
 ```
+
+`files` and `files_exclude` work as they do in a [lint waiver](lint.rst): one word or a list, each a
+file, a plain directory or a pattern where `*` and `?` stop at `/` and `**` does not, relative to the
+directory of the exclusion file. `files_exclude` wins, and without `files` it means every file except
+those. A pattern reaches only below that directory (`..` does not leave it); for a file elsewhere, start it with
+`/` or `**/`. They also match the path as the database holds it, and a bare file name matches that file in any
+directory. In a text file the same rule is one row, without spaces in the patterns:
+`files rtl/generated rtl/old.vhd files_exclude rtl/generated/keep.vhd`. A pattern that covers no source file
+of the database is warning `W0111`, with a near name if there is one. The older `file GLOB` row keeps its
+matching (any case, `*` crosses `/`, any trailing part of the path) and also takes a plain directory.
 
 Excluded items are left out of the totals and Cobertura and listed under "excluded" with their
 reasons; the database keeps the raw counts. Rows match by instance, kind and the hash of the
@@ -308,7 +322,8 @@ there to read (a stale line is warning `W0110`). `yavs cov report --uncovered DB
 | `toggle` | `PATH SCALAR [rise\|fall]` (YAML: `instance`, `signal`, `direction`) |
 | `instance` | an instance path and everything below it |
 | `unit` | a package, such as `work.pkg_tools` |
-| `file` | a file glob, such as `*/generated/*.vhd` |
+| `file` | a file glob or directory, such as `*/generated/*.vhd` |
+| `files`, `files_exclude` | lists of files, directories and patterns relative to the exclusion file (YAML: under `kind: file`) |
 
 In YAML, quote values that start with `*` or contain `: `.
 

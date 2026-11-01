@@ -11,17 +11,20 @@
 //! toggle    <instance|glob> <scalar|glob> [rise|fall]   a signal's scalar, both directions unless one is named
 //! instance  <glob>          that instance and everything below it
 //! unit      <lib.package>   a package's items
-//! file      <glob>          every item of matching source files
+//! file      <glob|dir>      every item of matching source files
+//! files     <pattern>... [files_exclude <pattern>...]    the same with the keys and matching of
+//! files_exclude <pattern>...                             lint waivers, relative to this file
 //! ```
 //!
 //! Items match by instance, kind, hash prefix, occurrence and arm; `file:line` is display only
 //! and a changed line is a warning. Exclusions apply when reporting: the database keeps raw
 //! counts.
 
-use std::collections::BTreeMap;
-use std::path::Path;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 
 use crate::{Database, Entry, Key, Kind};
+use yavs_diag::files::{Found, normalize};
 use yavs_diag::{Diagnostic, dotted};
 
 mod yaml;
@@ -80,7 +83,14 @@ enum Rule {
     Toggle(String, String, Option<bool>),
     Instance(String),
     Unit(String),
+    /// The older `file` row: its own glob (any case, `*` crosses `/`, any trailing path), or what
+    /// a `files` pattern matches.
     File(String),
+    /// `files` and `files_exclude`, as in a lint waiver: empty `files` is every file.
+    Files {
+        files: Vec<String>,
+        files_exclude: Vec<String>,
+    },
 }
 
 /// One row of an exclusion file.
@@ -99,6 +109,8 @@ pub struct Row {
 pub struct Rules {
     /// The file as the user named it, for messages and the exclusion report.
     pub name: String,
+    /// Its directory: what patterns are relative to.
+    pub base: PathBuf,
     pub rows: Vec<Row>,
 }
 
@@ -112,6 +124,11 @@ impl Rules {
         let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
         Ok(Rules {
             name: path.display().to_string(),
+            base: std::path::absolute(path)
+                .map_err(|e| e.to_string())?
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_default(),
             rows: if yaml {
                 parse_yaml(&text)?
             } else {
@@ -228,6 +245,29 @@ fn item_rule(
     })
 }
 
+/// A text row `files P... [files_exclude P...]` or `files_exclude P...`.
+fn files_row(w: &[&str], bad: &dyn Fn(&str) -> String) -> Result<Rule, String> {
+    let (files, rest) = match w[0] {
+        "files" => {
+            let n = w
+                .iter()
+                .position(|x| *x == "files_exclude")
+                .unwrap_or(w.len());
+            (&w[1..n], &w[n..])
+        }
+        _ => (&w[..0], w),
+    };
+    let files_exclude = rest.get(1..).unwrap_or_default();
+    if (w[0] == "files" && files.is_empty()) || (!rest.is_empty() && files_exclude.is_empty()) {
+        return Err(bad("expected at least one pattern after the key"));
+    }
+    let list = |v: &[&str]| v.iter().map(|p| normalize(p)).collect();
+    Ok(Rule::Files {
+        files: list(files),
+        files_exclude: list(files_exclude),
+    })
+}
+
 /// Parse an exclusion file; the error names the line.
 pub fn parse(text: &str) -> Result<Vec<Row>, String> {
     let mut rows = Vec::new();
@@ -271,15 +311,17 @@ pub fn parse(text: &str) -> Result<Vec<Row>, String> {
             ["instance", g] => Rule::Instance(dotted(g)),
             ["unit", u] => Rule::Unit(u.to_string()),
             ["file", g] => Rule::File(g.to_string()),
+            ["files" | "files_exclude", ref rest @ ..] if !rest.is_empty() => files_row(&w, &bad)?,
             [
                 "statement" | "branch" | "condition" | "expression" | "combination" | "toggle"
-                | "instance" | "unit" | "file",
+                | "instance" | "unit" | "file" | "files" | "files_exclude",
                 ..,
             ] => {
                 return Err(bad("wrong number of fields"));
             }
             [t, ..] => {
-                let tail = yavs_diag::suggest::tail(t, "type", yaml::KINDS.into_iter());
+                let types = yaml::KINDS.into_iter().chain(["files", "files_exclude"]);
+                let tail = yavs_diag::suggest::tail(t, "type", types);
                 return Err(format!(
                     "line {}: unknown exclusion type `{t}`: `{}`{tail}",
                     i + 1,
@@ -311,9 +353,39 @@ fn pattern_matches(pattern: &str, k: &Key) -> bool {
         })
 }
 
-/// Whether rule `r` takes the item. A rule's instance glob is dotted when read, so a row may use
-/// either form of a path.
-fn matches(r: &Rule, k: &Key, e: &Entry) -> bool {
+/// Whether the older `file` row names `file`, a path as the database holds it.
+fn file_glob(g: &str, file: &str) -> bool {
+    // Either separator in the row and in the recorded path (Windows paths use `\\`).
+    let (g, f) = (g.replace('\\', "/"), file.replace('\\', "/"));
+    glob(&g, &f) || f.match_indices('/').any(|(i, _)| glob(&g, &f[i + 1..]))
+}
+
+/// The files of the database a `file` or `files` rule takes, given the files as patterns see them;
+/// `None` for any other rule.
+fn rule_files<'a>(r: &Rule, found: &[(&'a str, Found)]) -> Option<BTreeSet<&'a str>> {
+    let hit = |f: &str, x: &Found| match r {
+        Rule::File(g) => file_glob(g, f) || x.matches(&normalize(g)),
+        Rule::Files {
+            files,
+            files_exclude,
+        } => {
+            (files.is_empty() || files.iter().any(|p| x.matches(p)))
+                && !files_exclude.iter().any(|p| x.matches(p))
+        }
+        _ => false,
+    };
+    matches!(r, Rule::File(_) | Rule::Files { .. }).then(|| {
+        found
+            .iter()
+            .filter(|(f, x)| hit(f, x))
+            .map(|x| x.0)
+            .collect()
+    })
+}
+
+/// Whether rule `r` takes the item; `files` is what [`rule_files`] gave for it. A rule's instance
+/// glob is dotted when read, so a row may use either form of a path.
+fn matches(r: &Rule, k: &Key, e: &Entry, files: Option<&BTreeSet<&str>>) -> bool {
     let path = k.shown();
     match r {
         Rule::Item {
@@ -359,11 +431,7 @@ fn matches(r: &Rule, k: &Key, e: &Entry) -> bool {
                 && (glob(g, &path) || path.match_indices('.').any(|(i, _)| glob(g, &path[..i])))
         }
         Rule::Unit(u) => k.path.eq_ignore_ascii_case(u),
-        Rule::File(g) => {
-            // Either separator in the row and in the recorded path (Windows paths use `\`).
-            let (g, f) = (g.replace('\\', "/"), e.file.replace('\\', "/"));
-            glob(&g, &f) || f.match_indices('/').any(|(i, _)| glob(&g, &f[i + 1..]))
-        }
+        Rule::File(_) | Rule::Files { .. } => files.is_some_and(|f| f.contains(e.file.as_str())),
     }
 }
 
@@ -374,6 +442,29 @@ pub fn apply(db: &Database, files: &[Rules]) -> Applied {
     let rows: Vec<(&str, &Row)> = files
         .iter()
         .flat_map(|f| f.rows.iter().map(|r| (f.name.as_str(), r)))
+        .collect();
+    let names: BTreeSet<&str> = db.items.values().map(|e| e.file.as_str()).collect();
+    // Per rule of the file kinds, the files it takes; per exclusion file, the files as seen from it.
+    let found: Vec<Vec<(&str, Found)>> = files
+        .iter()
+        .map(|f| {
+            let any = f
+                .rows
+                .iter()
+                .any(|r| matches!(r.rule, Rule::File(_) | Rule::Files { .. }));
+            let list = names.iter().filter(|_| any);
+            list.map(|n| (*n, Found::new(n, &f.base))).collect()
+        })
+        .collect();
+    let row_found: Vec<&[(&str, Found)]> = files
+        .iter()
+        .zip(&found)
+        .flat_map(|(f, x)| f.rows.iter().map(move |_| x.as_slice()))
+        .collect();
+    let taken: Vec<_> = rows
+        .iter()
+        .zip(&row_found)
+        .map(|((_, r), f)| rule_files(&r.rule, f))
         .collect();
     let mut out = Applied {
         kept: Database {
@@ -397,7 +488,7 @@ pub fn apply(db: &Database, files: &[Rules]) -> Applied {
             hit.get_or_insert(w.reason.clone());
         }
         for (i, (exfile, r)) in rows.iter().enumerate() {
-            if matches(&r.rule, k, e) {
+            if matches(&r.rule, k, e, taken[i].as_ref()) {
                 seen[i].push(k.clone());
                 hit.get_or_insert(r.reason.clone());
                 if let Rule::Item {
@@ -444,8 +535,23 @@ pub fn apply(db: &Database, files: &[Rules]) -> Applied {
             items,
         });
     }
-    for ((exfile, r), items) in rows.iter().zip(seen) {
-        if items.is_empty() {
+    for (i, ((exfile, r), items)) in rows.iter().zip(seen).enumerate() {
+        // A pattern of a list that covers nothing says so itself, even if the others apply.
+        let mut said = false;
+        if let Rule::Files {
+            files,
+            files_exclude,
+        } = &r.rule
+        {
+            for p in files.iter().chain(files_exclude) {
+                if !row_found[i].iter().any(|(_, x)| x.matches(p)) {
+                    said = true;
+                    out.warnings
+                        .push(stale_pattern(exfile, r.line, p, row_found[i]));
+                }
+            }
+        }
+        if items.is_empty() && !said {
             out.warnings.push(Diagnostic::warning(
                 STALE,
                 format!(
@@ -463,6 +569,24 @@ pub fn apply(db: &Database, files: &[Rules]) -> Applied {
         });
     }
     out
+}
+
+/// W0111 for a pattern that covers no source file of the database, with a near file or directory.
+fn stale_pattern(exfile: &str, line: usize, p: &str, found: &[(&str, Found)]) -> Diagnostic {
+    // Every file with the directories above it, as a pattern would name them.
+    let mut names = BTreeSet::new();
+    for (_, x) in found {
+        let shown = x.shown();
+        names.insert(shown);
+        names.extend(shown.match_indices('/').map(|(i, _)| &shown[..i]));
+    }
+    let near = yavs_diag::suggest::tail(p.trim_end_matches('/'), "path", names.into_iter());
+    Diagnostic::warning(
+        STALE,
+        format!(
+            "{exfile}:{line}: the pattern `{p}` covers no source file of the coverage database{near}"
+        ),
+    )
 }
 
 /// The other direction of a toggle item.
@@ -667,8 +791,8 @@ mod tests {
 
     /// `apply` with the rows of one file called `ex`.
     fn apply1(d: &Database, rows: Vec<Row>) -> Applied {
-        let name = "ex".to_string();
-        apply(d, &[Rules { name, rows }])
+        let (name, base) = ("ex".to_string(), PathBuf::from("/nowhere"));
+        apply(d, &[Rules { name, base, rows }])
     }
 
     fn db() -> Database {
@@ -758,6 +882,72 @@ mod tests {
         ] {
             let a = apply1(&d, parse(&format!("{row}\r\n")).unwrap());
             assert!(a.kept.items.is_empty(), "{row}");
+        }
+    }
+
+    #[test]
+    fn file_rows_take_directories_and_lists() {
+        let mut d = db();
+        let files = [
+            "/p/rtl/gen/a.vhd",
+            "/p/rtl/b.vhd",
+            "/p/tb/c.vhd",
+            "/p/rtl/gen/a.vhd",
+        ];
+        for (e, f) in d.items.values_mut().zip(files) {
+            e.file = f.into();
+        }
+        let left = |t: &str, y: bool| {
+            let rows = if y { parse_yaml(t) } else { parse(t) }.unwrap();
+            let name = "ex".to_string();
+            let base = PathBuf::from("/p");
+            let a = apply(&d, &[Rules { name, base, rows }]);
+            let mut k: Vec<String> = a.kept.items.values().map(|e| e.file.clone()).collect();
+            k.sort();
+            k.dedup();
+            (k, a.warnings.len())
+        };
+        // A plain directory, in the older row too, and files_exclude alone or with files.
+        let tb = "/p/tb/c.vhd".to_string();
+        let b = "/p/rtl/b.vhd".to_string();
+        assert!(left("file rtl\n", false).0.iter().all(|f| f == &tb));
+        assert!(left("files rtl/\n", false).0.iter().all(|f| f == &tb));
+        assert_eq!(
+            left("files rtl/ files_exclude rtl/gen/\n", false).0.len(),
+            2
+        );
+        assert!(
+            left("files_exclude tb/\n", false)
+                .0
+                .iter()
+                .all(|f| f == &tb)
+        );
+        let y = "exclude:\n  - kind: file\n    files: [rtl/gen, 'tb/*.vhd']\n    reason: gone\n";
+        assert_eq!(left(y, true).0, vec![b.clone()]);
+        let y = "exclude:\n  - kind: file\n    files:\n      - rtl\n    files_exclude: rtl/gen\n";
+        assert!(left(y, true).0.contains(&tb));
+        // A pattern that covers nothing warns, with a near name, though its neighbour applies.
+        let rows = parse("files rtl/ tbb/\n").unwrap();
+        let (name, base) = ("ex".to_string(), PathBuf::from("/p"));
+        let a = apply(&d, &[Rules { name, base, rows }]);
+        assert_eq!(a.warnings.len(), 1);
+        let m = &a.warnings[0].message;
+        assert!(
+            m.contains("`tbb/` covers no source file") && m.contains("`tb`"),
+            "{m}"
+        );
+        // Bad forms.
+        assert!(parse("files\n").is_err());
+        assert!(parse("files a files_exclude\n").is_err());
+        assert!(parse("fils a\n").unwrap_err().contains("`file`"));
+        for t in [
+            "exclude:\n  - kind: file\n",
+            "exclude:\n  - kind: file\n    files: []\n",
+            "exclude:\n  - kind: file\n    file: a\n    files: b\n",
+            "exclude:\n  - kind: file\n    files: [[a]]\n",
+            "exclude:\n  - kind: unit\n    unit: a\n    files: b\n",
+        ] {
+            assert!(parse_yaml(t).is_err(), "{t}");
         }
     }
 

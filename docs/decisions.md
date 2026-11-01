@@ -2445,6 +2445,10 @@ scalars; the on-disk format is implementation-defined, so it is fixed here (yavs
 
 ## Coverage exclusions (yavs-cov, CLI, #351, user, 2026-10-19)
 
+- **File lists (maintainer, 2026-11-01, #1020):** exclusion files take `files` and `files_exclude` with the
+  keys and matching of lint waivers, one helper for both (`yavs_diag::files`, moved out of `yavs-lint`). The
+  older `file` row keeps its own loose glob, so existing files keep working, and also takes a plain directory.
+  A pattern that covers nothing is `W0111`, not an error: exclusion files are shared between configurations.
 - **Requirement (user):** "it should be easy to exclude by reading the report". Choices of the
   user, in order: identify an item by its text hash, not its line ("if the line moves then it
   is still valid"); keep the line number optional ("we can have a line number optional, but
