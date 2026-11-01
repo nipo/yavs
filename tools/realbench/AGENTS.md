@@ -73,10 +73,10 @@ tools/build-bench.sh --features clift     # release + 64-byte aligned functions 
 cp ~/.cache/yavs-agents/sims.local.conf tools/sims.local.conf       # untracked
 python3 -I tools/realbench/run.py --list
 python3 -I tools/realbench/run.py --self-test
-# the phases of one test, probe (one run per cell): analyze, elab, codegen, run
-python3 -I tools/realbench/run.py target/release/yavs --ref sim1 --cores 6 --runs 1 --phases analyze,elab,codegen --tests hdlm_fifo_sync
+# the phases of one test, probe (one run per cell): analyze, elab, run (`codegen` runs `--tier=llvm`: only on a build with the `llvm` feature)
+python3 -I tools/realbench/run.py target/release/yavs --ref sim1 --cores 6 --runs 1 --phases analyze,elab,run --tests hdlm_fifo_sync
 # baseline: all tests, interp and auto (cold and warm), two performance cores, against the reference
-python3 -I tools/realbench/run.py target/release/yavs --ref sim1 --cores 6,7 --tiers interp,auto,auto-cold --label baseline
+python3 -I tools/realbench/run.py target/release/yavs --ref sim1 --cores 6,7 --tiers interp,auto,auto-cold --phases analyze,elab,run --label baseline
 # a probe: one untimed run per cell, pass or fail and the tail of the output
 python3 -I tools/realbench/run.py target/release/yavs --ref sim1 --cores 6 --runs 0 --tests hdlm_fifo_sync
 # regression check of a tuning change: two binaries interleaved on the same worlds
