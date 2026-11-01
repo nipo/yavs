@@ -71,7 +71,7 @@ On other CI systems, download the archive with plain commands:
     export PATH="$PWD/$A:$PATH"
     yavs --version
 
-:doc:`install` lists the archives of the other platforms.
+:ref:`installation` lists the archives of the other platforms.
 
 A coverage gate
 ---------------

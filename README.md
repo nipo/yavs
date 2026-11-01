@@ -18,18 +18,13 @@ yavs is a VHDL simulator written in Rust, for VHDL-1993, 2008 and 2019.
 - [Coverage](https://yavs.readthedocs.io/en/latest/coverage.html): from statements to condition combinations, with HTML and Cobertura reports and a CI gate.
 - [Static analysis](https://yavs.readthedocs.io/en/latest/lint.html): `yavs lint` reports what can be proved wrong before a simulation.
 - [VHPI](https://yavs.readthedocs.io/en/latest/vhpi.html): plugins and C functions called from VHDL.
-- [Platforms](https://yavs.readthedocs.io/en/latest/install.html): Linux x86_64, Linux aarch64 and Windows x86_64, one archive with nothing else to install.
+- [Platforms](https://yavs.readthedocs.io/en/latest/getting-started.html#installation): Linux x86_64, Linux aarch64 and Windows x86_64, one archive with nothing else to install.
 
 Some of this needs a release newer than 0.11.0: see the [release notes](https://yavs.readthedocs.io/en/latest/release_notes.html).
 
 ## Quickstart
 
-```
-yavs analyze --work=work:build/work hello_tb.vhd
-yavs run --work=work:build/work hello_tb
-```
-
-[Install yavs](https://yavs.readthedocs.io/en/latest/install.html), then follow [Getting started](https://yavs.readthedocs.io/en/latest/getting-started.html).
+[Install yavs](https://yavs.readthedocs.io/en/latest/getting-started.html#installation), then follow [Getting started](https://yavs.readthedocs.io/en/latest/getting-started.html#your-first-simulation).
 
 ### In GitHub Actions
 
@@ -41,17 +36,13 @@ yavs run --work=work:build/work hello_tb
 
 [yavs-action](https://github.com/ru551n/yavs-action) installs a release; [Continuous integration](https://yavs.readthedocs.io/en/latest/ci.html) has a whole job.
 
-## With VUnit
+## Test frameworks
 
-The `vunit-yavs` package adds yavs to VUnit as a simulator; it needs yavs 0.11.0 or later: [Using yavs from VUnit](https://yavs.readthedocs.io/en/latest/vunit.html).
+- [VUnit](https://yavs.readthedocs.io/en/latest/vunit.html): through the `vunit-yavs` package; it needs yavs 0.11.0 or later.
+- [OSVVM](https://yavs.readthedocs.io/en/latest/libraries.html): analyzed from its sources, under VHDL-2008 and VHDL-2019.
+- [UVVM](https://yavs.readthedocs.io/en/latest/libraries.html): analyzed from its sources; some of its testbenches still fail ([#991](https://github.com/ru551n/yavs/issues/991)).
 
-## Speed
-
-On 41 third-party testbenches, a repeated run took about a fifth of the time of an established open-source VHDL simulator and a first run a little over half (measured 2026-10-28): [performance](https://yavs.readthedocs.io/en/latest/performance.html).
-
-## Test suites
-
-The test suites of OSVVM, UVVM, VUnit and Open Logic and the VESTs language suite run on yavs: results per suite in the [conformance report](https://yavs.readthedocs.io/en/latest/conformance.html) of 2026-10-29.
+Results per suite are in the [conformance report](https://yavs.readthedocs.io/en/latest/conformance.html) of 2026-10-29.
 
 ## Documentation
 
@@ -59,6 +50,7 @@ The test suites of OSVVM, UVVM, VUnit and Open Logic and the VESTs language suit
 - [Command-line reference](https://yavs.readthedocs.io/en/latest/cli-reference.html)
 - [Error codes](https://yavs.readthedocs.io/en/latest/error-codes.html)
 - [Moving from another simulator](https://yavs.readthedocs.io/en/latest/migrating.html)
+- [Performance](https://yavs.readthedocs.io/en/latest/performance.html)
 - [Known limitations](https://yavs.readthedocs.io/en/latest/faq.html)
 - [Release notes](https://yavs.readthedocs.io/en/latest/release_notes.html)
 - [Context7](https://context7.com/ru551n/yavs), for coding assistants

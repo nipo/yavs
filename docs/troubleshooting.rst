@@ -48,7 +48,7 @@ Common problems
    * - What you see
      - What to do
    * - ``yavs: command not found``
-     - Put the directory of the archive on ``PATH`` (:doc:`install`).
+     - Put the directory of the archive on ``PATH`` (:ref:`installation`).
    * - Alpine: ``yavs: not found`` although the file exists
      - Install the ``gcompat`` package.
    * - ``error[L0001]: library `work` not found``
@@ -83,7 +83,7 @@ Common problems
    * - ``E0120``, tier not available
      - ``--tier`` names a compiled tier this yavs was built without (``yavs --version`` lists the
        tiers it has; ``yavs --explain E0120`` says which tier needs which build). Use a tier it
-       has or ``--tier=interp``, or rebuild (:doc:`install`).
+       has or ``--tier=interp``, or rebuild (:ref:`installation`).
 
 A run that behaves differently than in another simulator may be one of the points where the
 standard leaves a choice open: see :doc:`language-choices`. ``--shuffle`` runs the processes in a

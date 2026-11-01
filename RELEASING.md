@@ -19,7 +19,7 @@ and `vscode-v*` tags and releases stay as they are; no new ones are made.
 There are no development versions: `main` carries the last released version everywhere until the
 release commit bumps it. `tools/release/bump.py X.Y.Z` writes every version spot (the Cargo
 manifest and lock files, `pyproject.toml`, `YAVS_MIN_VERSION`, `package.json`, the minimum yavs
-named in the READMEs and `docs/`, the version in `docs/install.rst`) and adds a section for the
+named in the READMEs and `docs/`, the version in `docs/getting-started.rst`) and adds a section for the
 version to `python/vunit-yavs/CHANGELOG.md` and `editors/vscode/CHANGELOG.md` (an `## Unreleased`
 section there becomes it). `tools/release/bump.py --check [X.Y.Z]` fails and names every spot
 that differs; the `versions` job of `ci.yml` runs it on every push, and `release.yml` runs it with

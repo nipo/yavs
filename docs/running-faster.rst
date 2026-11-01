@@ -16,7 +16,7 @@ Tiers
 * ``--tier=clift`` compiles everything before time 0. It can pay off for a long run of a
   compute-heavy design.
 * ``--tier=interp`` runs the interpreter alone; it is the default of a source build without a
-  compiled tier (:doc:`install`).
+  compiled tier (:ref:`installation`).
 
 The output is identical on every tier.
 

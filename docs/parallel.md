@@ -23,7 +23,7 @@ across parallel test runs" below).
 | Signal updates | Spread over the threads only when at least 256 independent signals change in one delta cycle. |
 | Results | Output, reports, waves, coverage and exit status are byte-identical at any thread count, and with `--shuffle` for the same seed. The test corpus is checked at 1 thread, 4 threads and 4 shuffled threads. |
 | Checks | Kernel tests compare 1 and 8 threads and several shuffle seeds, and the CI run of the test corpus at 4 threads compares 1 and 4 threads. |
-| Compile thread | If a compiled tier is built in, `--tier=auto` compiles hot functions on one more background thread (see [install](install.rst)); it is not counted in `--threads`. |
+| Compile thread | If a compiled tier is built in, `--tier=auto` compiles hot functions on one more background thread (see [installation](https://yavs.readthedocs.io/en/latest/getting-started.html#installation)); it is not counted in `--threads`. |
 | Debugging | `--threads` is ignored under `--dap` (warning `W0109`), so a debug session behaves the same every time. |
 
 ## Measured speedup

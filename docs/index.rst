@@ -52,7 +52,7 @@ What you get:
 
 Where to start:
 
-* New to yavs: :doc:`install`, :doc:`getting-started`, then :doc:`project-walkthrough`.
+* New to yavs: :doc:`getting-started`, then :doc:`project-walkthrough`.
 * Coming from another simulator: :doc:`migrating`.
 * Using VUnit: :doc:`vunit`.
 * A failing test to debug: :doc:`debugger-tutorial`.
@@ -65,7 +65,6 @@ the :doc:`release_notes`, and pages say when a feature needs a release newer tha
    :caption: Get started
    :hidden:
 
-   install
    getting-started
    project-walkthrough
    migrating

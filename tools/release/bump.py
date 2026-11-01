@@ -16,7 +16,7 @@ V = r"(\d+\.\d+\.\d+)"
 # (file, pattern with one version group); each pattern must match at least once.
 SPOTS = [
     ("Cargo.toml", r'\[workspace\.package\]\nversion = "' + V + '"'),
-    ("docs/install.rst", r"``yavs " + V + r" \(compiled tier"),
+    ("docs/getting-started.rst", r"``yavs " + V + r" \(compiled tier"),
     ("README.md", r"it needs yavs " + V + " or later"),
     ("docs/vunit.rst", r"You need yavs " + V + " or later"),
     ("python/vunit-yavs/pyproject.toml", r'\[project\]\nname = "vunit-yavs"\nversion = "' + V + '"'),
