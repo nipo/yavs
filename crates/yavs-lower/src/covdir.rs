@@ -203,12 +203,20 @@ fn sites(db: &Db, file: FileId) -> HashMap<u32, Vec<What>> {
             _ => add(
                 start,
                 What::No(
-                    "a directive applies to an `if`, `elsif`, `while`, `exit`, `next` or assignment",
+                    "a directive applies to an `if`, `elsif`, `while`, `exit`, `next` or an \
+                     assignment, sequential or concurrent",
                 ),
             ),
         }
     }
     out
+}
+
+/// Whether only blanks stand before byte `pos` on its line.
+fn own_line(bytes: &[u8], pos: u32) -> bool {
+    let before = &bytes[..pos as usize];
+    let line = before.rsplit(|&c| c == b'\n').next().unwrap_or(before);
+    line.iter().all(u8::is_ascii_whitespace)
 }
 
 /// The start of keyword `kw` right before byte `pos` of `text`, parentheses and blanks between.
@@ -297,6 +305,15 @@ pub fn resolve(db: &Db, file: FileId) -> Checked {
         match parse(file, c.start, &text) {
             Parsed::Other => {}
             Parsed::Err(d) => out.diags.push(*d),
+            // After code on its line it would apply to the next statement, not to that code.
+            Parsed::Ok(d) if !own_line(bytes, c.start) => out.diags.push(
+                Diagnostic::error(TARGET, "this exclusion does not stand on its own line")
+                    .with_primary(
+                        d.at,
+                        "a directive applies to what follows it, not to this line",
+                    )
+                    .with_help("write it on the line before the construct"),
+            ),
             Parsed::Ok(d) => match groups.last_mut() {
                 Some((next, v)) if *next == c.next && c.next.is_some() => v.push(d),
                 _ => groups.push((c.next, vec![d])),
@@ -322,7 +339,7 @@ pub fn resolve(db: &Db, file: FileId) -> Checked {
                         .with_primary(d.at, "there is nothing to attach it to")
                         .with_help(
                             "write it right before an `if`, `elsif`, `while`, `exit`, `next` \
-                             or an assignment",
+                             or an assignment, sequential or concurrent",
                         ),
                 );
                 continue;

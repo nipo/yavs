@@ -243,7 +243,7 @@ const EXPLAIN: &[(&str, &str)] = &[
     ),
     (
         "E2024",
-        "A coverage exclusion has nothing to attach to or cannot be used where it is: no `if`, `elsif`, `while`, `exit`, `next` or assignment follows it (comments and blank lines may stand between), the construct has several conditions or choices, `exclude condition` is on an assignment or `exclude expression` on a condition, or the expression has no combinations to exclude (fewer than two inputs, an input that is constant after elaboration, more than 8 inputs, or too many combinations).",
+        "A coverage exclusion has nothing to attach to or cannot be used where it is: it stands after code on its line, or no `if`, `elsif`, `while`, `exit`, `next` or assignment (sequential or concurrent) follows it (comments and blank lines may stand between), the construct has several conditions or choices, `exclude condition` is on an assignment or `exclude expression` on a condition, or the expression has no combinations to exclude (fewer than two inputs, an input that is constant after elaboration, more than 8 inputs, or too many combinations).",
     ),
     (
         "E2025",

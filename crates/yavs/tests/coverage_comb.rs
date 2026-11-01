@@ -663,6 +663,14 @@ fn directives_are_checked_without_coverage() {
             &["constant after elaboration"],
         ),
         (
+            "    if valid then n <= 1; end if; -- yavs cov exclude 01\n    if valid and ready then n <= 1; end if;",
+            "E2024",
+            &[
+                "does not stand on its own line",
+                "on the line before the construct",
+            ],
+        ),
+        (
             "    -- yavs cov exclude 01\n    n <= 1 when valid and ready else 2;",
             "E2024",
             &["several conditions or choices"],
@@ -844,4 +852,40 @@ fn tiers_agree() {
             "{tier}"
         );
     }
+}
+
+/// A directive before a concurrent assignment waives its combination (#993).
+#[test]
+fn a_concurrent_assignment_takes_a_directive() {
+    let tmp = tempdir("conc_directive");
+    let text = "entity c is end;
+architecture x of c is
+  signal a, b, o : bit;
+begin
+  -- yavs cov exclude 11: impossible
+  o <= a and b;
+  process begin
+    wait for 1 ns; a <= '1';
+    wait for 1 ns; a <= '0'; b <= '1';
+    wait;
+  end process;
+end;
+";
+    std::fs::write(tmp.join("c.vhd"), text).expect("write");
+    let o = yavs(&tmp, &["analyze", "--work=work:lib", "c.vhd"]);
+    assert!(o.status.success(), "{}", err(&o));
+    let o = yavs(
+        &tmp,
+        &[
+            "run",
+            "--work=work:lib",
+            "--cov=c.ycov",
+            "--cov-kind=combination",
+            "c",
+        ],
+    );
+    assert!(o.status.success(), "{}", err(&o));
+    let db = read(&tmp.join("c.ycov"));
+    let waived: Vec<_> = rows(&db).into_iter().filter(|r| r.3 > 0).collect();
+    assert_eq!(waived, [(6, "11".to_string(), 0, 1)]);
 }

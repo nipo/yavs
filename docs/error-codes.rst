@@ -497,7 +497,7 @@ Elaboration (E2 and W2)
    * - _`W2023`
      - With ``--cov-kind=combination``, a decision or logic expression with two or more inputs has no combinations to measure: an input is constant after elaboration, it has more than 8 inputs, or it has more combinations than the limit.
    * - _`E2024`
-     - A coverage exclusion has nothing to attach to or cannot be used where it is: no ``if``, ``elsif``, ``while``, ``exit``, ``next`` or assignment follows it (comments and blank lines may stand between), the construct has several conditions or choices, ``exclude condition`` is on an assignment or ``exclude expression`` on a condition, or the expression has no combinations to exclude (fewer than two inputs, an input that is constant after elaboration, more than 8 inputs, or too many combinations).
+     - A coverage exclusion has nothing to attach to or cannot be used where it is: it stands after code on its line, or no ``if``, ``elsif``, ``while``, ``exit``, ``next`` or assignment (sequential or concurrent) follows it (comments and blank lines may stand between), the construct has several conditions or choices, ``exclude condition`` is on an assignment or ``exclude expression`` on a condition, or the expression has no combinations to exclude (fewer than two inputs, an input that is constant after elaboration, more than 8 inputs, or too many combinations).
    * - _`E2025`
      - A ``-- yavs coverage`` (or ``-- yavs cov``) comment has no command or an unknown one.
    * - _`E2101`

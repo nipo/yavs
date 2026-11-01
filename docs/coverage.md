@@ -150,8 +150,10 @@ inputs, or more than 512 combinations is not measured; with `--cov-kind=combinat
 
 ## Excluding combinations in the source
 
-A requirement that cannot occur is waived with a comment before the decision or assignment,
-one comment per exclusion, with an optional reason after `:`:
+A requirement that cannot occur is waived with a comment before the decision or assignment
+(sequential or concurrent), each exclusion on a line of its own, with an optional reason after
+`:`. A directive after code on the same line is `E2024`, since it would apply to what follows,
+not to that code:
 
 ```vhdl
 -- yavs coverage exclude condition (valid=false, ready=true): impossible handshake
