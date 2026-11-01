@@ -250,8 +250,31 @@ pub(crate) enum PutOp {
 pub enum Control {
     Stop,
     Finish,
+    Reset,
 }
 
+/// `vhpiPhaseP` (#832), the registration phase until the plugins have loaded.
+#[derive(Clone, Copy)]
+pub(crate) struct ToolPhase(pub(crate) i32);
+
+impl Default for ToolPhase {
+    fn default() -> Self {
+        ToolPhase(vhpiRegistrationPhase)
+    }
+}
+
+/// Where `vhpi_control(vhpiReset)` stands (#832).
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum Reset {
+    #[default]
+    None,
+    /// Asked for: the run ends, then `yavs run` builds the simulation again.
+    Asked,
+    /// The new simulation is built and has not started.
+    Built,
+}
+
+#[derive(Clone)]
 pub(crate) struct Error {
     pub(crate) severity: vhpiSeverityT,
     pub(crate) message: CString,
@@ -308,6 +331,7 @@ pub(crate) const INT_PROPS: &[vhpiIntPropertyT] = &[
     vhpiIsSharedP,
     vhpiGenerateIndexP,
     vhpiCapabilitiesP,
+    vhpiPhaseP,
     vhpiIsResolvedP,
     vhpiIsBasicP,
     vhpiSigKindP,
@@ -359,6 +383,12 @@ pub(crate) struct State {
     /// A read-only phase (end of time step, end of simulation): puts are refused.
     pub(crate) read_only: bool,
     pub(crate) error: Option<Error>,
+    pub(crate) tool_phase: ToolPhase,
+    pub(crate) reset: Reset,
+    /// Why this run cannot reset (`vhpi_control`, `vhpiProvidesReset`).
+    pub(crate) reset_refused: Option<String>,
+    /// A `vhpiCbPLIError` callback is running: errors in it do not fire it again.
+    pub(crate) in_pli_error: bool,
     /// The interpreter side of the simulation (`set_runtime`): shared variables (#309).
     pub(crate) built: Option<yavs_elab::Built>,
     /// Strings handed out by `vhpi_get_str`. They are never freed, so the
@@ -396,6 +426,9 @@ impl State {
             severity: vhpiError,
             message,
         });
+        if !self.in_pli_error && !self.cbs.due(vhpiCbPLIError).is_empty() {
+            crate::abi::PLI_ERROR_DUE.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
     }
 
     pub(crate) fn intern(&mut self, s: String) -> *const vhpiCharT {
@@ -1000,7 +1033,13 @@ impl State {
                     | vhpiProvidesForeignModel
                     | vhpiProvidesAdvancedForeignModel
                     | vhpiProvidesDebugRuntime
+                    | if self.reset_refused.is_none() {
+                        vhpiProvidesReset
+                    } else {
+                        0
+                    }
             }
+            (Object::Tool, vhpiPhaseP) => self.tool_phase.0,
             (_, vhpiIsResolvedP | vhpiIsBasicP | vhpiSigKindP | vhpiIsForcedP)
             | (Object::NetDriver(_) | Object::Transaction(_), _) => {
                 return self.net_prop(obj, prop);

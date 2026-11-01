@@ -49,7 +49,7 @@ pub(crate) struct Foreign {
     drivers: Vec<Driver>,
     /// Transactions scheduled before the simulation (driver, transaction): made at the first
     /// observer call.
-    pending: Vec<(usize, ModelTxn)>,
+    pub(crate) pending: Vec<(usize, ModelTxn)>,
     /// `vhpiLibF` registrations whose `elabf` ran (#357), in that order: their `execf` runs
     /// at the start of the simulation.
     libs: Vec<usize>,

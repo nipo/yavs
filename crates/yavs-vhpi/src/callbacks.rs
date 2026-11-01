@@ -125,6 +125,16 @@ pub(crate) struct Callbacks {
 fn split(reason: i32) -> Option<(i32, bool)> {
     Some(match reason {
         vhpiCbValueChange | vhpiCbForce | vhpiCbRelease | vhpiCbTransaction => (reason, true),
+        // Repetitive by the header's own comments (#832).
+        vhpiCbPLIError | vhpiCbSigInterrupt | vhpiCbEnterInteractive | vhpiCbExitInteractive => {
+            (reason, true)
+        }
+        vhpiCbStartOfTool
+        | vhpiCbEndOfTool
+        | vhpiCbStartOfElaboration
+        | vhpiCbEndOfElaboration
+        | vhpiCbStartOfReset
+        | vhpiCbEndOfReset => (reason, false),
         vhpiCbStartOfSimulation
         | vhpiCbEndOfSimulation
         | vhpiCbStartOfInitialization
@@ -152,6 +162,28 @@ fn split(reason: i32) -> Option<(i32, bool)> {
         vhpiCbSensitivity => (vhpiCbValueChange, true),
         _ => return None,
     })
+}
+
+/// Why a reason `split` refuses is refused, in words.
+pub(crate) fn refused(reason: i32) -> String {
+    let name = match reason {
+        vhpiCbStartOfAnalysis | vhpiCbEndOfAnalysis => {
+            return "the analysis callback reasons: `yavs run` does not analyse, and `yavs analyze` \
+                    loads no plugin"
+                .into();
+        }
+        vhpiCbStartOfSave | vhpiCbEndOfSave | vhpiCbStartOfRestart | vhpiCbEndOfRestart => {
+            return "the save and restart callback reasons: yavs cannot save a simulation".into();
+        }
+        vhpiCbQuiescense => "vhpiCbQuiescense",
+        vhpiCbStmt => "vhpiCbStmt",
+        vhpiCbResume => "vhpiCbResume",
+        vhpiCbSuspend => "vhpiCbSuspend",
+        vhpiCbStartOfSubpCall => "vhpiCbStartOfSubpCall",
+        vhpiCbEndOfSubpCall => "vhpiCbEndOfSubpCall",
+        _ => return format!("callback reason {reason}"),
+    };
+    name.into()
 }
 
 /// Why a registration failed.
@@ -458,6 +490,31 @@ impl Callbacks {
             cb.wake = None;
         }
         Some(id)
+    }
+
+    /// `vhpi_control(vhpiReset)` (#832): the kernel of the callbacks' wake-ups and cycles is gone.
+    /// Callbacks stay as they are; time-based ones count their delay again from time 0.
+    pub(crate) fn reset(&mut self) {
+        self.vc_cycle = None;
+        self.vc_in_bus = false;
+        self.vc_runs.clear();
+        self.vc_served.clear();
+        self.vc_pending.clear();
+        self.wakes.clear();
+        self.to_wake.clear();
+        self.to_cancel.clear();
+        let mut ids: Vec<u64> = self.all.keys().copied().collect();
+        ids.sort_unstable();
+        for id in ids {
+            let cb = self.all.get_mut(&id).expect("listed above");
+            cb.wake = None;
+            cb.last = None;
+            cb.fresh = 0;
+            if cb.base == vhpiCbAfterDelay && cb.state != vhpiMature {
+                cb.at = cb.delay;
+                self.to_wake.push(id);
+            }
+        }
     }
 
     /// Callback `id` is due now. Returns its data when it is enabled and should run. A

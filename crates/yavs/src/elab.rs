@@ -385,6 +385,29 @@ impl RunArgs {
         self.wave.is_some() && (self.wave_variables || self.debugged())
     }
 
+    /// Why `vhpi_control(vhpiReset)` cannot work in this run (#832): these keep what happened so
+    /// far outside the simulation.
+    fn no_vhpi_reset(&self) -> Option<String> {
+        let option = if self.debugged() {
+            "a debug session"
+        } else if self.wave.is_some() {
+            "`--wave`"
+        } else if self.cov.is_some() {
+            "`--cov`"
+        } else if self.profile.is_some() {
+            "`--profile`"
+        } else if self.activity.is_some() {
+            "`--activity`"
+        } else if self.assert_summary {
+            "`--assert-summary`"
+        } else {
+            return None;
+        };
+        Some(format!(
+            "not with {option}, which reports on the whole run: run without it"
+        ))
+    }
+
     /// The tier of this run: the one asked for, else `auto` where it is built in and nothing
     /// needs the interpreter alone (a debugger reads frame slots).
     pub(crate) fn tier(&self) -> TierArg {
@@ -1503,6 +1526,7 @@ fn prepare(
         let mut argv = vec!["yavs".to_string()];
         argv.extend(a.plusargs.iter().cloned());
         yavs_vhpi::set_argv(argv);
+        yavs_vhpi::set_reset_refusal(a.no_vhpi_reset());
         for spec in &a.vhpi {
             let p: yavs_vhpi::PluginSpec = spec.parse().unwrap_or_else(|e| match e {});
             let loaded = yavs_vhpi::load(&p).map_err(|err| err.to_diagnostic());
@@ -1511,6 +1535,9 @@ fn prepare(
                 return Err((out, 2));
             }
         }
+    }
+    if !a.vhpi.is_empty() {
+        yavs_vhpi::start_of_elaboration();
     }
     // The models of VHPI foreign architectures run now, before the build (#330).
     let mut e = e;
@@ -1607,6 +1634,9 @@ fn prepare(
         out.emit(&db.sources, &d);
         return Err((out, 2));
     }
+    if !a.vhpi.is_empty() {
+        yavs_vhpi::end_of_elaboration();
+    }
     Ok(Prepared {
         out,
         db,
@@ -1664,6 +1694,21 @@ fn token_gone(why: String) -> Diagnostic {
 }
 
 pub fn run(
+    a: RunArgs,
+    argv: Vec<String>,
+    format: MessageFormat,
+    color: bool,
+    encoding: yavs_syntax::Encoding,
+) -> ExitCode {
+    let plugins = !a.vhpi.is_empty();
+    let status = run_design(a, argv, format, color, encoding);
+    if plugins {
+        yavs_vhpi::end_of_tool();
+    }
+    status
+}
+
+fn run_design(
     mut a: RunArgs,
     argv: Vec<String>,
     format: MessageFormat,
@@ -1850,6 +1895,7 @@ pub fn run(
                  start the run again"
                     .to_string()
             }),
+            interactive: (!a.vhpi.is_empty()).then_some(yavs_vhpi::interactive as fn(bool)),
             reload: Some(reloader(argv, format, color, encoding)),
             hook: std::env::var(yavs_dap::HOOK_VAR).ok(),
             source_map: a.source_map.clone(),
@@ -1891,7 +1937,9 @@ pub fn run(
     if a.vhpi.is_empty() && a.wave.is_none() && a.cov.is_none() {
         db.release_analysis();
     }
-    let (mut sim, built) = match e.build_full_once(cfg) {
+    // `vhpi_control(vhpiReset)` builds it again (#832).
+    let cfg_again = (!a.vhpi.is_empty()).then(|| cfg.clone());
+    let (mut sim, mut built) = match e.build_full_once(cfg) {
         Ok(s) => s,
         // Package and instance initialisation runs VHDL code: report it with its VHDL stack.
         Err(err) => {
@@ -1905,7 +1953,7 @@ pub fn run(
         out.emit(&db.sources, &w);
     }
     // Held to the end of the run: `end` or a drop ends tier-up.
-    let tier_up = match use_tier(built.as_ref().map(|b| &*b.rt), &a) {
+    let mut tier_up = match use_tier(built.as_ref().map(|b| &*b.rt), &a) {
         Ok(g) => g,
         Err(d) => {
             let code = if matches!(d.code, "E0120" | "E0127") {
@@ -1960,7 +2008,7 @@ pub fn run(
     });
     let on_pipe = sim.interrupt();
     crate::stdout::on_broken(move || on_pipe.stop());
-    let rt = built.as_ref().map(|b| b.rt.clone());
+    let mut rt = built.as_ref().map(|b| b.rt.clone());
     // Toggle coverage watches the value-change bus; without it nothing is subscribed.
     let toggles = kind(CovKindArg::Toggle).then(|| {
         let (t, skipped) = yavs_cov::toggle::toggles(&db, &e, a.cov_toggle_max);
@@ -1995,26 +2043,48 @@ pub fn run(
     // exit status stays 130. Else, with output collected, it writes the reports that wait in
     // the buffer out and exits at once.
     let signalled = Arc::new(AtomicBool::new(false));
+    // The simulation of the moment: a VHPI reset replaces it.
+    let live = Arc::new(std::sync::Mutex::new(sim.interrupt()));
+    let current = live.clone();
     let mut hooks = yavs_wave::interrupt::Handlers {
-        usr1: Some(crate::stuck::on_request(sim.interrupt())),
+        usr1: Some(crate::stuck::on_request(move || {
+            current.lock().unwrap_or_else(|p| p.into_inner()).pause()
+        })),
         ..Default::default()
     };
     if crate::stdout::is_on() {
         hooks.tick = Some((crate::stdout::TICK, Box::new(crate::stdout::flush)));
     }
     let launch = tier_up.as_ref().map(|t| t.launcher(format, color));
-    hooks.after = launch
-        .clone()
-        .map(|(after, f)| (after, Box::new(move || f()) as _));
+    // After a VHPI reset the signal thread must not start the old simulation's tier-up.
+    let tier_up_current = Arc::new(AtomicBool::new(true));
+    let still = tier_up_current.clone();
+    hooks.after = launch.clone().map(|(after, f)| {
+        let start = move || {
+            if still.load(Ordering::SeqCst) {
+                f();
+            }
+        };
+        (after, Box::new(start) as _)
+    });
     let keep_exit = !a.common.load.is_empty() || !a.vhpi.is_empty();
-    if recorder.is_some() || cfg_profile.is_some() || activity.is_some() || a.assert_summary {
+    if recorder.is_some()
+        || cfg_profile.is_some()
+        || activity.is_some()
+        || a.assert_summary
+        || !a.vhpi.is_empty()
+    {
         let flag = if recorder.is_some() {
             &interrupted
         } else {
             &signalled
         };
-        let i = sim.interrupt();
-        ctrl_c_stops(&mut hooks, move || i.stop(), flag.clone(), keep_exit);
+        let current = live.clone();
+        let stop = move || {
+            yavs_vhpi::note_interrupt();
+            current.lock().unwrap_or_else(|p| p.into_inner()).stop();
+        };
+        ctrl_c_stops(&mut hooks, stop, flag.clone(), keep_exit);
     } else if crate::stdout::is_on() {
         hooks.first = Some(Box::new(move || {
             crate::stdout::flush();
@@ -2057,6 +2127,46 @@ pub fn run(
     let max = a.hang_report.unwrap_or(30);
     let r = loop {
         let r = sim.run_until(stop);
+        if r.is_ok()
+            && let Some(cfg) = &cfg_again
+            && yavs_vhpi::reset_pending()
+            && !signalled.load(Ordering::SeqCst)
+        {
+            // The old simulation goes first: its thread pool and open files.
+            drop(sim);
+            let (again, b) = match e.build_full(cfg.clone()) {
+                Ok(s) => s,
+                Err(err) => {
+                    out.emit(&db.sources, &e.runtime_diagnostic(&err));
+                    return out.finish(if err.exit_status() == 101 { 3 } else { 2 });
+                }
+            };
+            sim = again;
+            built = b;
+            rt = built.as_ref().map(|b| b.rt.clone());
+            tier_up_current.store(false, Ordering::SeqCst);
+            tier_up = match use_tier(rt.as_deref(), &a) {
+                Ok(g) => g,
+                Err(d) => {
+                    out.emit(&none, &d);
+                    return out.finish(3);
+                }
+            };
+            if let Some(t) = &tier_up {
+                (t.launcher(format, color).1)();
+            }
+            if let Some(p) = &tokens {
+                sim.set_tokens(p.clone());
+            }
+            sim.subscribe(Box::new(Printer));
+            if let Err(d) = observers(&a, &db, &e, &mut sim, built.as_ref(), &mut out, &view) {
+                out.emit(&none, &d);
+                return out.finish(2);
+            }
+            *live.lock().unwrap_or_else(|p| p.into_inner()) = sim.interrupt();
+            yavs_vhpi::reset_done();
+            continue;
+        }
         if matches!(r, Ok(RunStatus::Paused)) && crate::stuck::take_request() {
             let report = sim.stuck_report();
             let d = e.stuck_diagnostic(&report, yavs_elab::StuckWhy::Requested, &procs, max);

@@ -14,10 +14,11 @@ use std::cell::Cell;
 use std::ffi::{CStr, c_char, c_int, c_long, c_void};
 use std::io::Write;
 use std::ptr::NonNull;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use crate::callbacks::{Callback, RegisterError};
-use crate::model::{Control, Fault, INT_PROPS, Iter, Object, STR_PROPS, State};
+use crate::model::{Control, Fault, INT_PROPS, Iter, Object, Reset, STR_PROPS, State};
 use crate::sys::*;
 use crate::value::{self, Encoded, Given, Member};
 use yavs_kernel::Hook;
@@ -62,7 +63,45 @@ pub(crate) fn with_state<R>(f: impl FnOnce(&mut State) -> R) -> R {
     let mut guard = lock();
     let state = guard.get_or_insert_with(State::default);
     state.error = None;
-    f(state)
+    let r = f(state);
+    drop(guard);
+    if PLI_ERROR_DUE.load(Ordering::Relaxed) {
+        pli_error();
+    }
+    r
+}
+
+/// An error was recorded and a `vhpiCbPLIError` callback is enabled. Plugin code cannot run
+/// under the lock, so `with_state` runs them as it leaves (#832).
+pub(crate) static PLI_ERROR_DUE: AtomicBool = AtomicBool::new(false);
+
+/// Runs the `vhpiCbPLIError` callbacks: they read the error with `vhpi_check_error`, as does
+/// the plugin code whose call failed afterwards.
+fn pli_error() {
+    PLI_ERROR_DUE.store(false, Ordering::Relaxed);
+    let (ids, error) = {
+        let mut guard = lock();
+        let s = guard.get_or_insert_with(State::default);
+        s.in_pli_error = true;
+        (s.cbs.due(vhpiCbPLIError), s.error.clone())
+    };
+    for id in ids {
+        let data = {
+            let mut guard = lock();
+            let s = guard.get_or_insert_with(State::default);
+            s.error.clone_from(&error);
+            let now = s.clock.now;
+            s.cbs.fire(id, now)
+        };
+        if let Some(rtn) = data.and_then(|d| d.cb_rtn.map(|r| (r, d))) {
+            // SAFETY: the plugin registered `rtn` for exactly this call.
+            unsafe { (rtn.0)(&rtn.1) };
+        }
+    }
+    let mut guard = lock();
+    let s = guard.get_or_insert_with(State::default);
+    s.in_pli_error = false;
+    s.error = error;
 }
 
 const NOT_IMPLEMENTED: &str = "not implemented in yavs yet";
@@ -140,6 +179,27 @@ pub extern "C" fn yavs_vhpi_control(command: c_int) -> c_int {
         let request = match command {
             vhpiStop => Control::Stop,
             vhpiFinish => Control::Finish,
+            vhpiReset => {
+                if let Some(why) = s.reset_refused.clone() {
+                    s.fail(
+                        Fault::Unsupported,
+                        format!("vhpi_control(vhpiReset): {why}"),
+                    );
+                    return 1;
+                }
+                if !matches!(
+                    s.tool_phase.0,
+                    vhpiInitializationPhase | vhpiSimulationPhase
+                ) || s.reset != Reset::None
+                {
+                    s.fail(
+                        Fault::Misuse,
+                        "vhpi_control(vhpiReset): only while a simulation runs",
+                    );
+                    return 1;
+                }
+                Control::Reset
+            }
             _ => {
                 s.fail(
                     Fault::Unsupported,
@@ -311,6 +371,10 @@ fn no_property(s: &mut State, func: &str, prop: i32, obj: &Object, implemented: 
 #[unsafe(no_mangle)]
 pub extern "C" fn vhpi_get(prop: vhpiIntPropertyT, h: vhpiHandleT) -> vhpiIntT {
     with_state(|s| {
+        // The tool's phase needs no handle (one reference takes only NULL, #832).
+        if h.is_null() && prop == vhpiPhaseP {
+            return s.tool_phase.0;
+        }
         let Some(obj) = get_obj(s, h, "vhpi_get") else {
             return vhpiUndefined;
         };
@@ -524,8 +588,8 @@ pub unsafe extern "C" fn vhpi_register_cb(cb: *mut vhpiCbDataT, flags: i32) -> v
                 s.fail(
                     Fault::Unsupported,
                     format!(
-                        "vhpi_register_cb: reason {}: {NOT_IMPLEMENTED}",
-                        data.reason
+                        "vhpi_register_cb: {}: {NOT_IMPLEMENTED}",
+                        crate::callbacks::refused(data.reason)
                     ),
                 );
                 std::ptr::null_mut()

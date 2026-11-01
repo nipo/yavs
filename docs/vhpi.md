@@ -20,9 +20,9 @@ For calling a plain C function from VHDL without a plugin, see "Calling C from V
 | Lookup | by name, by index, iterators, parent/prefix handles | |
 | Reading values | all formats, from callbacks, whole records and arrays of records as raw data | protected objects (they have no value) |
 | Writing values | signals and ports (deposit or force with propagation), variables, driver transactions | forcing variables, constants, generics, non-propagating modes on signals |
-| Callbacks | start/end of simulation and initialization, time step, delta cycle, process and postponed phases, after delay, time-out, value change, sensitivity on a signal, transaction, force, release | statements, subprogram calls, tool phases, save and restart |
+| Callbacks | start/end of simulation and initialization, time step, delta cycle, process and postponed phases, after delay, time-out, value change, sensitivity on a signal, transaction, force, release, start and end of the tool and of elaboration, errors, Ctrl-C, debugger stops, start and end of a reset | statements, subprogram calls, analysis (`yavs run` does not analyse), quiescence, save and restart |
 | Foreign models | functions, procedures, architectures, library and application hooks | file parameters |
-| Misc calls | `vhpi_control` stop and finish, `vhpi_format_value`, `vhpi_get_next_time` (in the read-only phase), `vhpi_protected_call` | `vhpi_get_data`, `vhpi_put_data` (exported so plugins link, but they report "not implemented") |
+| Misc calls | `vhpi_control` stop, finish and reset, `vhpiPhaseP`, `vhpi_format_value`, `vhpi_get_next_time` (in the read-only phase), `vhpi_protected_call` | `vhpi_get_data`, `vhpi_put_data`: yavs cannot save a simulation (exported so plugins link; they return 0 with an error) |
 
 ## A first plugin
 
@@ -65,6 +65,27 @@ For a top level `tb` with an unsigned signal `q` the run ends with a line such a
 (the full name of the root instance is upper case; the plugin reads names case-insensitively).
 Without `--vhpi` the plugin does nothing; it is not part of the design.
 
+
+## Resetting a simulation
+
+`vhpi_control(vhpiReset)` returns 0, the current cycle finishes, then the simulation is built again
+and starts from time 0 with the initial values of the design:
+
+1. `vhpiCbStartOfReset` runs, with the old simulation still readable. `vhpiCbEndOfSimulation` does
+   not run. `vhpiPhaseP` is `vhpiResetPhase`.
+2. `vhpiCbEndOfReset` runs at time 0 with the new simulation, then the initialization callbacks as
+   in any run.
+
+What stays: the plugin and its own state, handles, and every callback that has not matured. A
+one-shot callback that ran is gone, so register what must run again in `vhpiCbEndOfReset`. An
+after-delay callback counts its delay again from time 0. Puts, forces and transactions of the old
+run are gone. Foreign models keep their `elabf` and `execf` calls of the first run: they do not run
+again.
+
+A reset is refused with an error when a run reports on its whole length (`--wave`, `--cov`,
+`--profile`, `--activity`, `--assert-summary`) or is a debug session; `vhpiProvidesReset` in
+`vhpiCapabilitiesP` says which it is. Outside a running simulation it is an error too.
+
 ## Loading a plugin
 
 ```
@@ -72,6 +93,12 @@ yavs run --vhpi=LIB[:ENTRY] [--vhpi=...] TOP
 ```
 
 - Plugins load in command-line order, after elaboration and before the simulation starts.
+- `vhpiPhaseP` (of the tool handle or NULL) follows registration, elaboration, initialization,
+  simulation and termination. When all plugins have loaded come `vhpiCbStartOfTool` and
+  `vhpiCbStartOfElaboration`, then the foreign models, then `vhpiCbEndOfElaboration`. yavs has
+  elaborated the design by then, so its hierarchy can already be read. `vhpiCbEndOfTool` is the
+  last call of a run, whichever way it ended.
+- `vhpi_control(vhpiReset)` starts the design again from time 0 while the plugin stays loaded, see "Resetting a simulation" below.
 - Without `ENTRY`, every routine in the library's NULL-terminated `vhpi_startup_routines` array
   runs. With `ENTRY`, that `void (*)(void)` function runs instead.
 - A name with a directory part must name an existing file; a bare name goes through the operating

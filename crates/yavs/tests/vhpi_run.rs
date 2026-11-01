@@ -1063,7 +1063,7 @@ fn vhpi_user_attributes_and_properties() {
             "root: gens=1 ports=0",
             "g1(3): label=g1 index=3 line=12",
             "p:v: shared=0",
-            "tool: capabilities=311",
+            "tool: capabilities=439",
         ],
         "{out}"
     );
@@ -1487,4 +1487,208 @@ fn vhpi_statements() {
         assert!(out.contains(want), "no `{want}` in\n{out}");
     }
     assert!(err.contains("W0904"), "{err}");
+}
+
+/// Design of the `phases` plugin (#832): a counter of 10 ns steps, 6 changes up to 60 ns.
+const PHASES: &str = "entity top is end;\n\
+    architecture a of top is\n\
+    signal count : integer := 0;\n\
+    begin\n\
+    process begin\n\
+    while count < 5 loop wait for 10 ns; count <= count + 1; end loop; wait;\n\
+    end process;\n\
+    end;\n";
+
+/// Runs `top` of [`PHASES`] with the `phases` plugin entry `entry`.
+fn phases(entry: &str, extra: &[&str]) -> (i32, String, String) {
+    let (lib, so) = setup_with("phases", PHASES);
+    let spec = format!("--vhpi={}:{entry}", so.display());
+    let mut args = vec!["run", &lib, &spec, "--resolution=ns"];
+    args.extend_from_slice(extra);
+    args.push("top");
+    yavs(&args)
+}
+
+fn plugin_lines(out: &str) -> Vec<&str> {
+    out.lines().filter(|l| !l.starts_with("**")).collect()
+}
+
+/// `vhpiPhaseP` with the tool handle and NULL at every phase, and each phase callback before the
+/// simulation and after it, in order (#832).
+#[test]
+fn vhpi_tool_phases() {
+    let (code, err, out) = phases("phases", &[]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(
+        plugin_lines(&out),
+        [
+            "load: phase 1",
+            "start of tool: phase 1 tool 1 at 0",
+            "start of elaboration: phase 3 tool 3 at 0",
+            "end of elaboration: phase 3 tool 3 at 0",
+            "start of simulation: phase 5 tool 5 at 0",
+            "start of initialization: phase 4 tool 4 at 0",
+            "end of initialization: phase 5 tool 5 at 0",
+            "end of simulation: phase 5 tool 5 at 60",
+            "end of tool: phase 6 tool 6 at 60",
+        ],
+        "{err}"
+    );
+}
+
+/// What stays out returns the standard's errors: a NULL handle, 0 and 1, with the error readable,
+/// and a warning in words instead of a number (#832).
+#[test]
+fn vhpi_analysis_save_and_restart_are_errors() {
+    let (code, err, out) = phases("refused", &[]);
+    assert_eq!(code, 0, "{err}");
+    for reason in [1028, 1029, 1036, 1038, 1039, 1040, 1041] {
+        assert!(
+            out.contains(&format!("reason {reason}: handle 0 error 1")),
+            "{out}"
+        );
+    }
+    assert!(out.contains("vhpi_get_data: 0 error 1"), "{out}");
+    assert!(out.contains("vhpi_put_data: 0 error 1"), "{out}");
+    assert!(out.contains("reset at load: 1 error 1"), "{out}");
+    assert!(err.contains("`yavs run` does not analyse"), "{err}");
+    assert!(err.contains("yavs cannot save a simulation"), "{err}");
+    assert!(err.contains("vhpiCbQuiescense"), "{err}");
+}
+
+/// `vhpi_control(vhpiReset)`: the design starts again from time 0 at any tier and thread count,
+/// the plugin keeps its callbacks, and the phases go round again (#832).
+#[test]
+fn vhpi_reset_runs_the_design_again() {
+    for extra in [
+        &["--tier=interp"][..],
+        &["--tier=interp", "--threads=4"][..],
+        &[][..],
+    ] {
+        let (code, err, out) = phases("reset", extra);
+        assert_eq!(code, 0, "{extra:?} {err}");
+        assert_eq!(
+            plugin_lines(&out),
+            [
+                "start of tool: phase 1 tool 1 at 0",
+                "start of elaboration: phase 3 tool 3 at 0",
+                "end of elaboration: phase 3 tool 3 at 0",
+                "start of simulation: phase 5 tool 5 at 0",
+                "start of initialization: phase 4 tool 4 at 0",
+                "end of initialization: phase 5 tool 5 at 0",
+                "capable 1",
+                "before reset: count 2",
+                "vhpi_control: 0 error 0",
+                "start of reset: phase 9 tool 9 at 25",
+                "start of reset: count 2",
+                "end of reset: phase 9 tool 9 at 0",
+                "end of reset: count 0",
+                // The after-delay callback was spent; nothing else registered it again.
+                "end of simulation: phase 5 tool 5 at 60",
+                "end of tool: phase 6 tool 6 at 60",
+            ],
+            "{extra:?} {err}"
+        );
+    }
+}
+
+/// A value-change callback stays across a reset and sees the changes of both runs (#832).
+#[test]
+fn vhpi_reset_keeps_a_value_change_callback() {
+    let (code, err, out) = phases("reset_watch", &["--tier=interp"]);
+    assert_eq!(code, 0, "{err}");
+    let changes: Vec<&str> = out.lines().filter(|l| l.starts_with("change at")).collect();
+    assert_eq!(
+        changes,
+        [
+            "change at 10",
+            "change at 20",
+            "change at 10",
+            "change at 20",
+            "change at 30",
+            "change at 40",
+            "change at 50",
+            "change at 60",
+        ],
+        "{out}{err}"
+    );
+}
+
+/// An option that reports on the whole run makes the reset an error, and `vhpiProvidesReset` says
+/// so (#832).
+#[test]
+fn vhpi_reset_refused_with_waves() {
+    let dir = tempdir("vhpi_reset_refused");
+    let wave = format!("--wave={}", dir.join("w.fst").display());
+    let (code, err, out) = phases("reset_refused", &[&wave]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("capable 0"), "{out}");
+    assert!(out.contains("vhpi_control: 1 error 1"), "{out}");
+    assert!(err.contains("not with `--wave`"), "{err}");
+}
+
+/// `vhpiCbPLIError`: runs on an error with the error readable, not again for an error of its own,
+/// and the plugin code whose call failed still reads its error (#832).
+#[test]
+fn vhpi_pli_error_callback() {
+    let (code, err, out) = phases("pli", &[]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out.matches("error callback: 1").count(), 1, "{out}{err}");
+    assert!(out.contains("no_such_thing"), "{out}");
+    assert!(out.contains("failed: 0 caller sees error 1"), "{out}{err}");
+}
+
+/// Enter and exit interactive around a console's stop (#832).
+#[test]
+fn vhpi_interactive_callbacks() {
+    let (code, err, out) = phases("console", &["--do=run 15 ns; quit"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(
+        out.contains("enter interactive: phase")
+            && out.contains("exit interactive: phase")
+            && out.contains("end of tool: phase 6"),
+        "{out}{err}"
+    );
+}
+
+/// Ctrl-C ends a run between cycles: `vhpiCbSigInterrupt` with the design readable, the end of the
+/// simulation, the end of the tool, and exit status 130 (#832).
+#[cfg(unix)]
+#[test]
+fn vhpi_sig_interrupt_callback() {
+    let vhdl = "entity top is end;\n\
+        architecture a of top is\n\
+        signal count : integer := 0;\n\
+        begin\n\
+        process begin wait for 1 ns; count <= count + 1; end process;\n\
+        end;\n";
+    let (lib, so) = setup_with("phases", vhdl);
+    let spec = format!("--vhpi={}:interrupt", so.display());
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_yavs"))
+        .args(["run", &lib, &spec, "--resolution=ns", "top"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("yavs");
+    let mut stdout = std::io::BufReader::new(child.stdout.take().expect("piped"));
+    let mut first = String::new();
+    std::io::BufRead::read_line(&mut stdout, &mut first).expect("output");
+    assert_eq!(first, "running\n");
+    let kill = std::process::Command::new("kill")
+        .args(["-INT", &child.id().to_string()])
+        .status()
+        .expect("kill");
+    assert!(kill.success());
+    let mut rest = String::new();
+    std::io::Read::read_to_string(&mut stdout, &mut rest).expect("output");
+    let done = child.wait_with_output().expect("wait");
+    assert_eq!(done.status.code(), Some(130), "{rest}");
+    assert!(rest.contains("signal interrupt: phase 5"), "{rest}");
+    assert!(rest.contains("interrupted: count "), "{rest}");
+    let (a, b, c) = (
+        rest.find("signal interrupt").expect("interrupt"),
+        rest.find("end of simulation").expect("end of simulation"),
+        rest.find("end of tool: phase 6").expect("end of tool"),
+    );
+    assert!(a < b && b < c, "{rest}");
 }

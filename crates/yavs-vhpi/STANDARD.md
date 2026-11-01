@@ -11,8 +11,8 @@ gap has an issue.
 
 | Area | Status | What works | Missing (issue) |
 |---|---|---|---|
-| Functions | partial | all 34 exported; every one works except the two on the right; `vhpi_get_next_time` in the end-of-time-step phase | `vhpi_get_data`, `vhpi_put_data` ([#832](https://github.com/ru551n/yavs/issues/832)) |
-| Plugin loading, tool object | supported | startup table or `LIB:ENTRY`, Linux and Windows export tables, `vhpiArgcP`, `vhpiArgvs`, `vhpiNameP`, `vhpiToolVersionP`, `vhpiCapabilitiesP` (hierarchy, static access, connectivity, foreign models, advanced foreign models, run-time debug) | `vhpiPhaseP` ([#832](https://github.com/ru551n/yavs/issues/832)) |
+| Functions | partial | all 34 exported; every one works except the two on the right; `vhpi_get_next_time` in the end-of-time-step phase | `vhpi_get_data`, `vhpi_put_data` return 0 with an error: no save and restart (decision needed, [#832](https://github.com/ru551n/yavs/issues/832)) |
+| Plugin loading, tool object | supported | startup table or `LIB:ENTRY`, Linux and Windows export tables, `vhpiArgcP`, `vhpiArgvs`, `vhpiNameP`, `vhpiToolVersionP`, `vhpiCapabilitiesP` (hierarchy, static access, connectivity, foreign models, advanced foreign models, run-time debug, reset unless the options refuse it), `vhpiPhaseP` with the tool handle or NULL | |
 | Region classes | partial | root and component instances, blocks, `for` and `if`/`case` generates, processes, equivalent processes of concurrent statements, sequential statements (kind, place, label), package instances, entities, architectures, packages | |
 | Declaration classes | partial | generics, ports, signals, constants, variables, shared variables, user attribute specifications and declarations of declarations, units and labels, aliases, files, implicit signals, components, configuration specifications, subprograms and their parameters and bodies, package bodies, libraries, use clauses | attribute names and other expressions; a configuration declaration's block configurations |
 | Types | supported | type and subtype declarations of every scalar, array and record kind, constraints, literals, record elements, units, access, file and protected types (kind and name) | |
@@ -21,9 +21,9 @@ gap has an issue.
 | Properties | partial | names, kind, file and line, mode, size, composite and scalar flags, type properties, `vhpiNumPortsP`, `vhpiNumGensP`, `vhpiLabelNameP`, `vhpiGenerateIndexP`, `vhpiIsSharedP`, `vhpiStartLineNoP`, `vhpiResolutionLimitP`, `vhpiIsResolvedP`, `vhpiIsBasicP`, `vhpiSigKindP`, `vhpiIsForcedP`, `vhpiTimeP`, `vhpiEndLineNoP`, `vhpiCompNameP`, `vhpiCompInstNameP`, `vhpiCompInstKindP`, `vhpiNumParamsP`, `vhpiIsPureP`, `vhpiPredefAttrP`, `vhpiAttrKindP`, `vhpiLibLogicalNameP`, `vhpiLibPhysicalNameP`, `vhpiStaticnessP`, `vhpiIsPassiveP`, `vhpiIsPostponedP`, `vhpiIsGuardedP`, `vhpiIsSeqStmtP` | |
 | Value formats | supported | every format on scalars, arrays of any dimension, record fields; `vhpiRawDataVal` also on whole records and arrays of composites; `vhpiPtrVal` on access parameters of foreign calls | no value for protected objects and no `vhpiPtrVecVal` object exists (no array of access parameters) |
 | Put modes | supported | `vhpiDepositPropagate`, `vhpiForcePropagate`, `vhpiRelease`, `vhpiDeposit` on variables, `vhpiSizeConstraint` on foreign results, `vhpi_schedule_transaction` on foreign drivers (inertial with pulse rejection, transport) | `vhpiDeposit` and `vhpiForce` on signals refused on purpose (two of three references refuse them) |
-| Callback reasons | partial | the simulation-cycle reasons, after delay, value change, `vhpiCbTimeOut`, `vhpiCbRepTimeOut`, `vhpiCbSensitivity` on a signal, transaction (signal or driver), force, release | statement, subprogram call, suspend and resume (they need hooks in running code); tool, analysis and elaboration phases, quiescence, interrupt, errors, interactive, save, restart and reset ([#832](https://github.com/ru551n/yavs/issues/832)) |
+| Callback reasons | partial | the simulation-cycle reasons, after delay, value change, `vhpiCbTimeOut`, `vhpiCbRepTimeOut`, `vhpiCbSensitivity` on a signal, transaction (signal or driver), force, release, tool and elaboration phases, `vhpiCbPLIError`, `vhpiCbSigInterrupt`, interactive, reset | statement, subprogram call, suspend and resume (they need hooks in running code); analysis (`yavs run` does not analyse), quiescence (no meaning known without the standard's text), save and restart ([#832](https://github.com/ru551n/yavs/issues/832)): refused at registration |
 | Foreign models | supported | `vhpiFuncF`, `vhpiProcF`, `vhpiArchF`, `vhpiLibF`, `vhpiAppF`, `vhpi_create` of processes and drivers | file parameters, `vhpiForeignfs` (W0904, foreign models only ever take scalars, arrays, records, access and signals) |
-| Simulation control | partial | `vhpi_control(vhpiStop)`, `vhpi_control(vhpiFinish)` | `vhpiReset` ([#832](https://github.com/ru551n/yavs/issues/832)) |
+| Simulation control | supported | `vhpi_control(vhpiStop)`, `vhpi_control(vhpiFinish)`, `vhpi_control(vhpiReset)` (refused with options that report on a whole run) | |
 | Errors and handles | supported | `vhpi_check_error` after every call, `vhpi_assert`, `vhpi_printf`, generational handles, `vhpi_compare_handles`, `vhpi_release_handle`, iterators released when exhausted | |
 | Conformance evidence | partial | a Python testbench framework's own regression (CI: the whole of it on Linux, the jobs that need no make on Windows, workflow `cocotb-windows`), C plugin traces diffed against a reference simulator (`tools/vhpi-conformance`), the plugin tests of `crates/yavs/tests/vhpi_run.rs` | the Rust `vhpi` crate's plugins as a second client ([#273](https://github.com/ru551n/yavs/issues/273)) |
 
@@ -183,7 +183,8 @@ yavs run --vhpi=LIB[:ENTRY] [--vhpi=...] TOP
   own (built from the generated export list) or resolves the names at run time from the main
   module. An import library made for `yavs.exe` binds only to an executable of that name.
 - `vhpi_control` with `vhpiStop` or `vhpiFinish` ends the run with status 0 (an extra argument
-  after the command is accepted and ignored). Other commands are refused.
+  after the command is accepted and ignored). `vhpiReset`: `docs/vhpi.md`, "Resetting a
+  simulation". Other commands are refused.
 - `+NAME[=VALUE]` arguments after the top level are available through `vhpiArgcP` and the
   `vhpiArgvs` iterator; the first argument is the program name `yavs`.
 - Time counts in units of `--resolution` (`vhpi_get_time`, `vhpiResolutionLimitP`).

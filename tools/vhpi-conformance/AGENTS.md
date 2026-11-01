@@ -33,6 +33,7 @@ extend the VHPI conformance run (#273).
 | `plugins/farch.c`, `designs/farch.vhd` | A foreign architecture: when `elabf` and `execf` run, `vhpi_create` of processes and drivers (which handles, which order, which phase), transactions from a value-change callback (inertial with a rejected pulse, transport) |
 | `plugins/libapp.c`, `designs/libapp.vhd` | Library and application foreign models (#357): whether and when their `elabf` and `execf` run, with a foreign function of the same library in the design |
 | `plugins/vars.c`, `designs/vars.vhd` | Variables read and deposited before their process ran, and a shared variable no process uses (#342) |
+| `plugins/phases.c`, `designs/phases.vhd` | Tool phases (#832): `vhpiPhaseP` with the tool handle and NULL in every callback, which tool-phase reasons register and fire, `vhpi_control(vhpiReset)`, `vhpi_get_data`, `vhpi_put_data` |
 | `designs/hier.vhd`, `designs/drive.vhd` | The designs |
 
 ## 3. Design decisions that bind this module

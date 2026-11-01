@@ -5465,6 +5465,8 @@ runs the test as written.
 
 ## vhpi export (`crates/yavs-vhpi`, `crates/yavs`)
 
+Done (#832, 2026-11-01): `vhpiPhaseP`, tool and elaboration phase callbacks, `vhpi_control(vhpiReset)` with its callbacks (in-process rebuild; refused with options that report on a whole run), `vhpiCbPLIError`, `vhpiCbSigInterrupt`, interactive callbacks. Not: analysis reasons, `vhpiCbQuiescense`, save and restart (`vhpi_get_data`, `vhpi_put_data`, their reasons), which return the standard's errors. Nothing here runs without `--vhpi` but one reset check after a run ends. Tests: `crates/yavs/tests/vhpi_run.rs`, plugin `phases.c`; `tools/vhpi-conformance` plugin `phases`.
+
 Done (#849, 2026-11-01): cocotb's regression on Windows, the jobs that need no make (pytest through its Python runner, the examples, the pytest plugin): workflow `cocotb-windows`, 6 of 6 jobs on `windows-latest`. Its VHPI library is built with MSVC by `tools/cocotb/run.py`. The makefile jobs stay on Linux (they need make and a POSIX shell).
 
 Done (#829, 2026-10-31): equivalent processes as regions, `vhpiEqProcessStmts`, `vhpiSensitivities`, `vhpiSeqStmts`, `vhpiIsPassiveP`, `vhpiIsPostponedP`, `vhpiIsGuardedP`, `vhpiStaticnessP`. Not: statement, subprogram-call, suspend and resume callbacks, stack frames and expressions (`W0904`).

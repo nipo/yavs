@@ -2,17 +2,17 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use yavs_kernel::{Interrupt, ProcWait, StuckReport};
+use yavs_kernel::{ProcWait, StuckReport};
 
 /// A report was asked for (SIGUSR1) since the last `take_request`.
 static REQUESTED: AtomicBool = AtomicBool::new(false);
 
 /// The SIGUSR1 hook of `yavs_wave::interrupt` (its thread, no thread of ours): sets the flag and
 /// pauses the kernel between two cycles, `yavs run` reports and continues.
-pub(crate) fn on_request(pause: Interrupt) -> Box<dyn Fn() + Send> {
+pub(crate) fn on_request(pause: impl Fn() + Send + 'static) -> Box<dyn Fn() + Send> {
     Box::new(move || {
         REQUESTED.store(true, Ordering::SeqCst);
-        pause.pause();
+        pause();
     })
 }
 

@@ -96,6 +96,66 @@ pub fn run_callbacks(reason: i32) -> usize {
     abi::fire(&abi::with_state(|s| s.cbs.due(reason)))
 }
 
+/// The phases around elaboration (#832). Plugins load after yavs has elaborated, so what a plugin
+/// sees as elaboration is the part it takes part in: `vhpiCbStartOfTool` and
+/// `vhpiCbStartOfElaboration` when all plugins have loaded, then the foreign models.
+pub fn start_of_elaboration() {
+    run_callbacks(sys::vhpiCbStartOfTool);
+    abi::with_state(|s| s.tool_phase = model::ToolPhase(sys::vhpiElaborationPhase));
+    run_callbacks(sys::vhpiCbStartOfElaboration);
+}
+
+/// `vhpiCbEndOfElaboration`: the foreign models are bound, the initialization phase follows.
+pub fn end_of_elaboration() {
+    run_callbacks(sys::vhpiCbEndOfElaboration);
+    abi::with_state(|s| s.tool_phase = model::ToolPhase(sys::vhpiInitializationPhase));
+}
+
+/// `vhpiCbEndOfTool`, the last thing plugins see of a run that got as far as loading them
+/// (once). Reads of signals are errors here: the simulation has no observer call left.
+pub fn end_of_tool() {
+    abi::with_state(|s| s.tool_phase = model::ToolPhase(sys::vhpiTerminationPhase));
+    run_callbacks(sys::vhpiCbEndOfTool);
+}
+
+/// `vhpiCbEnterInteractive` or `vhpiCbExitInteractive`: a debugger stops or goes on.
+pub fn interactive(enter: bool) {
+    run_callbacks(if enter {
+        sys::vhpiCbEnterInteractive
+    } else {
+        sys::vhpiCbExitInteractive
+    });
+}
+
+/// Ctrl-C ends this run (safe from the signal thread): `vhpiCbSigInterrupt` as it ends.
+pub fn note_interrupt() {
+    sim::INTERRUPTED.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Why this run cannot do `vhpi_control(vhpiReset)`; set before plugins load.
+pub fn set_reset_refusal(why: Option<String>) {
+    abi::with_state(|s| s.reset_refused = why);
+}
+
+/// A plugin asked for a reset and the run has ended: build the simulation again, subscribe
+/// [`VhpiObserver`], then call [`reset_done`].
+pub fn reset_pending() -> bool {
+    abi::with_state(|s| s.reset == model::Reset::Asked)
+}
+
+/// The new simulation is built; what belonged to the old one is forgotten.
+pub fn reset_done() {
+    abi::with_state(|s| {
+        s.reset = model::Reset::Built;
+        s.puts.clear();
+        s.foreign.pending.clear();
+        s.control = None;
+        s.clock.now = yavs_kernel::Time::ZERO;
+        s.clock.delta = 0;
+        s.cbs.reset();
+    });
+}
+
 /// Takes the pending `vhpi_control` request, if a plugin made one.
 pub fn take_control() -> Option<Control> {
     abi::with_state(|s| s.control.take())

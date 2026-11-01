@@ -136,6 +136,8 @@ struct Link {
     hook: OnceLock<console::Hook>,
     /// Why `restart` is refused, if it is.
     no_restart: Option<String>,
+    /// Told when a stop starts (`true`) and ends: VHPI's interactive callbacks.
+    interactive: Option<fn(bool)>,
     /// A client that attached over TCP: the run cannot be started again from its side, so its
     /// restart button is `restart` here (#963).
     attached: bool,
@@ -701,6 +703,18 @@ impl Debugger for Front {
 
 /// Report the stop, then answer requests until one resumes; `None` ends the session.
 fn serve_stop(sh: &Shared, at: &At<'_, '_>, stopped: Json) -> Option<Next> {
+    // A plugin hears that the tool is interactive for as long as the stop lasts (#832).
+    if let Some(f) = sh.link.interactive {
+        f(true);
+    }
+    let next = stop_served(sh, at, stopped);
+    if let Some(f) = sh.link.interactive {
+        f(false);
+    }
+    next
+}
+
+fn stop_served(sh: &Shared, at: &At<'_, '_>, stopped: Json) -> Option<Next> {
     sh.nodes.lock().unwrap_or_else(|p| p.into_inner()).clear();
     sh.stopped.store(true, Ordering::Relaxed);
     // The waves of the completed time steps, then the stop.
@@ -2667,6 +2681,8 @@ fn parse_hit(s: &str) -> Result<HitCond, String> {
 pub struct Options {
     /// Why `restart` cannot work in this run (state outside the simulation).
     pub no_restart: Option<String>,
+    /// Called when a stop starts (`true`) and when it ends.
+    pub interactive: Option<fn(bool)>,
     pub reload: Option<ReloadFn>,
     /// The test runner's hook, `<port>:<secret>` (`console::HOOK_VAR`).
     pub hook: Option<String>,
@@ -2876,6 +2892,7 @@ fn session(
         viewer: OnceLock::new(),
         hook: OnceLock::new(),
         no_restart: options.no_restart,
+        interactive: options.interactive,
         attached: closer.is_some(),
         source_map: options.source_map,
         layout: options.layout,

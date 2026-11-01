@@ -7,7 +7,7 @@
 // VHPI names are matched as written in the C standard.
 #![allow(non_upper_case_globals)]
 
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use yavs_elab::{Built, ScopeId};
 use yavs_interp::{CallVal, InterpProcess};
@@ -17,11 +17,23 @@ use yavs_sem::stat::ConstValue;
 
 use crate::abi::{fire, hooked, with_state};
 use crate::callbacks::{TRANSACTIONS, WATCHING};
-use crate::model::{Control, PutOp, State};
+use crate::model::{Control, PutOp, Reset, State, ToolPhase};
 use crate::sys::*;
 
 /// Subscribe one to the simulation that runs the loaded plugins.
 pub struct VhpiObserver;
+
+/// The first Ctrl-C of the run (`yavs run` ends it): `vhpiCbSigInterrupt` as it ends (#832).
+pub(crate) static INTERRUPTED: AtomicBool = AtomicBool::new(false);
+
+/// The tool phase from a callback of `reason` on, as in the reference that reports one.
+fn phase_of(reason: i32) -> Option<i32> {
+    match reason {
+        vhpiCbStartOfInitialization => Some(vhpiInitializationPhase),
+        vhpiCbStartOfSimulation | vhpiCbEndOfInitialization => Some(vhpiSimulationPhase),
+        _ => None,
+    }
+}
 
 impl VhpiObserver {
     /// Runs the callbacks `due` picks at the hook's time, then makes the kernel requests
@@ -86,6 +98,10 @@ fn requests(s: &mut State, hook: &mut Hook<'_>, hold_puts: bool) {
     match s.control.take() {
         Some(Control::Finish) => hook.end(EndReason::Finish(0)),
         Some(Control::Stop) => hook.end(EndReason::Stop(0)),
+        Some(Control::Reset) => {
+            s.reset = Reset::Asked;
+            hook.end(EndReason::Requested);
+        }
         None => {}
     }
 }
@@ -179,7 +195,7 @@ impl yavs_kernel::Observer for VhpiObserver {
             Phase::LastKnownDelta => &[vhpiCbLastKnownDeltaCycle],
             Phase::StartOfPostponed => &[vhpiCbStartOfPostponed],
             Phase::EndOfTimeStep => &[vhpiCbEndOfTimeStep],
-            Phase::EndOfSim => &[vhpiCbEndOfSimulation],
+            Phase::EndOfSim => &[],
         };
         // The read-only phases: nothing may change the design any more at this time.
         let read_only = matches!(
@@ -188,14 +204,35 @@ impl yavs_kernel::Observer for VhpiObserver {
         );
         // Puts from before the update are handed over at `StartOfProcesses` (#319).
         let early = matches!(phase, Phase::NextTimeStep | Phase::NextCycle);
+        if phase == Phase::EndOfSim {
+            if INTERRUPTED.swap(false, Ordering::SeqCst) {
+                Self::dispatch(hook, true, false, |s| s.cbs.due(vhpiCbSigInterrupt));
+            }
+            // A reset is no end of the simulation; a callback of its end can still ask for one.
+            if with_state(|s| s.reset != Reset::Asked) {
+                Self::dispatch(hook, true, false, |s| s.cbs.due(vhpiCbEndOfSimulation));
+            }
+            if with_state(|s| s.reset == Reset::Asked) {
+                with_state(|s| s.tool_phase = ToolPhase(vhpiResetPhase));
+                Self::dispatch(hook, true, false, |s| s.cbs.due(vhpiCbStartOfReset));
+            }
+            return;
+        }
         if phase == Phase::StartOfSim {
-            // Library and application models (#357) run before the phase's callbacks.
-            with_state(|s| {
+            let again = with_state(|s| {
                 s.clock.now = hook.now();
                 s.clock.delta = hook.delta();
                 s.read_only = false;
+                std::mem::take(&mut s.reset) == Reset::Built
             });
-            hooked(hook, crate::foreign::start_models);
+            if again {
+                Self::dispatch(hook, false, false, |s| s.cbs.due(vhpiCbEndOfReset));
+            }
+            with_state(|s| s.tool_phase = ToolPhase(vhpiInitializationPhase));
+            // Library and application models (#357) run before the phase's callbacks, once.
+            if !again {
+                hooked(hook, crate::foreign::start_models);
+            }
             with_state(|s| requests(s, hook, false));
         }
         // Transactions (#830): a driver's as the cycle starts, the rest after the update.
@@ -210,6 +247,9 @@ impl yavs_kernel::Observer for VhpiObserver {
             }
         }
         for &r in reasons {
+            if let Some(p) = phase_of(r) {
+                with_state(|s| s.tool_phase = ToolPhase(p));
+            }
             Self::dispatch(hook, read_only, early, |s| s.cbs.due(r));
         }
     }

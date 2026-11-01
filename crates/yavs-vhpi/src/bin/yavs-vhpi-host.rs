@@ -46,6 +46,7 @@ fn main() -> ExitCode {
     match yavs_vhpi::take_control() {
         Some(Control::Finish) => println!("host: finish requested"),
         Some(Control::Stop) => println!("host: stop requested"),
+        Some(Control::Reset) => println!("host: reset requested"),
         None => println!("host: ran to completion"),
     }
     yavs_vhpi::run_callbacks(vhpiCbEndOfSimulation);
