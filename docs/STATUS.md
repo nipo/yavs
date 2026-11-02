@@ -3589,6 +3589,10 @@ predecoded dispatch.
 
 A whole record signal read by a process 16 times gets an image in the value's layout, kept by the kernel and written where a leaf changed; a whole read is then one copy, and a process gives the image up when it is written more than it saves. `v := r` reads the signal into `v` directly. Microwatt -5 percent instructions interpreted and all compiled, GRLIB -2.5 percent; nothing measured worse beyond its noise. Details: `docs/decisions.md` "Record signal images".
 
+### Wake path of a record sensitivity (2026-11-02, #1069, branch `perf/inv-wake`)
+
+A wait's abutting ranges of one signal are one waiter, and a signal's sole resident whole-signal waiter is woken where the update finishes. `rec_pair` at `--tier=auto`: instructions 0.754, cycles 0.721; small RTL designs level, `rtl_chain` +0.27 percent instructions at interp. Numbers in `docs/decisions.md`.
+
 ### Frame objects: full fact table and whole copies (2026-11-02, #1059, branch `perf/iterative`)
 
 A block of many slices between process variables lost its folding after eight statements, 2x the instructions at auto; a full table of memory facts now forgets temporaries. A whole copy between two variables has a direct path. Nine windows at auto within the noise; details in `docs/decisions.md`.

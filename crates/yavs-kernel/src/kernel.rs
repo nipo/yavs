@@ -3196,13 +3196,16 @@ impl SimControl {
             self.arm_readers(s);
         }
         let sig = &self.signals[s as usize];
-        let [r] = sig.changed[..] else {
-            return false;
+        let waiters = &self.waiters[s as usize];
+        let one = match sig.changed[..] {
+            [r] if r.len == 1 => waiters.sole_resident(r.offset),
+            [] => return false,
+            _ => None,
         };
-        let Some(w) = (r.len == 1)
-            .then(|| self.waiters[s as usize].sole_resident(r.offset))
-            .flatten()
-        else {
+        let Some(w) = (match one {
+            Some(w) => Some(w),
+            None => waiters.sole_whole(),
+        }) else {
             return false;
         };
         // An edge trigger reads signals this update may not have finished yet.
@@ -3215,7 +3218,7 @@ impl SimControl {
             self.stats.image_writes += self.images.push_sig(&self.signals[s as usize]);
         }
         let sig = &mut self.signals[s as usize];
-        self.stats.events += 1 + std::mem::take(&mut sig.nruns);
+        self.stats.events += sig.changed.len() as u64 + std::mem::take(&mut sig.nruns);
         sig.changed.clear();
         self.wake(p, false);
         true

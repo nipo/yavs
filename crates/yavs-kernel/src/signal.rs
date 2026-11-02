@@ -358,6 +358,16 @@ impl Waiters {
         }
     }
 
+    /// The one waiter of the signal, when it is resident and waits for all of it: every event
+    /// of the signal wakes it (a combinational process on a record pack).
+    #[inline]
+    pub fn sole_whole(&self) -> Option<&Waiter> {
+        match self.only()? {
+            [w] if w.perm != 0 && w.range == Range::new(0, self.len) => Some(w),
+            _ => None,
+        }
+    }
+
     /// The signal has one waiter, a resident one of process `p`.
     #[inline]
     pub fn only_resident(&self, p: u32) -> bool {
