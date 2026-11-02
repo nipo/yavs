@@ -2244,10 +2244,12 @@ scalars; the on-disk format is implementation-defined, so it is fixed here (yavs
 - **Records mixing protected and other elements (L102, #371, 2019 5.3.1; user, 2026-10-19, "reject,
   follow LRM"):** `E1905` at the first non-protected element; all four references reject it. Records
   whose elements are all protected, arrays of protected types and access types to them stay accepted (#361).
-- **Negated literal at the i64 minimum (L58, #214; user, 2026-10-19, majority rule):** `-9223372036854775808`,
-  for integer and physical types, is `E1402` in user code (all three reference simulators reject it;
-  the range of `universal_integer` is implementation-defined). Library `std` stays exempt: its `TIME`
-  declaration uses the literal.
+- **Negated literal at the i64 minimum (L58, #214; user, 2026-10-19, majority rule; LRM reading corrected 2026-11-02):**
+  `-9223372036854775808`, for integer and physical types, is `E1402` in user code. The LRM is clear, not
+  implementation-defined as recorded on 2026-10-19: the literal is a value before the minus applies, and 9.5 and
+  9.3.6 with 5.2.3.1 make 2**63 an error for a 64-bit implementation (quotes in L58). 0.4.0 to 0.6.0 accepted it
+  (1fe26d3), which was a bug. The error's help gives `-9223372036854775807 - 1`. Library `std` stays exempt: its
+  `TIME` declaration uses the literal (16.3 leaves the range `implementation_defined`).
 - **Implicit condition operator (L53, #48; user, 2026-10-19, rule 15):** a visible `??` for the
   condition's type first; when none is visible, the `??` declared beside the type, so
   `use ieee.std_logic_1164.std_ulogic` alone is enough. 9.2.9 does not say where the operator is

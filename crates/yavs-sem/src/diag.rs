@@ -91,7 +91,7 @@ codes! {
     FORCE_RESOLVED_MEMBER = "E1362", "The target of a force or release assignment is a member (an element, slice or field) of a signal whose composite subtype is resolved as a whole (LRM 10.5.2.1); force or release the whole composite signal.";
     // E14xx static evaluation
     OVERFLOW = "E1401", "Static integer or physical arithmetic overflows 64 bits.";
-    LITERAL_RANGE = "E1402", "A literal is too large to represent.";
+    LITERAL_RANGE = "E1402", "A literal is too large to represent: integer literals and the value of a physical literal must fit 64 bits, also with a minus before them (LRM 9.5, 9.3.6). Write the 64-bit minimum as `-9223372036854775807 - 1`.";
     OUT_OF_SUBTYPE = "E1403", "A static value lies outside the static subtype it is converted to.";
     LENGTH_MISMATCH = "E1405", "The static lengths of the two sides differ, for a whole array or for an element or field of a composite value. Give the value the target's length, or change the target's constraint.";
     NOT_STATIC = "E1410", "The expression must be locally static here.";

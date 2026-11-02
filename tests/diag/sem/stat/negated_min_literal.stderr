@@ -1,0 +1,36 @@
+error[E1402]: the literal `9223372036854775808` is too large, also with a minus before it
+ --> tests/diag/sem/stat/negated_min_literal.vhd:9:24
+  |
+9 |   constant a : big := -9223372036854775808;
+  |                        ^^^^^^^^^^^^^^^^^^^ one past the largest 64-bit value
+  |
+  = note: the literal is a value of its own before the minus applies (LRM 9.5, 9.3.6)
+  = help: write the 64-bit minimum as `-9223372036854775807 - 1`
+
+error[E1402]: the literal `9223372036854775808 fs` is too large, also with a minus before it
+  --> tests/diag/sem/stat/negated_min_literal.vhd:10:25
+   |
+10 |   constant c : time := -9223372036854775808 fs;
+   |                         ^^^^^^^^^^^^^^^^^^^^^^ one past the largest 64-bit value
+   |
+   = note: the literal is a value of its own before the minus applies (LRM 9.5, 9.3.6)
+   = help: write the 64-bit minimum as `-9223372036854775807 fs - 1 fs`
+
+error[E1402]: the literal `9223372036854775.808 ps` is too large, also with a minus before it
+  --> tests/diag/sem/stat/negated_min_literal.vhd:12:25
+   |
+12 |   constant e : time := -9223372036854775.808 ps;
+   |                         ^^^^^^^^^^^^^^^^^^^^^^^ one past the largest 64-bit value
+   |
+   = note: the literal is a value of its own before the minus applies (LRM 9.5, 9.3.6)
+   = help: write the 64-bit minimum as `-9223372036854775807 fs - 1 fs`
+
+error[E1402]: the literal `16#8000_0000_0000_0000#` is too large, also with a minus before it
+  --> tests/diag/sem/stat/negated_min_literal.vhd:13:23
+   |
+13 |   type big2 is range -16#8000_0000_0000_0000# to 0;
+   |                       ^^^^^^^^^^^^^^^^^^^^^^^ one past the largest 64-bit value
+   |
+   = note: the literal is a value of its own before the minus applies (LRM 9.5, 9.3.6)
+   = help: write the 64-bit minimum as `-9223372036854775807 - 1`
+

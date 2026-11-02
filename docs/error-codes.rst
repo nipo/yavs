@@ -363,7 +363,7 @@ Semantic analysis (E1 and W1)
    * - _`W1401`
      - Static arithmetic overflows in a context that does not require the value; the runtime check stays.
    * - _`E1402`
-     - A literal is too large to represent.
+     - A literal is too large to represent: integer literals and the value of a physical literal must fit 64 bits, also with a minus before them (LRM 9.5, 9.3.6).
    * - _`E1403`
      - A static value lies outside the static subtype it is converted to.
    * - _`W1403`

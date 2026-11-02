@@ -2744,7 +2744,7 @@ The GitHub Action that installs a release lives in its own repository, `ru551n/y
 
 ## sem (`crates/yavs-sem`, M1)
 
-- A negated abstract literal at the i64 minimum (`-9223372036854775808`, `-9223372036854775808 fs`) is `E1402` in user code (L58, #214, majority rule); only library `std` uses it (TIME's lower bound) and folds it to `i64::MIN`.
+- A negated abstract literal at the i64 minimum (`-9223372036854775808`, `-9223372036854775808 fs`) is `E1402` in user code (L58, #214; the LRM is clear, 9.5 and 9.3.6), with a help line giving `-9223372036854775807 - 1`; only library `std` uses it (TIME's lower bound) and folds it to `i64::MIN`.
 - Instances of one generic subprogram declared under one name (`function f is new f generic map (...)`)
   overload by their instantiated profiles, next to ordinary overloads and across use clauses (#28):
   `tests/diag/sem/gen/subprogram_instances_*`, difftest `generics/subprog_instance_overload` (2008, 2019).

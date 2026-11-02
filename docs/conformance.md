@@ -85,7 +85,7 @@ Not passing: sim1: 54; sim2: 41 (the classes of each are in `docs/conformance.js
 
 [`docs/design/simulator-discrepancies.md`](https://github.com/ru551n/yavs/blob/main/docs/design/simulator-discrepancies.md) lists every case where the references disagree with each other, with the language reference or with yavs:
 238 catalogued behaviours, each with a reproducer under `tests/discrepancies/<case>/`. CI runs every reproducer on yavs and fails when yavs's output
-differs from the recorded one (matches). Kinds: LRM clear 150, LRM ambiguity 81, reference bug 5, library availability 1, other 1.
+differs from the recorded one (matches). Kinds: LRM clear 151, LRM ambiguity 80, reference bug 5, library availability 1, other 1.
 
 Policy (`docs/plan.md`): where the language reference is clear, yavs follows it even against all references; where it is unclear yavs is permissive
 and follows the majority of the references that run the construct. The verdicts of each reference are in the catalogue; the table gives the clause, the kind,
@@ -148,7 +148,7 @@ and yavs's verdict.
 | [`group-mixed-class-template`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/group-mixed-class-template) | 6.9, 6.10 | LRM clear | OK |
 | [`group-template-box-empty`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/group-template-box-empty) | 6.10 | LRM ambiguity | OK |
 | [`homograph-subprogram-instances`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/homograph-subprogram-instances) | 12.3, 4.10 | LRM clear | REJECT |
-| [`i64-min-literal`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/i64-min-literal) | 9.3, 5.2.3 (range of universal_integer implementation-define | LRM ambiguity | REJECT |
+| [`i64-min-literal`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/i64-min-literal) | 9.5, 9.3.6, 5.2.3.1, 5.2.4.1 (the literal is a value before  | LRM clear | REJECT |
 | [`implicit-condition-operator`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/implicit-condition-operator) | 9.2.9 | LRM ambiguity | OK |
 | [`implicit-signal-in-subprogram`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/implicit-signal-in-subprogram) | 4.2.2.2, 14.7.5 | LRM ambiguity | OK |
 | [`incomplete-type-never-completed`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/incomplete-type-never-completed) | 5.4.2 | LRM clear | REJECT |

@@ -1871,8 +1871,8 @@
    {
     "case": "i64-min-literal",
     "decided": "user, 2026-10-19: keep reject; user, 2026-10-19 (#214, L58)",
-    "kind": "LRM ambiguity",
-    "lrm": "9.3, 5.2.3 (range of universal_integer implementation-defined)",
+    "kind": "LRM clear",
+    "lrm": "9.5, 9.3.6, 5.2.3.1, 5.2.4.1 (the literal is a value before the minus applies; L58)",
     "yavs": "REJECT"
    },
    {

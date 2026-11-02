@@ -120,8 +120,9 @@ Negated literal at the 64-bit minimum
    constant k : time := -9223372036854775808 fs;
 
 The literal ``9223372036854775808`` is too large even when a minus is applied directly to it
-(``E1402``), for integer and physical types: the range of ``universal_integer`` is implementation
-defined (9.3, 5.2.3), and yavs stops at the 64-bit maximum (decided by the user, 2026-10-19).
+(``E1402``), for integer and physical types: the literal is a value before the minus applies, and
+the standard bounds it by the widest integer type the implementation provides, 64 bits in yavs
+(9.5, 9.3.6, 5.2.3.1). Simulators agree on this one.
 
 *Portable:* write ``-9223372036854775807 - 1``.
 

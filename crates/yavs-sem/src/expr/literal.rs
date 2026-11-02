@@ -731,16 +731,22 @@ pub fn literal_value(
     }))
 }
 
-/// The value of `-lit` when the literal alone is one past `i64::MAX` (LRM 9.3, 5.2.3: the minus
-/// applies to a `universal_integer` literal; only library `std` uses it, for `TIME`) and `ty` is an
-/// integer or physical type; `None` for every other literal (the normal path handles and reports).
+/// `-lit` where the literal alone is one past `i64::MAX` and `ty` is an integer or physical type:
+/// its value, the literal as written and the spelling of the minimum that fits; `None` for every
+/// other literal. Only library `std` folds it (its `TIME`); elsewhere it is `E1402`
+/// ([`negated_min_error`], LRM 9.5, 9.3.6, lrm-checks L58).
 // ponytail: only the i64 minimum needs the wider intermediate; any other value folds via `-` as before.
-pub fn negated_min(db: &Db, lit: &Literal, ty: TypeId) -> Option<ConstValue> {
+pub fn negated_min(db: &Db, lit: &Literal, ty: TypeId) -> Option<NegatedMin> {
     const MAG: i128 = 1 << 63;
+    const MIN: &str = "-9223372036854775807";
     match (&lit.kind, &db.types[ty].kind) {
         (LiteralKind::Abstract(t), k) if k.class() == crate::types::TypeClass::Integer => {
             let a = lex(t.as_str()).ok()?;
-            (a.to_i128() == Some(MAG)).then_some(ConstValue::Int(i64::MIN))
+            (a.to_i128() == Some(MAG)).then(|| NegatedMin {
+                value: ConstValue::Int(i64::MIN),
+                text: t.as_str().to_string(),
+                fix: format!("{MIN} - 1"),
+            })
         }
         (LiteralKind::Physical { value, unit }, TypeKind::Physical { units }) => {
             let scale = units
@@ -748,10 +754,39 @@ pub fn negated_min(db: &Db, lit: &Literal, ty: TypeId) -> Option<ConstValue> {
                 .find(|u| db.decls[u.decl].name.key() == unit.key)?
                 .scale;
             let a = lex(value.as_str()).ok()?;
-            (a.scaled(scale) == Some(MAG)).then_some(ConstValue::Phys(i64::MIN))
+            let base = &db.decls[units.iter().find(|u| u.scale == 1)?.decl].name;
+            (a.scaled(scale) == Some(MAG)).then(|| NegatedMin {
+                value: ConstValue::Phys(i64::MIN),
+                text: format!("{} {}", value.as_str(), unit.text.as_str()),
+                fix: format!("{MIN} {base} - 1 {base}"),
+            })
         }
         _ => None,
     }
+}
+
+/// What [`negated_min`] found.
+pub struct NegatedMin {
+    pub value: ConstValue,
+    text: String,
+    fix: String,
+}
+
+/// `E1402` for a [`negated_min`] outside library `std`: the literal is a value before the minus
+/// applies (LRM 9.5, 9.3.6), so the help names the spelling that fits.
+pub fn negated_min_error(db: &mut Db, span: Span, m: NegatedMin) -> Reported {
+    db.error(
+        Diagnostic::error(
+            diag::LITERAL_RANGE,
+            format!(
+                "the literal `{}` is too large, also with a minus before it",
+                m.text
+            ),
+        )
+        .with_primary(span, "one past the largest 64-bit value")
+        .with_note("the literal is a value of its own before the minus applies (LRM 9.5, 9.3.6)")
+        .with_help(format!("write the 64-bit minimum as `{}`", m.fix)),
+    )
 }
 
 /// Build the constant HIR expression of a literal of type `ty` (sem.md 3.5, "Resolved with type T").

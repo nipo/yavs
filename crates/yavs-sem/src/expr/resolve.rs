@@ -657,10 +657,13 @@ impl Db {
             K::Unary { op, operand } => {
                 if *op == ast::UnaryOp::Minus
                     && let K::Literal(l) = &operand.kind
-                    && self.in_std_library(scope)
-                    && let Some(v) = crate::expr::literal::negated_min(self, l, i.ty)
+                    && let Some(m) = crate::expr::literal::negated_min(self, l, i.ty)
                 {
-                    return crate::expr::literal::const_expr(self, e.span, i.ty, Some(v));
+                    if self.in_std_library(scope) {
+                        return crate::expr::literal::const_expr(self, e.span, i.ty, Some(m.value));
+                    }
+                    crate::expr::literal::negated_min_error(self, l.span, m);
+                    return self.poison_expr();
                 }
                 let id = self.build_operator(scope, i, &[operand.as_ref()], e.span);
                 if *op == ast::UnaryOp::Not {
