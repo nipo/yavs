@@ -24,9 +24,9 @@ pub use kernel::{
     Stats, StuckProc, StuckReport, StuckSignal, Tokens, WakeId, progress,
 };
 pub use process::{
-    Cond, CopyProcess, Ctx, EDGE_LEVEL, Gate, GateProcess, Lit, LiveSink, MuxPart, MuxProcess,
-    Opnd, ProcId, Process, ProgArm, ProgNode, ProgOp, ProgPart, ProgProcess, Severity, Src,
-    ToggleProcess, edge_key,
+    Cond, CopyProcess, Ctx, DirectRef, EDGE_LEVEL, Gate, GateProcess, Lit, LiveSink, MuxPart,
+    MuxProcess, Opnd, ProcId, Process, ProgArm, ProgNode, ProgOp, ProgPart, ProgProcess, Severity,
+    Src, ToggleProcess, edge_key,
 };
 pub use signal::{
     DelayMode, DriverId, ForceMode, GuardKind, Range, Resolution, Resolver, SigRef, SignalId,

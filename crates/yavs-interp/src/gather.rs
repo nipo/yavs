@@ -53,6 +53,10 @@ pub(crate) struct Bound {
     items: Box<[Item]>,
     reads: Box<[Grp]>,
     runs: Box<[Grp]>,
+    /// The first driver slot of the first scatter through the plan and, per leaf, the kernel's
+    /// facts of its driver when it is a direct byte driver (`Ctx::direct_ref`): they do not
+    /// change. A scatter from other driver slots looks them up each time.
+    refs: std::cell::OnceCell<(u32, Box<[Option<yavs_kernel::DirectRef>]>)>,
 }
 
 /// One instance of a leaf in a whole value: the leaf, its byte offset in the value and its first
@@ -313,6 +317,7 @@ fn flush_planes(
 /// `d` after `when`; a logic leaf joins the run of the leaves before it when it follows them in
 /// the same driver.
 #[inline(always)]
+#[allow(clippy::too_many_arguments)]
 fn write_leaf(
     c: &mut Ctx<'_>,
     d: yavs_kernel::DriverId,
@@ -321,6 +326,7 @@ fn write_leaf(
     v: &[u8],
     run: &mut Option<Run>,
     when: When,
+    dref: Option<&yavs_kernel::DirectRef>,
 ) -> R<()> {
     let (t, now, mode) = when;
     if matches!(l.kind, LeafKind::LogicScalar | LeafKind::LogicVec) && (1..=64).contains(&l.len) {
@@ -353,7 +359,11 @@ fn write_leaf(
         }
         LeafKind::Scalar | LeafKind::Bytes => {
             let v = v.get(..l.len as usize * l.ew as usize).unwrap_or(v);
-            if !(now && l.len == 1 && c.assign_bytes_now(d, r, v)) {
+            if !(now
+                && l.len == 1
+                && (dref.is_some_and(|x| c.assign_ref_bytes(x, r.offset, v))
+                    || c.assign_bytes_now(d, r, v)))
+            {
                 c.assign_bytes(d, Some(r), t, v, mode)?;
             }
         }
@@ -442,6 +452,7 @@ impl Machine {
                 items,
                 reads,
                 runs,
+                refs: std::cell::OnceCell::new(),
             })
         }))
     }
@@ -656,6 +667,12 @@ impl Machine {
             .get(driver as usize..driver as usize + plan.leaves.len())
             .ok_or_else(|| cold(|| ice(format!("no driver slots from {driver}"))))?;
         let when = (t, now, mode);
+        let (base, cached) = b.refs.get_or_init(|| {
+            let refs = ds.iter().map(|d| c.direct_ref(d.id)).collect();
+            (driver, refs)
+        });
+        // Another scatter through the same plan (other driver slots): no facts, the usual path.
+        let refs: &[Option<yavs_kernel::DirectRef>] = if *base == driver { cached } else { &[] };
         let mut run = None;
         if part.is_none() && !b.items.is_empty() {
             for g in &*b.runs {
@@ -685,12 +702,14 @@ impl Machine {
                         .get(at..at + l.vsize as usize)
                         .ok_or_else(|| cold(|| ice("a leaf outside its value")))?;
                     let d = ds[t.leaf as usize].id;
-                    write_leaf(c, d, l, Range::new(t.k, l.len), v, &mut run, when)?;
+                    let dref = refs.get(t.leaf as usize).and_then(Option::as_ref);
+                    write_leaf(c, d, l, Range::new(t.k, l.len), v, &mut run, when, dref)?;
                 }
             }
             return flush_run(c, &mut run, when);
         }
-        for ((l, s), d) in plan.leaves.iter().zip(&*b.sigs).zip(ds) {
+        for (li, ((l, s), d)) in plan.leaves.iter().zip(&*b.sigs).zip(ds).enumerate() {
+            let dref = refs.get(li).and_then(Option::as_ref);
             let n = l.insts as usize;
             for i in 0..n {
                 // A logic leaf's instances are mirrored in the kernel (`Leaf::kstart`): taken
@@ -701,7 +720,7 @@ impl Machine {
                     .get(at..at + l.vsize as usize)
                     .ok_or_else(|| cold(|| ice("a leaf outside its value")))?;
                 let r = Range::new(s.off + l.kstart(j, first, outer) as u32, l.len);
-                write_leaf(c, d.id, l, r, v, &mut run, when)?;
+                write_leaf(c, d.id, l, r, v, &mut run, when, dref)?;
             }
         }
         flush_run(c, &mut run, when)

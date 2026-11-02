@@ -881,6 +881,19 @@ pub(crate) struct OutB {
     pub val: [u8; 8],
 }
 
+/// What a direct byte driver's assignments need of its `DriverInfo`, looked up once
+/// (`Ctx::direct_ref`): the facts are fixed when the simulation is built. For a plan bound to a
+/// process's drivers (a record scatter), so its leaves do not look them up per drive.
+#[derive(Clone, Copy, Debug)]
+pub struct DirectRef {
+    pid: ProcId,
+    sig: u32,
+    slot: u32,
+    local: u32,
+    off: u32,
+    len: u32,
+}
+
 /// A process with more drivers than this keeps `ProcState::marks`.
 pub(crate) const MARKED_DRIVERS: usize = 4;
 
@@ -2228,6 +2241,68 @@ impl Ctx<'_> {
             self.mark_entries(info, 1);
         }
         taken
+    }
+
+    /// The facts of direct byte driver `d` of this process, for `assign_ref_bytes`; `None` for
+    /// any other driver.
+    pub fn direct_ref(&self, d: DriverId) -> Option<DirectRef> {
+        let info = self.sh.drivers.get(d.0 as usize)?;
+        (info.bdirect && info.owner == self.pid).then_some(DirectRef {
+            pid: self.pid,
+            sig: info.signal.0,
+            slot: info.slot,
+            local: info.local,
+            off: info.range.offset,
+            len: info.range.len,
+        })
+    }
+
+    /// `assign_bytes_now` of one element `elem` through the driver of `r` (`direct_ref`) in one
+    /// pass: the skip test, else one `OutB` entry. False, nothing done, where
+    /// `assign_bytes_now` must run.
+    #[inline(always)]
+    pub fn assign_ref_bytes(&mut self, r: &DirectRef, elem: u32, bytes: &[u8]) -> bool {
+        let n = bytes.len();
+        if r.pid != self.pid
+            || n == 0
+            || n > 8
+            || elem.wrapping_sub(r.off) >= r.len
+            || !self.st.calm(r.local as usize)
+        {
+            return false;
+        }
+        let s = &self.sh.signals[r.sig as usize];
+        if !matches!(s.ty.elem, crate::value::Elem::Bytes(es) if es as usize == n) {
+            return false;
+        }
+        let key = (r.sig, r.slot);
+        let fresh = match &self.st.marks {
+            Some(m) => m.d.get(r.local as usize) != Some(&(m.epoch << 2 | 3)),
+            None => !self.st.outb.iter().any(|o| (o.sig, o.slot) == key),
+        };
+        if fresh
+            && self.st.same_wanted(r.local)
+            && self
+                .st
+                .same_seen(r.local, s.direct_same_bytes(r.slot, elem, bytes))
+        {
+            self.note_skipped();
+            return true;
+        }
+        if let Some(m) = &mut self.st.marks
+            && let Some(x) = m.d.get_mut(r.local as usize)
+        {
+            *x = m.epoch << 2 | 3;
+        }
+        self.st.act |= ACT_ASSIGNED;
+        self.st.outb.push(OutB {
+            sig: r.sig,
+            slot: r.slot,
+            elem,
+            es: n as u32,
+            val: pack8(bytes),
+        });
+        true
     }
 
     /// `assign_bytes` of one element with zero delay (transport or inertial without rejection):
