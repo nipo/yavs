@@ -225,7 +225,30 @@ fn calls_native(prog: &yavs_ir::Program, f: &yavs_ir::Func) -> std::collections:
 /// compiled code for a callback into the interpreter's functions: every instruction it does not
 /// run inline (`is_inline`: steps, natives, signal operations), and each `Stmt` where
 /// temporaries are recorded as roots (it is stepped then).
-fn callbacks(prog: &yavs_ir::Program, f: &yavs_ir::Func) -> (usize, usize) {
+fn callbacks(prog: &yavs_ir::Program, f: &yavs_ir::Func, same: bool) -> (usize, usize) {
+    let (out, total) = leaving(prog, f, same);
+    (out.len(), total)
+}
+
+/// The kinds of the instructions `callbacks` counts as leaving, most frequent first (trace only).
+fn leave_kinds(prog: &yavs_ir::Program, f: &yavs_ir::Func, same: bool) -> String {
+    let mut m = std::collections::BTreeMap::<String, usize>::new();
+    for pc in leaving(prog, f, same).0 {
+        let d = format!("{:?}", f.code[pc]);
+        *m.entry(d.split([' ', '{', '(']).next().unwrap_or("").to_string())
+            .or_default() += 1;
+    }
+    let mut v: Vec<_> = m.into_iter().collect();
+    v.sort_by_key(|a| std::cmp::Reverse(a.1));
+    v.iter()
+        .map(|(k, n)| format!("{k} {n}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// The pcs `callbacks` counts as leaving, and the instructions an activation runs. With `same`
+/// a wait compiled code skips (`yavs_rt_wait_same`) counts once, not once per `WaitOn`.
+fn leaving(prog: &yavs_ir::Program, f: &yavs_ir::Func, same: bool) -> (Vec<usize>, usize) {
     use yavs_ir::Inst;
     let n = f.code.len();
     let mut seen = vec![false; n];
@@ -247,13 +270,30 @@ fn callbacks(prog: &yavs_ir::Program, f: &yavs_ir::Func) -> (usize, usize) {
     }
     let roots = (0..n).any(|pc| seen[pc] && matches!(f.code[pc], Inst::TempRoot { .. }));
     let nc = calls_native(prog, f);
+    let skipped: Vec<(usize, usize)> = if same {
+        yavs_interp::static_wait(prog, f, 1)
+    } else {
+        Vec::new()
+    };
+    // The first `WaitOn` of such a wait still counts: `yavs_rt_wait_same` is a call out too.
+    let skip = |pc: usize| {
+        matches!(f.code[pc], Inst::WaitOn { .. })
+            && skipped.iter().any(|&(st, s)| {
+                st < pc
+                    && pc < s
+                    && f.code[st + 1..pc]
+                        .iter()
+                        .any(|i| matches!(i, Inst::WaitOn { .. }))
+            })
+    };
     let out = (0..n)
         .filter(|&pc| {
             seen[pc]
+                && !skip(pc)
                 && (crate::native::leaves(prog, f, pc, &nc)
                     || roots && matches!(f.code[pc], Inst::Stmt))
         })
-        .count();
+        .collect();
     (out, seen.iter().filter(|&&b| b).count())
 }
 
@@ -262,9 +302,14 @@ fn callbacks(prog: &yavs_ir::Program, f: &yavs_ir::Func) -> (usize, usize) {
 /// than interpreting the instruction, so the compiled process ran slower than the interpreted
 /// one (#507). ponytail: a static count over every path of the body, not weighted by what runs;
 /// a measured comparison of both forms if a process near the line needs it.
-fn too_many_callbacks(prog: &yavs_ir::Program, f: &yavs_ir::Func, id: FuncId) -> Option<String> {
+fn too_many_callbacks(
+    prog: &yavs_ir::Program,
+    f: &yavs_ir::Func,
+    id: FuncId,
+    same: bool,
+) -> Option<String> {
     if f.kind == FuncKind::Process {
-        let (out, total) = callbacks(prog, f);
+        let (out, total) = callbacks(prog, f, same);
         return (out * CALLBACKS > total).then(|| {
             format!(
                 "{out} of the {total} IR instructions an activation runs leave the compiled \
@@ -379,6 +424,10 @@ struct Tune {
     /// every process that calls it into the interpreter's loop for compiled code
     /// (`run_ops::<true, _>`), which its modelled gain of 9 percent does not cover (#481).
     frame_calls: bool,
+    /// Whether the `WaitOn`s of a wait that names the same signals every activation
+    /// (`yavs_interp::static_wait`) count as staying in `callbacks`: compiled code skips them
+    /// with one `yavs_rt_wait_same` call (#1046).
+    wait_same: bool,
 }
 
 impl Tune {
@@ -393,6 +442,7 @@ impl Tune {
         big: true,
         frame: true,
         frame_calls: true,
+        wait_same: false,
     };
     const FIRST: Tune = Tune {
         rtl_min: 64,
@@ -405,10 +455,11 @@ impl Tune {
         big: true,
         frame: true,
         frame_calls: false,
+        wait_same: true,
     };
 
     /// `FIRST`, or what `YAVS_FIRST_TUNE=rtl_min=N,band=0|1,instances=N,share=N,o2_after=N,
-    /// tree_payback=N,payback_rtl=N,big=0|1,frame=0|1,frame_calls=0|1` changes of it (a measuring aid; an entry that is not understood is ignored).
+    /// tree_payback=N,payback_rtl=N,big=0|1,frame=0|1,frame_calls=0|1,wait_same=0|1` changes of it (a measuring aid; an entry that is not understood is ignored).
     fn first() -> Tune {
         static T: std::sync::OnceLock<Tune> = std::sync::OnceLock::new();
         *T.get_or_init(|| {
@@ -426,6 +477,7 @@ impl Tune {
                     ("big", Ok(n)) => t.big = n != 0,
                     ("frame", Ok(n)) => t.frame = n != 0,
                     ("frame_calls", Ok(n)) => t.frame_calls = n != 0,
+                    ("wait_same", Ok(n)) => t.wait_same = n != 0,
                     _ => {}
                 }
             }
@@ -2636,7 +2688,7 @@ impl Worker {
             .then(|| {
                 too_short(&self.prog, f, id)
                     .or_else(|| fused_search(&self.prog, f))
-                    .or_else(|| too_many_callbacks(&self.prog, f, id))
+                    .or_else(|| too_many_callbacks(&self.prog, f, id, self.tune.wait_same))
                     .or(few)
             })
             .flatten();
@@ -2647,11 +2699,16 @@ impl Worker {
         {
             let seen = self.time.get(id.0 as usize).map_or(0, |t| t[0]);
             tr.line(format!(
-                "refused f{} `{}` ({} IR), seen {seen} us of {}: {why}",
+                "refused f{} `{}` ({} IR), seen {seen} us of {}: {why}{}",
                 id.0,
                 f.name,
                 f.code.len(),
-                self.total
+                self.total,
+                if f.kind == FuncKind::Process && why.contains("leave the compiled") {
+                    format!(" [{}]", leave_kinds(&self.prog, f, self.tune.wait_same))
+                } else {
+                    String::new()
+                }
             ));
         }
         // (What a compile and a link from the cache are charged: the generator borrows `self` below.)
@@ -2717,8 +2774,13 @@ impl Worker {
                         _ => String::new(),
                     };
                     let leave = (f.kind == FuncKind::Process)
-                        .then(|| callbacks(&self.prog, f))
-                        .map_or(String::new(), |(o, t)| format!(", {o} of {t} leave"));
+                        .then(|| callbacks(&self.prog, f, self.tune.wait_same))
+                        .map_or(String::new(), |(o, t)| {
+                            format!(
+                                ", {o} of {t} leave [{}]",
+                                leave_kinds(&self.prog, f, self.tune.wait_same)
+                            )
+                        });
                     tr.line(format!(
                         "{id} compiled{} `{}` ({} IR{leave}{base}) {level:?} {part:?}{} {:?} in {} us, cpu {} us (model {}), first seen {} ms and candidate {} ms ago, \
                          seen {}/{} us, spent {} of {} us",
@@ -4033,9 +4095,53 @@ mod tests {
     fn a_process_that_leaves_its_compiled_code_often_stays_interpreted() {
         for (ops, outs, refused) in [(100, 5, false), (50, 9, true), (0, 1, true)] {
             let (prog, f) = process(ops, outs);
-            let why = too_many_callbacks(&prog, prog.func(f).unwrap(), f);
+            let why = too_many_callbacks(&prog, prog.func(f).unwrap(), f, false);
             assert_eq!(why.is_some(), refused, "{ops} {outs}: {why:?}");
         }
+    }
+
+    /// The `WaitOn`s of a sensitivity list (one per signal) are no callbacks when compiled code
+    /// skips the whole wait (`yavs_rt_wait_same`, #1046): a body of 100 instructions and a list of
+    /// 30 signals is compiled with `wait_same`, refused without.
+    #[test]
+    fn a_long_sensitivity_list_is_one_way_out() {
+        use yavs_ir::{Inst, RegTy};
+        let mut pb = ProgramBuilder::new();
+        let f = pb.declare("p", yavs_ir::FuncKind::Process, None);
+        let mut fb = pb.define(f);
+        fb.flag(yavs_ir::FuncFlags::SENS_LIST);
+        fb.stmt(StmtKind::Wait, Span::new(FileId(0), 0, 1));
+        let x = fb.int(1);
+        for _ in 0..100 {
+            fb.emit(Inst::Bin {
+                op: yavs_ir::IntOp::Add,
+                dst: x,
+                a: x,
+                b: x,
+            });
+        }
+        let wait = fb.block();
+        fb.emit(Inst::Br { to: wait });
+        fb.at(wait);
+        fb.stmt(StmtKind::Wait, Span::new(FileId(0), 0, 1));
+        let (s, off, len) = (fb.reg(RegTy::Sig), fb.int(0), fb.int(1));
+        fb.emit(Inst::SigVal {
+            dst: s,
+            sig: 0,
+            offset: off,
+            len,
+        });
+        for _ in 0..30 {
+            fb.emit(Inst::WaitOn { sig: s });
+        }
+        fb.emit(Inst::Suspend { resume: 0 });
+        fb.emit(Inst::Br { to: wait });
+        fb.finish();
+        let prog = pb.finish().unwrap();
+        let p = prog.func(f).unwrap();
+        assert_eq!(yavs_interp::static_wait(&prog, p, 1).len(), 1);
+        assert!(too_many_callbacks(&prog, p, f, false).is_some());
+        assert_eq!(too_many_callbacks(&prog, p, f, true), None);
     }
 
     /// The signal operations compiled code answers in place (reads, `'event`, the wait that ends an
@@ -4083,7 +4189,7 @@ mod tests {
             fb.emit(Inst::Br { to: body });
             fb.finish();
             let prog = pb.finish().unwrap();
-            let why = too_many_callbacks(&prog, prog.func(f).unwrap(), f);
+            let why = too_many_callbacks(&prog, prog.func(f).unwrap(), f, false);
             assert_eq!(why.is_some(), refused, "{inplace}: {why:?}");
         }
     }
