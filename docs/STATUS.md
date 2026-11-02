@@ -10796,3 +10796,5 @@ Constructs yavs accepted although the LRM text or every voting reference rejects
   2026-10-19 on #33; actuals of constrained formals stay accepted.
 - Aggregate targets (L98): a nested aggregate as an element of a one-dimensional array of arrays is `E1410` (10.6.2.1, 10.5.2.1); matrix
   targets and nested record targets stay accepted (the record forms are open for the maintainer).
+- Anonymous-type operators (L94): operator notation (`r < r`) of a user operator with anonymous parameter types is `E1505` (help: `"<"(r, r)`);
+  such an operator is no candidate in operator notation, so predefined operators of other types are used as if it were not visible.

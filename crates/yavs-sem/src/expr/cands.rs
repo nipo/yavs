@@ -310,6 +310,14 @@ impl Db {
                 CandSet::Class(_) | CandSet::Alloc(_) => false,
             };
         for &d in ds.iter() {
+            // A subprogram with anonymous parameter types is called in function notation only:
+            // operator notation has no association list to bind them (2019 6.5.7.1;
+            // `anonymous_operator_use`, user 2026-11-02).
+            if !self.generic.implicit.is_empty()
+                && self.generic.implicit.contains_key(&self.entity(d))
+            {
+                continue;
+            }
             if by_first {
                 let CandSet::Types(is) = &ocs[0] else {
                     unreachable!("by_first needs a type set")
@@ -337,6 +345,55 @@ impl Db {
             );
         }
         CandSet::Types(out)
+    }
+
+    /// `E1505` for operator `e` (unary or binary) in operator notation when an overload with
+    /// anonymous parameter types would fit it: `operator_cands` leaves those out, since 2019
+    /// 6.5.7.1 binds anonymous types through an association list, which operator notation does
+    /// not have. Returns whether it reported.
+    pub(crate) fn anonymous_operator_use(&mut self, scope: ScopeId, e: &ast::Expr) -> bool {
+        if self.generic.implicit.is_empty() {
+            return false;
+        }
+        let (sym, ops): (&str, smallvec::SmallVec<[&ast::Expr; 2]>) = match &e.kind {
+            ast::ExprKind::Unary { op, operand } => {
+                (unary_symbol(*op), smallvec::smallvec![&**operand])
+            }
+            ast::ExprKind::Binary { op, left, right } => {
+                (binary_symbol(*op), smallvec::smallvec![&**left, &**right])
+            }
+            _ => return false,
+        };
+        let ocs: smallvec::SmallVec<[CandSet; 2]> =
+            ops.iter().map(|o| self.cands(scope, o)).collect();
+        let Visible::Overloads(ds) = self.lookup(scope, operator_key(sym)) else {
+            return false;
+        };
+        let Some(d) = ds.iter().copied().find(|&d| {
+            self.generic.implicit.contains_key(&self.entity(d))
+                && self.operator_interp(d, &ocs).is_some()
+        }) else {
+            return false;
+        };
+        let args: Vec<String> = ops.iter().map(|o| self.source_text(o.span)).collect();
+        let decl_span = self.decls[self.entity(d)].span;
+        let mut diag = yavs_diag::Diagnostic::error(
+            crate::diag::UNINSTANTIATED_CALL,
+            format!(
+                "operator `\"{sym}\"` has a parameter of an anonymous type (`type is ...`): \
+                 operator notation gives no association list to bind it (LRM 2019 6.5.7.1)"
+            ),
+        )
+        .with_primary(e.span, "operator notation")
+        .with_help(format!(
+            "call it in function notation: `\"{sym}\"({})`",
+            args.join(", ")
+        ));
+        if decl_span != yavs_diag::Span::default() {
+            diag = diag.with_secondary(decl_span, "declared here");
+        }
+        self.report(diag);
+        true
     }
 
     /// What decides whether overload `d` can take an operand of type `t` as its first

@@ -1,0 +1,1 @@
+A VHDL-2019 user operator with parameters of an anonymous type (`function "<" (a : type is private; b : a'subtype)`) used in operator notation, `r < r`, is now error `E1505` with a help naming the function-notation call `"<"(r, r)`, which still works. In operator notation such an operator no longer competes with the predefined operators of other types.

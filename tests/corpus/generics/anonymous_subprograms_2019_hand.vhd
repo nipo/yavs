@@ -1,7 +1,9 @@
 -- difftest: top=anonymous_subprograms_2019_hand std=2019 ref=hand
 -- ref=hand: no reference simulator binds anonymous parameter types (`x : type is ...`, LRM 2019
 -- 6.5.2, 6.5.3) in formal subprograms, in subprograms with a generic list or in user operators;
--- the expected output is the LRM result.
+-- the expected output is the LRM result. User operators with anonymous parameter types are
+-- called in function notation: operator notation is E1505 (user, 2026-11-02), and an operation of
+-- other types (`color'pos(red) + 1`) uses the predefined operator.
 package q is
   function pick generic (type t) parameter (x : type is private; y : t) return t;
   function scale generic (type t) parameter (a : type is range <>; b : a'subtype; c : t) return a'subtype;
@@ -56,9 +58,9 @@ begin
   begin
     report "pick " & integer'image(pi(true, 7)) & " " & integer'image(pi(1.5, 8)) & " " & color'image(pc(red, green));
     report "scale " & integer'image(sm(3, 4, true));
-    report "plus " & integer'image(r + r);
-    report "plus " & integer'image(red + green) & " " & integer'image(color'pos(red) + 1);
-    report "neg " & integer'image(-r) & " " & integer'image(-green);
+    report "plus " & integer'image("+"(r, r));
+    report "plus " & integer'image("+"(red, green)) & " " & integer'image(color'pos(red) + 1);
+    report "neg " & integer'image("-"(r)) & " " & integer'image("-"(green));
     report "run " & integer'image(p1.run) & " " & integer'image(p2.run);
     wait;
   end process;

@@ -1,6 +1,8 @@
 -- yavs-test: std=2019
 -- expect: none
--- LRM 2019 6.5.2: user operators with anonymous parameter types, called with operator syntax
+-- LRM 2019 6.5.2, 6.5.7.1: user operators with anonymous parameter types, called in function
+-- notation; in operator notation the predefined operators of other types are used (`i + i`),
+-- and the user operators are E1505 (anonymous_operator_notation.vhd, user 2026-11-02)
 package p is
   function "<" (a : type is private; b : a'subtype) return boolean;
   function "-" (a : type is private) return boolean;
@@ -25,12 +27,11 @@ begin
     variable i : integer;
     variable c : color;
   begin
-    b := r < r;
-    b := - r;
+    b := "-"(r);
     b := "<"(r, r);
     i := i + i;
     i := 1 + 2;
-    c := red & green;
+    c := "&"(red, green);
     wait;
   end process;
 end architecture;

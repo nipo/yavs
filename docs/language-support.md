@@ -114,7 +114,7 @@ LCS set; it is not checked against every change of the published standard.
 | 012 | `'IMAGE` and `TO_STRING` for composite types | supported | simulated | arrays and records |
 | 014, 014a | Composites of protected types, access types to them | supported | simulated | a record that mixes protected and other elements is `E1905`; a variable port of such a composite is `E1907` (not supported) |
 | 015, 015a | Report the calling path, the current file name | supported | simulated | `get_call_path`, `file_name`, `file_line` |
-| 016 | Anonymous types (`type is private`, `type is <>`, `type is range <>` in interface lists) | supported | simulated | |
+| 016 | Anonymous types (`type is private`, `type is <>`, `type is range <>` in interface lists) | supported | simulated | a user operator with anonymous parameter types is called in function notation, `"<"(r, r)`; operator notation, `r < r`, is error `E1505` |
 | 018, 018a, 018d | Attributes for enumerated types, `'INDEX`, `'DESIGNATED_SUBTYPE` | supported | 018 simulated, others analysed | |
 | 019 | Constraints from initial values of signals and variables | supported | simulated | |
 | 023 | Relax library requirement on configurations | supported | analysed | |

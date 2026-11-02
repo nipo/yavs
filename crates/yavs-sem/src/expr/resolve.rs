@@ -1175,6 +1175,9 @@ impl Db {
     /// Report why `e` has no interpretation that fits `exp`.
     fn no_interp(&mut self, scope: ScopeId, e: &ast::Expr, exp: Expected, is: &[Interp]) {
         use ast::ExprKind as K;
+        if self.anonymous_operator_use(scope, e) {
+            return;
+        }
         // A character literal that is not a literal of the expected enumeration type (15.6).
         if let (
             K::Literal(ast::Literal {
