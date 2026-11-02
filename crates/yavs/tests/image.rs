@@ -1,6 +1,7 @@
 //! Record images (#1065) change nothing: each design runs with an image from the first gather
-//! (`YAVS_IMAGE_AFTER=1`), every copy checked against the leaves (`YAVS_IMAGE_CHECK=1`), and
-//! without images, on one and on four threads, shuffled too; output and waves must be the same.
+//! (`YAVS_IMAGE_AFTER=1`), copied, and with every copy checked against the leaves
+//! (`YAVS_IMAGE_CHECK=1`), and without images, on one and on four threads, shuffled too; output
+//! and waves must be the same.
 
 mod common;
 use common::tempdir;
@@ -8,7 +9,8 @@ use common::tempdir;
 use std::path::Path;
 use std::process::{Command, Output};
 
-const ON: &[(&str, &str)] = &[("YAVS_IMAGE_AFTER", "1"), ("YAVS_IMAGE_CHECK", "1")];
+const CHECK: &[(&str, &str)] = &[("YAVS_IMAGE_AFTER", "1"), ("YAVS_IMAGE_CHECK", "1")];
+const COPY: &[(&str, &str)] = &[("YAVS_IMAGE_AFTER", "1")];
 const OFF: &[(&str, &str)] = &[("YAVS_NO_IMAGE", "1")];
 
 fn yavs(dir: &Path, env: &[(&str, &str)], args: &[&str]) -> Output {
@@ -40,8 +42,8 @@ fn images_change_nothing() {
             &["analyze", "--work", &work, file.to_str().unwrap()],
         );
         assert!(a.status.success(), "analyze {design}: {a:?}");
-        let (wa, wb) = (d.join("off.fst"), d.join("on.fst"));
-        for (env, f) in [(OFF, &wa), (ON, &wb)] {
+        let (wa, wb, wc) = (d.join("off.fst"), d.join("on.fst"), d.join("copy.fst"));
+        for (env, f) in [(OFF, &wa), (CHECK, &wb), (COPY, &wc)] {
             let wave = format!("--wave={}", f.display());
             let args = [
                 "run",
@@ -55,11 +57,9 @@ fn images_change_nothing() {
             let r = yavs(&d, env, &args);
             assert!(r.status.code().is_some(), "{design} waves: {r:?}");
         }
-        assert_eq!(
-            std::fs::read(&wa).unwrap(),
-            std::fs::read(&wb).unwrap(),
-            "{design}: waves"
-        );
+        let off = std::fs::read(&wa).unwrap();
+        assert_eq!(off, std::fs::read(&wb).unwrap(), "{design}: waves, checked");
+        assert_eq!(off, std::fs::read(&wc).unwrap(), "{design}: waves, copied");
         for extra in [
             &["--threads", "1"][..],
             &["--threads", "4"],
@@ -68,14 +68,17 @@ fn images_change_nothing() {
             let mut args = vec!["run", "--work", &work, "--tier=interp", "--no-cache"];
             args.extend_from_slice(extra);
             args.push(design);
-            let (off, on) = (yavs(&d, OFF, &args), yavs(&d, ON, &args));
-            assert_eq!(
-                off.status.code(),
-                on.status.code(),
-                "{design} {extra:?}: exit status"
-            );
-            assert_eq!(off.stdout, on.stdout, "{design} {extra:?}: stdout");
-            assert_eq!(off.stderr, on.stderr, "{design} {extra:?}: stderr");
+            let off = yavs(&d, OFF, &args);
+            for on in [CHECK, COPY] {
+                let on = yavs(&d, on, &args);
+                assert_eq!(
+                    off.status.code(),
+                    on.status.code(),
+                    "{design} {extra:?}: exit status"
+                );
+                assert_eq!(off.stdout, on.stdout, "{design} {extra:?}: stdout");
+                assert_eq!(off.stderr, on.stderr, "{design} {extra:?}: stderr");
+            }
         }
     }
 }
