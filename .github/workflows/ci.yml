@@ -136,6 +136,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           cargo build --locked -p yavs --features clift
+          python3 tools/difftest/test_cleanup.py
           YAVS_BIN="$PWD/target/debug/yavs" python3 tools/difftest/difftest.py --candidate yavs-clift --no-sandbox --jobs 2 --filter '^(arith|delta|generics)/'
           # --tier=clift-auto with every function translated from its first call or jump, at 1 and 4 threads.
           YAVS_BIN="$PWD/target/debug/yavs" YAVS_RUN_FLAGS=--tier-heat=0,0,0 python3 tools/difftest/difftest.py --candidate yavs-clift-auto --threads 4 --no-sandbox --jobs 2 --filter '^(arith|delta|generics)/'

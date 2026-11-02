@@ -24,8 +24,11 @@ Python 3 stdlib only.
 Every simulator run is `timeout 300 systemd-run --user --scope -p MemoryMax=2G bash -c ...`,
 at most 8 at a time (`--jobs` is clamped). Work libraries and raw `stdout.txt`/`stderr.txt`
 go to `~/.cache/yavs-difftest/run-<pid>/<candidate>/<test>/t<threads>/` (one directory per
-process, so parallel runs do not collide; set `DIFFTEST_CACHE` to choose the directory yourself;
-old `run-*` directories are not removed). `--no-sandbox` skips
+process, so parallel runs do not collide; set `DIFFTEST_CACHE` to choose the directory yourself).
+A passing case's directory is removed at once and the whole run directory when the run ends
+(also on interrupt or SIGTERM); only failing cases stay, and the path is printed on stderr.
+A run killed with SIGKILL leaves its directory, and old `run-*` directories are never swept.
+`tools/difftest/test_cleanup.py` checks this. `--no-sandbox` skips
 systemd-run for debugging.
 
 ## Test header

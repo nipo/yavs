@@ -304,6 +304,13 @@ def wall(got):
 
 
 def one(t, args):
+    res = _one(t, args)
+    if res["class"] in ("pass", "early", "skip", "ref-bad"):  # not a yavs failure: nothing to debug
+        dt.drop(CACHE / args.suite / t["name"])
+    return res
+
+
+def _one(t, args):
     if "skip" in t:
         return {"name": t["name"], "class": "skip", "msg": t["skip"]}
     res = {"name": t["name"]}
@@ -365,12 +372,17 @@ def main():
             sys.exit(f"{args.check}: not in the suite: {' '.join(sorted(missing))}")
         tests = [t for t in tests if t["name"] in want]
     counts, results = {}, []
+    dt.guard(CACHE)
     with cf.ThreadPoolExecutor(max(1, min(args.jobs, dt.MAX_JOBS))) as ex:
-        for r in ex.map(lambda t: one(t, args), tests):
-            results.append(r)
-            counts[r["class"]] = counts.get(r["class"], 0) + 1
-            if args.verbose or (r["class"] not in ("pass", "skip", "ref-bad")):
-                print(f"{r['class'].upper()} {r['name']}" + ("" if r["class"] in ("pass", "skip") else "\n" + "\n".join("    " + l for l in r["msg"].splitlines()[:20])))
+        try:
+            for r in ex.map(lambda t: one(t, args), tests):
+                results.append(r)
+                counts[r["class"]] = counts.get(r["class"], 0) + 1
+                if args.verbose or (r["class"] not in ("pass", "skip", "ref-bad")):
+                    print(f"{r['class'].upper()} {r['name']}" + ("" if r["class"] in ("pass", "skip") else "\n" + "\n".join("    " + l for l in r["msg"].splitlines()[:20])))
+        except BaseException:  # interrupt: skip the queued tests, let the running ones finish
+            ex.shutdown(wait=True, cancel_futures=True)
+            raise
     if args.json:
         args.json.write_text("".join(json.dumps(r) + "\n" for r in results))
     if args.write_pass:

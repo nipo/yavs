@@ -2,7 +2,7 @@
 """Differential test harness for yavs: run corpus testbenches on a candidate
 simulator and diff the normalised output against checked-in reference
 outputs of the first reference simulator (sim1) (`.expected`). Stdlib only. See README.md."""
-import gzip, shutil, argparse, zlib, concurrent.futures as cf, difflib, os, re, shlex, subprocess, sys
+import atexit, gzip, shutil, signal, argparse, zlib, concurrent.futures as cf, difflib, os, re, shlex, subprocess, sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -16,6 +16,29 @@ CACHE = Path(os.environ.get("DIFFTEST_CACHE") or Path.home() / ".cache" / "yavs-
 # the shared std/ieee store (#564) is private to this tool, never the user's
 os.environ["YAVS_STD_CACHE"] = str(CACHE / "std")
 MAX_JOBS = 8
+
+
+def drop(path):
+    """Remove the scratch directory of a passing case; failing cases stay for debugging."""
+    shutil.rmtree(path, ignore_errors=True)
+
+
+def cleanup(cache):
+    """Remove the run's scratch directory except failing cases (kept, path printed)."""
+    shutil.rmtree(cache / "std", ignore_errors=True)
+    for d, _, _ in os.walk(cache, topdown=False):  # empty directories only
+        try:
+            os.rmdir(d)
+        except OSError:
+            pass
+    if cache.exists():
+        print(f"failing cases kept for debugging in {cache}", file=sys.stderr)
+
+
+def guard(cache):
+    """Clean up on exit and on SIGTERM (SIGINT raises KeyboardInterrupt, which also exits)."""
+    atexit.register(cleanup, cache)
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
 TIMEOUT = 300
 GZ_MIN = 1 << 20  # outputs larger than this are stored as .expected.gz
 RC_ANALYSE, RC_ELAB = 97, 98
@@ -363,6 +386,13 @@ def write_expected(vhd, text):
 
 
 def one(vhd, args, template, ignore):
+    res = _one(vhd, args, template, ignore)
+    if res["ok"]:
+        drop(CACHE / args.candidate_id / vhd.relative_to(CORPUS).with_suffix(""))
+    return res
+
+
+def _one(vhd, args, template, ignore):
     rel = vhd.relative_to(CORPUS)
     hdr = parse_header(vhd)
     base = CACHE / args.candidate_id / rel.with_suffix("")
@@ -442,15 +472,20 @@ def main():
         print("\n".join(str(p.relative_to(CORPUS)) for p in tests)); return
     jobs = max(1, min(args.jobs, MAX_JOBS))
     fails, results = 0, []
+    guard(CACHE)
     with cf.ThreadPoolExecutor(jobs) as ex:
-        for r in ex.map(lambda p: one(p, args, template, ignore), tests):
-            results.append(r)
-            if r["ok"]:
-                if args.verbose or args.bless:
-                    print(f"PASS {r['name']}" + (f" ({r['msg']})" if r["msg"] else ""))
-            else:
-                fails += 1
-                print(f"FAIL {r['name']}\n" + "\n".join("    " + l for l in r["msg"].splitlines()[:40]))
+        try:
+            for r in ex.map(lambda p: one(p, args, template, ignore), tests):
+                results.append(r)
+                if r["ok"]:
+                    if args.verbose or args.bless:
+                        print(f"PASS {r['name']}" + (f" ({r['msg']})" if r["msg"] else ""))
+                else:
+                    fails += 1
+                    print(f"FAIL {r['name']}\n" + "\n".join("    " + l for l in r["msg"].splitlines()[:40]))
+        except BaseException:  # interrupt: skip the queued tests, let the running ones finish
+            ex.shutdown(wait=True, cancel_futures=True)
+            raise
     if args.json:
         import json
         args.json.write_text("\n".join(json.dumps(r) for r in results) + "\n")
