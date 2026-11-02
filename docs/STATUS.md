@@ -10794,3 +10794,5 @@ Constructs yavs accepted although the LRM text or every voting reference rejects
   93 file (`E1302`); `--relaxed` takes the explicit one with `W1302` (R7). GRLIB at 1993 runs with `--relaxed` and is unchanged.
 - Named return values (L62): a call as the value of a `return` statement is `E1304` (LCS-2016-072b), reversing the permissive ruling of
   2026-10-19 on #33; actuals of constrained formals stay accepted.
+- Aggregate targets (L98): a nested aggregate as an element of a one-dimensional array of arrays is `E1410` (10.6.2.1, 10.5.2.1); matrix
+  targets and nested record targets stay accepted (the record forms are open for the maintainer).

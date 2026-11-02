@@ -52,6 +52,11 @@ yavs, with what to do about each.
      - The aggregate runs in the direction of the index subtype, so its leftmost element is its
        lowest index, not ``3``. ``others`` there is ``E1325``.
      - Qualify it, ``t'(3 => a, 2 => b, ...)``, to give it the type's direction.
+   * - An aggregate target with a nested aggregate as an element of an array of arrays,
+       ``((p, q), (r, s)) := m`` with ``m`` an array of rows
+     - Error ``E1410``: each element of an aggregate target must be a name. A target of a
+       two-dimensional array, and nested record targets, are accepted.
+     - Name whole rows, ``(row0, row1) := m``, or assign the elements one by one.
    * - A static index out of range or a constant overflow in code that may be dead
      - Warning (``W1404``, ``W1401``); the check still runs if the code runs.
      - ``-Werror=W1404`` makes it an error.

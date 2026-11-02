@@ -1,2 +1,2 @@
 exit	0
-diag	note	4000000	0	:aggregate_target_nested_array:_p0	p0=52 s0=81 s5=84
+diag	note	3000000	0	:aggregate_target_nested_array:_p0	p0=52 s0=84 s2=83

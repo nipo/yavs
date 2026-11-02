@@ -1557,9 +1557,11 @@ impl Db {
             return Ok(());
         }
         if self.file_rev() == crate::LangRev::Vhdl1993
-            && let Some((&i, &x)) = imp
-                .iter()
-                .find_map(|i| exp.iter().find(|&&x| self.homographs(*i, x)).map(|x| (i, x)))
+            && let Some((&i, &x)) = imp.iter().find_map(|i| {
+                exp.iter()
+                    .find(|&&x| self.homographs(*i, x))
+                    .map(|x| (i, x))
+            })
         {
             let name = self.decls[x].name;
             let [ri, rx] = [i, x].map(|d| crate::mangle::region(self, self.decls[d].scope));
@@ -1603,7 +1605,9 @@ impl Db {
 
     /// `ambiguous` with a message and help of the caller's (`why`, `help`).
     fn ambiguous_with(&mut self, e: &ast::Expr, best: &[Interp], why: Option<(String, String)>) {
-        let msg = why.as_ref().map_or("this expression is ambiguous".into(), |w| w.0.clone());
+        let msg = why
+            .as_ref()
+            .map_or("this expression is ambiguous".into(), |w| w.0.clone());
         let mut d = Diagnostic::error(diag::AMBIGUOUS, msg)
             .with_primary(e.span, "several interpretations fit");
         let callables: Vec<DeclId> = best

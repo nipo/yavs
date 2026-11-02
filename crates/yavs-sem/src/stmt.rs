@@ -1349,6 +1349,35 @@ impl Db {
                     ));
                 }
                 if matches!(self.exprs[a.value].kind, ExprKind::Aggregate { .. }) {
+                    // An element of a one-dimensional array of arrays is an expression, which
+                    // must be a name: a nested aggregate is not one. Subaggregates of a
+                    // multidimensional target are not elements (9.3.3.3) and stay legal (L98).
+                    let t = self.base(self.exprs[x].subtype);
+                    if let crate::types::TypeKind::Array { indexes, elem } = &self.types[t].kind
+                        && indexes.len() == 1
+                        && matches!(
+                            self.types[self.base(*elem)].kind,
+                            crate::types::TypeKind::Array { .. }
+                        )
+                    {
+                        return Err(self.error(
+                            Diagnostic::error(
+                                diag::NOT_STATIC,
+                                "an element of an aggregate target must be a locally static name, \
+                                 not an aggregate",
+                            )
+                            .with_primary(self.exprs[a.value].span, "an aggregate of an array element")
+                            .with_note(
+                                "LRM 10.6.2.1, 10.5.2.1: the expression in each element association \
+                                 of an aggregate target shall be a locally static name; an element \
+                                 of an array of arrays is not a subaggregate (9.3.3.3)",
+                            )
+                            .with_help(
+                                "assign the elements one by one, or name a whole element, as in \
+                                 `(row0, row1) := v` with `row0` and `row1` variables of the element type",
+                            ),
+                        ));
+                    }
                     stack.push(a.value);
                 } else {
                     // 10.5.2.1, 10.6.2.1: each element is a locally static name (#812).
