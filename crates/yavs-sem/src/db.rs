@@ -302,6 +302,14 @@ pub struct Db {
     /// deferred constant before its full declaration (6.4.2.2, `Db::check_deferred_read`).
     #[serde(skip)]
     pub(crate) interface_default: bool,
+    /// The initial value of an object of this package declaration is being analyzed: a name of
+    /// one of its deferred constants there is `E1226` (6.4.2.2, `Db::check_deferred_read`).
+    #[serde(skip)]
+    pub(crate) package_initial: Option<ScopeId>,
+    /// The spans of the prefix of an attribute of the subtype alone (`k'range`, `r.f'length`)
+    /// being resolved: a deferred constant named there is not read (`Db::subtype_attr_prefix`).
+    #[serde(skip)]
+    pub(crate) subtype_prefix: Vec<Span>,
     /// Implicit operations waiting for a well-known type of `std.standard` (BOOLEAN, STRING, ...).
     #[serde(skip)]
     pub(crate) pending_implicit: Vec<crate::implicit::Pending>,
@@ -1024,6 +1032,8 @@ impl Db {
             pkg_targets: Default::default(),
             incomplete_ok: false,
             interface_default: false,
+            package_initial: None,
+            subtype_prefix: Vec::new(),
             later_in_file: Vec::new(),
             dup_in_file: Vec::new(),
             context_subtype: None,

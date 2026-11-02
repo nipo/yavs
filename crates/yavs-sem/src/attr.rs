@@ -99,6 +99,24 @@ impl PredefAttr {
         )
     }
 
+    /// Whether the attribute of an object depends on the object's subtype alone, never its
+    /// value: a deferred constant of a fully constrained subtype may be its prefix (#1072).
+    pub fn of_subtype(self) -> bool {
+        use PredefAttr::*;
+        matches!(
+            self,
+            Left | Right
+                | High
+                | Low
+                | Ascending
+                | Length
+                | Range
+                | ReverseRange
+                | Subtype
+                | Element
+        )
+    }
+
     /// Look up by folded name.
     pub fn from_key(key: Symbol) -> Option<Self> {
         TABLE

@@ -1340,6 +1340,27 @@ impl Db {
     // -- top-down ---------------------------------------------------------------
 
     /// Resolve a name used as a prefix to the interpretation of type `t`.
+    /// `resolve_prefix` for the prefix of an attribute of the subtype alone (`k'range`,
+    /// `r.f'subtype`): a deferred constant it names, itself or through record elements, is not
+    /// read (`Db::check_deferred_read`). The indices of an indexed prefix stay reads.
+    pub(crate) fn subtype_attr_prefix(
+        &mut self,
+        scope: ScopeId,
+        n: &ast::Name,
+        t: TypeId,
+    ) -> ExprId {
+        let mut spans = vec![n.span];
+        let mut cur = n;
+        while let ast::NameKind::Selected { prefix, .. } = &cur.kind {
+            spans.push(prefix.span);
+            cur = prefix;
+        }
+        let outer = std::mem::replace(&mut self.subtype_prefix, spans);
+        let p = self.resolve_prefix(scope, n, t);
+        self.subtype_prefix = outer;
+        p
+    }
+
     pub(crate) fn resolve_prefix(&mut self, scope: ScopeId, n: &ast::Name, t: TypeId) -> ExprId {
         let CandSet::Types(is) = self.name_cands(scope, n) else {
             return self.poison_expr();
@@ -2544,7 +2565,11 @@ impl Db {
                 (AttrPrefix::Entity(d), stat, None)
             }
             Via::AttrOf(t) => {
-                let p = self.resolve_prefix(scope, prefix, t);
+                let p = if a.of_subtype() {
+                    self.subtype_attr_prefix(scope, prefix, t)
+                } else {
+                    self.resolve_prefix(scope, prefix, t)
+                };
                 if !a.reads_value() {
                     self.not_read(p);
                 }

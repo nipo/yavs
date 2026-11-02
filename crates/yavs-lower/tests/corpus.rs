@@ -137,6 +137,7 @@ const PASS: &[&str] = &[
     "composite/arrays_aggregates",
     "composite/concat_composite",
     "composite/constant_bounds",
+    "composite/deferred_subtype_attrs",
     "composite/package_record_signals",
     "composite/range_value",
     "composite/record_signal_attrs",

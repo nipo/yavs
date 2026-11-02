@@ -74,9 +74,9 @@
     "total": 174
    },
    "poc-2008": {
-    "fail": 45,
+    "fail": 0,
     "matches_expected": true,
-    "pass": 372,
+    "pass": 417,
     "total": 417
    },
    "satcat5-2008": {

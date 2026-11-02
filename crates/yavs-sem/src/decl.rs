@@ -468,37 +468,27 @@ impl Db {
         }
     }
 
-    /// `E1226`: an initial value in a package declaration names one of its deferred constants,
-    /// whose value is not known before the package body (6.4.2.2, #809). Uses in the body are
-    /// `check_deferred_read`'s.
-    fn check_deferred_uses(&mut self, scope: ScopeId, e: ExprId) {
-        if self.scopes[scope].kind != crate::scope::ScopeKind::Package {
-            return;
-        }
-        let mut early = Vec::new();
-        self.walk_expr(e, &mut |x| {
-            if let crate::hir::ExprKind::Obj(d) = self.exprs[x].kind
-                && self.decls[d].scope == scope
-                && matches!(&self.decls[d].kind, DeclKind::Object(o) if o.role == ObjRole::Deferred)
-            {
-                early.push((d, self.exprs[x].span));
-            }
-        });
-        for (d, span) in early {
-            self.report_deferred_early(d, span);
-        }
-    }
-
-    /// `E1226`: a name in the body of `d`'s package, or in a subprogram there, denotes the
-    /// deferred constant `d` before its full declaration (6.4.2.2): the subprogram may run
-    /// before the value exists (#846). Interface defaults are exempt.
+    /// `E1226`: a name denotes the deferred constant `d` before its full declaration (6.4.2.2):
+    /// in an initial value of its package (`Db::package_initial`, #809), or in the body of its
+    /// package or a subprogram there, which may run before the value exists (#846). Interface
+    /// defaults are exempt, and so is the prefix of an attribute of its subtype alone when the
+    /// deferred declaration constrains that subtype fully (`k'range`, L175, #1072).
     pub(crate) fn check_deferred_read(&mut self, scope: ScopeId, d: DeclId, span: Span) {
+        let DeclKind::Object(o) = &self.decls[d].kind else {
+            return;
+        };
         if self.interface_default
-            || !matches!(&self.decls[d].kind, DeclKind::Object(o) if o.role == ObjRole::Deferred)
+            || o.role != ObjRole::Deferred
+            || (self.subtype_prefix.contains(&span)
+                && self.constrainedness(o.subtype) == crate::types::Constrainedness::Full)
         {
             return;
         }
         let pkg = self.decls[d].scope;
+        if self.package_initial == Some(pkg) {
+            self.report_deferred_early(d, span);
+            return;
+        }
         let mut cur = Some(scope);
         while let Some(sc) = cur {
             if self.body_package(sc) == Some(pkg) {
@@ -531,7 +521,7 @@ impl Db {
             )
             .with_primary(span, "its value is not known here")
             .with_secondary(self.decls[d].name_span(), "deferred here")
-            .with_note("LRM 6.4.2.2: before the end of the full declaration, a deferred constant may appear only in the default expression of a local generic, port or formal parameter"),
+            .with_note("LRM 6.4.2.2: before the end of the full declaration, a deferred constant may appear only in the default expression of a local generic, port or formal parameter, or as the prefix of an attribute of its subtype (such as `'range` or `'length`) when its declaration constrains that subtype fully"),
         );
     }
 
@@ -804,13 +794,14 @@ impl Db {
                 .and_then(|()| self.check_shared_body_elaborated(scope, subtype, first)),
             _ => Ok(()),
         };
+        let package =
+            (self.scopes[scope].kind == crate::scope::ScopeKind::Package).then_some(scope);
+        let outer = std::mem::replace(&mut self.package_initial, package);
         let default = o
             .default
             .as_ref()
             .map(|e| self.expr_in_subtype(scope, e, subtype));
-        if let Some(e) = default {
-            self.check_deferred_uses(scope, e);
-        }
+        self.package_initial = outer;
         if class == ObjClass::Constant && default.is_some() {
             for n in &o.names {
                 self.check_full_conforms(scope, n, subtype, o.subtype.span);

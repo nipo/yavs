@@ -1,0 +1,6 @@
+exit	0
+diag	note	0	0	:deferred_subtype_attrs:_p0	q=1101
+diag	note	0	0	:deferred_subtype_attrs:_p0	f=33
+diag	note	0	0	:deferred_subtype_attrs:_p0	types=3 0 4 1 1 4
+diag	note	0	0	:deferred_subtype_attrs:_p0	double=16 kl=4
+diag	note	0	0	:deferred_subtype_attrs:_p0	sum=18

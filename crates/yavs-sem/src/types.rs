@@ -2002,7 +2002,7 @@ impl Db {
                         .with_primary(prefix.span, "not an array"),
                 ));
             };
-            let p = self.resolve_prefix(scope, prefix, *t);
+            let p = self.subtype_attr_prefix(scope, prefix, *t);
             self.not_read(p);
             (AttrPrefix::Expr(p), *t)
         };
@@ -2142,7 +2142,7 @@ impl Db {
                     .with_primary(prefix.span, "not an object of one type"),
                 ));
             };
-            let e = self.resolve_prefix(scope, prefix, *t);
+            let e = self.subtype_attr_prefix(scope, prefix, *t);
             self.not_read(e);
             self.runtime_subtype(e, attr.span)
         } else {

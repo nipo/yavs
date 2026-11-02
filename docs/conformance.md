@@ -20,7 +20,7 @@ tests pass; every failure is tracked as an issue. This is evidence, not a proof 
 | Open Logic | FPGA standard library: its own testbenches run with yavs | 6867/6867 |
 | Real designs | neorv32 (three configurations) and GRLIB LEON3 run to completion | 4/4 designs |
 | Waveforms of real designs | signals of 17 designs equal to sim1's at every time step | 44824/44889 signals |
-| Third-party VHDL code | files of 33 libraries and designs that analyse | 6866/6918 files |
+| Third-party VHDL code | files of 33 libraries and designs that analyse | 6911/6918 files |
 | VHPI | plugin call traces identical to sim1's | 2/23 traces |
 
 Terms used here: *passed / total* counts the tests a suite judges itself, out of the tests that can be judged (a test whose own
@@ -354,7 +354,7 @@ Third-party VHDL libraries and designs, fetched at pinned commits, analysed file
 | open-logic-2008 | 386/386 | yes | 386/386 |
 | osvvm-2008 | 174/174 | yes | 174/174 |
 | osvvm-2019 | 174/174 | yes | 174/174 |
-| poc-2008 | **372/417** | yes | 417/417 |
+| poc-2008 | 417/417 | yes | 417/417 |
 | satcat5-2008 | 246/246 | yes | 246/246 |
 | surf-2008 | 318/318 | yes | 310/318 |
 | unisim-2008 | a vendor library directory is not available |  | - |
