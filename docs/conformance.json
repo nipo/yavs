@@ -74,10 +74,10 @@
     "total": 174
    },
    "poc-2008": {
-    "fail": 0,
+    "fail": 45,
     "matches_expected": true,
-    "pass": 181,
-    "total": 181
+    "pass": 372,
+    "total": 417
    },
    "satcat5-2008": {
     "fail": 0,
@@ -1396,9 +1396,9 @@
     "total": 174
    },
    "poc-2008": {
-    "pass": 181,
-    "recorded": "2026-10-22",
-    "total": 181
+    "pass": 417,
+    "recorded": "2026-11-02",
+    "total": 417
    },
    "satcat5-2008": {
     "pass": 246,

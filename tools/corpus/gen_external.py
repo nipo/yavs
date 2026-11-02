@@ -119,6 +119,10 @@ def validate(name, std, files, base, flags):
                 ok = False
                 verdict = f"sim1 and sim2 disagree (sim1={'ok' if oa else 'FAIL'}, sim2={'ok' if ob else 'FAIL'}), no third reference at 1993: "
                 log.append(f"disagree {f[2]}: sim1={'ok' if oa else 'FAIL'} sim2={'ok' if ob else 'FAIL'} ({why})")
+            elif simconf.get("sim3", "gen_cmd") is None:  # no tie-breaker on this host: the file is dropped
+                ok = False
+                verdict = f"sim1 and sim2 disagree (sim1={'ok' if oa else 'FAIL'}, sim2={'ok' if ob else 'FAIL'}), no third reference configured: "
+                log.append(f"disagree {f[2]}: sim1={'ok' if oa else 'FAIL'} sim2={'ok' if ob else 'FAIL'} ({why})")
             else:  # sim1 and sim2 disagree: sim3 decides
                 if third is None:
                     third = chain("sim3", std, cur, base, wd, flags.get("sim3", []))
@@ -193,6 +197,11 @@ def gen_ext(name, std, G):
     if "lister" in spec:  # the project's own scripts give the order: no glob, no regex scan
         sid = next(iter(spec["sources"]))
         files = [(lib, sid, rel, base[sid] / rel) for lib, rel in spec["lister"](base[sid])]
+        tbfiles += [rel for _, s, rel, _ in files if s == sid and rel.startswith(spec.get("tbdir", "\0"))]
+        listed = {(s, rel) for _, s, rel, _ in files}
+        for sid, glob, why in spec.get("unlisted", []):  # VHDL the project's build does not compile, with the reason
+            excl += [(sid, str(p.relative_to(base[sid])), why) for p in sorted(base[sid].glob(glob))
+                     if p.suffix.lower() in (".vhd", ".vhdl") and (sid, str(p.relative_to(base[sid]))) not in listed]
     for kind in ("src", "tb"):
         for sid, glob, lib, *only in spec.get(kind, []):
             if only and std not in only[0]:
@@ -233,6 +242,8 @@ def gen_ext(name, std, G):
                 t = (base[sid] / rel).read_text(encoding="latin-1")
                 vu = bool(re.search(r"\brunner_cfg\b", t, re.I))
                 for e in ENT.findall(t):
+                    if spec.get("tbtop") and not re.search(spec["tbtop"], e, re.I):
+                        continue
                     tbs.append({"lib": lib, "source": sid, "path": rel, "top": e, "vunit": vu})
     ex = {"testbenches": dict(spec.get("tbinfo", {}), bench=tbs) if tbs else None, "base": base,
           "spec": spec, "prefix_n": len(pre)}
@@ -364,17 +375,15 @@ SPECS = {
 SPECS.update({
     "poc": dict(
         stds=("2008",),
-        note="order: regex dependency scan; library poc for src/ plus the generic board config (my_config_GENERIC, CI my_project), test for tb/; VHDL STD",
-        sources={"poc": ("https://github.com/VLSI-EDA/PoC", "8c39b2407a97ec81b8601c4b64e4d2e2141ab9cf", "Apache-2.0",
-                         "Chair of VLSI-Design (TU Dresden) Pile of Cores, archived; the project's own simulation package PoC.simulation")},
-        src=[("poc", "src/**/*.vhdl", "poc"), ("poc", "tb/common/my_config_GENERIC.vhdl", "poc"), ("poc", "tools/GitLab-CI/my_project.vhdl", "poc")],
-        tb=[("poc", "tb/**/*.vhdl", "test")],
-        skip=[("poc", "src/xil/*", "Xilinx primitives (unisim)"), ("poc", "src/alt/*", "Altera/Intel primitives"),
-              ("poc", "*.v93.vhdl", "VHDL-93 variant of a unit that also has a 2008 file"),
-              ("poc", "tb/common/my_config_[!G]*", "board configuration other than GENERIC"),
-              ("poc", "tb/common/config_tb.vhdl", "needs a board configuration package selected at run time")],
-        tbinfo=dict(runner="poc.sh sim2|sim3 <tb entity> (PoC's own tool chain; *.files list each bench's dependencies); equivalently sim2 -r <tb>",
-                    passes="PoC.simulation: the bench calls simAssert/simFinish and prints 'SIMULATION RESULT = PASSED'; severity failure on a failed assertion")),
+        note="order: PoC's own build files (lib/OsvvmLibraries.pro for its OSVVM submodules, src/build.pro for library PoC with board and vendor GENERIC, tb/RunAllTests.pro for the OSVVM test benches) interpreted with sim1 settings; VHDL STD",
+        sources={"poc": ("https://github.com/VHDL/PoC", "b90402732980e3fdbc4d2339c0b7d16dbc0b3d79", "Apache-2.0",
+                         "release v3.0.0 (tag, also the head of main), with its submodules (OSVVM, OSVVM-Common, OSVVM-UART, OSVVM-AXI4, OSVVM-Scripts); Open Source VHDL Group, successor of the archived VLSI-EDA/PoC (Chair of VLSI-Design, TU Dresden)")},
+        tbdir="tb/", tbtop=r"harness$|_tb$",
+        unlisted=[("poc", "src/**/*", "not in PoC's build for board and vendor GENERIC (Xilinx and Altera primitives, VHDL-93 variants)"),
+                  ("poc", "tb/**/*", "not in PoC's regression (tb/RunAllTests.pro): a bench of the old PoC.simulation framework (v3.0.0 no longer contains its packages), a board configuration other than GENERIC, or a test case or helper that PoC's scripts leave out"),
+                  ("poc", "lib/**/*", "OSVVM submodule file not in the build of OsvvmLibraries.pro (test benches, demos, other tool variants)")],
+        tbinfo=dict(runner="regression.tcl (OSVVM scripts: build.pro / RunAllTests.pro, `RunTest` per test case) on sim2, sim1 or other OSVVM-supported tools; equivalently sim1 -e <test case configuration> -r",
+                    passes="OSVVM: the test controller's alert and log checks report no failure (AlertLogPkg EndOfTestReports PASSED)")),
     "satcat5": dict(
         stds=("2008",),
         note="order: regex dependency scan; everything in library work as in the project's Vivado/sim3 scripts; VHDL STD",

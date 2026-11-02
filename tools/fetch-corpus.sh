@@ -61,7 +61,8 @@ fetch hdl-modules https://github.com/hdl-modules/hdl-modules c4f01c4bb69aab66c87
 # External library corpora (tools/corpus/gen_external.py): shallow, one pinned commit each.
 fetch open-logic https://github.com/open-logic/open-logic d9f123aae1c6022288782668067311f9794da0a2
 fetch en_cl_fix https://github.com/open-logic/en_cl_fix ecd7dd026837997f2cd8bc4861769abc6cbbc73c
-fetch poc https://github.com/VLSI-EDA/PoC 8c39b2407a97ec81b8601c4b64e4d2e2141ab9cf
+# PoC Library v3.0.0 (Open Source VHDL Group; the OSVVM-based test benches need its OSVVM submodules).
+fetch_with_submodules poc https://github.com/VHDL/PoC b90402732980e3fdbc4d2339c0b7d16dbc0b3d79
 fetch json-for-vhdl https://github.com/Paebbels/JSON-for-VHDL 2ab1ebc2c788ececce152a49ffda706f84570e95
 fetch vhdl-extras https://github.com/kevinpt/vhdl-extras b8916c4942e99d02fac04e25799cb2c996eb5870
 fetch satcat5 https://github.com/the-aerospace-corporation/satcat5 58402dcbe64adc9c30d00c08edc20e3aef314ac6

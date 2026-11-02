@@ -183,52 +183,46 @@ vunit = true
 [[test]]
 name = "poc_arith_addw"
 category = "numeric"
-why = "Wide adder architectures compared over exhaustive operand sweeps: long numeric_std loops"
+why = "Wide adder architectures compared over exhaustive 9-bit operand sweeps with OSVVM checks: long numeric_std loops, 16.7 million checks"
 source = "poc"
-path = "tb/arith/arith_addw_tb.vhdl"
-top = "arith_addw_tb"
-toplib = "test"
+path = "tb/arith/Adder_Wide/arith_Adder_Wide_Simple.vhdl"
+top = "arith_Adder_Wide_Simple"
+toplib = "tb_arith_Adder_Wide"
 corpus = ["poc-2008"]
+ok = "DONE +PASSED"
 
 [[test]]
-name = "poc_stat_histogram"
+name = "poc_arith_scaler"
+category = "numeric"
+why = "Fixed-point scaler (multiplier and divider sets, rounded) over many operand and ratio selections, 5120 checks: unsigned arithmetic"
+source = "poc"
+path = "tb/arith/Scaler/arith_Scaler_Simple.vhdl"
+top = "arith_Scaler_Simple"
+toplib = "tb_arith_Scaler"
+corpus = ["poc-2008"]
+ok = "DONE +PASSED"
+
+[[test]]
+name = "poc_ooo_buffer"
 category = "memory"
-why = "Histogram with RAM-backed bins fed from a stimulus generator"
+why = "Out-of-order buffer testbench with 13 concurrent writer and reader processes checked through an OSVVM scoreboard: protected types, records and a RAM model"
 source = "poc"
-path = "tb/misc/stat/stat_Histogram_tb.vhdl"
-top = "stat_Histogram_tb"
-toplib = "test"
+path = "tb/dstruct/OutOfOrderBuffer/TbOutOfOrderBuffer_WriteRead.vhdl"
+top = "TbOutOfOrderBuffer_WriteRead"
+toplib = "tb_struct_OutOfOrderBuffer"
 corpus = ["poc-2008"]
+ok = "DONE +PASSED"
 
 [[test]]
-name = "poc_cache_cpu"
+name = "poc_arith_counter_bcd"
 category = "fsm"
-why = "Cache controller with CPU and memory models: FSM, tag RAM and data RAM, handshakes"
+why = "BCD counter checked over its whole range: small clocked design, many cycles"
 source = "poc"
-path = "tb/cache/cache_cpu_tb.vhdl"
-top = "cache_cpu_tb"
-toplib = "test"
+path = "tb/arith/Counter_BCD/arith_Counter_BCD_Simple.vhdl"
+top = "arith_Counter_BCD_Simple"
+toplib = "tb_arith_Counter_BCD"
 corpus = ["poc-2008"]
-
-[[test]]
-name = "poc_strings"
-category = "strings-textio"
-why = "String helper package tests (to_string, str_match, str_replace ...): all string code"
-source = "poc"
-path = "tb/common/strings_tb.vhdl"
-top = "strings_tb"
-toplib = "test"
-corpus = ["poc-2008"]
-
-[[test]]
-name = "poc_uart_rx"
-category = "fsm"
-why = "UART receiver against a bit-banged transmitter: small FSM over many clock cycles"
-source = "poc"
-path = "tb/io/uart/uart_rx_tb.vhdl"
-top = "uart_rx_tb"
-toplib = "test"
-corpus = ["poc-2008"]
+ok = "DONE +PASSED"
 
 [[test]]
 name = "fletcher_bufferwriter_512"
@@ -474,16 +468,6 @@ files = [
   { lib = "@module", source = "hdl-modules", glob = "modules/register_file/sim/*.vhd" },
   { lib = "@module", source = "hdl-modules", path = "modules/bfm/test/tb_axi_stream_bfm.vhd" },
 ]
-
-[[test]]
-name = "poc_fifo_ic_assembly"
-category = "fsm"
-why = "Cross-clock FIFO with frame assembly"
-source = "poc"
-path = "tb/fifo/fifo_ic_assembly_tb.vhdl"
-top = "fifo_ic_assembly_tb"
-toplib = "test"
-corpus = ["poc-2008"]
 
 [[test]]
 name = "fletcher_bufferreader"

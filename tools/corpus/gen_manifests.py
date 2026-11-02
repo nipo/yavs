@@ -166,7 +166,7 @@ def gen_vunit(std):
 
 # ---------------------------------------------------------------- OSVVM (.pro, Tcl subset)
 class Pro:
-    def __init__(self, root, std):
+    def __init__(self, root, std, extra=None):
         self.root, self.lib, self.cwd, self.files, self.ignored = root, "osvvm", root, [], {}
         v = {"ToolName": simconf.get("sim1", "osvvm_tool_name", "sim1"), "ToolSupportsGenericPackages": True, "Supports2019Interface": True,
              "Supports2019ImpureFunctions": True, "Supports2019FilePath": True, "Supports2019AssertApi": True,
@@ -175,6 +175,7 @@ class Pro:
              "FunctionalCoverageIntegratedInSimulator": "default",
              "VhdlVersion": int(std), "UseMemoryPkg01": False, "ClockResetVersion": "2026.09",
              "OsvvmDevDerivePackageHeaders": False, "ToolVendor": simconf.get("sim1", "osvvm_tool_vendor", "sim1")}
+        v.update(extra or {})
         self.vars = v
 
     @staticmethod
@@ -232,7 +233,7 @@ class Pro:
             if cmd[0] == "FindSettingsPkgBody":
                 return f"{self.subst(cmd[1])}_default.vhd"
             return None  # NoNullRangeWarning etc.
-        return re.sub(r"\$\{?::osvvm::(\w+)\}?", lambda m: str(self.vars[m.group(1)]), w)
+        return re.sub(r"\$\{?::(?:osvvm|poc)::(\w+)\}?", lambda m: str(self.vars[m.group(1)]), w)
 
     def cond(self, expr):
         def var(m):
@@ -244,7 +245,8 @@ class Pro:
         e = re.sub(r"\[DirectoryExists\s+(\S+?)\]", lambda m: repr((self.cwd / m.group(1)).is_dir()), expr)
         e = re.sub(r"\[FileExists\s+(\S+?)\]", lambda m: repr((self.cwd / m.group(1)).is_file()), e)
         e = re.sub(r"\[string compare\s+(\S+)\s+(\S+)\]", lambda m: f"(({m.group(1)}>{m.group(2)})-({m.group(1)}<{m.group(2)}))", e)
-        e = re.sub(r"\$\{?::osvvm::(\w+)\}?", var, e)
+        e = re.sub(r"\$\{?::(?:osvvm|poc)::(\w+)\}?", var, e)
+        e = re.sub(r"\{([^{}]*)\}", lambda m: repr(tuple(m.group(1).split())), e)  # Tcl list operand of `in`
         e = e.replace(" ne ", " != ").replace(" eq ", " == ")
         e = e.replace("&&", " and ").replace("||", " or ")
         e = re.sub(r"\b(true|false)\b", lambda m: m.group(1).capitalize(), e)
@@ -257,7 +259,7 @@ class Pro:
             name = w[0]
             if name == "library":
                 self.lib = self.subst(w[1])
-            elif name == "analyze":
+            elif name in ("analyze", "RunTest"):  # RunTest (PoC test cases) analyzes the file, then simulates it
                 f = self.subst(w[1])
                 self.files.append((self.lib, (self.cwd / f).resolve()))
             elif name == "include":
@@ -302,6 +304,26 @@ def gen_osvvm(std):
             ("osvvm-libraries", "osvvm/CoverageVendorApiPkg_NVC.vhd", "simulator specific; the 'default' variant is used"),
             ("osvvm-libraries", "osvvm/deprecated/*", "variants .pro selects only for tools without 2019/generic support")]
     return ["osvvm-libraries"], files, excl, f"order: OsvvmLibraries.pro interpreted with sim1 settings, VHDL {std}"
+
+
+def poc_files(root):
+    """[(lib, path)] in PoC's own build order: its OSVVM submodules (lib/OsvvmLibraries.pro), library PoC (src/build.pro) and the
+    OSVVM test benches (tb/RunAllTests.pro, `RunTest` files analyzed). Board and vendor GENERIC, as the regression script's default; the
+    generated local_configuration.vhdl is stood in for by the repository's own template (only the project directory string differs)."""
+    extra = {"vendorName": "GENERIC", "boardName": "GENERIC",
+             "projectConfigurationFile": "../tb/common/project_configuration_GENERIC.vhdl",
+             "localConfigurationFile": "common/local_configuration.vhdl.template"}
+    out, seen = [], set()
+    for pro in ("lib/OsvvmLibraries.pro", "src/build.pro", "tb/RunAllTests.pro"):
+        p = Pro(root, "2008", extra)
+        p.cwd = (root / pro).parent
+        p.run_text((root / pro).read_text())
+        for lib, f in p.files:
+            rel = str(f.relative_to(root))
+            if rel not in seen:
+                seen.add(rel)
+                out.append((lib, rel))
+    return out
 
 
 # ---------------------------------------------------------------- UVVM
@@ -394,6 +416,7 @@ GEN = {"hdl-modules": gen_hdl_modules, "vunit": gen_vunit, "osvvm": gen_osvvm, "
 FLAGS = {"yavs-lib": {"sim1": [], "yavs": ["--bootstrap"]}, "uvvm": {"sim1": ["--relaxed"], "yavs": ["--relaxed"]}}
 
 SPECS = gen_external.SPECS
+SPECS["poc"]["lister"] = poc_files
 VALIDATING = False
 validate, save_rejects = gen_external.validate, gen_external.save_rejects
 for _n in SPECS:
