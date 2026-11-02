@@ -1,0 +1,3 @@
+sim1 2008 REJECT
+sim2 2008 OK
+# 2026-11-02, rule 47 probes c2, c6, c8, c15: sim1 does not parse an attribute type mark after `new` (the same type marks parse outside `new`), sim2 runs them.

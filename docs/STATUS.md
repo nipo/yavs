@@ -10809,3 +10809,5 @@ Constructs yavs accepted although the LRM text or every voting reference rejects
 - PSL formals (#1078): a comma between formals of different kinds is `E0002` (PSL separates kinds with `;`).
 - `T'base` as a type mark (L177): `E1201` in subtype indications, qualified expressions, allocators and type conversions of 1993 and 2008
   files; `T'base'attr` stays legal; 2019 files still accept it (LCS-2016-018 not checked).
+- `'subtype` and `'element` as type marks, also in allocators (L178): accepted as before, the verdict and its quotes recorded; two catalogue
+  cases.
