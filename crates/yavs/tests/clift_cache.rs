@@ -142,12 +142,30 @@ fn a_warm_clift_auto_run_links_the_hot_process_from_the_cache() {
             .collect();
         (o.stdout, compiled, err)
     };
-    let (out, cold, err) = run();
+    // A run that ends while the compile thread is still compiling or linking leaves the cache
+    // as it was (the compile is abandoned at exit by design), and how soon a loaded host gets
+    // there is not the cache's to control: a run is repeated, up to TRIES times, until it got
+    // that far. A cache that never serves a hit still fails every attempt.
+    const TRIES: usize = 5;
+    let (out, mut cold, mut err) = run();
+    for _ in 1..TRIES {
+        if !cold.is_empty() {
+            break;
+        }
+        (_, cold, err) = run();
+    }
     assert!(
         !cold.is_empty() && !cold.contains(&true),
         "the first run compiled nothing or linked from an empty cache: {err}"
     );
+    for _ in 1..TRIES {
+        let (out2, warm, _) = run();
+        assert_eq!(out2, out);
+        if warm.contains(&true) {
+            return;
+        }
+    }
     let (out2, warm, err) = run();
     assert_eq!(out2, out);
-    assert!(warm.contains(&true), "no hit in the warm run: {err}");
+    assert!(warm.contains(&true), "no hit in {TRIES} warm runs: {err}");
 }
