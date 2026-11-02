@@ -238,6 +238,9 @@ pub struct Stats {
     /// Runs of concurrent copies the kernel made itself (`SimControl::forward_copies`), also
     /// counted in `process_runs`.
     pub copy_forwards: u64,
+    /// Scans of a signal's waiter lists (`Waiters::take_woken`): the wake path that no short
+    /// path in `cycle` or `finish_direct` took.
+    pub wake_scans: u64,
 }
 
 /// A pending observer wake-up (`Hook::wake_at`). Ordered by time, then registration.
@@ -2540,6 +2543,7 @@ impl SimControl {
                 continue;
             }
             let mut woken = std::mem::take(&mut self.woken_buf);
+            self.stats.wake_scans += 1;
             // A shuffled run takes the order the processes are woken in.
             let ordered = self.rng.is_some();
             match uniform {
@@ -4534,7 +4538,18 @@ impl SimControl {
                 from_prev = true;
             }
             let list = if from_prev { &st.sens_prev } else { &st.sens };
-            for &(s, range) in list {
+            let mut i = 0;
+            while let Some(&(s, mut range)) = list.get(i) {
+                i += 1;
+                // Abutting ranges of one signal (the fields of a record pack in a sensitivity
+                // list) are one waiter: the same elements, one list entry instead of one per field.
+                while let Some(&(t, r)) = list.get(i)
+                    && t == s
+                    && r.offset == range.end()
+                {
+                    range.len += r.len;
+                    i += 1;
+                }
                 let sig = &mut self.signals[s.0 as usize];
                 sig.watched = true;
                 sig.image_watched = false;

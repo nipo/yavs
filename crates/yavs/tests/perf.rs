@@ -361,6 +361,19 @@ case!(
         ("ops", Max(870)),
     ]
 );
+// The fields of a record sensitivity are one waiter, woken where the update finishes (#1069):
+// 202 waiter-list scans before.
+case!(
+    rec_wake,
+    "n=200 b=D001 d=7CD778B1",
+    &[],
+    [
+        ("cycles", Max(1236)),
+        ("wakes", Max(824)),
+        ("events", Max(6481)),
+        ("wake_scans", Max(4)),
+    ]
+);
 case!(
     copy_chain,
     "c=",

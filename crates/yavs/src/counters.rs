@@ -62,6 +62,7 @@ pub fn report(s: yavs_kernel::Stats, rt: Option<&yavs_interp::Runtime>) {
         ("images", s.images),
         ("image_bytes", s.image_bytes),
         ("copy_forwards", s.copy_forwards),
+        ("wake_scans", s.wake_scans),
         ("ecall_hits", hits),
         ("ecall_runs", runs),
         ("opt_funcs", yavs_ir::optimised_functions()),
