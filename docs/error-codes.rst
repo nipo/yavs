@@ -302,6 +302,8 @@ Semantic analysis (E1 and W1)
      - None of the visible subprograms or literals with this name accepts these operands.
    * - _`E1302`
      - More than one interpretation fits; qualify an operand or use a selected name.
+   * - _`W1302`
+     - ``--relaxed`` (R7): in a VHDL-1993 file an operation is declared implicitly by one package and explicitly, with the same profile, by another, both made visible by use clauses (``=`` on ``std_logic_vector`` from ``std_logic_1164`` and ``std_logic_unsigned``).
    * - _`E1303`
      - An operator symbol that is not a VHDL operator, or an operator function with the wrong number of parameters (LRM 4.5.2).
    * - _`E1304`

@@ -10785,3 +10785,10 @@ A record signal, an array of records or an array of arrays is an element of an a
 ## Names of packages (#1010, 2026-11-01)
 
 `'path_name` and `'instance_name` of a package: one last element (`own_element`), a colon for a package; a library package from any region is `:lib:pkg:` (it was the reading instance's path); a generic package named by itself is `:lib:gp:` in declaration and body; items nested in a library package are static text, so its initialisation reads no instance data. The reading in the declaration of a generic package splits the references and is open for the maintainer (L173).
+
+## Rule 47 rulings of 2026-11-02 (user)
+
+Constructs yavs accepted although the LRM text or every voting reference rejects them, decided by the maintainer:
+
+- VHDL-1993 homograph (L134): an implicit and an explicit declaration with one profile, both visible through use clauses, are ambiguous in a
+  93 file (`E1302`); `--relaxed` takes the explicit one with `W1302` (R7). GRLIB at 1993 runs with `--relaxed` and is unchanged.

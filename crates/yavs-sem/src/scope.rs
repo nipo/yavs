@@ -616,9 +616,11 @@ impl Db {
         if !over.is_empty() {
             pot.retain(|p| !self.over_hides(&over_set, *p));
         }
-        // (b) of two potentially visible homographs, explicit beats implicit. Explicit
-        // overloadables are bucketed by profile shape, so only equal shapes are compared.
-        if pot.iter().any(|&p| self.decls[p].implicit) {
+        // (b) of two potentially visible homographs, explicit beats implicit (2008 12.4 b).
+        // Explicit overloadables are bucketed by profile shape, so only equal shapes are
+        // compared. 1993 has no such rule (10.4): both stay visible and a use of them is
+        // ambiguous (`prefer_explicit`, lrm-checks L134).
+        if rev != crate::LangRev::Vhdl1993 && pot.iter().any(|&p| self.decls[p].implicit) {
             let mut by_shape = ShapeIndex::default();
             let mut explicit_other: SmallVec<[DeclId; 4]> = SmallVec::new();
             for &q in &pot {

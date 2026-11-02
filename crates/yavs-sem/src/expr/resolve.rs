@@ -596,8 +596,8 @@ impl Db {
                     return self.poison_expr();
                 };
                 best.retain(|(_, c)| *c == min);
-                if best.len() > 1 {
-                    self.prefer_explicit(&mut best);
+                if best.len() > 1 && self.prefer_explicit(e, &mut best).is_err() {
+                    return self.poison_expr();
                 }
                 if best.len() > 1 {
                     self.ambiguous(e, &best.iter().map(|b| b.0).collect::<Vec<_>>());
@@ -1515,8 +1515,14 @@ impl Db {
     /// Calls that are ambiguous only between implicit operations and explicit
     /// subprograms (a 2019 composite `TO_STRING` and a user `to_string(A; sep := " ")`,
     /// in the same package or made visible by a use clause): the explicit ones win, as
-    /// in sim1, sim2 and sim3 (decisions.md).
-    fn prefer_explicit(&self, best: &mut smallvec::SmallVec<[(Interp, u32); 4]>) {
+    /// in sim1, sim2 and sim3 (decisions.md). In a 1993 file an implicit and an explicit
+    /// homograph made visible by use clauses stay ambiguous (1993 10.4, 10.5): `E1302`, or
+    /// `W1302` and the explicit one under `--relaxed` (R7, lrm-checks L134).
+    fn prefer_explicit(
+        &mut self,
+        e: &ast::Expr,
+        best: &mut smallvec::SmallVec<[(Interp, u32); 4]>,
+    ) -> Result<(), crate::Reported> {
         let calls: Option<Vec<DeclId>> = best
             .iter()
             .map(|(i, _)| match i.via {
@@ -1524,17 +1530,61 @@ impl Db {
                 _ => None,
             })
             .collect();
-        let Some(calls) = calls else { return };
+        let Some(calls) = calls else { return Ok(()) };
         let (imp, exp): (Vec<DeclId>, Vec<DeclId>) =
             calls.iter().partition(|&&d| self.decls[d].implicit);
         if imp.is_empty() || exp.is_empty() {
-            return;
+            return Ok(());
+        }
+        if self.file_rev() == crate::LangRev::Vhdl1993
+            && let Some((&i, &x)) = imp
+                .iter()
+                .find_map(|i| exp.iter().find(|&&x| self.homographs(*i, x)).map(|x| (i, x)))
+        {
+            let name = self.decls[x].name;
+            let [ri, rx] = [i, x].map(|d| crate::mangle::region(self, self.decls[d].scope));
+            let what = format!(
+                "`{name}` is declared implicitly by `{ri}` and explicitly by `{rx}`; VHDL-1993 \
+                 hides neither (LRM 1993 10.4, 10.5)"
+            );
+            if self.relaxed() {
+                self.report(
+                    Diagnostic::warning(
+                        diag::W_IMPLICIT_HOMOGRAPH_93,
+                        format!("{what}; `--relaxed` uses the explicit one"),
+                    )
+                    .with_primary(e.span, "accepted by `--relaxed`"),
+                );
+            } else {
+                let interps: Vec<Interp> = best.iter().map(|b| b.0).collect();
+                self.ambiguous_with(
+                    e,
+                    &interps,
+                    Some((
+                        what,
+                        format!(
+                            "analyse the file with `--std=2008`, where the explicit one wins \
+                             (LRM 2008 12.4), pass `--relaxed`, or replace `use {rx}.all` by \
+                             use clauses for only the operations you need from it, without \
+                             {name}"
+                        ),
+                    )),
+                );
+                return Err(crate::Reported);
+            }
         }
         best.retain(|(i, _)| matches!(i.via, Via::Call(d) if !self.decls[self.entity(d)].implicit));
+        Ok(())
     }
 
     fn ambiguous(&mut self, e: &ast::Expr, best: &[Interp]) {
-        let mut d = Diagnostic::error(diag::AMBIGUOUS, "this expression is ambiguous")
+        self.ambiguous_with(e, best, None);
+    }
+
+    /// `ambiguous` with a message and help of the caller's (`why`, `help`).
+    fn ambiguous_with(&mut self, e: &ast::Expr, best: &[Interp], why: Option<(String, String)>) {
+        let msg = why.as_ref().map_or("this expression is ambiguous".into(), |w| w.0.clone());
+        let mut d = Diagnostic::error(diag::AMBIGUOUS, msg)
             .with_primary(e.span, "several interpretations fit");
         let callables: Vec<DeclId> = best
             .iter()
@@ -1596,6 +1646,7 @@ impl Db {
             }
             _ => "qualify an operand (`t'(x)`) or use a selected name (`pkg.\"+\"`)".into(),
         };
+        let help = why.map_or(help, |w| w.1);
         self.report(d.with_help(help));
     }
 

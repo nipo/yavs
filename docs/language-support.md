@@ -78,8 +78,10 @@ the files again.
 - Overloads on both `std_logic_vector` and `std_ulogic_vector` analyse, because they are distinct types in 1993
   (simulated).
 - Reading an `out` port or parameter is an error (`E1360`, analysed).
-- An explicit declaration hides an implicit one when both are visible through use clauses, as in 2008, so packages
-  that redeclare predefined operators, such as `std_logic_unsigned`, analyse without a flag (simulated).
+- An explicit declaration does not hide an implicit one when both are visible through use clauses: 1993 has no such
+  rule (it is new in 2008). So `a = b` on `std_logic_vector` with both `std_logic_1164` and `std_logic_unsigned` used
+  is ambiguous, error `E1302`. Pass `--relaxed` to use the explicit one, as 2008 does (warning `W1302`), analyse the
+  file with `--std=2008`, or use only the operations you need from `std_logic_unsigned` (analysed).
 - 2008 syntax is rejected, mostly with `E0011` and otherwise as a syntax error: `process (all)`, conditional and selected assignments
   inside a process, `elsif` and `case` generate, package generics, `/* */` comments, bit string literals with a length
   or `U`, `S`, `D` bases, matching operators, external names, `force` and `release`, protected types (analysed, probed). Some 2008 constructs are accepted, see below.

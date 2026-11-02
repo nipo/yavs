@@ -148,7 +148,7 @@ Arguments:
 
 .. option:: --relaxed
 
-   Turn some errors into warnings: a shared variable of a non-protected type, a pure function that calls an impure one, an ``others`` aggregate for an unconstrained target, a non-static actual of a signal parameter.
+   Turn some errors into warnings: a shared variable of a non-protected type, a pure function that calls an impure one, an ``others`` aggregate for an unconstrained target, a non-static actual of a signal parameter, an operation a VHDL-1993 file sees declared both implicitly and explicitly.
 
 .. option:: --psl
 
@@ -222,7 +222,7 @@ Arguments:
 
 .. option:: --relaxed
 
-   Turn some errors into warnings: a shared variable of a non-protected type, a pure function that calls an impure one, an ``others`` aggregate for an unconstrained target, a non-static actual of a signal parameter.
+   Turn some errors into warnings: a shared variable of a non-protected type, a pure function that calls an impure one, an ``others`` aggregate for an unconstrained target, a non-static actual of a signal parameter, an operation a VHDL-1993 file sees declared both implicitly and explicitly.
 
 .. option:: --psl
 
@@ -311,7 +311,7 @@ Arguments:
 
 .. option:: --relaxed
 
-   Turn some errors into warnings: a shared variable of a non-protected type, a pure function that calls an impure one, an ``others`` aggregate for an unconstrained target, a non-static actual of a signal parameter.
+   Turn some errors into warnings: a shared variable of a non-protected type, a pure function that calls an impure one, an ``others`` aggregate for an unconstrained target, a non-static actual of a signal parameter, an operation a VHDL-1993 file sees declared both implicitly and explicitly.
 
 .. option:: --psl
 

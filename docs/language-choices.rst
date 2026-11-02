@@ -20,7 +20,8 @@ yavs, with what to do about each.
    * - Verification code with a shared variable that is not protected, a pure function that calls
        an impure one, or an ``others`` aggregate assigned to an unconstrained object
      - Errors, as the standard says.
-     - ``--relaxed`` on ``analyze`` and ``run`` turns them into warnings.
+     - ``--relaxed`` on ``analyze`` and ``run`` turns them, and the other cases below that name it,
+       into warnings.
    * - PSL in ``-- psl`` comments
      - Read only when asked.
      - ``--psl`` on ``analyze`` and ``run``.
@@ -31,6 +32,12 @@ yavs, with what to do about each.
      - Allowed; the design uses the packages of the newest standard.
      - Keep VHDL-1993 code that overloads on both ``std_logic_vector`` and ``std_ulogic_vector``
        in a design of 1993 files only.
+   * - A VHDL-1993 file that uses ``=`` on ``std_logic_vector`` with both ``std_logic_1164`` and
+       ``std_logic_unsigned`` visible (or any operation declared implicitly by one package and
+       explicitly by another)
+     - Error ``E1302`` under ``--std=93``: VHDL-1993 hides neither declaration.
+     - ``--relaxed`` uses the explicit one, as VHDL-2008 does (warning ``W1302``); or analyze the
+       file with ``--std=2008``.
    * - VHDL-1993 code that relies on rules VHDL-2008 relaxed
      - Error ``E1007`` under ``--std=93``, naming the 1993 rule.
      - Analyze the file with ``--std=2008``.

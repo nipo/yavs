@@ -1025,8 +1025,13 @@ difference, is `docs/design/vhdl-93.md`.
   does not see what 2008 added (`E1007` for `to_string`, a 2008-only unit). The reference simulators refuse to mix standards;
   yavs keeps one rule for all revisions and never refuses a mixed design (user, 2026-10-23).
 - **Shared variables** of non-protected types are legal in a 93 file (no `E1904`/`W1904`).
-- **Homographs**: an explicit declaration hides an implicit one of a use clause in every mode (the references need `--relaxed` /
-  `-fexplicit` for this at 1993; GRLIB passes both).
+- **Homographs** (user, 2026-11-02, replaces the agent reading of 2026-10-23): in a 93 file an implicit and an explicit
+  declaration with the same profile, both made potentially visible by use clauses (`"="` on `std_logic_vector` from
+  `std_logic_1164` and `std_logic_unsigned`), stay both visible, so a use is ambiguous: `E1302` (1993 10.4, 10.5; the
+  rule that the explicit one wins is new in 2008 12.4 b). `--relaxed` takes the explicit one with warning `W1302` (R7),
+  as both references do with their relaxed switches. 2008 and 2019 files are unchanged. GRLIB at 1993 is analysed with
+  `--relaxed` (its manifest and the realbench test already pass it): without it one file, `grtachom.vhd`, has five
+  ambiguous uses, the same file the first reference rejects.
 - **Not enforced** (rule 2): the 2008 relaxations (reading `out` ports, case and static rules) are accepted in a 93 file, since valid
   93 code never depends on them being errors. Superseded for `--std=93` by the next entry.
 - **1993 restrictions enforced in a 93 file** (user, 2026-10-28, #814; supersedes S13 of `docs/design/vhdl-93.md` for a 93 file):
