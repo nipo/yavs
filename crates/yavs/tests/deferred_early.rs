@@ -142,11 +142,157 @@ fn analyse(tmp: &std::path::Path, name: &str, src: &str) -> String {
     work
 }
 
+/// Complete sources: the same early call from a package nested in the package body, from a
+/// generic package instantiated as a library unit and from a package nested in the body of a
+/// generic package. `@@` is as above; the entity is `t_NAME`.
+const BAD_UNITS: &[(&str, &str)] = &[
+    (
+        "nested_package",
+        "package p is
+  type vec_t is array (natural range <>) of integer;
+  constant U : vec_t;
+  function x return integer;
+end package;
+package body p is
+  function mk(n : integer) return vec_t is
+    variable r : vec_t(1 to n) := (others => 7);
+  begin return r; end;
+  package n is function h return integer; end package;
+  package body n is
+    function h return integer is begin return @@U'length; end;
+  end package body;
+  constant X1 : integer := n.h;
+  constant U : vec_t := mk(4);
+  function x return integer is begin return X1; end;
+end package body;
+use work.p.all;
+entity t_nested_package is end entity;
+architecture a of t_nested_package is
+begin
+  process begin report \"RES \" & integer'image(x); wait; end process;
+end architecture;
+",
+    ),
+    (
+        "generic_instance",
+        "package gp is
+  generic (n : integer);
+  type vec_t is array (natural range <>) of integer;
+  constant U : vec_t;
+  function x return integer;
+end package;
+package body gp is
+  function mk(m : integer) return vec_t is
+    variable r : vec_t(1 to m) := (others => 7);
+  begin return r; end;
+  function h return integer is begin return @@U'length; end;
+  constant X1 : integer := h;
+  constant U : vec_t := mk(n);
+  function x return integer is begin return X1; end;
+end package body;
+package ip is new work.gp generic map (n => 4);
+entity t_generic_instance is end entity;
+architecture a of t_generic_instance is
+begin
+  process begin report \"RES \" & integer'image(work.ip.x); wait; end process;
+end architecture;
+",
+    ),
+    (
+        "generic_nested",
+        "package gp is
+  generic (n : integer);
+  type vec_t is array (natural range <>) of integer;
+  constant U : vec_t;
+  function x return integer;
+end package;
+package body gp is
+  function mk(m : integer) return vec_t is
+    variable r : vec_t(1 to m) := (others => 7);
+  begin return r; end;
+  package k is function h return integer; end package;
+  package body k is function h return integer is begin return @@U'length; end; end package body;
+  constant X1 : integer := k.h;
+  constant U : vec_t := mk(n);
+  function x return integer is begin return X1; end;
+end package body;
+package ip is new work.gp generic map (n => 4);
+entity t_generic_nested is end entity;
+architecture a of t_generic_nested is
+begin
+  process begin report \"RES \" & integer'image(work.ip.x); wait; end process;
+end architecture;
+",
+    ),
+    (
+        "instance_in_package_body",
+        "package gp is
+  generic (n : integer);
+  type vec_t is array (natural range <>) of integer;
+  constant U : vec_t;
+  function x return integer;
+end package;
+package body gp is
+  function mk(m : integer) return vec_t is
+    variable r : vec_t(1 to m) := (others => 7);
+  begin return r; end;
+  function h return integer is begin return @@U'length; end;
+  constant X1 : integer := h;
+  constant U : vec_t := mk(n);
+  function x return integer is begin return X1; end;
+end package body;
+package q is function y return integer; end package;
+package body q is
+  package ip is new work.gp generic map (n => 4);
+  function y return integer is begin return ip.x; end;
+end package body;
+entity t_instance_in_package_body is end entity;
+architecture a of t_instance_in_package_body is
+begin
+  process begin report \"RES \" & integer'image(work.q.y); wait; end process;
+end architecture;
+",
+    ),
+];
+
+/// The same generic package instantiated where no package initialisation runs, in an
+/// architecture and in a process: not implemented (#1079), a clear error and no wrong bounds.
+const UNSUPPORTED: &[(&str, &str, &str)] = &[
+    (
+        "instance_in_architecture",
+        "  package ip is new work.gp generic map (n => 4);\nbegin\n  process begin report \"RES \" & integer'image(ip.U'length); wait; end process;",
+        "the bounds of deferred constant `U` of a package instance declared in an architecture, block or process is not implemented yet",
+    ),
+    (
+        "instance_in_process",
+        "begin\n  process\n    package ip is new work.gp generic map (n => 4);\n  begin report \"RES \" & integer'image(ip.x); wait; end process;",
+        "deferred constant `U` of a package instance declared in a process is not implemented yet",
+    ),
+];
+
+const GENERIC: &str = "package gp is
+  generic (n : integer);
+  type vec_t is array (natural range <>) of integer;
+  constant U : vec_t;
+  function x return integer;
+end package;
+package body gp is
+  function mk(m : integer) return vec_t is
+    variable r : vec_t(1 to m) := (others => 7);
+  begin return r; end;
+  constant U : vec_t := mk(n);
+  function x return integer is begin return U'length; end;
+end package body;
+";
+
 #[test]
 fn a_bounds_read_before_the_full_declaration_is_an_error_in_every_tier() {
     let tmp = tempdir("deferred_early");
-    for (name, body) in BAD {
-        let src = source(name, body);
+    let cases = BAD
+        .iter()
+        .map(|(name, body)| (*name, source(name, body)))
+        .chain(BAD_UNITS.iter().map(|(name, src)| (*name, src.to_string())));
+    for (name, src) in cases {
         let at = src.find("@@").expect("marker");
         let line = src[..at].matches('\n').count() + 1;
         let work = analyse(&tmp, name, &src.replacen("@@", "", 1));
@@ -183,6 +329,84 @@ fn the_same_read_after_the_full_declaration_gives_the_bounds() {
             assert!(
                 all.contains(&format!("RES {result}")),
                 "{name} {tier}: want {result}: {all}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_package_instance_in_an_architecture_or_process_is_not_implemented() {
+    let tmp = tempdir("deferred_early_instance");
+    for (name, unit, want) in UNSUPPORTED {
+        let src = format!(
+            "{GENERIC}entity t_{name} is end entity;\narchitecture a of t_{name} is\n{unit}\nend architecture;\n"
+        );
+        let work = analyse(&tmp, name, &src);
+        for tier in tiers() {
+            let o = yavs(&["run", &work, tier, "--threads=1", &format!("t_{name}")]);
+            let e = String::from_utf8_lossy(&o.stderr);
+            assert_eq!(o.status.code(), Some(2), "{name} {tier}: {e}");
+            assert!(
+                e.contains(&format!("error[E2001]: {want}")),
+                "{name} {tier}: {e}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_generic_package_instance_and_a_nested_package_read_the_bounds_after_the_full_declaration() {
+    let tmp = tempdir("deferred_early_ok_units");
+    for (name, src, result) in [
+        (
+            "generic_after",
+            format!(
+                "{GENERIC}package ip is new work.gp generic map (n => 4);\nentity t_generic_after is end entity;\narchitecture a of t_generic_after is\nbegin\n  process begin report \"RES \" & integer'image(work.ip.x); wait; end process;\nend architecture;\n"
+            ),
+            4,
+        ),
+        (
+            "nested_after",
+            "package p is
+  type vec_t is array (natural range <>) of integer;
+  constant U : vec_t;
+  function x return integer;
+end package;
+package body p is
+  function mk(n : integer) return vec_t is
+    variable r : vec_t(1 to n) := (others => 7);
+  begin return r; end;
+  package n is function h return integer; end package;
+  package body n is
+    function h return integer is begin return U'length + U'left; end;
+  end package body;
+  constant U : vec_t := mk(4);
+  constant X1 : integer := n.h;
+  function x return integer is begin return X1; end;
+end package body;
+use work.p.all;
+entity t_nested_after is end entity;
+architecture a of t_nested_after is
+begin
+  process begin report \"RES \" & integer'image(x); wait; end process;
+end architecture;
+"
+            .to_string(),
+            5,
+        ),
+    ] {
+        let work = analyse(&tmp, name, &src);
+        for tier in tiers() {
+            let o = yavs(&["run", &work, tier, "--threads=1", &format!("t_{name}")]);
+            let all = format!(
+                "{}{}",
+                String::from_utf8_lossy(&o.stdout),
+                String::from_utf8_lossy(&o.stderr)
+            );
+            assert!(o.status.success(), "{name} {tier}: {all}");
+            assert!(
+                all.contains(&format!("RES {result}")),
+                "{name} {tier}: {all}"
             );
         }
     }

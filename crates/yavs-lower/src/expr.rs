@@ -745,16 +745,37 @@ impl<'a> Fx<'a, '_> {
     /// the full declaration, they do not exist (LRM 14.4.2, erroneous). The read at `span` checks
     /// the flag the full declaration sets (`Cx::deferred_done`); a read below the full
     /// declaration, or from another file than its body, needs no check (#1076).
-    fn deferred_bounds_check(&mut self, d: DeclId, span: Span) {
-        let Some(c) = self.deferred_completion(d) else {
-            return;
+    fn deferred_bounds_check(&mut self, d: DeclId, span: Span) -> R<()> {
+        let db = self.db;
+        let DeclKind::Object(o) = &db.decls[d].kind else {
+            return Ok(());
         };
+        if o.role != yavs_sem::decl::ObjRole::Deferred
+            || db.constrainedness(o.subtype) == yavs_sem::types::Constrainedness::Full
+        {
+            return Ok(());
+        }
+        let Some(c) = self.deferred_completion(d) else {
+            return Ok(());
+        };
+        // Only the initialisation of a package sets the flag; the bounds of the constant of an
+        // instance declared in an architecture, block or process are not available (#1079).
         let Some(&(p, off)) = self.cx.deferred_done.get(&c) else {
-            return;
+            // A package with no run-time object has no initialisation to run early.
+            if !self.in_region_instance(d) {
+                return Ok(());
+            }
+            return Err(self.cx.unsupported(
+                span,
+                &format!(
+                    "the bounds of deferred constant `{}` of a package instance declared in an architecture, block or process",
+                    db.decls[d].name
+                ),
+            ));
         };
         let full = self.db.decls[c].span;
         if full.file != span.file || span.start >= full.start {
-            return;
+            return Ok(());
         }
         let a = self.addr(Space::Pkg(p), off);
         let done = self.load(a, Width::B8, RegTy::I64);
@@ -770,6 +791,33 @@ impl<'a> Fx<'a, '_> {
         );
         self.term(Inst::Unreachable { what });
         self.at(ok);
+        Ok(())
+    }
+
+    /// `d` belongs to a package instance declared in an architecture, block, process or
+    /// subprogram (a library package or one nested in a package has its own initialisation).
+    fn in_region_instance(&self, d: DeclId) -> bool {
+        use yavs_sem::scope::ScopeKind as K;
+        let db = self.db;
+        let scope = db.decls[d].scope;
+        let Some((_, i)) = db
+            .insts
+            .iter()
+            .find(|(_, i)| i.scope == scope || i.body.get() == Some(&scope))
+        else {
+            return false;
+        };
+        let mut cur = Some(db.decls[i.site].scope);
+        while let Some(s) = cur {
+            if matches!(
+                db.scopes[s].kind,
+                K::Entity | K::Architecture | K::Block | K::Generate | K::Process | K::Subprogram
+            ) {
+                return true;
+            }
+            cur = db.scopes[s].parent;
+        }
+        false
     }
 
     fn obj_rt(&self, d: DeclId) -> RegTy {
@@ -2219,7 +2267,7 @@ impl<'a> Fx<'a, '_> {
             return Ok(self.comp_walk(d, &steps, self.db.exprs[e].span)?.2.desc);
         }
         if let ExprKind::Obj(d) = self.db.exprs[e].kind {
-            self.deferred_bounds_check(d, self.db.exprs[e].span);
+            self.deferred_bounds_check(d, self.db.exprs[e].span)?;
             match self.cx.objs.get(&d).copied() {
                 Some(Obj::Array { space, off }) => {
                     let a = self.addr(space, off);

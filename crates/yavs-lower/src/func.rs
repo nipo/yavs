@@ -933,6 +933,15 @@ impl<'a, 'b> Fx<'a, 'b> {
                     }
                     (Some(dope), None) => dope,
                     (None, Some((_, vd))) => vd,
+                    (None, None) if o.role == ObjRole::Deferred => {
+                        return Err(self.cx.unsupported(
+                            decl.span,
+                            &format!(
+                                "deferred constant `{}` of a package instance declared in a process",
+                                decl.name
+                            ),
+                        ));
+                    }
                     (None, None) => {
                         return Err(self
                             .cx
