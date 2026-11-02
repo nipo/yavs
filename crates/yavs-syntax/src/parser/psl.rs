@@ -148,6 +148,16 @@ impl Parser<'_> {
 
     /// Remember the name of a skipped `property` or `sequence` declaration: a directive naming
     /// it is outside the subset.
+    /// The name of the `sequence` or `property` declaration at the current keyword.
+    pub(super) fn psl_decl_name(&self) -> Option<(Ident, bool)> {
+        let property = match self.toks[self.pos].kind {
+            Tok::Kw(Kw::Property) => true,
+            Tok::Kw(Kw::Sequence) => false,
+            _ => return None,
+        };
+        (self.nth(1) == Tok::Ident).then(|| (self.make_ident(self.toks[self.pos + 1]), property))
+    }
+
     pub(super) fn psl_skipped_name(&mut self) {
         if self.nth(1) == Tok::Ident {
             let id = self.make_ident(self.toks[self.pos + 1]);

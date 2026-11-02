@@ -41,7 +41,9 @@ one; a `cover` prints its `report` text each time it is hit. The subset below is
   braces, `{ {a; b} && {c; d} }`: written as `{a; b} && {c; d}`, the directive is skipped (`W0004`). `&` between
   booleans (`{ a & b }`) is VHDL concatenation (`E1340`).
 - Built-in functions `prev`, `stable`, `rose`, `fell`, `isunknown`, `countones`, `onehot` and `onehot0`.
-- Named `sequence` and `property` declarations with `boolean`, `const`, `sequence` and `property` formals.
+- Named `sequence` and `property` declarations with `boolean`, `const`, `sequence` and `property` formals. Their
+  names are declarations of the region: a declaration of the same name there (a constant, a port, another sequence)
+  is `E1101`.
 
 ## What is skipped with a warning
 

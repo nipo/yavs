@@ -10802,3 +10802,5 @@ Constructs yavs accepted although the LRM text or every voting reference rejects
   Boolean form instead.
 - A unit declared twice in one file (L174): warning `W0005` at the second copy (LRM 13.1, 13.5); the run still uses the last copy. Two files
   are unchanged.
+- PSL declarations are declarations of their region (#1077): sem declares each `sequence` and `property` name (`DeclKind::Psl`), so a
+  homograph is `E1101` and a use in a VHDL expression `E1361`.

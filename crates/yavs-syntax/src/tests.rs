@@ -920,7 +920,12 @@ fn psl_formal_only_directives_are_skipped_silently() {
         let LibraryUnit::Architecture(a) = &p.design.unwrap().units[0].unit else {
             panic!()
         };
-        assert_eq!(a.stmts.len(), 1, "{f}: the assignment survives");
+        // A declaration after `begin` also keeps its name (#1077).
+        let stmts = a
+            .stmts
+            .iter()
+            .filter(|s| !matches!(s.kind, ConcStmtKind::PslDecl(_)));
+        assert_eq!(stmts.count(), 1, "{f}: the assignment survives");
     }
     // A directive that is not formal-only still warns, also after one that is.
     let src = conc("fairness a;\nassert eventually! a;");
@@ -951,7 +956,12 @@ fn psl_is_skipped_with_one_warning_per_unit() {
         let LibraryUnit::Architecture(a) = &p.design.unwrap().units[0].unit else {
             panic!()
         };
-        assert_eq!(a.stmts.len(), 1, "{f}: the assignment survives");
+        // A declaration after `begin` also keeps its name (#1077).
+        let stmts = a
+            .stmts
+            .iter()
+            .filter(|s| !matches!(s.kind, ConcStmtKind::PslDecl(_)));
+        assert_eq!(stmts.count(), 1, "{f}: the assignment survives");
     }
     // Declaration forms, in a package.
     for f in &forms[..3] {
@@ -1006,6 +1016,7 @@ fn checkers(src: &str) -> Vec<(Option<String>, usize, usize)> {
     };
     a.stmts
         .iter()
+        .filter(|s| !matches!(s.kind, ConcStmtKind::PslDecl(_)))
         .map(|s| match &s.kind {
             ConcStmtKind::Process(p) => (
                 s.label.map(|l| l.text.to_string()),

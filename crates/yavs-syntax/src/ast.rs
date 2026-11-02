@@ -245,6 +245,8 @@ pub enum Decl {
     Disconnect(DisconnectSpec),
     ConfigSpec(ConfigSpec),
     View(ViewDecl),
+    /// A PSL `sequence` or `property` declaration (#445, #1077).
+    Psl(PslDeclName),
 }
 
 #[derive(Debug)]
@@ -468,6 +470,15 @@ pub enum EntityNameList {
     Names(Vec<(Designator, Option<Signature>)>),
     Others,
     All,
+}
+
+/// The name of a PSL `sequence` or `property` declaration. The parser expands its uses itself
+/// (`parser/psl_named.rs`); sem declares the name, for the homograph rules (LRM 6.1, 12.3).
+#[derive(Debug)]
+pub struct PslDeclName {
+    pub name: Ident,
+    pub property: bool,
+    pub span: Span,
 }
 
 #[derive(Debug)]
@@ -1070,6 +1081,9 @@ pub struct ConcStmt {
 #[derive(Debug)]
 pub enum ConcStmtKind {
     Process(ProcessStmt),
+    /// A PSL declaration written after `begin`, which the grammar does not allow
+    /// (2008 3.3.2, 11.1): sem reports it, or warns under `--relaxed`.
+    PslDecl(PslDeclName),
     Block(BlockStmt),
     Instance(InstanceStmt),
     ProcedureCall(Name),

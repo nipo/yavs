@@ -1743,12 +1743,27 @@ impl Db {
         let mut errs = Errs::default();
         let mut out = Vec::with_capacity(stmts.len());
         for s in stmts {
+            if let ast::ConcStmtKind::PslDecl(p) = &s.kind {
+                errs.keep(self.psl_decl_in_statements(scope, p));
+                continue;
+            }
             if let Some(id) = errs.keep(self.conc_stmt(scope, s, passive)) {
                 out.push(id);
             }
         }
         errs.keep(crate::attr::unresolved_labels(self, scope));
         errs.finish(out.into())
+    }
+
+    /// A PSL `sequence` or `property` declaration after `begin`: declared in the region, as
+    /// one before `begin` (#1077).
+    fn psl_decl_in_statements(
+        &mut self,
+        scope: ScopeId,
+        p: &ast::PslDeclName,
+    ) -> Result<(), Reported> {
+        self.psl_decl(scope, p);
+        Ok(())
     }
 
     fn conc_stmt(
@@ -1774,6 +1789,7 @@ impl Db {
         }
         let postponed = s.postponed;
         let kind = match &s.kind {
+            K::PslDecl(_) => return Err(self.ice(s.span, "a PSL declaration reached conc_stmt")),
             K::Process(p) => self.process(scope, s, p, id, postponed, passive)?,
             K::Block(b) => self.block(scope, s, b, id)?,
             K::Instance(i) => {

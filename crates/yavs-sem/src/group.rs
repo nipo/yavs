@@ -54,6 +54,18 @@ impl Db {
         Ok(())
     }
 
+    /// A PSL `sequence` or `property` declaration: its name is declared in the region, so a
+    /// homograph is `E1101` (2008 6.1 lists both as declarations, 12.3; #1077).
+    pub(crate) fn psl_decl(&mut self, scope: ScopeId, p: &ast::PslDeclName) {
+        let d = self.new_decl(
+            scope,
+            Designator::Ident(p.name),
+            DeclKind::Psl(p.property),
+            p.span,
+        );
+        self.declare(scope, d);
+    }
+
     /// `group g : t (c1, c2, ...);` Each constituent names an entity of the template's class
     /// at its position (6.10).
     pub(crate) fn group_decl(

@@ -647,6 +647,7 @@ fn decl_span(d: &ast::Decl) -> Span {
         D::Disconnect(x) => x.span,
         D::ConfigSpec(x) => x.span,
         D::View(x) => x.span,
+        D::Psl(x) => x.span,
     }
 }
 

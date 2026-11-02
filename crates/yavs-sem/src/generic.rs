@@ -3213,6 +3213,7 @@ impl Db {
                 constituents: constituents.iter().map(|&c| self.r_decl(r, c)).collect(),
             },
             DeclKind::GroupTemplate(c) => DeclKind::GroupTemplate(c.clone()),
+            DeclKind::Psl(p) => DeclKind::Psl(*p),
             DeclKind::Label(s) => DeclKind::Label(self.r_stmt(r, *s)),
             DeclKind::Element { record, index } => DeclKind::Element {
                 record: self.r_ty(r, *record),

@@ -198,6 +198,9 @@ pub enum DeclKind {
     GroupTemplate(Box<[(Kw, bool)]>),
     /// Statement labels are implicitly declared.
     Label(StmtId),
+    /// A PSL `sequence` (`false`) or `property` (`true`) declaration: only its name, for the
+    /// homograph rules; the parser expands its uses (#1077).
+    Psl(bool),
     /// Only reachable through selection, never in `Scope::names`.
     Element {
         record: TypeId,
@@ -622,6 +625,7 @@ impl Db {
             D::Component(c) => vec![Designator::Ident(c.name)],
             D::Group(g) => vec![Designator::Ident(g.name)],
             D::GroupTemplate(g) => vec![Designator::Ident(g.name)],
+            D::Psl(p) => vec![Designator::Ident(p.name)],
             D::Alias(a) => match &a.designator {
                 ast::Designator::Ident(i) => vec![Designator::Ident(*i)],
                 _ => vec![],
@@ -743,6 +747,10 @@ impl Db {
             D::PackageInstance(x) => self.package_instance_decl(scope, x),
             D::Group(x) => self.group_decl(scope, x),
             D::GroupTemplate(x) => self.group_template(scope, x),
+            D::Psl(x) => {
+                self.psl_decl(scope, x);
+                Ok(())
+            }
             D::Disconnect(x) => self.disconnect_spec(scope, x),
             D::ConfigSpec(x) => self.config_spec(scope, x),
             D::View(x) => {
@@ -2308,5 +2316,6 @@ pub(crate) fn decl_span(d: &ast::Decl) -> Span {
         D::Disconnect(x) => x.span,
         D::ConfigSpec(x) => x.span,
         D::View(x) => x.span,
+        D::Psl(x) => x.span,
     }
 }
