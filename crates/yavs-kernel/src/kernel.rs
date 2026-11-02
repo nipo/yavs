@@ -3056,9 +3056,9 @@ impl SimControl {
             return;
         }
         let info = &self.drivers[d as usize];
-        let w = &mut slot_mut(&mut self.slots[info.owner.0 as usize])
-            .st
-            .waveforms[info.local as usize];
+        let st = &mut slot_mut(&mut self.slots[info.owner.0 as usize]).st;
+        st.waved = true;
+        let w = &mut st.waveforms[info.local as usize];
         if !w.idle() || !w.phantom.is_empty() {
             return;
         }

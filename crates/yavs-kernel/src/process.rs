@@ -946,6 +946,10 @@ pub(crate) struct ProcState {
     pub same: [u8; SAME_DRIVERS],
     /// Assignments that took the general path of `assign` (`Stats::general_assigns`).
     pub general: u64,
+    /// Some waveform of this process was ever given a transaction or a skipped assignment
+    /// (`schedule`, `phantom_of`, the kernel's clock skip); never cleared. While false every
+    /// waveform is idle with no phantom, and the direct paths leave out that test.
+    pub waved: bool,
 }
 
 /// Drivers of a process with a skip-test state (`ProcState::same`); later ones always ask it.
@@ -1055,6 +1059,37 @@ fn code_planes(c: u8) -> [u64; 4] {
 }
 
 impl ProcState {
+    /// A transaction of driver `d` at `at` for the kernel's queue: the process is no longer quiet.
+    #[inline(always)]
+    fn schedule(&mut self, at: Time, d: DriverId) {
+        self.waved = true;
+        self.scheduled.push((at, d));
+    }
+
+    /// Driver `local` holds skipped assignments of this run (`Waveform::phantom`).
+    #[inline(always)]
+    fn phantom_of(&mut self, local: u32) {
+        self.waved = true;
+        self.phantoms.push(local);
+    }
+
+    /// Whether waveform `local` is idle with no phantom; `waved` false says so with no load.
+    #[inline(always)]
+    fn calm(&self, local: usize) -> bool {
+        if !self.waved {
+            debug_assert!(
+                self.waveforms
+                    .get(local)
+                    .is_none_or(|w| w.idle() && w.phantom.is_empty()),
+                "stale ProcState::waved"
+            );
+            return true;
+        }
+        self.waveforms
+            .get(local)
+            .is_some_and(|w| w.idle() && w.phantom.is_empty())
+    }
+
     /// Whether to ask the skip test of an assignment to direct driver `local`: not while its
     /// tests keep missing (`SAME_MISSES`). The test's answer goes to `same_seen`.
     #[inline(always)]
@@ -1095,6 +1130,14 @@ impl ProcState {
             "ACT_ASSIGNED missing"
         );
         debug_assert!(!self.again || self.sens.is_empty(), "again with sens");
+        debug_assert!(
+            self.waved
+                || self
+                    .waveforms
+                    .iter()
+                    .all(|w| w.idle() && w.phantom.is_empty()),
+            "stale ProcState::waved"
+        );
     }
 
     /// End of a run: whether skipped assignments are left, which the kernel must replace by an
@@ -1612,9 +1655,10 @@ impl Ctx<'_> {
                     range: r,
                     value: Some(value),
                 });
+                self.st.waved = true;
                 self.st.waveforms[local].schedule(r, None, &mut t);
                 self.st.act |= ACT_ASSIGNED;
-                self.st.scheduled.push((now, d));
+                self.st.schedule(now, d);
             }
             return;
         }
@@ -1648,9 +1692,10 @@ impl Ctx<'_> {
                 value: Some(value),
             });
             // Transport: a transaction at `now` replaces the earlier ones at `now`.
+            self.st.waved = true;
             self.st.waveforms[local].schedule(r, None, &mut t);
             self.st.act |= ACT_ASSIGNED;
-            self.st.scheduled.push((now, d));
+            self.st.schedule(now, d);
         }
     }
 
@@ -1751,12 +1796,11 @@ impl Ctx<'_> {
             }
             && self.unchanged(sig, d, r, (*v).into())
         {
-            let w = &mut self.st.waveforms[local];
-            if w.phantom.is_empty() {
+            if self.st.waveforms[local].phantom.is_empty() {
                 self.st.act |= ACT_ASSIGNED;
-                self.st.phantoms.push(local as u32);
+                self.st.phantom_of(local as u32);
             }
-            w.phantom.push(r);
+            self.st.waveforms[local].phantom.push(r);
             return Ok(());
         }
         // Zero delay, nothing pending or skipped on the driver: nothing to preempt, so the
@@ -1778,13 +1822,14 @@ impl Ctx<'_> {
             }
             .map_err(|m| self.error(ErrorKind::InvalidAssign(m)))?;
             let now = self.sh.now;
+            self.st.waved = true;
             self.st.waveforms[local].pending.push(Txn {
                 time: now,
                 range: r,
                 value: Some(buf),
             });
             self.st.act |= ACT_ASSIGNED;
-            self.st.scheduled.push((now, d));
+            self.st.schedule(now, d);
             return Ok(());
         }
         let mut new = TxnList::new();
@@ -1887,7 +1932,7 @@ impl Ctx<'_> {
                 code,
             });
             self.st.act |= ACT_ASSIGNED;
-            self.st.scheduled.push((at, d));
+            self.st.schedule(at, d);
             return true;
         }
         if info.direct {
@@ -1945,7 +1990,7 @@ impl Ctx<'_> {
         } {
             w.phantom.push(r);
             self.st.act |= ACT_ASSIGNED;
-            self.st.phantoms.push(info.local);
+            self.st.phantom_of(info.local);
             return true;
         }
         let now = self.sh.now;
@@ -1955,7 +2000,7 @@ impl Ctx<'_> {
             code,
         });
         self.st.act |= ACT_ASSIGNED;
-        self.st.scheduled.push((now, d));
+        self.st.schedule(now, d);
         true
     }
 
@@ -1983,8 +2028,7 @@ impl Ctx<'_> {
         {
             return false;
         }
-        let w = &self.st.waveforms[info.local as usize];
-        if !w.idle() || !w.phantom.is_empty() || self.has_entries(info, 2) {
+        if !self.st.calm(info.local as usize) || self.has_entries(info, 2) {
             return false;
         }
         if !self.has_entries(info, 1)
@@ -2045,7 +2089,7 @@ impl Ctx<'_> {
         if same {
             self.st.waveforms[info.local as usize].phantom.push(r);
             self.st.act |= ACT_ASSIGNED;
-            self.st.phantoms.push(info.local);
+            self.st.phantom_of(info.local);
         }
         same
     }
@@ -2357,7 +2401,7 @@ impl Ctx<'_> {
             let w = &mut self.st.waveforms[local];
             w.phantom.push(r);
             self.st.act |= ACT_ASSIGNED;
-            self.st.phantoms.push(local as u32);
+            self.st.phantom_of(local as u32);
             return true;
         }
         let val = pack8(bytes);
@@ -2368,7 +2412,7 @@ impl Ctx<'_> {
             val,
         });
         self.st.act |= ACT_ASSIGNED;
-        self.st.scheduled.push((at, d));
+        self.st.schedule(at, d);
         true
     }
 
@@ -2425,7 +2469,7 @@ impl Ctx<'_> {
                 planes,
             });
             self.st.act |= ACT_ASSIGNED;
-            self.st.scheduled.push((at, d));
+            self.st.schedule(at, d);
             return true;
         }
         if info.direct {
@@ -2476,7 +2520,7 @@ impl Ctx<'_> {
         {
             w.phantom.push(r);
             self.st.act |= ACT_ASSIGNED;
-            self.st.phantoms.push(info.local);
+            self.st.phantom_of(info.local);
             return true;
         }
         let now = self.sh.now;
@@ -2487,7 +2531,7 @@ impl Ctx<'_> {
             planes,
         });
         self.st.act |= ACT_ASSIGNED;
-        self.st.scheduled.push((now, d));
+        self.st.schedule(now, d);
         true
     }
 
@@ -2584,7 +2628,7 @@ impl Ctx<'_> {
             code,
         });
         self.st.act |= ACT_ASSIGNED;
-        self.st.scheduled.push((at, d));
+        self.st.schedule(at, d);
         true
     }
 
@@ -2716,9 +2760,10 @@ impl Ctx<'_> {
                 range: r,
                 value,
             });
+            self.st.waved = true;
             self.st.waveforms[local].schedule(r, Some(time), &mut t);
             self.st.act |= ACT_ASSIGNED;
-            self.st.scheduled.push((time, d));
+            self.st.schedule(time, d);
         }
         Ok(())
     }
@@ -2821,6 +2866,7 @@ impl Ctx<'_> {
         let local = self.own(d)?.local as usize;
         self.st.act |= ACT_ASSIGNED;
         self.st.scheduled.extend(new.iter().map(|t| (t.time, d)));
+        self.st.waved = true;
         self.st.waveforms[local].schedule(r, reject_from, new);
         Ok(())
     }

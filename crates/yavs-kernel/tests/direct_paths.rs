@@ -1387,3 +1387,93 @@ fn direct_drives_match_the_general_path() {
         }
     }
 }
+
+/// A process whose direct drivers mostly get zero-delay same-value assignments, then a delayed one
+/// of its own, and an observer's `Hook::assign` (a VHPI foreign driver) on another of its drivers
+/// at the last known delta: the quiet summary (`ProcState::waved`) must turn off before any of
+/// those leaves a waveform busy. Debug builds assert it at every run (`check_flags`); the values,
+/// deltas and `'driving_value` must equal a run that skips nothing, at 1 and 4 threads.
+fn waved_drivers(skip: bool, threads: usize) -> Vec<String> {
+    struct Late(DriverId, bool);
+    impl Observer for Late {
+        fn phase(&mut self, h: &mut Hook<'_>, phase: Phase) {
+            if phase == Phase::LastKnownDelta && h.now() >= ns(6) && !self.1 {
+                self.1 = true;
+                let one = "1".parse::<LogicVec>().unwrap();
+                h.assign(self.0, None, &[(ns(1), &one)], DelayMode::Transport)
+                    .unwrap();
+            }
+        }
+    }
+    let mut b = Builder::new();
+    let lv = |s: &str| s.parse::<LogicVec>().unwrap();
+    let (a, v) = (
+        b.signal("a", SignalType::logic(1), &lv("0")),
+        b.signal("v", SignalType::logic(1), &lv("0")),
+    );
+    let (da, dv) = (b.driver(a), b.driver(v));
+    let mut n = 0u32;
+    b.process(
+        "p",
+        NONE,
+        &[da, dv],
+        p(move |c| {
+            n += 1;
+            // The compiled code's and the interpreter's entry (`assign_code_now`), else the API.
+            let now = |c: &mut Ctx<'_>, d: DriverId, code: u8| -> Result<(), SimError> {
+                if !c.assign_code_now(d, Range::new(0, 1), code) {
+                    c.assign_code(d, None, Time::ZERO, code, DelayMode::INERTIAL)?;
+                }
+                Ok(())
+            };
+            now(c, da, ZERO)?;
+            let held = c.logic(v)?.get(0) as u8;
+            now(c, dv, held)?;
+            // Pending at the next run, whose zero-delay `0` must preempt it (a skip there would
+            // let it mature); at run 7 one that matures before the next run.
+            if n == 4 {
+                c.assign_code(da, None, ns(2), ONE, DelayMode::INERTIAL)?;
+            }
+            if n == 7 {
+                c.assign_code(da, None, ns(1), ONE, DelayMode::INERTIAL)?;
+            }
+            c.report(
+                Severity::Note,
+                format!(
+                    "a={} v={} drv a={} v={}",
+                    c.logic(a)?,
+                    c.logic(v)?,
+                    c.driving_value(da)?,
+                    c.driving_value(dv)?
+                ),
+            );
+            c.wait_for(ns(if n == 7 { 2 } else { 1 }))
+        }),
+    );
+    let (mut sim, trace) = build(
+        b,
+        Config {
+            skip_unchanged: skip,
+            threads,
+            ..Config::default()
+        },
+    );
+    sim.subscribe(Box::new(Late(dv, false)));
+    sim.run_until(ns(20)).unwrap();
+    trace.take()
+}
+
+#[test]
+fn drivers_that_become_busy_keep_values_and_deltas() {
+    let plain = waved_drivers(false, 1);
+    // Only the second delayed `1` matures.
+    assert_eq!(
+        plain.iter().filter(|l| l.contains("a[0..1]=\"1\"")).count(),
+        1,
+        "{plain:?}"
+    );
+    assert!(plain.iter().any(|l| l.contains("v=1")), "{plain:?}");
+    for threads in [1, 4] {
+        assert_eq!(waved_drivers(true, threads), plain, "threads {threads}");
+    }
+}
