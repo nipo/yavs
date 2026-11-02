@@ -12838,6 +12838,10 @@ The kernel decisions (cap, take only for a batch worth pooling, `TOKEN_IDLE`) st
 - **Deferred constant used in its package body before the full declaration** (#861): an analysis error, `E1226` (option a), kept. No run-time error and no per-revision split.
 - **Null range choice next to other associations in an aggregate** (#860): `E1326` in 1993 files only (option a); 2008 and 2019 accept it. See `docs/design/lrm-checks.md`.
 
+## Attributes of an unconstrained deferred constant (#1076; maintainer, 2026-11-02)
+
+- Accepted in the package body, in a subprogram and after the full declaration, with the bounds of the full declaration's value; `E1226` in the package declaration and in a body declaration before the full declaration. See `docs/design/lrm-checks.md` L175.
+
 ## One release with every artifact (release.yml, tools/release/bump.py, RELEASING.md, #903, maintainer, 2026-10-30)
 
 - **One release per version holds everything** (maintainer, 2026-10-30): the simulator archives (Linux x86_64, Linux aarch64,

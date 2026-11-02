@@ -1,0 +1,7 @@
+exit	0
+diag	note	0	0	:deferred_unconstrained_attrs:_p0	f=4607
+diag	note	0	0	:deferred_unconstrained_attrs:_p0	g=5 8 4
+diag	note	0	0	:deferred_unconstrained_attrs:_p0	h=4
+diag	note	0	0	:deferred_unconstrained_attrs:_p0	q=1101
+diag	note	0	0	:deferred_unconstrained_attrs:_p0	later=23
+diag	note	0	0	:deferred_unconstrained_attrs:_p0	U'length=4 5

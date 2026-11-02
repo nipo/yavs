@@ -472,7 +472,8 @@ impl Db {
     /// in an initial value of its package (`Db::package_initial`, #809), or in the body of its
     /// package or a subprogram there, which may run before the value exists (#846). Interface
     /// defaults are exempt, and so is the prefix of an attribute of its subtype alone when the
-    /// deferred declaration constrains that subtype fully (`k'range`, L175, #1072).
+    /// deferred declaration constrains that subtype fully (`k'range`, L175, #1072); with an
+    /// unconstrained subtype, in a subprogram of the body (#1076).
     pub(crate) fn check_deferred_read(&mut self, scope: ScopeId, d: DeclId, span: Span) {
         let DeclKind::Object(o) = &self.decls[d].kind else {
             return;
@@ -489,13 +490,18 @@ impl Db {
             self.report_deferred_early(d, span);
             return;
         }
+        let mut in_subprogram = false;
         let mut cur = Some(scope);
         while let Some(sc) = cur {
+            in_subprogram |= self.scopes[sc].kind == crate::scope::ScopeKind::Subprogram;
             if self.body_package(sc) == Some(pkg) {
                 let full = self.scopes[sc].names.get(&self.decls[d].name.key()).is_some_and(|v| {
                     v.iter().any(|&f| matches!(&self.decls[f].kind, DeclKind::Object(o) if o.class == ObjClass::Constant))
                 });
-                if !full {
+                // An unconstrained one takes its bounds from the full declaration's value: ok
+                // in a subprogram, which normally runs after the body is elaborated (#1076).
+                let late = in_subprogram && self.subtype_prefix.contains(&span);
+                if !full && !late {
                     self.report_deferred_early(d, span);
                 }
                 return;
@@ -521,7 +527,7 @@ impl Db {
             )
             .with_primary(span, "its value is not known here")
             .with_secondary(self.decls[d].name_span(), "deferred here")
-            .with_note("LRM 6.4.2.2: before the end of the full declaration, a deferred constant may appear only in the default expression of a local generic, port or formal parameter, or as the prefix of an attribute of its subtype (such as `'range` or `'length`) when its declaration constrains that subtype fully"),
+            .with_note("LRM 6.4.2.2: before the end of the full declaration, a deferred constant may appear only in the default expression of a local generic, port or formal parameter, or as the prefix of an attribute of its subtype (such as `'range` or `'length`) when its declaration constrains that subtype fully, or, in its package body, in a subprogram or after the full declaration"),
         );
     }
 
