@@ -25,6 +25,7 @@ for an agent that tunes performance or measures a performance change on real tes
 | `programs.py` | Builds the program images of the CPU workloads (section 7) from pinned sources into `<cache>/images`; also a command: `programs.py PROGRAM key=value` |
 | `window.py` | Short-window A/B on Cranelift against sim1: minutes, not hours (section 8) |
 | `perfguard.py` | Guard run by hand: window instructions of a commit against a stored reference, pass or fail per test (section 8a) |
+| `replay.py`, `replay/record.c` | Process replay: one hot process's instance alone, driven by its recorded inputs per delta (a VHPI recorder plugin), in seconds; `--check` validates it against the full run (section 8b) |
 | `cpu/` | The harness's own VHDL and C for the CPU workloads: the Microwatt console, JTAG-socket and testbench replacements and its CoreMark port (source id `@harness` in `tests.toml`) |
 
 `YAVS_BENCH_TIERFLAGS` (extra arguments after `--tier=` of every yavs run cell, e.g. `--tier-heat=1,0,0` to compile every function at its first call) is not part of the cell name: set it for both binaries of a `--compare`.
@@ -231,3 +232,47 @@ python3 -I tools/realbench/perfguard.py --self-test
 - A build stays in `~/.cache/yavs-window-build-<hash>` and the checkout in `~/.cache/yavs-perfguard/tree` (detached worktree of this repository, moved to each commit): delete both when done. The libraries of the tests are cached in `~/.cache/yavs-perfguard/rb` (`YAVS_REALBENCH_CACHE` overrides).
 - A reference taken with other windows than `WINDOWS` in `window.py` is refused as stale. Refresh it after a change of a window, of `tests.toml` or of a pinned source, and after an intended speed-up (a move down past the bound also fails).
 - Time: about 6 minutes for the nine windows after the build (362 s and 457 s measured), one timing core of 9 to 15 held for the run.
+
+## 8b. Process replay (`replay.py`, #1066): one hot process alone, in seconds
+
+A whole Microwatt or GRLIB run takes minutes, and a window still runs the rest of the design. `replay.py` records, per delta cycle, every change of the `in` ports of the instance that holds a hot process in a real run, then runs that entity alone with the same generics from a generated testbench that drives the recording. The entity's processes run their own code on the inputs and wakes they had, without the rest of the design. No change to yavs: the recorder is a VHPI plugin (`replay/record.c`, built with `cc` against the header in `crates/yavs-vhpi/include`), loaded only in the recording run; the replay runs without plugins, because `--vhpi` changes what is compiled (variables stay in slots, no edge triggers, ports not collapsed).
+
+```sh
+export YAVS_REALBENCH_CACHE=~/.cache/yavs-<tag>/rb       # private cache (lib may be a link to the shared one)
+python3 -I tools/realbench/replay.py --list               # targets: test, instance, process, end of the recording
+python3 -I tools/realbench/replay.py BIN execute1_1       # the one command: replay to the target's end on a free timing core, perf stat counters
+python3 -I tools/realbench/replay.py BIN execute1_1 --check   # plus the validation against the full run (minutes)
+python3 -I tools/realbench/replay.py BIN --self-test      # parser and generator; with BIN also a recording and a replay of a small design
+```
+
+- Targets (`TARGETS`): Microwatt `execute1_1` (instance `execute1_0`) and `decode2_1` (`decode2_0`) to 800 us, GRLIB `dctrl` (`mmu_dcache`) and `iu` (`iu3`, process `comb`) to 700 us. A new target is one line: test, instance path as `--profile` prints it, process label, end time.
+- The recording is made once per test entry, instance, end time and recorder source, by `--tier=interp` (values do not depend on the build), and kept in `<cache>/replay/stim-<key>.txt` (8 to 32 MB): the replay of another binary reuses it. The testbench is generated per run from the recorder's description (`.ports`: port leaves with their kind and base type, generic values, the entity's source file) and the entity's own header (context clause, generic and port declarations, read from its source).
+- Stimulus format: `T <fs> fs` starts a time step, `D <n>` the delta cycle, `<leaf> <value>` one change (std_ulogic and its vectors as characters, other enumerations as positions, integers as numbers). Real, time, physical and access port elements, and `inout` ports, stop the recording or the generation with their name.
+- `--check` validates, on the same binary and tier: (1) the statement and branch hit counts of every process of the instance (coverage, interpreter) in the full run and in the replay, item by item; (2) the process's own compiled functions (`f<id>_<label>`, `n<id>_<label>`, perf map `YAVS_CLIFT_PERFMAP`) under `perf record` with fixed periods: instructions, cycles, L1i and branch misses per 1000 instructions, code size; (3) the `--profile` seconds of the process and the share of them in compiled code (the compile decision). The full run is warmed twice like the replay. Other entities' processes with the same label (GRLIB has many `comb`) are told apart by code size.
+- Recording runs are untimed on CCD0; the replay runs pinned on a free core of 9 to 15 (it waits up to an hour for one, `tools/claim core` locks). `perf record` takes a small buffer (`-m`, falling back to 4 pages): the locked-page budget for perf buffers is per user and other agents' runs use it up. The scratch world is deleted unless `--keep`.
+
+### Validation, 2026-11-02, e34ddb69, Cranelift bench build, `--tier=auto`, load 14 to 19 (other agents' windows on CCD1)
+
+| target (entity) | recording: run, size | replay wall (perf stat) | full run to the end, under perf record | coverage hit counts equal | compiled share of the process, full : replay | process seconds (profile), full : replay |
+|---|---|---:|---:|---|---|---|
+| `execute1_1` (`execute1`, Microwatt, to 800 us) | 178 s, 32 MB | 11.6 s | 85.6 s | 2091 of 2126, the rest off by 1 | 0 : 0 percent | 3.44 : 1.55 (0.45) |
+| `decode2_1` (`decode2`, to 800 us) | 186 s, 42 MB | 6.1 s | 121.8 s | 638 of 638 | 1 : 1 percent | 4.46 : 1.33 (0.30) |
+| `dctrl` (`mmu_dcache`, GRLIB, to 700 us) | 192 s, 8 MB | 5.1 s | 67.8 s | 1302 of 1712, the rest off by at most 4 | **94 : 5 percent** | 6.44 : 1.94 (0.30) |
+| `iu` (`iu3`, process `comb`, to 700 us) | 111 s, 5 MB | 4.6 s | 69.3 s | 3858 of 4704, the rest off by at most 3 | **59 : 2 percent** | 18.30 : 3.75 (0.21) |
+
+Where the cycles go, warm auto, percent of the run (seam = gather and scatter of record signals):
+
+| run | seam | signal update | kernel cycle | generated code | interpreter |
+|---|---:|---:|---:|---:|---:|
+| `execute1` replay : Microwatt to 800 us | 7.1 : 12.2 | 10.0 : 10.2 | 11.8 : 16.4 | 7.2 : 12.9 | 55.2 : 42.8 |
+| `decode2` replay : Microwatt to 800 us | 8.2 : 12.8 | 5.6 : 10.4 | 9.1 : 15.6 | 9.0 : 13.4 | 54.6 : 42.3 |
+| `mmu_dcache` replay : GRLIB to 700 us | 6.1 : 8.7 | 8.3 : 6.2 | 9.1 : 16.3 | 11.1 : 26.8 | 55.0 : 31.3 |
+| `iu3` replay : GRLIB to 700 us | 4.8 : 9.0 | 5.0 : 6.4 | 4.1 : 16.1 | 0.5 : 26.0 | 77.0 : 31.7 |
+
+What holds and what does not:
+
+- **Wakes and paths hold.** Every statement and branch of the instance runs as often in the replay as in the full run (`decode2_1` exactly; the others off by at most 4 in a few hundred items: the time-0 start, below). So the replay runs the same activations on the same values through the same IR: a change to how one process is interpreted or compiled moves the replay's instructions the way it moves that process inside the full run.
+- **Per-symbol counters of the process could not be compared** (#1074): code linked from the compilation cache has no perf map entry, and under `--tier=clift` the entries carry no name, so a warm run, the one that is measured, has no symbol for its generated code. The check reads symbols from cold auto runs, where only functions compiled during the run have one; none of the four targets is compiled there. `execute1_dp` (target `execute1_dp`, same recording) is compiled at auto and is the symbol check that exists.
+- **The compile decision of `auto` holds on Microwatt, not on GRLIB.** `auto` compiles a function once the interpreter has spent enough wall time in it, and drops a compile that has not finished when the run ends: the replays run a few seconds, so GRLIB's large `comb` of `iu3` and `dctrl` stay interpreted (2 and 5 percent compiled against 59 and 94). Compare compiled code on GRLIB with `--tier clift` in both runs, or read the compiled-share column before trusting an auto result.
+- **Cycles do not transfer.** The process takes 0.21 to 0.45 of its in-design time in the replay for the same activations: in the full design the rest of the run evicts its code and data and trains the branch predictor on other code (whole-run IPC about 1.4 on these designs against 2.4 to 3.3 for the replays). A replay shows what a change does to the process's own work (instructions, what is compiled, how much of the run is seam), not the cache, TLB and branch effects of the whole design, not the kernel cost of the other processes, and not compile-thread timing (#673). Decisions on cycles, on L1i, iTLB and branch misses, on layout and on anything cross-process still need `window.py --rounds` or whole runs.
+- The replay is the whole entity instance (every process and sub-instance of it), not one process; its inputs arrive one delta later than in the full run, in the same order, and at time 0 the ports start at their declared defaults for one delta (the off-by-one counts). A port whose actual only gets transactions without events, a port of mode `inout`, and real, time, physical or access elements are not replayed. The testbench's own driver (the textio reading of the stimulus) is about a fifth of a replay's time and is in its whole-run counters.
