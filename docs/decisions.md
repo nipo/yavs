@@ -13673,3 +13673,10 @@ Written by Claude. Two commits, each revertible alone; whether they reach `main`
 **The same refusal depends on the compile set.** A callee outside the set the policy is compiling together (`Generator::tree`) is called through `Mem::ntab`, so its caller gets a native variant that never reaches it (it is published only when its native callees exist, `ready`); a callee inside the set that is refused makes its caller refused. An eager compile of a caller alone and the auto compile of its tree can differ for that reason.
 
 **Not done.** A native variant built earlier with an indirect call to a function found refused later stays unpublished (`ready`); its callers go through the interpreter as before. A short refused function (under `rt::SHORT`, no loop) is still left interpreted by the shortness rule, which no longer has the waiver for functions called natively.
+
+## Shape facts in process copies (`opt/slots.rs`, `opt/decl.rs`, 2026-11-02)
+
+**Decision.** Constant-size temporaries are frame bytes in a process with nested subprograms too: a nested subprogram reaches the frame through `AddrOf Up` below the lowered frame, so the bytes past it are as private as in any other process. And what the declarative part leaves in the frame counts as written by the body only when a block the body can reach writes it (`Opt::reached_from`), not by block number: the lowering splices the declarations of a process's signal copies in behind the first blocks of the body, and those stores kept the descriptors of the copies from being facts.
+
+**Why.** A generic-sized vector drive in GRLIB's SDRAM model kept a wave object in temporary memory only because the model's process has nested procedures; the length checks of `iu3`'s signal copies stayed run-time checks only because of the block number of their declaration.
+
