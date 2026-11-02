@@ -247,8 +247,8 @@
        12
       ],
       "generics": [
-       57,
-       57
+       58,
+       58
       ],
       "hierarchy": [
        90,
@@ -348,8 +348,8 @@
        12
       ],
       "generics": [
-       57,
-       57
+       58,
+       58
       ],
       "hierarchy": [
        90,
@@ -449,8 +449,8 @@
        12
       ],
       "generics": [
-       57,
-       57
+       58,
+       58
       ],
       "hierarchy": [
        90,
@@ -525,17 +525,17 @@
    }
   },
   "discrepancies": {
-   "cases": 245,
+   "cases": 251,
    "output_tail": "",
    "yavs_matches_expected": true
   },
   "external": {
    "sim1": {
     "classes": {
-     "analysis": 21,
+     "analysis": 23,
      "elab": 7,
      "oracle": 25,
-     "pass": 1016,
+     "pass": 1014,
      "skip": 403,
      "timeout": 1
     },
@@ -614,9 +614,9 @@
   }
  },
  "generated": {
-  "commit": "b6b3edb038-dirty",
+  "commit": "4fc9a5c9f9",
   "commit_date": "2026-11-02",
-  "version": "0.12.1"
+  "version": "0.13.0"
  },
  "local": {
   "records": {
@@ -1533,11 +1533,32 @@
     "yavs": "OK"
    },
    {
-    "case": "anonymous-operator",
-    "decided": "agent (L94, #308)",
-    "kind": "LRM ambiguity",
-    "lrm": "6.5.2, 9.2 (2019)",
+    "case": "alloc-attribute-type-mark",
+    "decided": "user, 2026-11-02 (rule 47 review, L178)",
+    "kind": "LRM clear",
+    "lrm": "9.3.5, 9.3.7, 16.2.2, 1.3.2 g)",
     "yavs": "OK"
+   },
+   {
+    "case": "alloc-attribute-type-mark-part",
+    "decided": "user, 2026-11-02 (rule 47 review, L178)",
+    "kind": "LRM clear",
+    "lrm": "9.3.5, 9.3.7, 16.2.2, 1.3.2 g)",
+    "yavs": "OK"
+   },
+   {
+    "case": "anonymous-operator",
+    "decided": "user, 2026-11-02 (rule 47 review; was agent, L94, #308)",
+    "kind": "LRM ambiguity",
+    "lrm": "6.5.2, 6.5.7.1, 9.2 (2019)",
+    "yavs": "REJECT"
+   },
+   {
+    "case": "base-as-type-mark",
+    "decided": "user, 2026-11-02 (rule 47 review, L177)",
+    "kind": "LRM clear",
+    "lrm": "16.2.2",
+    "yavs": "REJECT"
    },
    {
     "case": "psl-sere-alternative",
@@ -1569,7 +1590,7 @@
    },
    {
     "case": "psl-named-sequence",
-    "decided": "agent, 2026-10-23 (#445)",
+    "decided": "agent, 2026-10-23 (#445); user, 2026-11-02",
     "kind": "LRM clear",
     "lrm": "PSL (IEEE 1850) 6.5",
     "yavs": "OK"
@@ -1653,10 +1674,10 @@
    },
    {
     "case": "v93-explicit-implicit-homograph",
-    "decided": "agent, 2026-10-23 (#629, L134)",
-    "kind": "LRM ambiguity",
-    "lrm": "1993 10.4",
-    "yavs": "OK"
+    "decided": "user, 2026-11-02 (rule 47 review; was agent, 2026-10-23, #629, L134)",
+    "kind": "LRM clear",
+    "lrm": "1993 10.4, 10.5",
+    "yavs": "REJECT (accepted with `--relaxed`, `W1302`)"
    },
    {
     "case": "v93-out-port-read",
@@ -1954,9 +1975,9 @@
    },
    {
     "case": "named-return-in-return-and-formal",
-    "decided": "agent (L62, #33)",
-    "kind": "LRM ambiguity",
-    "lrm": "4.2.1 (2019)",
+    "decided": "user, 2026-10-19 and 2026-11-02 (L62, #33)",
+    "kind": "LRM clear",
+    "lrm": "4.2.1 (2019), LCS-2016-072b",
     "yavs": "OK"
    },
    {
@@ -2136,7 +2157,7 @@
    },
    {
     "case": "protected-header-generic-map",
-    "decided": "agent (#445, L169)",
+    "decided": "agent (#445, L169); kept by the user, 2026-11-02 (rule 47 review)",
     "kind": "LRM clear",
     "lrm": "5.6.2, LCS-2016-034 (2019)",
     "yavs": "OK"
@@ -2325,7 +2346,7 @@
    },
    {
     "case": "reanalysed-unit-dependents",
-    "decided": "agent, 2026-11-01 (#1053, L174)",
+    "decided": "agent, 2026-11-01 (#1053, L174); user, 2026-11-02",
     "kind": "LRM ambiguity (obsolete units must be analysed again; who does it is not said)",
     "lrm": "13.5",
     "yavs": "OK"
@@ -2389,6 +2410,27 @@
    {
     "case": "deferred-constant-unconstrained-called-early",
     "decided": "maintainer, 2026-11-02 (#1076, L175)",
+    "kind": "LRM clear (erroneous: the full declaration is not elaborated yet)",
+    "lrm": "6.4.2.2, 14.4.2",
+    "yavs": "REJECT (run-time error `E3009`)"
+   },
+   {
+    "case": "deferred-constant-unconstrained-instance-in-process",
+    "decided": "agent, 2026-11-02 (#1079)",
+    "kind": "LRM clear (a package instantiation is a declarative item of a process, a subprogram and a block)",
+    "lrm": "4.8, 6.4.2.2",
+    "yavs": "OK"
+   },
+   {
+    "case": "deferred-constant-unconstrained-instance-nested",
+    "decided": "agent, 2026-11-02 (#1079)",
+    "kind": "LRM clear",
+    "lrm": "4.8, 6.4.2.2",
+    "yavs": "OK"
+   },
+   {
+    "case": "deferred-constant-unconstrained-instance-called-early",
+    "decided": "agent, 2026-11-02 (#1079)",
     "kind": "LRM clear (erroneous: the full declaration is not elaborated yet)",
     "lrm": "6.4.2.2, 14.4.2",
     "yavs": "REJECT (run-time error `E3009`)"
@@ -2703,10 +2745,10 @@
    },
    {
     "case": "aggregate-target-nested-array",
-    "decided": "agent, 2026-10-19 (#350, L98, 2 of 4 accept)",
-    "kind": "LRM ambiguity",
+    "decided": "user, 2026-11-02 (rule 47 review; was agent, 2026-10-19, #350, L98)",
+    "kind": "LRM clear",
     "lrm": "10.5.2.1, 10.6.2.1",
-    "yavs": "OK"
+    "yavs": "REJECT"
    },
    {
     "case": "aggregate-target-matrix",

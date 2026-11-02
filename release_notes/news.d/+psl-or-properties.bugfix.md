@@ -1,1 +1,0 @@
-A PSL `or` whose operands are both properties, `(a -> next b) or (a -> next[2] c)`, is now error `E0013`: it is outside the simple subset of PSL that VHDL-2008 incorporates, which needs a Boolean on the left of `or`. An `or` with a Boolean operand still runs.

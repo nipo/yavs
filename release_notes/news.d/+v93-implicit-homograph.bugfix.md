@@ -1,1 +1,0 @@
-In a VHDL-1993 file, an operation declared implicitly by one package and explicitly by another, both made visible by use clauses (`=` on `std_logic_vector` with `std_logic_1164` and `std_logic_unsigned`), is now ambiguous (`E1302`), as VHDL-1993 requires. `--relaxed` uses the explicit one with warning `W1302`, as VHDL-2008 does.
