@@ -10788,3 +10788,7 @@ Composite variables of processes of a fixed size, without handles, live in the f
 ## Fused byte drive in the interpreter (#1046, 2026-11-02, branch `perf/inv-bytedrive`)
 
 `Op::ByteDrive`: an integer, enumeration or real assignment from a private frame waveform is one op in the interpreter, zero delay through the kernel's direct-driver skip test (`docs/decisions.md` "A fused byte drive in the interpreter"). Per statement, unchanged and changed integer: 580 and 1005 instructions to 334 and 759 interpreted; unchanged in compiled code (262 and 655), which does not use the op. Windows, instructions geomean: 0.980 interpreted, 0.990 at `--tier=auto`.
+
+## Facts of a process copy
+
+A process copy is made per instance data and per the forms of the signals its body names (`yavs_ir::InstFacts`); Cranelift's code of a copy reads and drives those signals without testing their form. Only for a tier that compiles copies, so not under `--tier=clift`. `docs/decisions.md` "Facts of a process copy".
