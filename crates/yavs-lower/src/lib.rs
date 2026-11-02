@@ -437,6 +437,10 @@ pub(crate) struct Cx {
     /// declared in a method act on its object (LRM 5.6.2, #221).
     pub method_self: HashMap<ScopeId, (TypeId, u8, u32)>,
     pub objs: HashMap<DeclId, Obj>,
+    /// The flag (package index, offset in package data) that its full declaration sets once
+    /// elaborated, by full declaration, for each deferred constant whose subtype is not fully
+    /// constrained: its bounds come from that value (`Fx::deferred_bounds_check`, #1076).
+    pub deferred_done: HashMap<DeclId, (u32, u32)>,
     /// The frame slot of each non-static range of a type or subtype declared in a sequential
     /// region, by its left bound: evaluated once at the declaration (LRM 14.4.2.1, #612).
     pub decl_ranges: HashMap<yavs_sem::ExprId, (Space, u32)>,
@@ -770,6 +774,7 @@ impl<'a> Lowerer<'a> {
                 proc_drivers: HashMap::default(),
                 method_self: HashMap::default(),
                 objs: HashMap::default(),
+                deferred_done: HashMap::default(),
                 const_dope: HashMap::default(),
                 rec_tables: HashMap::default(),
                 refl: HashMap::default(),

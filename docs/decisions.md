@@ -12841,6 +12841,7 @@ The kernel decisions (cap, take only for a batch worth pooling, `TOKEN_IDLE`) st
 ## Attributes of an unconstrained deferred constant (#1076; maintainer, 2026-11-02)
 
 - Accepted in the package body, in a subprogram and after the full declaration, with the bounds of the full declaration's value; `E1226` in the package declaration and in a body declaration before the full declaration. See `docs/design/lrm-checks.md` L175.
+- A subprogram of the body above the full declaration that reads such bounds, called while an earlier declaration of the body is elaborated, is erroneous (LRM 14.4.2) and a run-time error (`E3009`, maintainer, 2026-11-02). Each such deferred constant has a flag in package data that its full declaration sets when elaborated; a bounds read (`Fx::dope_of`) checks it only when its source position is above the full declaration in the same file, so subprograms below the full declaration, other units and every other read pay nothing. The check is plain IR (a load, a branch, `Unreachable` with the message), so every tier has it.
 
 ## One release with every artifact (release.yml, tools/release/bump.py, RELEASING.md, #903, maintainer, 2026-10-30)
 

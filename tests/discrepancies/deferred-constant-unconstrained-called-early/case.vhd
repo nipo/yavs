@@ -1,6 +1,6 @@
 -- LRM 6.4.2.2: a function of a package body reads 'length of a deferred constant of an
 -- unconstrained array subtype and is called, to initialise a constant, before the full
--- declaration is elaborated: the bounds do not exist yet.
+-- declaration is elaborated: the bounds do not exist yet (erroneous, a run-time error in yavs).
 package p is
   type vec_t is array (natural range <>) of integer;
   constant U : vec_t;

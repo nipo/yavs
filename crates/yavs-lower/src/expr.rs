@@ -739,6 +739,39 @@ impl<'a> Fx<'a, '_> {
         deferred_completion(self.db, d)
     }
 
+    /// The bounds of deferred constant `d` come from its full declaration's value (`d`'s subtype
+    /// is not fully constrained): read before that declaration is elaborated, which a call made
+    /// while elaborating an earlier declaration of the body does from a subprogram declared above
+    /// the full declaration, they do not exist (LRM 14.4.2, erroneous). The read at `span` checks
+    /// the flag the full declaration sets (`Cx::deferred_done`); a read below the full
+    /// declaration, or from another file than its body, needs no check (#1076).
+    fn deferred_bounds_check(&mut self, d: DeclId, span: Span) {
+        let Some(c) = self.deferred_completion(d) else {
+            return;
+        };
+        let Some(&(p, off)) = self.cx.deferred_done.get(&c) else {
+            return;
+        };
+        let full = self.db.decls[c].span;
+        if full.file != span.file || span.start >= full.start {
+            return;
+        }
+        let a = self.addr(Space::Pkg(p), off);
+        let done = self.load(a, Width::B8, RegTy::I64);
+        let (ok, bad) = (self.block(), self.block());
+        self.branch(done, ok, bad);
+        self.at(bad);
+        let what = self.msg(
+            &format!(
+                "the bounds of deferred constant `{0}` are read, but its full declaration has not been elaborated yet (LRM 14.4.2); move the declaration that makes the call below the full declaration of `{0}`",
+                self.db.decls[d].name
+            ),
+            Dir::To,
+        );
+        self.term(Inst::Unreachable { what });
+        self.at(ok);
+    }
+
     fn obj_rt(&self, d: DeclId) -> RegTy {
         match ty::obj_subtype(self.db, d) {
             Some(st) => self.rt_of(self.db.base(st)),
@@ -2186,6 +2219,7 @@ impl<'a> Fx<'a, '_> {
             return Ok(self.comp_walk(d, &steps, self.db.exprs[e].span)?.2.desc);
         }
         if let ExprKind::Obj(d) = self.db.exprs[e].kind {
+            self.deferred_bounds_check(d, self.db.exprs[e].span);
             match self.cx.objs.get(&d).copied() {
                 Some(Obj::Array { space, off }) => {
                     let a = self.addr(space, off);

@@ -2438,6 +2438,10 @@ pub(crate) fn package(
     for &s in &scopes {
         for d in db.decls_with_instances(s) {
             ok &= fx.pkg_object(d, index, &mut size, &mut signals).is_ok();
+            if let Some(&(p, off)) = fx.cx.deferred_done.get(&d) {
+                let (a, one) = (fx.addr(Space::Pkg(p), off), fx.int(1));
+                fx.store(a, one, Width::B8);
+            }
         }
     }
     // The aliases of the external names its subprograms use (#255).
@@ -2507,7 +2511,18 @@ impl Fx<'_, '_> {
             ObjClass::Constant => {
                 // A deferred constant without its body, and locally static constants (read
                 // through their folded value), have no slot.
-                let Some(def) = o.default else { return Ok(()) };
+                let Some(def) = o.default else {
+                    // Its bounds come from the full declaration's value: that declaration sets
+                    // a flag once elaborated (`Fx::deferred_bounds_check`, #1076).
+                    if o.role == yavs_sem::decl::ObjRole::Deferred
+                        && db.constrainedness(o.subtype) != yavs_sem::types::Constrainedness::Full
+                        && let Some(c) = self.deferred_completion(d)
+                    {
+                        let off = alloc(8);
+                        self.cx.deferred_done.insert(c, (p, off));
+                    }
+                    return Ok(());
+                };
                 if db.value(def).is_some() {
                     return Ok(());
                 }
