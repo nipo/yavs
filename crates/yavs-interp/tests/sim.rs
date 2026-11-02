@@ -2731,3 +2731,124 @@ fn an_offset_past_a_variable_in_the_frame_is_an_error() {
     let e = format!("{:?}", r.err());
     assert!(e.contains("outside"), "{e}");
 }
+
+/// A copy between two variables in the frame takes the direct path, and one that leaves its
+/// object stops: the variable behind it is not written (#1059).
+#[test]
+fn a_copy_past_a_variable_in_the_frame_is_an_error() {
+    let mut pb = ProgramBuilder::new();
+    let int = integer(&mut pb);
+    let rec = pb.ty(Ty::Record {
+        fields: vec![
+            Field {
+                name: "a".into(),
+                ty: int,
+                desc: None,
+            },
+            Field {
+                name: "b".into(),
+                ty: int,
+                desc: None,
+            },
+        ],
+    });
+    let what = pb.check_msg("variable", Dir::To);
+    let p = pb.declare("p", FuncKind::Process, None);
+    {
+        let mut fb = pb.define(p);
+        stmt(&mut fb, StmtKind::VarAssign);
+        let k = fb.local("k", int, 8, 8);
+        let mut slots = Vec::new();
+        for name in ["v", "w"] {
+            let s = fb.local(name, rec, 24, 8);
+            slots.push(s);
+            let size = fb.int(16);
+            let init = fb.reg(RegTy::Ptr);
+            fb.emit(Inst::Alloc { dst: init, size });
+            let h = fb.reg(RegTy::Handle);
+            fb.emit(Inst::New {
+                dst: h,
+                ty: rec,
+                init,
+                size,
+                shared: false,
+            });
+            let d = fb.reg(RegTy::Ptr);
+            fb.emit(Inst::Deref {
+                dst: d,
+                handle: h,
+                what,
+            });
+            let (a0, a8, a16) = (
+                fb.addr(AddrSpace::Frame, s),
+                fb.addr(AddrSpace::Frame, s + 8),
+                fb.addr(AddrSpace::Frame, s + 16),
+            );
+            for (addr, src) in [(a0, d), (a8, d), (a16, h)] {
+                fb.emit(Inst::Store {
+                    addr,
+                    src,
+                    w: Width::B8,
+                });
+            }
+        }
+        let bytes = fb.int(16);
+        store(&mut fb, AddrSpace::Frame, k, bytes, Width::B8);
+        let body = fb.block();
+        fb.emit(Inst::Br { to: body });
+        fb.at(body);
+        fb.body(body);
+        wait_for(&mut fb, NS);
+        stmt(&mut fb, StmtKind::VarAssign);
+        let word = |fb: &mut FuncBuilder<'_>, s: u32| {
+            let a = fb.addr(AddrSpace::Frame, s);
+            let r = fb.reg(RegTy::Ptr);
+            fb.emit(Inst::Load {
+                dst: r,
+                addr: a,
+                w: Width::B8,
+            });
+            r
+        };
+        let (dv, dw) = (word(&mut fb, slots[0]), word(&mut fb, slots[1]));
+        // All of `w` into `v`, at a length nothing knows before it runs.
+        let n = load(&mut fb, AddrSpace::Frame, k, Width::B8);
+        fb.emit(Inst::Copy {
+            dst: dv,
+            src: dw,
+            bytes: n,
+        });
+        report(&mut fb, "inside");
+        // Half a variable further on, past the end of `v`.
+        stmt(&mut fb, StmtKind::VarAssign);
+        let pos = fb.int(8);
+        let at = fb.reg(RegTy::Ptr);
+        fb.emit(Inst::Index {
+            dst: at,
+            base: dv,
+            pos,
+            stride: 1,
+        });
+        fb.emit(Inst::Copy {
+            dst: at,
+            src: dw,
+            bytes: n,
+        });
+        report(&mut fb, "written");
+        wait_forever(&mut fb);
+        fb.finish();
+    }
+    let mut d = Design::new(pb);
+    d.procs = vec![ProcSpec {
+        name: "p",
+        func: p,
+        drives: vec![],
+    }];
+    let f = d.prog.func(p).unwrap();
+    assert!(f.objects_end() > 0, "both variables are in the frame");
+    let (lines, r) = d.run(Time::ns(10));
+    assert!(has(&lines, "inside"), "{lines:?}");
+    assert!(!has(&lines, "written"), "{lines:?}");
+    let e = format!("{:?}", r.err());
+    assert!(e.contains("outside"), "{e}");
+}

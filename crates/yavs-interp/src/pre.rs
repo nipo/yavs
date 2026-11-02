@@ -993,6 +993,12 @@ pub(crate) enum Op {
         src: u32,
         bytes: u32,
     },
+    /// `Inst::Copy` of two known frame addresses, usually two composite variables of a process.
+    CopyFrames {
+        dst: u32,
+        src: u32,
+        bytes: u32,
+    },
     CopyConst {
         dst: u32,
         c: u32,
@@ -5537,6 +5543,16 @@ impl Code {
         }
         if budget {
             count_back_edges(prog, f, &entry, &mut ops, &mut at);
+        }
+        // After the fusions, which know `Op::Copy` (a copy and its drive stay one op).
+        let frame = |r: u32| matches!(known.get(r as usize), Some(Known::Frame(_)));
+        for o in &mut ops {
+            if let Op::Copy { dst, src, bytes } = *o
+                && frame(dst)
+                && frame(src)
+            {
+                *o = Op::CopyFrames { dst, src, bytes };
+            }
         }
         let first = entry.first().copied().unwrap_or(NONE);
         // Debug aid next to the IR dump of `YAVS_DUMPIR`.

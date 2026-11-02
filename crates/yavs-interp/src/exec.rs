@@ -427,6 +427,16 @@ fn object_of(root: &[u8], i: usize) -> Option<&[u8]> {
     root.get(s..s + n)
 }
 
+/// Where a frame index lies in the root frame's slots: start and length, if it does.
+#[inline(always)]
+fn root_range(root: &[u8], i: u32) -> Option<(usize, usize)> {
+    if i == 0 {
+        Some((0, root.len()))
+    } else {
+        yavs_ir::frame_object_range(i).filter(|&(s, n)| s + n <= root.len())
+    }
+}
+
 #[inline(always)]
 fn slots_of_mut<'a>(
     frames: &[Frame],
@@ -2833,13 +2843,14 @@ impl Machine {
             whole as usize * 32,
             (whole as usize + usize::from(sh != 0)) * 32,
         );
-        if !self.copy_pair(dm, sm, dn, sn, |out, src| {
+        let merge = |out: &mut [u8], src: &[u8]| {
             if sh == 0 {
                 out.copy_from_slice(&src[..dn]);
             } else {
                 shift_merge(out, src, sh);
             }
-        }) {
+        };
+        if !self.root_pair(dm, sm, dn, sn, merge) && !self.copy_pair(dm, sm, dn, sn, merge) {
             return Ok(false);
         }
         if head > 0 {
@@ -4142,6 +4153,48 @@ impl Machine {
             return false;
         }
         self.copy_pair(d, s, n, n, |out, src| out.copy_from_slice(src))
+    }
+
+    /// `f(dst, src)` on the `dn` bytes at `d` and the `sn` bytes at `s` when they are two separate
+    /// parts of the root frame, its slots or its composite variables. `false`: `f` was not called.
+    /// (Not in `copy_fast`: that is inlined in the dispatch, and a few more lines there cost every
+    /// op.)
+    #[inline(always)]
+    fn root_pair(
+        &mut self,
+        d: u64,
+        s: u64,
+        dn: usize,
+        sn: usize,
+        f: impl FnOnce(&mut [u8], &[u8]),
+    ) -> bool {
+        let (dsp, didx, doff) = split(d);
+        let (ssp, sidx, soff) = split(s);
+        // (A native window may hold the root frame's slots elsewhere: `rd` and `put` find them.)
+        if dsp != FRAME || ssp != FRAME || self.nwin.is_some() {
+            return false;
+        }
+        let root = &mut self.root[..];
+        let (Some((ds, dl)), Some((ss, sl))) = (root_range(root, didx), root_range(root, sidx))
+        else {
+            return false;
+        };
+        let (doff, soff) = (doff as usize, soff as usize);
+        let (a, b) = (ds + doff, ss + soff);
+        if doff.saturating_add(dn) > dl
+            || soff.saturating_add(sn) > sl
+            || (a < b + sn && b < a + dn)
+        {
+            return false;
+        }
+        let (lo, hi) = root.split_at_mut(a.max(b));
+        let (out, src) = if a < b {
+            (&mut lo[a..a + dn], &hi[..sn])
+        } else {
+            (&mut hi[..dn], &lo[b..b + sn])
+        };
+        f(out, src);
+        true
     }
 
     /// `f(dst, src)` on the `dn` bytes at `d` and the `sn` bytes at `s` when they are in two
@@ -7732,6 +7785,10 @@ impl Machine {
                     ));
                     k += 1;
                 }
+                Op::CopyFrames { dst, src, bytes } => {
+                    t!(self.op_copy_frames(dst, src, bytes));
+                    k += 1;
+                }
                 Op::CopyConst { dst, c } => {
                     t!(self.op_copy_const(prog, dst, c));
                     k += 1;
@@ -8253,6 +8310,20 @@ impl Machine {
         let v = self.rd(self.regs[a as usize], n)? == self.rd(self.regs[b as usize], n)?;
         self.regs[dst as usize] = v.into();
         Ok(())
+    }
+
+    /// `Op::CopyFrames`, out of line.
+    #[inline(never)]
+    fn op_copy_frames(&mut self, dst: u32, src: u32, bytes: u32) -> R<()> {
+        let (d, s, n) = (
+            self.regs[dst as usize],
+            self.regs[src as usize],
+            self.regs[bytes as usize],
+        );
+        if self.root_pair(d, s, n as usize, n as usize, |o, s| o.copy_from_slice(s)) {
+            return Ok(());
+        }
+        self.copy_mem(d, s, n)
     }
 
     /// `Op::CopyConst`, out of line.

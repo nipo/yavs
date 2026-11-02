@@ -960,6 +960,13 @@ impl Key {
             _ => None,
         }
     }
+
+    /// Is this fact about memory a register points to, usually what one statement built? A fact
+    /// about a known address, a variable, may be used all through a block.
+    fn is_temporary(&self) -> bool {
+        self.region()
+            .is_some_and(|(a, ..)| !matches!(a, Opn::A(..)))
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -980,22 +987,49 @@ const MEM_CAP: usize = 64;
 struct Table {
     pure: FxMap<Key, Val>,
     mem: FxMap<Key, Val>,
+    /// The memory facts about temporaries in the order they were learned (with some gone from
+    /// `mem` by now).
+    age: std::collections::VecDeque<Key>,
     log: Vec<(Key, Option<Val>)>,
 }
 
 impl Table {
     fn put(&mut self, k: Key, v: Val) {
         let old = if k.region().is_some() {
-            // ponytail: a full table stops learning memory facts; every store and statement
-            // scans it, so it stays small. An index by address if this loses much.
-            if self.mem.len() >= MEM_CAP {
-                return;
+            // Every store and statement scans the table, so it stays small. A full one makes room
+            // from `age` (#1059); with only variables left it stops learning.
+            if !self.mem.contains_key(&k) {
+                if !self.make_room() {
+                    return;
+                }
+                if k.is_temporary() {
+                    self.age.push_back(k.clone());
+                }
             }
             self.mem.insert(k.clone(), v)
         } else {
             self.pure.insert(k.clone(), v)
         };
         self.log.push((k, old));
+    }
+
+    fn make_room(&mut self) -> bool {
+        while self.mem.len() >= MEM_CAP {
+            let Some(k) = self.age.pop_front() else {
+                // What a rollback brought back has no place in the order.
+                let mem = &self.mem;
+                self.age
+                    .extend(mem.keys().filter(|k| k.is_temporary()).cloned());
+                if self.age.is_empty() {
+                    return false;
+                }
+                continue;
+            };
+            if let Some(v) = self.mem.remove(&k) {
+                self.log.push((k, Some(v)));
+            }
+        }
+        true
     }
 
     fn get(&self, k: &Key) -> Option<Val> {
@@ -1044,6 +1078,61 @@ impl Table {
                     m.remove(&k);
                 }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod table_tests {
+    use super::*;
+
+    fn key(i: i64) -> Key {
+        Key::Load(Opn::K(i), Width::B8)
+    }
+
+    fn var(i: u32) -> Key {
+        Key::Load(Opn::A(AddrSpace::Frame, i * 8), Width::B8)
+    }
+
+    /// A table full of facts about variables keeps them, as a later statement may read them.
+    #[test]
+    fn a_table_of_variables_stops_learning() {
+        let mut t = Table::default();
+        let cap = MEM_CAP as u32;
+        for i in 0..=cap {
+            t.put(var(i), Val::K(1));
+        }
+        assert!(t.get(&var(0)).is_some() && t.get(&var(cap)).is_none());
+        // A fact about a variable pushes out one about a temporary.
+        let mut t = Table::default();
+        t.put(key(0), Val::K(1));
+        for i in 0..cap {
+            t.put(var(i), Val::K(1));
+        }
+        assert!(t.get(&key(0)).is_none() && t.get(&var(cap - 1)).is_some());
+    }
+
+    /// A full table forgets its oldest fact about a temporary, and leaving a block gives back what
+    /// it forgot.
+    #[test]
+    fn a_full_table_keeps_learning() {
+        let mut t = Table::default();
+        let cap = MEM_CAP as i64;
+        for i in 0..cap {
+            t.put(key(i), Val::K(i));
+        }
+        assert!(key(0).is_temporary() && !var(0).is_temporary());
+        let mark = t.log.len();
+        t.put(key(cap), Val::K(cap));
+        assert!(t.get(&key(0)).is_none() && t.get(&key(cap)).is_some());
+        assert_eq!(t.mem.len(), MEM_CAP);
+        t.rollback(mark);
+        assert!(t.get(&key(0)).is_some() && t.get(&key(cap)).is_none());
+        // What came back has no place in the order, and the table still takes new facts.
+        for i in cap..cap * 3 {
+            t.put(key(i), Val::K(i));
+            assert!(t.get(&key(i)).is_some());
+            assert!(t.mem.len() <= MEM_CAP);
         }
     }
 }
