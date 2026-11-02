@@ -10800,3 +10800,5 @@ Constructs yavs accepted although the LRM text or every voting reference rejects
   such an operator is no candidate in operator notation, so predefined operators of other types are used as if it were not visible.
 - PSL `or` of two properties (L133): `E0013` (simple subset, PSL 4.4.4); `(next b) or a` stays accepted. Corpus `psl/psl_temporal_ext` checks the
   Boolean form instead.
+- A unit declared twice in one file (L174): warning `W0005` at the second copy (LRM 13.1, 13.5); the run still uses the last copy. Two files
+  are unchanged.

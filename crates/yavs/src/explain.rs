@@ -78,6 +78,15 @@ const EXPLAIN: &[(&str, &str)] = &[
         "W0004",
         "A design unit contains PSL (IEEE 1850) outside the subset yavs runs. yavs runs clocked `assert`, `assume` and `cover` over booleans, sequences and the weak temporal operators, with declared sequences and properties, written as VHDL-2008 statements or in `-- psl` comments (the user guide's PSL page lists the subset). Everything else (strong operators, `forall`, unclocked directives, vunit/vmode/vprop units) is skipped, so that property is not checked and the simulation is otherwise unaffected. Directives for formal tools only (`restrict`, `restrict_guarantee`, `assume_guarantee`, `fairness`, `strong fairness`, and any directive that calls `nondet` or `nondet_vector`) are skipped without this warning. One warning is given per design unit. Use `-Werror=W0004` to make it an error, or `-Wno-W0004` to silence it.",
     ),
+    (
+        "W0005",
+        "A design file declares the same library unit twice (two architectures `a` of entity \
+         `e`, or two primary units of one name). The units of a file are analysed in textual \
+         order (LRM 13.1), so the second replaces the first in the library, and a unit between \
+         the two that names it was analysed against the first and is then obsolete (LRM 13.5). \
+         yavs runs the second copy and analyses the units between against it. Remove or rename \
+         one of the two.",
+    ),
     // yavs command line
     (
         "E0100",

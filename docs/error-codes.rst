@@ -38,6 +38,8 @@ Syntax, command line, waveforms, coverage, debugger, plugins (E0 and W0)
      - A VHDL-2019 construct was used in a VHDL-2008 file.
    * - _`W0004`
      - A design unit contains PSL (IEEE 1850) outside the subset yavs runs.
+   * - _`W0005`
+     - A design file declares the same library unit twice (two architectures ``a`` of entity ``e``, or two primary units of one name).
    * - _`E0006`
      - Constructs are nested deeper than the parser's limit.
    * - _`E0007`

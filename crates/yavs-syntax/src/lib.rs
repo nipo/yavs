@@ -108,6 +108,8 @@ pub mod codes {
     pub const NO_SEPARATOR: &str = "W0003";
     /// PSL declarations and directives outside the subset in a design unit, skipped.
     pub const PSL_SKIPPED: &str = "W0004";
+    /// A library unit declared twice in one design file.
+    pub const UNIT_TWICE: &str = "W0005";
 }
 
 #[derive(Clone, Debug, Default)]

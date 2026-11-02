@@ -1588,3 +1588,15 @@ fn psl_or_of_two_properties_is_outside_the_simple_subset() {
         assert!(psl_warnings(&src).is_empty(), "{ok}");
     }
 }
+
+#[test]
+fn a_unit_declared_twice_in_a_file_warns() {
+    // LRM 13.1: textual order, so the second copy replaces the first. Primary units share one
+    // name space; architectures are per entity.
+    let src = "entity e is end;\narchitecture a of e is begin end;\narchitecture a of f is begin end;\n\
+               package e is end;\narchitecture a of e is begin end;\npackage body q is end;";
+    let p = parse_std(src, Std::Vhdl2008);
+    let codes: Vec<&str> = p.diags.iter().map(|d| d.code).collect();
+    assert_eq!(codes, ["W0005", "W0005"], "{:?}", p.diags);
+    assert!(p.design.is_some());
+}

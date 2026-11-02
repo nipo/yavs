@@ -1,0 +1,23 @@
+warning[W0005]: architecture `a` of `e` is declared a second time in this file; the units of a file are analysed in textual order (LRM 13.1), so this one replaces the first
+ --> unit_twice.vhd:9:14
+  |
+3 | architecture a of e is begin end architecture;
+  |              - first declared here
+...
+9 | architecture a of e is begin end architecture;
+  |              ^ declared again here
+  |
+  = note: a unit between the two that names it was analysed against the first one, so it is obsolete once the second is analysed (LRM 13.5)
+  = help: remove or rename one of the two units
+
+warning[W0005]: package body `p` is declared a second time in this file; the units of a file are analysed in textual order (LRM 13.1), so this one replaces the first
+  --> unit_twice.vhd:13:14
+   |
+12 | package body p is end package body;
+   |              - first declared here
+13 | package body p is end package body;
+   |              ^ declared again here
+   |
+   = note: a unit between the two that names it was analysed against the first one, so it is obsolete once the second is analysed (LRM 13.5)
+   = help: remove or rename one of the two units
+

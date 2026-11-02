@@ -3,6 +3,8 @@
 use super::{PResult, Parser, Recover};
 use crate::ast::*;
 use crate::token::{Kw, Tok};
+use crate::{Symbol, codes};
+use yavs_diag::Diagnostic;
 
 fn is_unit_start(t: Tok) -> bool {
     matches!(
@@ -33,7 +35,59 @@ impl Parser<'_> {
                 self.bump();
             }
         }
+        self.warn_units_twice(&units);
         DesignFile { units }
+    }
+
+    /// `W0005` at a library unit declared again later in the same file: the units of a file
+    /// are analysed in textual order (13.1), so the later one replaces the first, and a unit
+    /// between them that names it is then obsolete (13.5; user, 2026-11-02).
+    fn warn_units_twice(&mut self, units: &[DesignUnit]) {
+        // Primary units share one name space (12.3, 13.5); secondary ones are per primary.
+        let key = |u: &LibraryUnit| -> (u8, Symbol, Option<Symbol>, Ident, &'static str) {
+            match u {
+                LibraryUnit::Entity(e) => (0, e.name.key, None, e.name, "entity"),
+                LibraryUnit::Package(p) => (0, p.name.key, None, p.name, "package"),
+                LibraryUnit::PackageInstance(p) => (0, p.name.key, None, p.name, "package"),
+                LibraryUnit::Configuration(c) => (0, c.name.key, None, c.name, "configuration"),
+                LibraryUnit::Context(c) => (0, c.name.key, None, c.name, "context"),
+                LibraryUnit::Architecture(a) => {
+                    (1, a.entity.key, Some(a.name.key), a.name, "architecture")
+                }
+                LibraryUnit::PackageBody(b) => (2, b.name.key, None, b.name, "package body"),
+            }
+        };
+        let keys: Vec<_> = units.iter().map(|u| key(&u.unit)).collect();
+        for (i, k) in keys.iter().enumerate() {
+            let Some(first) = keys[..i]
+                .iter()
+                .find(|f| (f.0, f.1, f.2) == (k.0, k.1, k.2))
+            else {
+                continue;
+            };
+            let what = match &units[i].unit {
+                LibraryUnit::Architecture(a) => {
+                    format!("architecture `{}` of `{}`", k.3.text, a.entity.text)
+                }
+                _ => format!("{} `{}`", k.4, k.3.text),
+            };
+            self.diags.push(
+                Diagnostic::warning(
+                    codes::UNIT_TWICE,
+                    format!(
+                        "{what} is declared a second time in this file; the units of a file are \
+                         analysed in textual order (LRM 13.1), so this one replaces the first"
+                    ),
+                )
+                .with_primary(k.3.span, "declared again here")
+                .with_secondary(first.3.span, "first declared here")
+                .with_note(
+                    "a unit between the two that names it was analysed against the first one, so \
+                     it is obsolete once the second is analysed (LRM 13.5)",
+                )
+                .with_help("remove or rename one of the two units"),
+            );
+        }
     }
 
     /// Skip to the start of the next design unit: a unit keyword after `;`.
