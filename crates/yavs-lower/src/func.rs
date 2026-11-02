@@ -657,6 +657,20 @@ impl<'a, 'b> Fx<'a, 'b> {
             ) {
                 continue;
             }
+            // The flag of a deferred constant whose bounds come from its full declaration,
+            // set right after it (#1079).
+            if o.role == ObjRole::Deferred
+                && o.class == ObjClass::Constant
+                && self.db.constrainedness(o.subtype) != yavs_sem::types::Constrainedness::Full
+                && let Some(c) = crate::expr::deferred_completion(self.db, d)
+            {
+                let off = self.fb.slot(8, 8);
+                let sp = Space::Frame(self.depth);
+                let (a, zero) = (self.addr(sp, off), self.int(0));
+                self.store(a, zero, Width::B8);
+                self.cx.deferred_done.insert(c, (sp, off));
+                continue;
+            }
             let r = match o.class {
                 ObjClass::Variable | ObjClass::Constant => self.local(d),
                 ObjClass::SharedVariable => Err(self.cx.unsupported(decl.span, "shared variables")),
@@ -667,6 +681,10 @@ impl<'a, 'b> Fx<'a, 'b> {
                 ObjClass::Signal => Err(self.cx.ice(decl.span, "signal in a sequential region")),
             };
             ok &= r.is_ok();
+            if let Some(&(sp, off)) = self.cx.deferred_done.get(&d) {
+                let (a, one) = (self.addr(sp, off), self.int(1));
+                self.store(a, one, Width::B8);
+            }
         }
         if ok { Ok(()) } else { Err(Failed) }
     }
@@ -933,15 +951,6 @@ impl<'a, 'b> Fx<'a, 'b> {
                     }
                     (Some(dope), None) => dope,
                     (None, Some((_, vd))) => vd,
-                    (None, None) if o.role == ObjRole::Deferred => {
-                        return Err(self.cx.unsupported(
-                            decl.span,
-                            &format!(
-                                "deferred constant `{}` of a package instance declared in a process",
-                                decl.name
-                            ),
-                        ));
-                    }
                     (None, None) => {
                         return Err(self
                             .cx
@@ -1804,6 +1813,44 @@ pub(crate) fn region_var_init(
 
 fn inst_object(db: &Db, pb: &mut ProgramBuilder, cx: &mut Cx, ir: &mut UnitIr, d: DeclId) -> R<()> {
     let decl = &db.decls[d];
+    // The bounds of a deferred constant of an instance in a region come from its full
+    // declaration: a flag cell the elaborator sets right after that value (#1079).
+    if let DeclKind::Object(o) = &decl.kind
+        && o.role == ObjRole::Deferred
+        && o.class == ObjClass::Constant
+        && db.constrainedness(o.subtype) != yavs_sem::types::Constrainedness::Full
+        && let Some(c) = crate::expr::deferred_completion(db, d)
+    {
+        let off = cx.inst_alloc(8);
+        cx.deferred_done.insert(c, (Space::Inst, off));
+        cx.deferred_inst_flag.insert(c, (d, off));
+    }
+    inst_object_of(db, pb, cx, ir, d)?;
+    if let Some((spec, off)) = cx.deferred_inst_flag.remove(&d) {
+        let name = format!("{}'done", db.decls[spec].name);
+        let init = thunk(db, pb, cx, &name, decl.span, |fx| Ok(fx.int(1)))?;
+        ir.consts.push(InstConst {
+            decl: spec,
+            name,
+            off,
+            w: Width::B8,
+            comp: None,
+            init,
+            scope: elab_region(db, decl.scope),
+            instance_level: cx.arch_scopes.contains(&decl.scope),
+        });
+    }
+    Ok(())
+}
+
+fn inst_object_of(
+    db: &Db,
+    pb: &mut ProgramBuilder,
+    cx: &mut Cx,
+    ir: &mut UnitIr,
+    d: DeclId,
+) -> R<()> {
+    let decl = &db.decls[d];
     if let DeclKind::Type(_) | DeclKind::Subtype(_) = decl.kind {
         for left in db
             .declared_ranges(d)
@@ -2447,8 +2494,8 @@ pub(crate) fn package(
     for &s in &scopes {
         for d in db.decls_with_instances(s) {
             ok &= fx.pkg_object(d, index, &mut size, &mut signals).is_ok();
-            if let Some(&(p, off)) = fx.cx.deferred_done.get(&d) {
-                let (a, one) = (fx.addr(Space::Pkg(p), off), fx.int(1));
+            if let Some(&(sp, off)) = fx.cx.deferred_done.get(&d) {
+                let (a, one) = (fx.addr(sp, off), fx.int(1));
                 fx.store(a, one, Width::B8);
             }
         }
@@ -2528,7 +2575,7 @@ impl Fx<'_, '_> {
                         && let Some(c) = self.deferred_completion(d)
                     {
                         let off = alloc(8);
-                        self.cx.deferred_done.insert(c, (p, off));
+                        self.cx.deferred_done.insert(c, (Space::Pkg(p), off));
                     }
                     return Ok(());
                 };

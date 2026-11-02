@@ -739,6 +739,21 @@ impl<'a> Fx<'a, '_> {
         deferred_completion(self.db, d)
     }
 
+    /// The full declaration of deferred constant `d` whose subtype is not fully constrained,
+    /// else `d` (#1079).
+    fn deferred_full(&self, d: DeclId) -> DeclId {
+        match &self.db.decls[d].kind {
+            DeclKind::Object(o)
+                if o.role == yavs_sem::decl::ObjRole::Deferred
+                    && self.db.constrainedness(o.subtype)
+                        != yavs_sem::types::Constrainedness::Full =>
+            {
+                self.deferred_completion(d).unwrap_or(d)
+            }
+            _ => d,
+        }
+    }
+
     /// The bounds of deferred constant `d` come from its full declaration's value (`d`'s subtype
     /// is not fully constrained): read before that declaration is elaborated, which a call made
     /// while elaborating an earlier declaration of the body does from a subprogram declared above
@@ -758,26 +773,25 @@ impl<'a> Fx<'a, '_> {
         let Some(c) = self.deferred_completion(d) else {
             return Ok(());
         };
-        // Only the initialisation of a package sets the flag; the bounds of the constant of an
-        // instance declared in an architecture, block or process are not available (#1079).
-        let Some(&(p, off)) = self.cx.deferred_done.get(&c) else {
-            // A package with no run-time object has no initialisation to run early.
-            if !self.in_region_instance(d) {
-                return Ok(());
+        let Some(&(space, off)) = self.cx.deferred_done.get(&c) else {
+            // A package with no run-time object has no initialisation to run early; an
+            // instance in a region always has its flag (`inst_object`, `Fx::decls`).
+            if self.in_region_instance(d) {
+                return Err(self
+                    .cx
+                    .ice(span, "deferred constant of an instance without a flag"));
             }
-            return Err(self.cx.unsupported(
-                span,
-                &format!(
-                    "the bounds of deferred constant `{}` of a package instance declared in an architecture, block or process",
-                    db.decls[d].name
-                ),
-            ));
+            return Ok(());
         };
         let full = self.db.decls[c].span;
         if full.file != span.file || span.start >= full.start {
             return Ok(());
         }
-        let a = self.addr(Space::Pkg(p), off);
+        // An elaboration-time call has no instance data (`capture_free`).
+        if self.cx.capture_free && matches!(space, Space::Inst) {
+            return Ok(());
+        }
+        let a = self.addr(space, off);
         let done = self.load(a, Width::B8, RegTy::I64);
         let (ok, bad) = (self.block(), self.block());
         self.branch(done, ok, bad);
@@ -2268,6 +2282,8 @@ impl<'a> Fx<'a, '_> {
         }
         if let ExprKind::Obj(d) = self.db.exprs[e].kind {
             self.deferred_bounds_check(d, self.db.exprs[e].span)?;
+            // The bounds of a deferred constant are those of its full declaration's value.
+            let d = self.deferred_full(d);
             match self.cx.objs.get(&d).copied() {
                 Some(Obj::Array { space, off }) => {
                     let a = self.addr(space, off);

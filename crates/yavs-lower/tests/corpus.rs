@@ -195,6 +195,7 @@ const PASS: &[&str] = &[
     "generics/attr_image_value",
     "generics/composite_eval",
     "generics/deferred_constant",
+    "generics/deferred_instance_bounds",
     "generics/elab_block_function",
     "generics/elab_calls",
     "generics/elab_values",

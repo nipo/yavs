@@ -255,21 +255,6 @@ end architecture;
     ),
 ];
 
-/// The same generic package instantiated where no package initialisation runs, in an
-/// architecture and in a process: not implemented (#1079), a clear error and no wrong bounds.
-const UNSUPPORTED: &[(&str, &str, &str)] = &[
-    (
-        "instance_in_architecture",
-        "  package ip is new work.gp generic map (n => 4);\nbegin\n  process begin report \"RES \" & integer'image(ip.U'length); wait; end process;",
-        "the bounds of deferred constant `U` of a package instance declared in an architecture, block or process is not implemented yet",
-    ),
-    (
-        "instance_in_process",
-        "begin\n  process\n    package ip is new work.gp generic map (n => 4);\n  begin report \"RES \" & integer'image(ip.x); wait; end process;",
-        "deferred constant `U` of a package instance declared in a process is not implemented yet",
-    ),
-];
-
 const GENERIC: &str = "package gp is
   generic (n : integer);
   type vec_t is array (natural range <>) of integer;
@@ -285,13 +270,94 @@ package body gp is
 end package body;
 ";
 
+/// The same generic package with the early call (`@@` marks the read), `X1` above `U`.
+const GENERIC_EARLY: &str = "package gp is
+  generic (n : integer);
+  type vec_t is array (natural range <>) of integer;
+  constant U : vec_t;
+  function x return integer;
+end package;
+package body gp is
+  function mk(m : integer) return vec_t is
+    variable r : vec_t(1 to m) := (others => 7);
+  begin return r; end;
+  function h return integer is begin return @@U'length; end;
+  constant X1 : integer := h;
+  constant U : vec_t := mk(n);
+  function x return integer is begin return X1; end;
+end package body;
+";
+
+/// (name, architecture): where the instance is declared. `W` is the early generic package,
+/// `V` the same one with the call below the full declaration (`GENERIC` gives `U'length`).
+const REGIONS: &[(&str, &str)] = &[
+    (
+        "architecture",
+        "  package ip is new work.W generic map (n => 4);\nbegin\n  process begin report \"RES \" & integer'image(EXPR); wait; end process;",
+    ),
+    (
+        "block",
+        "begin\n  b : block\n    package ip is new work.W generic map (n => 4);\n  begin\n    process begin report \"RES \" & integer'image(EXPR); wait; end process;\n  end block;",
+    ),
+    (
+        "generate",
+        "begin\n  g : for i in 4 to 4 generate\n    package ip is new work.W generic map (n => i);\n  begin\n    process begin report \"RES \" & integer'image(EXPR); wait; end process;\n  end generate;",
+    ),
+    (
+        "process",
+        "begin\n  process\n    package ip is new work.W generic map (n => 4);\n  begin report \"RES \" & integer'image(EXPR); wait; end process;",
+    ),
+    (
+        "function",
+        "  function f return integer is\n    package ip is new work.W generic map (n => 4);\n  begin return EXPR; end function;\nbegin\n  process begin report \"RES \" & integer'image(f); wait; end process;",
+    ),
+    (
+        "nested",
+        "  package outer is new work.GO generic map (n => 4);\nbegin\n  process begin report \"RES \" & integer'image(outer.y); wait; end process;",
+    ),
+    (
+        "nested_in_process",
+        "begin\n  process\n    package outer is new work.GO generic map (n => 4);\n  begin report \"RES \" & integer'image(outer.y); wait; end process;",
+    ),
+];
+
+/// A package that instantiates `W` in its body and reads the result: the instance inside an
+/// instance.
+const NESTED_PKG: &str = "package go is
+  generic (n : integer);
+  function y return integer;
+end package;
+package body go is
+  package inner is new work.W generic map (n => n);
+  function y return integer is begin return inner.U'length * 100 + inner.U'right * 10 + inner.U(inner.U'left); end function;
+end package body;
+";
+
+fn region_source(name: &str, early: bool, arch: &str) -> String {
+    let pkg = if early { GENERIC_EARLY } else { GENERIC };
+    let nested = NESTED_PKG.replace("W", "gp");
+    let expr = "ip.U'length * 100 + ip.U'right * 10 + ip.U(ip.U'left)";
+    let arch = arch
+        .replace("W", "gp")
+        .replace("GO", "go")
+        .replace("EXPR", expr);
+    format!(
+        "{pkg}{nested}entity t_{name} is end entity;\narchitecture a of t_{name} is\n{arch}\nend architecture;\n"
+    )
+}
+
 #[test]
 fn a_bounds_read_before_the_full_declaration_is_an_error_in_every_tier() {
     let tmp = tempdir("deferred_early");
     let cases = BAD
         .iter()
         .map(|(name, body)| (*name, source(name, body)))
-        .chain(BAD_UNITS.iter().map(|(name, src)| (*name, src.to_string())));
+        .chain(BAD_UNITS.iter().map(|(name, src)| (*name, src.to_string())))
+        .chain(
+            REGIONS
+                .iter()
+                .map(|(name, arch)| (*name, region_source(name, true, arch))),
+        );
     for (name, src) in cases {
         let at = src.find("@@").expect("marker");
         let line = src[..at].matches('\n').count() + 1;
@@ -299,7 +365,14 @@ fn a_bounds_read_before_the_full_declaration_is_an_error_in_every_tier() {
         for tier in tiers() {
             let o = yavs(&["run", &work, tier, "--threads=1", &format!("t_{name}")]);
             let e = String::from_utf8_lossy(&o.stderr);
-            assert_eq!(o.status.code(), Some(2), "{name} {tier}: {e}");
+            // Exit 1: the instance is elaborated by a process or a call, while the simulation
+            // runs; 2: while the design is elaborated.
+            let code = if matches!(name, "process" | "function" | "nested_in_process") {
+                1
+            } else {
+                2
+            };
+            assert_eq!(o.status.code(), Some(code), "{name} {tier}: {e}");
             for want in [
                 "error[E3009]: the bounds of deferred constant `U` are read",
                 "its full declaration has not been elaborated yet",
@@ -334,23 +407,68 @@ fn the_same_read_after_the_full_declaration_gives_the_bounds() {
     }
 }
 
+/// The instance declared in an architecture, block, generate, process or function (also inside
+/// another instance) gives the bounds and elements of the full declaration (#1079).
 #[test]
-fn a_package_instance_in_an_architecture_or_process_is_not_implemented() {
-    let tmp = tempdir("deferred_early_instance");
-    for (name, unit, want) in UNSUPPORTED {
-        let src = format!(
-            "{GENERIC}entity t_{name} is end entity;\narchitecture a of t_{name} is\n{unit}\nend architecture;\n"
-        );
+fn a_package_instance_in_a_region_reads_the_bounds_of_its_deferred_constant() {
+    let tmp = tempdir("deferred_early_regions");
+    for (name, arch) in REGIONS {
+        let name = &format!("{name}_ok");
+        let src = region_source(name, false, arch);
         let work = analyse(&tmp, name, &src);
         for tier in tiers() {
             let o = yavs(&["run", &work, tier, "--threads=1", &format!("t_{name}")]);
-            let e = String::from_utf8_lossy(&o.stderr);
-            assert_eq!(o.status.code(), Some(2), "{name} {tier}: {e}");
-            assert!(
-                e.contains(&format!("error[E2001]: {want}")),
-                "{name} {tier}: {e}"
+            let all = format!(
+                "{}{}",
+                String::from_utf8_lossy(&o.stdout),
+                String::from_utf8_lossy(&o.stderr)
             );
+            assert!(o.status.success(), "{name} {tier}: {all}");
+            assert!(all.contains("RES 447"), "{name} {tier}: {all}");
         }
+    }
+}
+
+/// The bounds are needed while the design is elaborated: a signal subtype, a generate range, a
+/// constant initialised by a function and a constant subtype (#1079).
+#[test]
+fn a_package_instance_in_an_architecture_gives_its_bounds_at_elaboration() {
+    let tmp = tempdir("deferred_early_elab");
+    let src = format!(
+        "{GENERIC}entity t_elab is end entity;
+architecture a of t_elab is
+  package ip is new work.gp generic map (n => 4);
+  signal s : bit_vector(1 to ip.U'length);
+  signal t : bit_vector(ip.U'range);
+  function f return integer is begin return ip.U'length * 10 + ip.U'right; end;
+  constant K : integer := f;
+  constant V : bit_vector(ip.U'range) := (others => '1');
+  constant W : integer := ip.U'length + ip.U(1);
+begin
+  g : for i in ip.U'range generate
+    process begin report \"GEN \" & integer'image(i); wait; end process;
+  end generate;
+  process begin
+    report \"RES \" & integer'image(s'length) & \" \" & integer'image(t'right) & \" \" & integer'image(K) & \" \" & integer'image(V'length) & \" \" & integer'image(W);
+    wait;
+  end process;
+end architecture;
+"
+    );
+    let work = analyse(&tmp, "elab", &src);
+    for tier in tiers() {
+        let o = yavs(&["run", &work, tier, "--threads=1", "t_elab"]);
+        let all = format!(
+            "{}{}",
+            String::from_utf8_lossy(&o.stdout),
+            String::from_utf8_lossy(&o.stderr)
+        );
+        assert!(o.status.success(), "{tier}: {all}");
+        assert!(all.contains("RES 4 4 44 4 11"), "{tier}: {all}");
+        assert!(
+            all.contains("GEN 1") && all.contains("GEN 4"),
+            "{tier}: {all}"
+        );
     }
 }
 

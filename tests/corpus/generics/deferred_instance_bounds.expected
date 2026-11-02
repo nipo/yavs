@@ -1,0 +1,4 @@
+exit	0
+diag	note	0	0	:deferred_instance_bounds:b:_p0	BLOCK 4 9
+diag	note	0	0	:deferred_instance_bounds:_p0	ARCH 4 4
+diag	note	0	0	:deferred_instance_bounds:_p0	BODY 431
