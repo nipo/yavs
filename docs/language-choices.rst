@@ -64,6 +64,10 @@ yavs, with what to do about each.
      - Warning ``W0005``: the second replaces the first, and a unit between them that names it
        runs with the second.
      - Remove or rename one of the two.
+   * - ``T'base`` as a type mark: ``integer'base'(5)``, ``new t'base'(...)``, ``x : t'base``
+     - Error ``E1201`` in a VHDL-1993 or VHDL-2008 file: the standard allows ``'base`` only as
+       the prefix of another attribute (``t'base'left``). A VHDL-2019 file still accepts it.
+     - Name the type directly, ``integer'(5)``.
    * - A static index out of range or a constant overflow in code that may be dead
      - Warning (``W1404``, ``W1401``); the check still runs if the code runs.
      - ``-Werror=W1404`` makes it an error.

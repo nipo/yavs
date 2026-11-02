@@ -1416,6 +1416,14 @@ impl Db {
                 {
                     return self.build_attr(scope, p, *attr, args, i, span);
                 }
+                // `t'base(x)`: 'BASE is no type mark (16.2.2).
+                if let ast::NameKind::Attribute { prefix: p, attr } = &prefix.kind
+                    && attr.key.as_str() == "base"
+                    && self.file_rev() != crate::LangRev::Vhdl2019
+                {
+                    self.base_as_type_mark(p, *attr, prefix.span);
+                    return self.poison.expr;
+                }
                 if let Some(st) = self.quiet_type_mark(scope, prefix) {
                     return self.build_conversion(scope, st, args, span);
                 }

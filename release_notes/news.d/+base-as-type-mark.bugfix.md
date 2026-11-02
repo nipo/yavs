@@ -1,0 +1,1 @@
+`T'base` used as a type mark, as in `integer'base'(5)`, `new word'base'("1010")`, `variable v : integer'base` or the conversion `integer'base(x)`, is now error `E1201` in a VHDL-1993 or VHDL-2008 file: the standard allows `'base` only as the prefix of another attribute, such as `integer'base'high`. Name the type directly instead, `integer'(5)`.

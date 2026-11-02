@@ -2050,6 +2050,11 @@ impl Db {
     ) -> Result<SubtypeId, Reported> {
         match &n.kind {
             ast::NameKind::Attribute { prefix, attr } => {
+                // 2019 stays open: LCS-2016-018 (enumerated type attributes) was not checked, and
+                // the community 2019 suite uses `t'base` as a subtype (L177).
+                if attr.key.as_str() == "base" && self.file_rev() != crate::LangRev::Vhdl2019 {
+                    return Err(self.base_as_type_mark(prefix, *attr, n.span));
+                }
                 return self.attribute_type_mark(scope, prefix, *attr);
             }
             // 2019 `A'INDEX(n)`, the only type mark with a parameter.
@@ -2093,6 +2098,42 @@ impl Db {
                 .with_secondary(self.decls[d].span, "declared here"),
             )),
         }
+    }
+
+    /// `E1201` for `T'BASE` used as a type mark: LRM 16.2.2 allows it only as the
+    /// prefix of another attribute (`T'BASE'LEFT`; user, 2026-11-02, lrm-checks L177).
+    pub(crate) fn base_as_type_mark(
+        &mut self,
+        prefix: &ast::Name,
+        attr: ast::Ident,
+        span: Span,
+    ) -> Reported {
+        // The candidate pass and the build both read a qualified expression's type mark.
+        if self.diags.iter().any(|d| {
+            d.code == diag::NOT_A_TYPE && d.primary.as_ref().is_some_and(|l| l.span == span)
+        }) {
+            return Reported;
+        }
+        let t = self.source_text(prefix.span);
+        self.error(
+            Diagnostic::error(
+                diag::NOT_A_TYPE,
+                format!(
+                    "`'{}` cannot be used as a type mark (LRM 16.2.2)",
+                    attr.text
+                ),
+            )
+            .with_primary(span, "not a type mark")
+            .with_note(
+                "LRM 16.2.2: T'BASE \"is allowed only as the prefix of the name of another \
+                 attribute\", as in T'BASE'LEFT",
+            )
+            .with_help(format!(
+                "name the type directly, e.g. `integer'(5)`: write the base type of `{t}` instead \
+                 of `{t}'{}`",
+                attr.text
+            )),
+        )
     }
 
     /// The subtype of the object `e`; when it is not fully constrained, a subtype whose bounds
