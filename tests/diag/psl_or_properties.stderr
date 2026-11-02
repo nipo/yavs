@@ -1,0 +1,11 @@
+error[E0013]: this property is not in the PSL simple subset: both operands of `or` are properties, and the left one must be a Boolean
+ --> psl_or_properties.vhd:9:51
+  |
+9 |   bad: assert always ((a = '1' -> next (b = '1')) or (a = '1' -> next[2] (c = '1')));
+  |                                                   ^^ both operands are properties
+  |
+  = note: IEEE 1076-2008 1.3.5 incorporates the simple subset of PSL; IEEE 1850 4.4.4: the left-hand side operand of a logical or operator is a Boolean
+  = help: put a Boolean on the left of `or`, or split the property into two directives
+
+error: aborting due to 1 previous error
+

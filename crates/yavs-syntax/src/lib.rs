@@ -96,6 +96,8 @@ pub mod codes {
     pub const NEEDS_2008: &str = "E0011";
     /// An encrypted (IEEE 1735 protected) envelope: yavs cannot read the file.
     pub const ENCRYPTED: &str = "E0012";
+    /// A PSL property outside the simple subset that IEEE 1076-2008 1.3.5 incorporates.
+    pub const PSL_SUBSET: &str = "E0013";
     /// Internal compiler error.
     pub const INTERNAL: &str = "E9999";
     /// A `` `warning `` directive.

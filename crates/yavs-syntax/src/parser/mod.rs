@@ -64,6 +64,9 @@ pub(crate) struct Parser<'a> {
     /// Expansions in this directive, and the number of the latest.
     psl_expansions: u32,
     psl_scope: u32,
+    /// A PSL rule the directive being parsed breaks (`E0013`): reported after the attempts,
+    /// which drop their own diagnostics.
+    psl_reject: Option<Diagnostic>,
     /// Lists under construction, one stack per element type: a list parser pushes its
     /// elements here and moves them into a vector of exactly their number, so no
     /// list grows (and copies its large elements) by doubling.
@@ -113,6 +116,7 @@ pub(crate) fn parse(
         psl_args: Vec::new(),
         psl_expansions: 0,
         psl_scope: 0,
+        psl_reject: None,
         sc: Scratch::default(),
     };
     p.design_file()

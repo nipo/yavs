@@ -52,6 +52,8 @@ Syntax, command line, waveforms, coverage, debugger, plugins (E0 and W0)
      - A VHDL-2008 construct was used in a VHDL-1993 file.
    * - _`E0012`
      - The file holds an encrypted (IEEE 1735 protected) envelope, ```protect begin_protected`` or ```pragma protect begin_protected``.
+   * - _`E0013`
+     - A PSL property is outside the simple subset of PSL that VHDL-2008 incorporates (IEEE 1076-2008 1.3.5, IEEE 1850 4.4.4).
    * - _`E0100`
      - A source file named on the command line cannot be read.
    * - _`E0101`

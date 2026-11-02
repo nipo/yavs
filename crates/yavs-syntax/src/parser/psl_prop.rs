@@ -260,8 +260,30 @@ impl Parser<'_> {
         let p = self.tp_unary_inner(lv)?;
         // `and` and `or` of properties; between booleans the expression parser took them.
         if matches!(self.peek(), Tok::Kw(Kw::And | Kw::Or)) {
-            let is_and = self.bump().kind == Tok::Kw(Kw::And);
+            let op = self.bump();
+            let is_and = op.kind == Tok::Kw(Kw::And);
             let rhs = self.nested(|s| s.tp_unary(lv))?;
+            // Simple subset (IEEE 1850 4.4.4): the left operand of `or` is a Boolean. Only
+            // both operands non-Boolean is rejected, as the references do (user, 2026-11-02).
+            let boolean = |p: &Pt| matches!(p, Pt::Leaf(_) | Pt::NotLeaf(_));
+            if !is_and && !boolean(&p) && !boolean(&rhs) && self.psl_reject.is_none() {
+                self.psl_reject = Some(
+                    yavs_diag::Diagnostic::error(
+                        crate::codes::PSL_SUBSET,
+                        "this property is not in the PSL simple subset: both operands of `or` \
+                         are properties, and the left one must be a Boolean",
+                    )
+                    .with_primary(self.tok_span(op), "both operands are properties")
+                    .with_note(
+                        "IEEE 1076-2008 1.3.5 incorporates the simple subset of PSL; IEEE 1850 \
+                         4.4.4: the left-hand side operand of a logical or operator is a Boolean",
+                    )
+                    .with_help(
+                        "put a Boolean on the left of `or`, or split the property into two \
+                         directives",
+                    ),
+                );
+            }
             return Ok(if is_and {
                 Pt::And(vec![p, rhs])
             } else {

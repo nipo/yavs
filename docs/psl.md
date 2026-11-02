@@ -28,7 +28,9 @@ one; a `cover` prints its `report` text each time it is hit. The subset below is
 
 - `default clock is <condition>;`, an `@<condition>` clock on a directive, `report` and `severity` clauses.
 - Directives `assert`, `assume` and `cover`, with a property on VHDL conditions (`boolean`, `bit` or `std_ulogic`).
-- Properties: `always`, `never`, `->`, `<->` and `iff`, `and` and `or` of properties, `next`, `next[n]` (n up to 256),
+- Properties: `always`, `never`, `->`, `<->` and `iff`, `and` and `or` of properties (an `or` needs a Boolean on at
+  least one side: `(p1) or (p2)` with two properties is outside the simple subset of PSL that VHDL takes in, error
+  `E0013`), `next`, `next[n]` (n up to 256),
   `next_a`, `next_e`, `next_event`, `next_event_a`, `next_event_e`, `until`, `until_`, `before`, `before_`, `abort`,
   `sync_abort` and `async_abort`, and a property on the right of `|->` and `|=>`. `abort` and `async_abort` are
   checked at the clock tick, not between ticks as the PSL standard defines the asynchronous abort. These properties

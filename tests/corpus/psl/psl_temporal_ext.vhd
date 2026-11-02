@@ -4,7 +4,8 @@
 -- the expected output is the LRM result, derived from the weak finite-trace semantics and
 -- checked against an independent evaluator of it. sync_abort (abort and async_abort run
 -- the same) inside and outside always, overlapping until and before, a property on the left of until, nested always, next_a over a
--- property, `or` of properties and next_event_e (IEEE 1850 6.2.1.3 to 6.2.1.7).
+-- property, `or` of a property and a Boolean and next_event_e (IEEE 1850 6.2.1.3 to 6.2.1.7). An
+-- `or` of two properties is outside the simple subset, E0013 (tests/diag/psl_or_properties.vhd).
 library ieee;
 use ieee.std_logic_1164.all;
 entity psl_temporal_ext is end;
@@ -43,6 +44,6 @@ begin
   nested_always: assert always (a = '1' -> next (always (b = '1' -> next (c = '1')))) report "nested_always";
   nexta_prop: assert always (a = '1' -> next_a[1 to 2] (b = '1' -> next (c = '1'))) report "nexta_prop";
   nexte_nevent: assert always (a = '1' -> next_e[1 to 3] (c = '0')) report "nexte_nevent";
-  or_props: assert always ((a = '1' -> next (b = '1')) or (a = '1' -> next[2] (c = '1'))) report "or_props";
+  or_rhs: assert always ((next (b = '1')) or (a = '1')) report "or_rhs";
   neve: assert always (a = '1' -> next_event_e((c = '1'))[2 to 3] (b = '1')) report "neve";
 end;

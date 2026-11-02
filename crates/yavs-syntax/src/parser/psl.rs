@@ -159,12 +159,20 @@ impl Parser<'_> {
     /// process, or `None`, with nothing consumed or reported, outside the subset.
     pub(super) fn psl_directive(&mut self) -> Option<ConcStmtKind> {
         let save = self.psl_save();
+        self.psl_reject = None;
         // The simple parsers first; the temporal one takes what they do not.
         for temporal in [false, true] {
             match self.psl_directive_inner(temporal) {
-                Ok(p) if self.diags.len() == save.1 => return Some(ConcStmtKind::Process(p)),
+                Ok(p) if self.diags.len() == save.1 && self.psl_reject.is_none() => {
+                    return Some(ConcStmtKind::Process(p));
+                }
                 _ => self.psl_restore(save),
             }
+        }
+        if let Some(d) = self.psl_reject.take() {
+            // An error, not a skip: the caller's skip then adds no `W0004` for this unit.
+            self.diags.push(d);
+            self.psl_warned = true;
         }
         None
     }

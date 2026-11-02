@@ -1145,7 +1145,7 @@ fn psl_temporal_properties() {
         "assert always (a <-> b);",
         "assert always (a iff b);",
         "assert always ((a -> next b) and (a -> next[2] (c)));",
-        "assert always ((a -> next b) or (a -> next[2] (c)));",
+        "assert always ((next b) or (a));",
         "assert always ((next[2] (b)) sync_abort c);",
         "assert (always (a -> next b)) sync_abort c;",
         "assert always ((a -> next b) abort c);",
@@ -1570,4 +1570,21 @@ fn plaintext_protect_regions_are_not_envelopes() {
         Std::Vhdl2008,
     );
     assert!(p.diags.iter().all(|d| d.code != "E0012"));
+}
+
+#[test]
+fn psl_or_of_two_properties_is_outside_the_simple_subset() {
+    // IEEE 1850 4.4.4: the left operand of `or` is a Boolean; both non-Boolean is E0013.
+    let bad = conc(
+        "default clock is rising_edge(clk);\nassert always ((a -> next b) or (a -> next[2] c));",
+    );
+    let p = parse_std(&bad, Std::Vhdl2008);
+    let codes: Vec<&str> = p.diags.iter().map(|d| d.code).collect();
+    assert_eq!(codes, ["E0013"], "{:?}", p.diags);
+    for ok in ["(next b) or a", "(next b) and (next c)"] {
+        let src = conc(&format!(
+            "default clock is rising_edge(clk);\nassert always ({ok});"
+        ));
+        assert!(psl_warnings(&src).is_empty(), "{ok}");
+    }
 }

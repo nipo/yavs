@@ -10798,3 +10798,5 @@ Constructs yavs accepted although the LRM text or every voting reference rejects
   targets and nested record targets stay accepted (the record forms are open for the maintainer).
 - Anonymous-type operators (L94): operator notation (`r < r`) of a user operator with anonymous parameter types is `E1505` (help: `"<"(r, r)`);
   such an operator is no candidate in operator notation, so predefined operators of other types are used as if it were not visible.
+- PSL `or` of two properties (L133): `E0013` (simple subset, PSL 4.4.4); `(next b) or a` stays accepted. Corpus `psl/psl_temporal_ext` checks the
+  Boolean form instead.

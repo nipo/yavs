@@ -95,7 +95,7 @@ cargo run -p yavs -- parse --std 2019 --dump-ast f.vhd   # inspect the tree
 - New syntax: a unit test in `src/tests.rs` plus, for an error, a `tests/diag/NAME.vhd` snapshot
   (first line `-- yavs: --std 2019` for 2019). Corpus list changes in `tests/parse-corpus/` must
   be explained in the commit.
-- Codes owned: `E0001`-`E0099`, `W0001`-`W0099` (`yavs_syntax::codes`: E0001 to E0012, W0001 to
+- Codes owned: `E0001`-`E0099`, `W0001`-`W0099` (`yavs_syntax::codes`: E0001 to E0013, W0001 to
   W0004), plus `E9999` for internal errors.
 
 ## 6. Coordination

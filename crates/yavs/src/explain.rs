@@ -56,6 +56,13 @@ const EXPLAIN: &[(&str, &str)] = &[
          vendor's key.",
     ),
     (
+        "E0013",
+        "A PSL property is outside the simple subset of PSL that VHDL-2008 incorporates (IEEE \
+         1076-2008 1.3.5, IEEE 1850 4.4.4). yavs rejects an `or` whose operands are both \
+         properties (`(a -> next b) or (a -> next c)`): the left operand must be a Boolean. Put \
+         the Boolean on the left, or write two directives.",
+    ),
+    (
         "W0001",
         "A `` `warning `` conditional analysis directive was reached; the message is the one in the directive.",
     ),
