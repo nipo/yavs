@@ -14,6 +14,14 @@ architecture t of psl_named is
   constant PB : string := "0110100110010101";
   constant PC : string := "0011010101001011";
   default clock is rising_edge(clk);
+  sequence ab is {a = '1'; b = '1'};
+  sequence abc is {ab; c = '1'};
+  sequence pair (boolean x, y) is {x; y};
+  sequence rep (boolean x) is {x[*2 to 3]; b = '1'};
+  property a_then_b is always (a = '1' -> next b = '1');
+  property then_next (boolean x, y) is always (x -> next y);
+  property ab_then_c is always (ab |=> c = '1');
+  property no_aa (boolean x) is never {x; x};
 begin
   clk <= not clk after 5 ns when now < 200 ns;
   process (clk) begin
@@ -28,15 +36,6 @@ begin
       end if;
     end if;
   end process;
-
-  sequence ab is {a = '1'; b = '1'};
-  sequence abc is {ab; c = '1'};
-  sequence pair (boolean x, y) is {x; y};
-  sequence rep (boolean x) is {x[*2 to 3]; b = '1'};
-  property a_then_b is always (a = '1' -> next b = '1');
-  property then_next (boolean x, y) is always (x -> next y);
-  property ab_then_c is always (ab |=> c = '1');
-  property no_aa (boolean x) is never {x; x};
 
   c1: cover ab report "ab";
   c2: cover abc report "abc";

@@ -87,7 +87,9 @@ def script_flags(t, toks):
         elif f in ("-frelaxed", "-frelaxed-rules"):
             t["relaxed"] = True
         elif f == "-fpsl":
-            t["psl"] = True
+            # This suite writes PSL declarations after `begin`, which yavs takes only with
+            # --relaxed (lrm-checks L176).
+            t["psl"] = t["relaxed"] = True
         else:
             raise Skip(f)
 

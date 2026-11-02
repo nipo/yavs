@@ -1,4 +1,4 @@
--- named sequences with boolean formals, used in covers
+-- named sequences with boolean formals, used in covers; declared before `begin` (2008 3.3.2, 11.1)
 library ieee;
 use ieee.std_logic_1164.all;
 entity top is end entity;
@@ -9,6 +9,8 @@ architecture a of top is
   constant pb : string := "0110100110010101";
   constant pc : string := "0011010101001011";
   default clock is rising_edge(clk);
+  sequence pair (boolean x, y) is {x; y};
+  sequence trio is {pair(a = '1', b = '1'); c = '1'};
 begin
   process begin
     for i in pa'range loop
@@ -22,8 +24,6 @@ begin
     end loop;
     wait;
   end process;
-  sequence pair (boolean x, y) is {x; y};
-  sequence trio is {pair(a = '1', b = '1'); c = '1'};
   d1: cover pair(a = '1', b = '1') report "RES pair";
   d2: cover trio report "RES trio";
 end architecture;

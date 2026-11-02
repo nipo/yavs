@@ -22,6 +22,9 @@ yavs, with what to do about each.
      - Errors, as the standard says.
      - ``--relaxed`` on ``analyze`` and ``run`` turns them, and the other cases below that name it,
        into warnings.
+   * - A PSL ``sequence`` or ``property`` declaration after ``begin``
+     - Error ``E1241``: VHDL-2008 makes it a declaration, written before ``begin``.
+     - Move it before ``begin``, or pass ``--relaxed`` (warning ``W1241``).
    * - PSL in ``-- psl`` comments
      - Read only when asked.
      - ``--psl`` on ``analyze`` and ``run``.

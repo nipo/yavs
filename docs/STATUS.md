@@ -10804,3 +10804,5 @@ Constructs yavs accepted although the LRM text or every voting reference rejects
   are unchanged.
 - PSL declarations are declarations of their region (#1077): sem declares each `sequence` and `property` name (`DeclKind::Psl`), so a
   homograph is `E1101` and a use in a VHDL expression `E1361`.
+- PSL declarations after `begin` (L176): `E1241`; `--relaxed` (R8) accepts them with `W1241`. The repo's own PSL corpus cases declare before
+  `begin` now.

@@ -43,7 +43,8 @@ one; a `cover` prints its `report` text each time it is hit. The subset below is
 - Built-in functions `prev`, `stable`, `rose`, `fell`, `isunknown`, `countones`, `onehot` and `onehot0`.
 - Named `sequence` and `property` declarations with `boolean`, `const`, `sequence` and `property` formals. Their
   names are declarations of the region: a declaration of the same name there (a constant, a port, another sequence)
-  is `E1101`.
+  is `E1101`. Write them before `begin`, where VHDL-2008 puts them: after `begin` they are error `E1241`, and
+  `--relaxed` accepts them there with warning `W1241`.
 
 ## What is skipped with a warning
 

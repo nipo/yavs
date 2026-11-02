@@ -13,6 +13,13 @@ architecture t of psl_named_formals is
   constant PB : string := "0110100110010101";
   constant PC : string := "0011010101001011";
   default clock is rising_edge(clk);
+  sequence rep (boolean x; const k) is {x[*k]; c = '1'};
+  sequence both (sequence p, q) is {p; q};
+  sequence twice (sequence p) is both(p, p);
+  sequence upto (boolean x; const lo, hi) is {x[*lo to hi]; b = '1'};
+  property then_y (sequence p, boolean y) is always (p |=> y);
+  property whole (property q) is always q;
+  property within_next (property q, boolean x) is always (x -> next q);
 begin
   clk <= not clk after 5 ns when now < 200 ns;
   process (clk) begin
@@ -27,14 +34,6 @@ begin
       end if;
     end if;
   end process;
-
-  sequence rep (boolean x; const k) is {x[*k]; c = '1'};
-  sequence both (sequence p, q) is {p; q};
-  sequence twice (sequence p) is both(p, p);
-  sequence upto (boolean x; const lo, hi) is {x[*lo to hi]; b = '1'};
-  property then_y (sequence p, boolean y) is always (p |=> y);
-  property whole (property q) is always q;
-  property within_next (property q, boolean x) is always (x -> next q);
 
   c1: cover rep(a = '1', 2) report "rep 2";
   c2: cover rep(b = '1', 1) report "rep 1";

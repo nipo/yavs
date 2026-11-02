@@ -1755,15 +1755,33 @@ impl Db {
         errs.finish(out.into())
     }
 
-    /// A PSL `sequence` or `property` declaration after `begin`: declared in the region, as
-    /// one before `begin` (#1077).
+    /// A PSL `sequence` or `property` declaration after `begin`: a block declarative item
+    /// (2008 3.3.2), not a concurrent statement (11.1), so `E1241`; `--relaxed` (R8) declares
+    /// it with `W1241` (user, 2026-11-02).
     fn psl_decl_in_statements(
         &mut self,
         scope: ScopeId,
         p: &ast::PslDeclName,
     ) -> Result<(), Reported> {
-        self.psl_decl(scope, p);
-        Ok(())
+        let what = if p.property { "property" } else { "sequence" };
+        let msg = format!(
+            "PSL {what} declaration `{}` after `begin`: it is a declaration, and the statement \
+             part holds only PSL directives (LRM 2008 3.3.2, 11.1)",
+            p.name.text
+        );
+        if self.relaxed() {
+            self.report(
+                Diagnostic::warning(diag::W_PSL_DECL_IN_STATEMENTS, msg)
+                    .with_primary(p.name.span, "accepted by `--relaxed`"),
+            );
+            self.psl_decl(scope, p);
+            return Ok(());
+        }
+        Err(self.error(
+            Diagnostic::error(diag::PSL_DECL_IN_STATEMENTS, msg)
+                .with_primary(p.name.span, "declared in the statement part")
+                .with_help("move the declaration before `begin`, or pass `--relaxed`"),
+        ))
     }
 
     fn conc_stmt(

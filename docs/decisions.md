@@ -2209,6 +2209,8 @@ scalars; the on-disk format is implementation-defined, so it is fixed here (yavs
 
 ## Sem: user decisions of 2026-10-19
 
+- **PSL declarations after `begin` (L176; user, 2026-11-02, rule 47 review):** `E1241`; `--relaxed` (R8) accepts them with
+  `W1241`, since real code and the second reference write them there. The grammar is clear (2008 3.3.2, 11.1).
 - **Named return values in `return` and actuals (L62, #33; user, 2026-10-19):** a call of a function
   with a named return value stays accepted in a `return` statement and as the actual of a
   constrained formal (permissive), although only some reference simulators accept those contexts.

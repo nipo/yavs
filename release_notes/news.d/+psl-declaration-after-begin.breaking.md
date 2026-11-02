@@ -1,0 +1,1 @@
+A PSL `sequence` or `property` declaration written after `begin` is now error `E1241`: VHDL-2008 makes it a declaration of the architecture or block, written before `begin`. Move it there, or pass `--relaxed` to accept it with warning `W1241`.

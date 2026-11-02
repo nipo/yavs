@@ -300,6 +300,10 @@ Semantic analysis (E1 and W1)
      - The declarative part does not list this item.
    * - _`E1240`
      - A subprogram body's specification does not conform to the declaration it completes (LRM 4.10): both must be the same sequence of lexical elements, apart from a numeric literal written with another value spelling and a simple name written as an expanded name.
+   * - _`E1241`
+     - A PSL ``sequence`` or ``property`` declaration is written after ``begin``.
+   * - _`W1241`
+     - ``--relaxed`` (R8): a PSL ``sequence`` or ``property`` declaration after ``begin`` is accepted as if it were written before ``begin`` (LRM 2008 3.3.2 and 11.1 allow it only there).
    * - _`E1300`
      - The expression has a different type than the context requires.
    * - _`E1301`
