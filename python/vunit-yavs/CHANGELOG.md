@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.12.1 (2026-11-02)
+
+- Needs yavs 0.12.1 or later. All changes: the yavs 0.12.1 release notes.
+
 ## 0.12.0 (2026-11-01)
 
 - Breaking: no coverage kind is on by default. `--yavs-cov` becomes `--yavs-cov=LETTERS` (`s` statement, `b` branch,

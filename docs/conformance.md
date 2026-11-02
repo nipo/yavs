@@ -1,15 +1,15 @@
 # yavs conformance report
 
-Generated: yavs 0.12.0 at commit `0301b104d6` (2026-11-01) by `tools/conformance/run.py`; do not edit by hand.
+Generated: yavs 0.12.1 at commit `b6b3edb038-dirty` (2026-11-02) by `tools/conformance/run.py`; do not edit by hand.
 
 yavs is checked by running the test suites of VHDL libraries, a VHDL language test suite and real designs on it, and by comparing its output
-with two established open-source VHDL simulators, called sim1 and sim2 here. Each suite judges its own tests. Over the suites below, 14981 of 15082
+with two established open-source VHDL simulators, called sim1 and sim2 here. Each suite judges its own tests. Over the suites below, 14991 of 15092
 tests pass; every failure is tracked as an issue. This is evidence, not a proof of correctness.
 
 | Project or suite | What it is | Passed / total |
 | --- | --- | ---: |
-| Differential testbenches | small testbenches of this repository; output must equal sim1's, at 1 and 4 threads | 606/606 |
-| Known simulator differences | one reproducer per case where simulators disagree | 238/238 |
+| Differential testbenches | small testbenches of this repository; output must equal sim1's, at 1 and 4 threads | 609/609 |
+| Known simulator differences | one reproducer per case where simulators disagree | 245/245 |
 | sim1's regression tests | a reference simulator's own self-checking tests (runnable ones) | 1016/1070 |
 | sim2's regression tests | a reference simulator's own self-checking tests (runnable ones) | 463/504 |
 | VESTs | VHDL-1993 language test suite | 3694/3694 |
@@ -40,7 +40,7 @@ Every testbench of `tests/corpus` runs on yavs and its normalised output is comp
 | --- | --- | --- | --- |
 | access | 8/8 | 8/8 | 8/8 |
 | arith | 8/8 | 8/8 | 8/8 |
-| composite | 136/136 | 136/136 | 136/136 |
+| composite | 139/139 | 139/139 | 139/139 |
 | delta | 13/13 | 13/13 | 13/13 |
 | env | 16/16 | 16/16 | 16/16 |
 | force | 12/12 | 12/12 | 12/12 |
@@ -62,7 +62,7 @@ Every testbench of `tests/corpus` runs on yavs and its normalised output is comp
 | std93 | 6/6 | 6/6 | 6/6 |
 | synopsys | 20/20 | 20/20 | 20/20 |
 | textio | 19/19 | 19/19 | 19/19 |
-| total | 606/606 | 606/606 | 606/606 |
+| total | 609/609 | 609/609 | 609/609 |
 
 Failing: none.
 
@@ -84,8 +84,8 @@ Not passing: sim1: 54; sim2: 41 (the classes of each are in `docs/conformance.js
 ### Known simulator differences
 
 [`docs/design/simulator-discrepancies.md`](https://github.com/ru551n/yavs/blob/main/docs/design/simulator-discrepancies.md) lists every case where the references disagree with each other, with the language reference or with yavs:
-238 catalogued behaviours, each with a reproducer under `tests/discrepancies/<case>/`. CI runs every reproducer on yavs and fails when yavs's output
-differs from the recorded one (matches). Kinds: LRM clear 151, LRM ambiguity 80, reference bug 5, library availability 1, other 1.
+245 catalogued behaviours, each with a reproducer under `tests/discrepancies/<case>/`. CI runs every reproducer on yavs and fails when yavs's output
+differs from the recorded one (matches). Kinds: LRM clear 154, LRM ambiguity 80, reference bug 6, other 4, library availability 1.
 
 Policy (`docs/plan.md`): where the language reference is clear, yavs follows it even against all references; where it is unclear yavs is permissive
 and follows the majority of the references that run the construct. The verdicts of each reference are in the catalogue; the table gives the clause, the kind,
@@ -217,6 +217,12 @@ and yavs's verdict.
 | [`allocator-overload`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/allocator-overload) | 9.3.7, 12.5 | LRM clear | OK |
 | [`static-intermediate-outside-integer`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/static-intermediate-outside-integer) | 9.3.6, 5.2.3.1 | LRM clear | OK |
 | [`static-intermediate-generate-parameter`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/static-intermediate-generate-parameter) | 9.4.3, 5.2.3.1 | LRM clear | FATAL |
+| [`deferred-constant-unconstrained-attribute`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/deferred-constant-unconstrained-attribute) | 6.4.2.2 | other | OK |
+| [`deferred-constant-unconstrained-parameter`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/deferred-constant-unconstrained-parameter) | 6.4.2.2 | other | OK |
+| [`deferred-constant-unconstrained-nested`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/deferred-constant-unconstrained-nested) | 6.4.2.2 | other | OK |
+| [`deferred-constant-unconstrained-early-subtype`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/deferred-constant-unconstrained-early-subtype) | 6.4.2.2, 14.4.2 | LRM clear | REJECT |
+| [`deferred-constant-unconstrained-in-package`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/deferred-constant-unconstrained-in-package) | 6.4.2.2 | LRM clear | REJECT |
+| [`deferred-constant-unconstrained-called-early`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/deferred-constant-unconstrained-called-early) | 6.4.2.2, 14.4.2 | LRM clear | REJECT (run-time error `E3009`) |
 | [`array-nested-resolved-whole`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/array-nested-resolved-whole) | 4.6, 14.7.2, 14.7.3.1 | LRM clear | OK |
 | [`array-record-resolved-whole`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/array-record-resolved-whole) | 4.6, 14.7.2 | LRM clear | OK |
 | [`array-resolved-whole`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/array-resolved-whole) | 4.6, 14.7.2 | LRM clear | OK |
@@ -247,6 +253,7 @@ and yavs's verdict.
 | [`signal-init-reads-port`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/signal-init-reads-port) | 14.4.2.4, 14.7.3.3 | LRM ambiguity | OK |
 | [`constant-init-reads-signal`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/constant-init-reads-signal) | 14.4.2.2, 14.5.2 | LRM ambiguity | OK |
 | [`path-name-of-block-label-in-inner-region`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/path-name-of-block-label-in-inner-region) | 16.2.5 | LRM clear | OK |
+| [`deferred-constant-global-bounds`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/deferred-constant-global-bounds) | 6.4.2.2, 14.4.2 | reference bug | OK |
 | [`aggregate-piece-context-direction`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/aggregate-piece-context-direction) | 9.3.3.3 | LRM ambiguity | OK |
 | [`aggregate-piece-direction`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/aggregate-piece-direction) | 9.3.3.3 | LRM ambiguity | OK |
 | [`aggregate-piece-element-range-direction`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/aggregate-piece-element-range-direction) | 9.3.3.3 | LRM ambiguity | OK |

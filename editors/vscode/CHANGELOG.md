@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.12.1 (2026-11-02)
+
+- Needs yavs 0.12.1 or later. All changes: the yavs 0.12.1 release notes.
+
 ## 0.12.0 (2026-11-01)
 
 - Vectors show on one line in the Variables view, Watch and hover; `help` in the Debug Console has command names in bold; Tab in the Debug Console takes what the list has in common and opens the list when none is open.

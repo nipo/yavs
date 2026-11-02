@@ -231,8 +231,8 @@
        8
       ],
       "composite": [
-       136,
-       136
+       139,
+       139
       ],
       "delta": [
        13,
@@ -332,8 +332,8 @@
        8
       ],
       "composite": [
-       136,
-       136
+       139,
+       139
       ],
       "delta": [
        13,
@@ -433,8 +433,8 @@
        8
       ],
       "composite": [
-       136,
-       136
+       139,
+       139
       ],
       "delta": [
        13,
@@ -525,7 +525,7 @@
    }
   },
   "discrepancies": {
-   "cases": 238,
+   "cases": 245,
    "output_tail": "",
    "yavs_matches_expected": true
   },
@@ -614,9 +614,9 @@
   }
  },
  "generated": {
-  "commit": "0301b104d6",
-  "commit_date": "2026-11-01",
-  "version": "0.12.0"
+  "commit": "b6b3edb038-dirty",
+  "commit_date": "2026-11-02",
+  "version": "0.12.1"
  },
  "local": {
   "records": {
@@ -2352,6 +2352,48 @@
     "yavs": "FATAL"
    },
    {
+    "case": "deferred-constant-unconstrained-attribute",
+    "decided": "maintainer, 2026-11-02 (#1076, L175)",
+    "kind": "LRM unclear (the text lets only a default expression name it before the full declaration; the call runs after it)",
+    "lrm": "6.4.2.2",
+    "yavs": "OK"
+   },
+   {
+    "case": "deferred-constant-unconstrained-parameter",
+    "decided": "maintainer, 2026-11-02 (#1076, L175)",
+    "kind": "LRM unclear (L175)",
+    "lrm": "6.4.2.2",
+    "yavs": "OK"
+   },
+   {
+    "case": "deferred-constant-unconstrained-nested",
+    "decided": "maintainer, 2026-11-02 (#1076, L175)",
+    "kind": "LRM unclear (L175), reference bug in sim1",
+    "lrm": "6.4.2.2",
+    "yavs": "OK"
+   },
+   {
+    "case": "deferred-constant-unconstrained-early-subtype",
+    "decided": "maintainer, 2026-11-02 (#1076, L175)",
+    "kind": "LRM clear (the value does not exist yet)",
+    "lrm": "6.4.2.2, 14.4.2",
+    "yavs": "REJECT"
+   },
+   {
+    "case": "deferred-constant-unconstrained-in-package",
+    "decided": "maintainer, 2026-11-02 (#1076, L175)",
+    "kind": "LRM clear (the value is not known in the declaration)",
+    "lrm": "6.4.2.2",
+    "yavs": "REJECT"
+   },
+   {
+    "case": "deferred-constant-unconstrained-called-early",
+    "decided": "maintainer, 2026-11-02 (#1076, L175)",
+    "kind": "LRM clear (erroneous: the full declaration is not elaborated yet)",
+    "lrm": "6.4.2.2, 14.4.2",
+    "yavs": "REJECT (run-time error `E3009`)"
+   },
+   {
     "case": "array-nested-resolved-whole",
     "decided": "agent (#333, resolution/nested_array_whole, ref=hand)",
     "kind": "LRM clear",
@@ -2559,6 +2601,13 @@
     "decided": "agent, 2026-10-20 (#376)",
     "kind": "LRM clear",
     "lrm": "16.2.5",
+    "yavs": "OK"
+   },
+   {
+    "case": "deferred-constant-global-bounds",
+    "decided": "agent, 2026-11-02 (#1072, L175)",
+    "kind": "reference bug (L175)",
+    "lrm": "6.4.2.2, 14.4.2",
     "yavs": "OK"
    },
    {
