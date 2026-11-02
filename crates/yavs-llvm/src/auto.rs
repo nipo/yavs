@@ -374,8 +374,7 @@ struct Tune {
     big: bool,
     /// Whether a `Kind::Frame` function is compiled at all. Its frame-mode code moves the rest of
     /// every process that calls it into the interpreter's loop for compiled code
-    /// (`run_ops::<true, _>`), which its modelled gain of 9 percent did not cover (#481) until
-    /// the cold block layout (#1046); the budget and payback rules are the only limit.
+    /// (`run_ops::<true, _>`), which its modelled gain of 9 percent does not cover (#481).
     frame: bool,
 }
 
@@ -400,7 +399,7 @@ impl Tune {
         tree_payback: 8,
         payback_rtl: 16,
         big: true,
-        frame: true,
+        frame: false,
     };
 
     /// `FIRST`, or what `YAVS_FIRST_TUNE=rtl_min=N,band=0|1,instances=N,share=N,o2_after=N,
