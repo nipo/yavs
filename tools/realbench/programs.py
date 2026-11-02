@@ -9,7 +9,7 @@ the test with what is needed.
   programs.py PROGRAM [key=value ...]     build (or find) the image, print its directory
 
 Programs:
-  microwatt_coremark  EEMBC CoreMark on Microwatt (iterations=N), own port in cpu/microwatt/coremark, as main_ram.hex, with the per-cycle debug
+  microwatt_coremark  EEMBC CoreMark on Microwatt (iterations=N, size=BYTES: TOTAL_DATA_SIZE, default 2000), own port in cpu/microwatt/coremark, as main_ram.hex, with the per-cycle debug
                     reports of the core removed from copies of its sources. The compiler is the pinned ziglang wheel of requirements.txt in
                     <cache>/venv (made on first use, so by `run.py --prepare`); $YAVS_PPC_ZIG (a zig binary) or $YAVS_PPC_PREFIX (a POWER GCC
                     tool prefix, e.g. powerpc64le-linux-gnu-) override it
@@ -171,11 +171,11 @@ MW_REPORTS = {"cache_ram": 2, "control": 3, "core_debug": 2, "cr_file": 5, "dcac
               "helpers": 2, "icache": 14, "loadstore1": 1, "mmu": 5, "register_file": 6, "xics": 15}
 
 
-def microwatt_coremark(iterations):
+def microwatt_coremark(iterations, size=None):
     cc, objcopy, version = ppc_tools()
     mw, em, port = CORPUS / "microwatt", CORPUS / "eembc-coremark", HERE / "cpu" / "microwatt" / "coremark"
     portsrc = [(port / f).read_bytes() for f in sorted(os.listdir(port))]
-    d = stored("microwatt_coremark", [head("microwatt"), head("eembc-coremark"), iterations, version, hashlib.sha256(b"".join(portsrc)).hexdigest()])
+    d = stored("microwatt_coremark", [head("microwatt"), head("eembc-coremark"), iterations, version, hashlib.sha256(b"".join(portsrc)).hexdigest()] + ([size] if size else []))
     if (d / "main_ram.hex").is_file():
         return d
     b = d.with_name(d.name + ".tmp")
@@ -208,7 +208,7 @@ def microwatt_coremark(iterations):
     shutil.copy(mw / "lib" / "console.c", b / "cm" / "console.c")
     shutil.copy(mw / "hello_world" / "head.S", b / "cm" / "head.S")
     flags = ["-O2", "-ffreestanding", "-fno-pic", "-fno-stack-protector", "-mno-vsx", "-mno-altivec", "-DPERFORMANCE_RUN=1",
-             f"-DITERATIONS={int(iterations)}", "-I", b / "cm", "-I", mw / "include", "-w"]
+             f"-DITERATIONS={int(iterations)}"] + ([f"-DTOTAL_DATA_SIZE={int(size)}"] if size else []) + ["-I", b / "cm", "-I", mw / "include", "-w"]
     objs = []
     for f in ("core_list_join", "core_main", "core_matrix", "core_state", "core_util", "ee_printf", "core_portme", "console"):
         run(cc + flags + ["-c", b / "cm" / f"{f}.c", "-o", b / f"{f}.o"], b, f"compiling {f}.c")
@@ -216,14 +216,14 @@ def microwatt_coremark(iterations):
     run(cc + flags + ["-c", b / "cm" / "head.S", "-o", b / "head.o"], b, "assembling head.S")
     run(cc + ["-nostdlib", "-static", "-Wl,-T," + str(port / "powerpc.lds"), "-o", b / "coremark.elf", b / "head.o"] + objs, b, "linking the Microwatt CoreMark image")
     run(objcopy + ["-O", "binary", b / "coremark.elf", b / "main_ram.bin"], b, "objcopy")
-    size = (b / "main_ram.bin").stat().st_size
-    if size > 380 * 1024:
-        raise Fail(f"microwatt_coremark: the image is {size} bytes, the testbench memory holds 384 KiB")
+    nbytes = (b / "main_ram.bin").stat().st_size
+    if nbytes > 380 * 1024:
+        raise Fail(f"microwatt_coremark: the image is {nbytes} bytes, the testbench memory holds 384 KiB")
     hexdata = run([sys.executable, "-I", mw / "scripts" / "bin2hex.py", b / "main_ram.bin"], b, "bin2hex.py")
     (b / "main_ram.hex").write_text(hexdata)
     # the generated git.vhdl package (the upstream Makefile writes it from git.vhdl.in): a fixed hash, so images do not depend on a checkout state
     (b / "git.vhdl").write_text((mw / "git.vhdl.in").read_text().replace("@hash@", head("microwatt")[:14]).replace("@dirty@", "0"))
-    (b / "build.txt").write_text(f"{version}\niterations {iterations}\nimage {size} bytes\n")
+    (b / "build.txt").write_text(f"{version}\niterations {iterations}\ndata size {size or 2000}\nimage {nbytes} bytes\n")
     for junk in ("cm", "coremark.elf", "main_ram.bin", *[o.name for o in objs], "head.o"):
         p = b / junk
         shutil.rmtree(p, ignore_errors=True) if p.is_dir() else p.unlink(missing_ok=True)

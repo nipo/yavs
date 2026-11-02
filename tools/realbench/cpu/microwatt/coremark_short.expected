@@ -1,0 +1,17 @@
+CoreMark Size    : 200
+Total ticks      : 73909
+Total time (secs): 7
+Iterations/Sec   : 0
+ERROR! Must execute for at least 10 secs for a valid result!
+Iterations       : 1
+Compiler version : realbench
+Compiler flags   : see tools/realbench/programs.py
+Memory location  : STACK
+seedcrc          : 0x4849
+[0]crclist       : 0x3330
+[0]crcmatrix     : 0xbd89
+[0]crcstate      : 0x242c
+[0]crcfinal      : 0x3330
+Correct operation validated. See README.md for run and reporting rules.
+
+Execution completed.

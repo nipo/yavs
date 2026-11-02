@@ -675,3 +675,13 @@ files = [
   { lib = "work", source = "microwatt", path = "soc.vhdl" },
   { lib = "work", source = "@harness", path = "microwatt/microwatt_bench_tb.vhdl" },
 ]
+
+[[test]]
+name = "microwatt_coremark_short"
+like = "microwatt_coremark"
+why = "The Microwatt CoreMark run with less data (TOTAL_DATA_SIZE 600 instead of 2000): the same program and code paths in 1.37 ms of simulated time instead of 6.14, measured 2026-11-02 and found NOT to stand in for the full run's ratios (AGENTS.md section 7a): use it to check a change runs and computes the same, not for verdicts. CoreMark has no reference checksums for this size, so the console is checked against a stored copy (expected) as well as against the reference"
+image = { program = "microwatt_coremark", iterations = 1, size = 600 }
+cycles = 136855
+expect = ["CoreMark Size +: 200$", "Iterations +: 1$", "Execution completed"]
+expected = "cpu/microwatt/coremark_short.expected"
+optin = "long (a minute or more) and needs a POWER cross compiler, see AGENTS.md section 7"

@@ -26,7 +26,7 @@ for an agent that tunes performance or measures a performance change on real tes
 | `window.py` | Short-window A/B on Cranelift against sim1: minutes, not hours (section 8) |
 | `perfguard.py` | Guard run by hand: window instructions of a commit against a stored reference, pass or fail per test (section 8a) |
 | `replay.py`, `replay/record.c` | Process replay: one hot process's instance alone, driven by its recorded inputs per delta (a VHPI recorder plugin), in seconds; `--check` validates it against the full run (section 8b) |
-| `cpu/` | The harness's own VHDL and C for the CPU workloads: the Microwatt console, JTAG-socket and testbench replacements and its CoreMark port (source id `@harness` in `tests.toml`) |
+| `cpu/` | The harness's own VHDL and C for the CPU workloads: the Microwatt console, JTAG-socket and testbench replacements and its CoreMark port (source id `@harness` in `tests.toml`), and the stored console of the short Microwatt CoreMark (`coremark_short.expected`, section 7a) |
 
 `YAVS_BENCH_TIERFLAGS` (extra arguments after `--tier=` of every yavs run cell, e.g. `--tier-heat=1,0,0` to compile every function at its first call) is not part of the cell name: set it for both binaries of a `--compare`.
 
@@ -155,6 +155,48 @@ Licences of the programs (nothing is committed from them): NEORV32 BSD-3-Clause,
 Microwatt CC-BY-4.0 with IBM's additional-rights notice (its `fpga/` files BSD-3-Clause). `cpu/microwatt/coremark` is derived from the EEMBC
 barebones port (Apache-2.0, header says so).
 
+## 7a. Short Microwatt CoreMark (`microwatt_coremark_short`, #1066): does not stand in for the full run
+
+The full Microwatt run already does one CoreMark iteration (`iterations = 1`), so fewer iterations are not possible; the short test
+keeps the same program and code and shrinks the data (`size = 600`: `TOTAL_DATA_SIZE`, 200 bytes per kernel instead of 666; `programs.py`
+`size=`). The run ends at 1.368 ms instead of 6.139 ms (136 855 clock cycles against 613 910). CoreMark has no reference checksums for
+this size, so the console must also equal `cpu/microwatt/coremark_short.expected` (`expected` in `tests.toml`, checked by `run.py`
+next to the reference's console). Same files and settings as `microwatt_coremark` through `like` (a test that takes every field of
+another it does not set).
+
+```sh
+python3 -I tools/realbench/window.py A/yavs B/yavs --full --tests microwatt_coremark_short   # the one command, about 2 minutes per run
+```
+
+Where the time goes, simulated (console lines time-stamped on a copy of `sim_console`): start-up before the timed CoreMark loop
+(boot, data set-up) about 0.09 ms of the short run and 0.22 ms of the full, the timed loop 0.74 ms against 5.40 ms, and the result
+printing (`ee_printf` through the UART model) 0.54 ms against 0.51 ms: **40 percent of the short run is printing**, 8 percent of the full.
+yavs's own start-up (elaboration and initialisation, warm, run to 1 ns) is 0.13 to 0.15 s, under 0.2 percent of either run.
+
+Measured 2026-11-02 with `window.py --full --rounds 2`, core 9, load 15 to 78 (other agents' windows on CCD1): main `e34ddb69` and
+`perf/iterative`, Cranelift bench builds, simulation thread. Tolerances fixed before looking: instructions 3 percent, cycles 5.
+
+| instructions ratio | short | full | short / full |
+|---|---:|---:|---:|
+| main auto / interp | 0.946 | 0.939 | 1.007 |
+| perf/iterative auto / interp | 0.838 (0.852, 0.823 by round) | 0.799 | **1.049** |
+| main auto / sim1 | 1.922 | 2.082 | **0.923** |
+| perf/iterative auto / sim1 | 1.652 | 1.719 | **0.961** |
+| perf/iterative auto / main auto | 0.860 | 0.826 | **1.041** |
+
+- **It does not stand in.** Only main's auto against interp holds; against sim1 the short run reads auto 4 to 8 percent better than the
+  full run, and it shows `perf/iterative`'s gain over main as 14.0 percent instead of 17.4. The printing tail is a different instruction
+  mix and is 40 percent of the run; `perf/iterative`'s auto also moved 3.5 percent between two identical short runs (compile timing, #673),
+  which a full run averages out.
+- **Cycles could not be judged in this sitting**: the same pair of binaries read 1.19 and 2.11 (auto / interp, full run) in two rounds,
+  so the 95 percent bands are wider than any result. Not repeated on a quiet host.
+- Per process (`--profile` shares of the auto run, top ten processes): shares agree within 0.5 points on main and 1 point on
+  `perf/iterative`, but per-process auto / interp time read from separate runs on CCD0 is load noise (main's short run read 0.70 overall,
+  the full 1.55). sim1 cannot be split per process: its generated code has no symbols in `perf`.
+- Use it to check that a change still runs and computes the same in two minutes; take verdicts from `microwatt_coremark` (`--full`) or the
+  window. A larger data size would cut the printing share (1200 bytes: about 15 percent) at about half the full run's length; not tried.
+- No RISC-V GCC is installed on this host, so there is no short `neorv32_coremark`.
+
 ## 8. Short-window A/B (`window.py`): can this idea be killed in minutes?
 
 All performance work has Cranelift as the base (maintainer rule, tracker #1046). The tool builds a checkout with Cranelift only, runs `--tier=auto`, and compares against sim1. There is no LLVM cell unless you pass an LLVM binary by hand.
@@ -269,10 +311,16 @@ Where the cycles go, warm auto, percent of the run (seam = gather and scatter of
 | `mmu_dcache` replay : GRLIB to 700 us | 6.1 : 8.7 | 8.3 : 6.2 | 9.1 : 16.3 | 11.1 : 26.8 | 55.0 : 31.3 |
 | `iu3` replay : GRLIB to 700 us | 4.8 : 9.0 | 5.0 : 6.4 | 4.1 : 16.1 | 0.5 : 26.0 | 77.0 : 31.7 |
 
+The same layers judged a proposed fast stand-in for Microwatt, a 90-line probe of the two-process record idiom (a 60-field record of 76
+leaves copied into a variable, one field changed, driven back each clock): seam 41 to 42 percent and signal update 27 to 30 (`scatter_leaves`
+22, `direct_same_planes` 21 to 25, `sig_gather` 18 to 19), against Microwatt to 800 us at 12 to 14 and 10 (7 to 8, 4 to 6, 5 to 6), on main
+and `perf/iterative`. It magnifies the seam about three times and has almost no interpreter or generated code, so it is a seam
+micro-benchmark, not a stand-in for Microwatt, and was not added to `tools/bench`.
+
 What holds and what does not:
 
 - **Wakes and paths hold.** Every statement and branch of the instance runs as often in the replay as in the full run (`decode2_1` exactly; the others off by at most 4 in a few hundred items: the time-0 start, below). So the replay runs the same activations on the same values through the same IR: a change to how one process is interpreted or compiled moves the replay's instructions the way it moves that process inside the full run.
-- **Per-symbol counters of the process could not be compared** (#1074): code linked from the compilation cache has no perf map entry, and under `--tier=clift` the entries carry no name, so a warm run, the one that is measured, has no symbol for its generated code. The check reads symbols from cold auto runs, where only functions compiled during the run have one; none of the four targets is compiled there. `execute1_dp` (target `execute1_dp`, same recording) is compiled at auto and is the symbol check that exists.
+- **Per-symbol counters of the process could not be compared** (#1074): code linked from the compilation cache has no perf map entry, and under `--tier=clift` the entries carry no name, so a warm run, the one that is measured, has no symbol for its generated code. The check reads symbols from cold auto runs, where only functions compiled during the run have one, and some of those have no name either (`f903`, `n334`). None of the targets had a named symbol there, `execute1_dp` included (target `execute1_dp`, same recording, compiled at auto: 92 percent of its time in compiled code in the replay against 91 in the full run, 0.68 : 2.25 s). The table stays in `--check` for when #1074 is fixed.
 - **The compile decision of `auto` holds on Microwatt, not on GRLIB.** `auto` compiles a function once the interpreter has spent enough wall time in it, and drops a compile that has not finished when the run ends: the replays run a few seconds, so GRLIB's large `comb` of `iu3` and `dctrl` stay interpreted (2 and 5 percent compiled against 59 and 94). Compare compiled code on GRLIB with `--tier clift` in both runs, or read the compiled-share column before trusting an auto result.
-- **Cycles do not transfer.** The process takes 0.21 to 0.45 of its in-design time in the replay for the same activations: in the full design the rest of the run evicts its code and data and trains the branch predictor on other code (whole-run IPC about 1.4 on these designs against 2.4 to 3.3 for the replays). A replay shows what a change does to the process's own work (instructions, what is compiled, how much of the run is seam), not the cache, TLB and branch effects of the whole design, not the kernel cost of the other processes, and not compile-thread timing (#673). Decisions on cycles, on L1i, iTLB and branch misses, on layout and on anything cross-process still need `window.py --rounds` or whole runs.
+- **Cycles do not transfer.** The process takes 0.21 to 0.45 of its in-design time in the replay for the same activations (with `--tier clift` in both runs, everything compiled: 0.16 for `dctrl`, 0.28 for `iu`): in the full design the rest of the run evicts its code and data and trains the branch predictor on other code (whole-run IPC about 1.4 on these designs against 2.4 to 3.3 for the replays). A replay shows what a change does to the process's own work (instructions, what is compiled, how much of the run is seam), not the cache, TLB and branch effects of the whole design, not the kernel cost of the other processes, and not compile-thread timing (#673). Decisions on cycles, on L1i, iTLB and branch misses, on layout and on anything cross-process still need `window.py --rounds` or whole runs.
 - The replay is the whole entity instance (every process and sub-instance of it), not one process; its inputs arrive one delta later than in the full run, in the same order, and at time 0 the ports start at their declared defaults for one delta (the off-by-one counts). A port whose actual only gets transactions without events, a port of mode `inout`, and real, time, physical or access elements are not replayed. The testbench's own driver (the textio reading of the stimulus) is about a fifth of a replay's time and is in its whole-run counters.

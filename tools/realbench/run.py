@@ -61,6 +61,12 @@ class Fail(Exception):
 def load_tests(path=HERE / "tests.toml"):
     data = tomllib.loads(Path(path).read_text())
     tests = data["test"]
+    raw = {t.get("name"): dict(t) for t in tests}
+    for i, t in enumerate(tests):  # `like`: every field of the named test that this one does not set
+        if "like" in t:
+            if t["like"] not in raw or "like" in raw[t["like"]]:
+                raise Fail(f"{path}: test {t.get('name', '?')}: like = {t['like']!r} names no test without a `like` of its own")
+            tests[i] = t = {**raw[t["like"]], **t}
     seen = set()
     for t in tests:
         t.setdefault("corpus", [])
@@ -89,6 +95,7 @@ def load_tests(path=HERE / "tests.toml"):
         t.setdefault("exit_code", 0)  # exit status of a passing run cell (a program that ends the simulation with a failure report: 1)
         t.setdefault("quiet", False)  # true: standard error is discarded (a design that reports on every cycle would fill gigabytes)
         t.setdefault("image", None)  # {program = ..., parameters}: built by programs.py before the run
+        t.setdefault("expected", "")  # a file under tools/realbench: the console of every run cell must equal it (no reference needed)
     return tests
 
 
@@ -671,6 +678,8 @@ def console_problem(t, out, ref):
     for rx in t["expect"]:
         if not re.search(rx, out, re.M):
             return f"console lacks /{rx}/"
+    if t.get("expected") and (d := console_diff(out, (HERE / t["expected"]).read_text())):
+        return f"console differs from {t['expected']}: {d}"
     return console_diff(out, ref) and f"console differs from the reference: {console_diff(out, ref)}"
 
 
@@ -1040,6 +1049,20 @@ def self_test():
         assert isinstance(t["generics"], list) and t["category"] and ("driver" in t or (t["top"] and (t["corpus"] or t["files"])))
         for m in t["corpus"]:
             assert (REPO / "tools/corpus" / f"{m}.toml").exists(), (t["name"], m)
+        assert not t["expected"] or (HERE / t["expected"]).is_file(), (t["name"], t["expected"])
+    by = {t["name"]: t for t in tests}
+    short, full = by["microwatt_coremark_short"], by["microwatt_coremark"]  # `like` copies what the test does not set
+    assert short["files"] == full["files"] and short["image"]["size"] == 600 and "size" not in full["image"] and not full["expected"]
+    exp = (HERE / short["expected"]).read_text()
+    assert console_problem(short, exp, exp) is None and "differs from" in console_problem(short, exp.replace("0x3330", "0x3331"), exp.replace("0x3330", "0x3331"))
+    with tempfile.TemporaryDirectory() as d:
+        bad = Path(d) / "t.toml"
+        bad.write_text('[[test]]\nname = "a"\nlike = "b"\n')
+        try:
+            load_tests(bad)
+            raise AssertionError("a like of a missing test passed")
+        except Fail as e:
+            assert "like" in str(e)
     global CORPUS
     saved, CORPUS = CORPUS, Path("/nonexistent-corpus")  # a missing checkout must fail by name, not be skipped
     try:
