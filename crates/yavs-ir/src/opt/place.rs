@@ -1,5 +1,6 @@
 //! A logic row or slice read through a temporary copy is read in place:
-//! `Alloc t; LCopy t, 0, src, so, n; ...; LGet x, t, i` is `LGet x, src, so + i`.
+//! `Alloc t; LCopy t, 0, src, so, n; ...; LGet x, t, i` is `LGet x, src, so + i`, and
+//! `...; LCopy d, do, t, to, m` is `LCopy d, do, src, so + to, m` (`LCopy` reads before it writes).
 //!
 //! A value has no plane offset, so the lowering copies a row (`hconfig(j)`) or a slice into a
 //! temporary and reads that. The temporary goes when nothing can tell: `t` is read by nothing
@@ -32,6 +33,7 @@ impl Opt<'_> {
 
     /// Is `i` certainly an element below `n`: constants, or `n - 1 - pos` with `pos` a checked
     /// position in the descriptor of `n` elements.
+    // ponytail: a loop variable as the position keeps the copy; interval facts could prove it.
     fn place_below(&self, i: Reg, n: Reg) -> bool {
         let kn = self.place_k(n);
         if let (Some(ki), Some(kn)) = (self.place_k(i), kn) {
@@ -64,6 +66,26 @@ impl Opt<'_> {
             _ => kn.is_some() && self.place_k(last) == kn.map(|k| k - 1),
         };
         last_ok && self.place_len_of(dope, n)
+    }
+
+    /// Is the run of `m` elements from `off` certainly inside `n`: constants, or all of them, the
+    /// lengths equal or checked equal by a `SubtypeCheck` between `pc` and `q`.
+    fn place_run_in(&self, off: Reg, m: Reg, n: Reg, pc: usize, q: usize) -> bool {
+        let (ko, km, kn) = (self.place_k(off), self.place_k(m), self.place_k(n));
+        if let (Some(a), Some(c), Some(k)) = (ko, km, kn) {
+            return 0 <= a && 0 <= c && a.checked_add(c).is_some_and(|e| e <= k);
+        }
+        if ko != Some(0) {
+            return false;
+        }
+        m == n
+            || matches!(self.place_def(m), Some(Inst::DopeLen { dope, dim: 0, .. })
+                if self.place_len_of(dope, n))
+            || self.code[pc + 1..q].iter().any(|i| {
+                matches!(*i, Inst::SubtypeCheck { dope, want, dims: 1, .. }
+                    if self.place_len_of(dope, n) && self.place_len_of(want, m)
+                        || self.place_len_of(dope, m) && self.place_len_of(want, n))
+            })
     }
 
     /// Does the descriptor `dope` have `n` elements in its first dimension?
@@ -190,6 +212,20 @@ impl Opt<'_> {
             }
             let ok = match self.code[q] {
                 Inst::LGet { base, idx, .. } => base == t && idx != t && self.place_below(idx, n),
+                Inst::LCopy {
+                    dst,
+                    dst_off,
+                    src: s,
+                    src_off,
+                    n: m,
+                } => {
+                    s == t
+                        && dst != t
+                        && dst_off != t
+                        && src_off != t
+                        && m != t
+                        && self.place_run_in(src_off, m, n, pc, q)
+                }
                 _ => false,
             };
             if !ok {
@@ -284,6 +320,22 @@ impl Opt<'_> {
                     dst,
                     base: src,
                     idx,
+                };
+            }
+            Inst::LCopy {
+                dst,
+                dst_off,
+                src: s,
+                src_off,
+                n,
+            } if s == t => {
+                let src_off = off(self, src_off);
+                self.code[q] = Inst::LCopy {
+                    dst,
+                    dst_off,
+                    src,
+                    src_off,
+                    n,
                 };
             }
             _ => {}

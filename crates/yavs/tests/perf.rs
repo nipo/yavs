@@ -179,7 +179,7 @@ macro_rules! case {
 case!(frame_vars, "n=200", &[], [("ops", Max(11200))]);
 // Slices between variables in the frame, one block: more facts than the optimiser's table keeps
 // (#1059), so a table that stopped learning shows here as ops per statement.
-case!(frame_slices, "x=", &[], [("ops", Max(25000))]);
+case!(frame_slices, "x=", &[], [("ops", Max(11400))]);
 case!(
     pkg_table,
     "sum=212",
@@ -533,7 +533,7 @@ case!(hread_loop, "sum=", &[], [("ops", Max(4233))]);
 case!(tab_tail, "sum=", &[], [("ops", Max(13549))]);
 // Rows of bit vectors behind access values filled in nested loops by a procedure of the process
 // (#768): the loads, the dereference and the descriptors leave the inner loop, which runs as one op.
-case!(row_fill, "ones=", &[], [("ops", Max(5290))]);
+case!(row_fill, "ones=", &[], [("ops", Max(4860))]);
 case!(
     edge_forms,
     "edges=",

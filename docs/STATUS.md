@@ -10796,3 +10796,8 @@ A process copy is made per instance data and per the forms of the signals its bo
 ## Shape in process copies
 
 Constant-size temporaries are frame bytes in processes with nested subprograms too; the declarations of a process's signal copies count as the declarative part wherever their blocks are (`Opt::reached_from`), so the copies' descriptors are facts and the copies move into the frame; a formal of a locally static subtype reads its bounds from the constant pool. Shape work on the descriptors of parameters that are not static stays at run time: layout words through the callback, lengths and positions from the descriptor (`docs/decisions.md` "Shape facts in process copies").
+
+## Logic rows and slices read in place
+
+The optimiser reads an element of a logic row or slice, and copies a row or slice into a target, from the source instead of through a temporary (`yavs-ir` `opt/place.rs`, `YAVS_NO_PLACE=1` turns it off; `docs/decisions.md` "Logic rows read in place"). Temporaries read any other way keep their copy, and so does a position that is a loop variable. Whole runs of two large designs print the same with and without it.
+
