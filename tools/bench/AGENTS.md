@@ -8,7 +8,7 @@ performance change. Everyone measures with this one harness, so numbers are comp
 - A fixed benchmark set, per-phase timings, an interleaved A/B comparison of two yavs binaries and a
   JSON record of every run. It measures; it never judges a change by itself and never edits a binary.
 - External benchmarks are referenced by path or environment variable and never copied into the repository
-  (root rule 7). Python is stdlib only (`python3 -I`). Scratch and results are under
+  (root rule 7). Python is stdlib only (`python3 -I`), except that the `osvvm_axistream` test runs `suites/pro.py` and needs pyEDAA.OSVVM in that Python (`tools/suites/requirements.txt`). Scratch and results are under
   `~/.cache/yavs-bench` (`YAVS_BENCH_CACHE`), never in the repository.
 
 ## 2. Map

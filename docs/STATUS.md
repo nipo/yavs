@@ -404,12 +404,13 @@ The generated-VIP tests of the framework component (generator output compiled an
 
 ### Verification library: its own `.pro` regression (#276)
 
-`tools/suites/pro.py` reads the library's build and test scripts (`OsvvmLibraries.pro`, `RunAllTests.pro`) with a Tcl subset, analyzes
+`tools/suites/pro.py` reads the library's build and test scripts (`OsvvmLibraries.pro`, `RunAllTests.pro`) with pyEDAA.OSVVM (since #1061; before that with a Tcl subset of its own), analyzes
 521 files in script order and runs each test (`yavs run`, release build of main, 2 in parallel). Pass = exit 0 and the
 library's own `DONE PASSED` summary line. The script settings package body is generated with the scripts' release as settings
 revision, as the scripts do (the transcript layout the tests compare against the validated results follows it). 2008 (re-measured at f2ab69be, 200 s wall at 2 in parallel; 178 s at b9dcddb6) and 2019 (at f2ab69be, 218 s wall):
 all 314 tests pass, the same test for test (2019 passed 272 of 314 at b9dcddb6, the #416 overflow in the native `to_integer`, fixed; it fell to 129 of 314 between fd35a265 and 33e5f57e, #429, fixed); the native co-simulation directories (`CoSim`, `CoSimPCIe`) are skipped, not run.
 Root causes fixed on the way: #291, #292, #294, #295, #296, #304, #311 (= #313), #314, #315 (= #312).
+Reader change (#1061, 2026-11-02): pyEDAA.OSVVM 0.8.1 (Apache-2.0, Python 3.12+, `tools/suites/requirements.txt`) replaced the Tcl subset. Against the old reader, both scripts give the same 835 actions under 2008 and 2019 (521 files, 314 tests: order, libraries, library mapping, generics, skipped directories); the one difference found was a `simulate` with no `TestName` (the package reuses the previous test case), handled in `pro.py`. The suite stays 314 of 314 under 2008 and 2019 (release build, about 15 s at `-j 4`).
 
 ### Reference simulators' own regression tests, run time (#354)
 

@@ -10,7 +10,7 @@ Read the root `AGENTS.md` first. This file is for an agent about to change or ru
   checking the vendored IEEE libraries, generating `lib/NATIVE.md`, reference simulator runs, the
   analysis corpus runner and the differential test harness.
 - Not part of any crate; nothing here is built by cargo. Python is stdlib only (run with
-  `python3 -I`), shell is bash or POSIX sh.
+  `python3 -I`; the one exception is `suites/pro.py`, which needs pyEDAA.OSVVM, `suites/requirements.txt`), shell is bash or POSIX sh.
 - Inputs are external checkouts in a cache directory, never repository content (root rule 7).
 
 ## 2. Map

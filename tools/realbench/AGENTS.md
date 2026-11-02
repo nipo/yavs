@@ -13,7 +13,7 @@ for an agent that tunes performance or measures a performance change on real tes
 - It measures; it never judges a change and never edits a binary. It reuses the timing code of `tools/bench/run.py`
   (`timed`, `cell`, `instr_event`: pinning, `systemd-run` cap, `timeout 300`, memory guard, medians, `perf stat` instructions).
 - Sources are read in place from the corpus cache (`tools/fetch-corpus.sh`) and the maintainer's project checkout; nothing is copied
-  into the repository (root rule 7). Python is stdlib only (`python3 -I`). Scratch and results are under `~/.cache/yavs-realbench`
+  into the repository (root rule 7). Python is stdlib only (`python3 -I`), except that the OSVVM `driver` tests run `suites/pro.py` and need pyEDAA.OSVVM in that Python (`tools/suites/requirements.txt`). Scratch and results are under `~/.cache/yavs-realbench`
   (`YAVS_REALBENCH_CACHE`).
 
 ## 2. Map

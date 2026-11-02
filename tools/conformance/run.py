@@ -12,7 +12,8 @@ the `llvm` feature) also difftest of the auto and llvm tiers and the designs und
 what it ran in docs/conformance-local.json with date and commit; CI never writes it. --check renders into --out
 and exits 1 when the committed docs/conformance.md differs outside the `Generated:` line.
 --waveq re-renders the committed report with the current tools/waveq results (a local record written by tools/waveq).
-Needs the corpora: tools/fetch-corpus.sh (YAVS_CORPUS, default ~/.cache/rsim-corpus). Python stdlib only.
+Needs the corpora: tools/fetch-corpus.sh (YAVS_CORPUS, default ~/.cache/rsim-corpus). Python stdlib only, except that the osvvm step
+needs pyEDAA.OSVVM in that Python (python3 -m pip install -r tools/suites/requirements.txt).
 """
 import argparse, concurrent.futures as cf, datetime, importlib.util, json, os, re, subprocess, sys, tempfile
 from pathlib import Path

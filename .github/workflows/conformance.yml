@@ -1,6 +1,7 @@
 # Conformance report (#780): regenerates the parts of docs/conformance.md that need only yavs and the
 # fetched corpora, uploads the report as an artifact and checks the committed copy. Nothing is published
 # outside the repository. On main a stale committed report is a warning; on a release tag it fails the run.
+# The osvvm step needs pyEDAA.OSVVM (tools/suites/requirements.txt, installed below).
 # It also runs cocotb's own regression over VHPI (tools/cocotb, a pinned cocotb from PyPI and its tests
 # from GitHub); a failing job there fails the run.
 # Nightly on main, by hand (`gh workflow run conformance.yml --ref main`, which RELEASING.md uses) and on a
@@ -34,6 +35,11 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v5
+      # pyEDAA.OSVVM reads the OSVVM scripts in tools/suites/pro.py (the osvvm step of the report)
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - run: python -m pip install -r tools/suites/requirements.txt
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - uses: actions/cache@v4

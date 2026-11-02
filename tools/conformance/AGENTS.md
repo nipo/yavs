@@ -13,7 +13,7 @@ report generator or regenerate the report (#780).
 - Not here: waveform equivalence on real designs (agent trust2: the section includes
   `tools/waveq/RESULTS.md` when that file exists, a placeholder before); the owner of `tools/waveq` refreshes the report with `run.py --waveq` after updating `RESULTS.md` and `results.json` (no CI steps needed), performance numbers (`tools/bench`,
   `tools/realbench`).
-- Python stdlib only (`python3 -I`).
+- Python stdlib only (`python3 -I`), except that the `osvvm` step runs `suites/pro.py`, which needs pyEDAA.OSVVM in that Python (`python3 -m pip install -r tools/suites/requirements.txt`; `conformance.yml` installs it).
 
 ## 2. Map
 

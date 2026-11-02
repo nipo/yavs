@@ -21,7 +21,7 @@ and overall: `analyze` (the test's whole compile order, consecutive files of one
 (#745; --analyze-calls per-file: one call per file); library part and own files apart; cold = fresh libraries, warm =
 the same files again into the populated libraries), `elab` (elaboration only, cold and warm cache), `codegen` (yavs `--tier=llvm` minus
 `--tier=interp`, both stopped at time 0; cold and warm cache; the reference generates code inside its elaboration), `run` (the --tiers cells).
-Python is stdlib only; run with `python3 -I`. See AGENTS.md.
+Python is stdlib only (run with `python3 -I`) except that the OSVVM driver tests need pyEDAA.OSVVM (tools/suites/requirements.txt). See AGENTS.md.
 """
 import argparse, concurrent.futures as cf, functools, importlib.util, json, math, os, re, shlex, shutil, statistics, subprocess, sys, tempfile, threading, time, tomllib, types
 from pathlib import Path
