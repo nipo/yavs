@@ -371,6 +371,9 @@ impl Elaborated {
             };
             let proc_waits = proc.several_waits();
             let name = self.hier.dotted_in(p.scope, Case::Lrm);
+            if let (Some(ir), Some(f)) = (&self.ir, proc.entry_func()) {
+                ir.program.note_label(yavs_ir::FuncId(f), &name);
+            }
             let pid = b.process_boxed(
                 &name,
                 ProcFlags {

@@ -398,7 +398,7 @@ Compiled tiers: Cranelift
      - ``speed``
      - ``run``
    * - ``YAVS_CLIFT_PERFMAP``
-     - Writes ``/tmp/perf-<pid>.map`` for ``perf report``.
+     - Writes ``/tmp/perf-<pid>.map`` for ``perf report``: one line per function of generated code, compiled or linked from the compilation cache, named ``f<id>_<process instance path>`` (``n`` native-frame code, ``c`` its adapter; ``+N`` when N more processes run the same code) or by subprogram.
      - ``1``
      - ``0``
      - ``run``
@@ -559,12 +559,12 @@ Compiled tiers: LLVM (the ``llvm`` feature of a source build)
      - unset
      - ``run``
    * - ``YAVS_LLVM_PERFMAP``
-     - Writes ``/tmp/perf-<pid>.map`` for ``perf report``.
+     - Writes ``/tmp/perf-<pid>.map`` for ``perf report``, with the same names and for cached code too (see ``YAVS_CLIFT_PERFMAP``).
      - any value
      - unset
      - ``run``
    * - ``YAVS_PERFMAP``
-     - The same, from the JIT's symbol lookups.
+     - The older name of ``YAVS_LLVM_PERFMAP``.
      - any value
      - unset
      - ``run``

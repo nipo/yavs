@@ -788,6 +788,9 @@ pub struct Jit {
     /// Code compiled for a module by its key (`lower::compile_one`): another function whose
     /// module is the same up to its names is that code.
     pub(crate) twins: std::collections::HashMap<String, (usize, usize, usize)>,
+    /// With the perf map on (`perfmap::llvm_requested`): the size of each symbol of the objects
+    /// added, from the object files themselves.
+    sizes: std::collections::HashMap<String, usize>,
 }
 
 extern "C" fn report_session_error(ctx: *mut c_void, err: LLVMErrorRef) {
@@ -827,6 +830,7 @@ impl Jit {
                 raw,
                 session_errors: Box::default(),
                 twins: Default::default(),
+                sizes: Default::default(),
             };
             LLVMOrcExecutionSessionSetErrorReporter(
                 LLVMOrcLLJITGetExecutionSession(raw),
@@ -891,8 +895,12 @@ impl Jit {
                 c"yavs-object".as_ptr(),
             );
             let jd = LLVMOrcLLJITGetMainJITDylib(self.raw);
-            check(LLVMOrcLLJITAddObjectFile(self.raw, jd, buf))
+            check(LLVMOrcLLJITAddObjectFile(self.raw, jd, buf))?;
         }
+        if crate::perfmap::llvm_requested() {
+            self.sizes.extend(symbol_sizes(obj));
+        }
+        Ok(())
     }
 
     /// Looks up an (unmangled) symbol, compiling and linking it if needed.
@@ -905,9 +913,6 @@ impl Jit {
             .session_errors
             .lock()
             .unwrap_or_else(|p| p.into_inner());
-        if res.is_ok() {
-            perf_map(&name, addr as usize);
-        }
         match res {
             Ok(()) if errors.is_empty() => Ok(addr as usize),
             Ok(()) => Err(Error(errors.drain(..).collect::<Vec<_>>().join("; "))),
@@ -922,6 +927,23 @@ impl Jit {
                 ))
             }
         }
+    }
+
+    /// [`Jit::lookup`], and with the perf map on, a line for the function under its readable
+    /// `symbol` (`perfmap::symbol`), sized by its object file.
+    pub fn lookup_listed(&mut self, name: &str, symbol: &str) -> Result<usize> {
+        let addr = self.lookup(name)?;
+        if crate::perfmap::llvm_requested() {
+            match self.sizes.get(name) {
+                Some(&size) => crate::perfmap::append(addr, size, symbol),
+                None => {
+                    return Err(Error(format!(
+                        "no size for `{name}` in the object files added (the perf map needs them)"
+                    )));
+                }
+            }
+        }
+        Ok(addr)
     }
 
     /// The triple the JIT generates code for.
@@ -943,23 +965,39 @@ impl Drop for Jit {
     }
 }
 
-/// Profiling aid: with `YAVS_PERFMAP` set, every looked-up symbol is listed in `/tmp/perf-<pid>.map`
-/// (the file `perf report` reads for code it does not know), so compiled functions show under
-/// their symbol (`f<id>`, `f<id>_n`) instead of as anonymous JIT addresses. A symbol's size is the
-/// distance to the next one.
-fn perf_map(name: &CStr, addr: usize) {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    static MAP: Mutex<Vec<(usize, String)>> = Mutex::new(Vec::new());
-    if !*ON.get_or_init(|| std::env::var_os("YAVS_PERFMAP").is_some()) {
-        return;
+/// The size of each function symbol of an object file, read with LLVM's object API (the perf map
+/// lists the code a symbol names, not the distance to the next one).
+fn symbol_sizes(obj: &[u8]) -> Vec<(String, usize)> {
+    let mut out = Vec::new();
+    // SAFETY: the binary only refers to the buffer (a copy), so both are disposed here; the name
+    // pointer is valid until the iterator moves on.
+    unsafe {
+        let buf = LLVMCreateMemoryBufferWithMemoryRangeCopy(
+            obj.as_ptr().cast::<c_char>(),
+            obj.len(),
+            c"yavs-object".as_ptr(),
+        );
+        let mut msg = ptr::null_mut();
+        let file = llvm_sys::object::LLVMCreateBinary(buf, ptr::null_mut(), &mut msg);
+        if file.is_null() {
+            if !msg.is_null() {
+                LLVMDisposeMessage(msg);
+            }
+        } else {
+            let it = llvm_sys::object::LLVMObjectFileCopySymbolIterator(file);
+            while llvm_sys::object::LLVMObjectFileIsSymbolIteratorAtEnd(file, it) == 0 {
+                let size = llvm_sys::object::LLVMGetSymbolSize(it);
+                let name = llvm_sys::object::LLVMGetSymbolName(it);
+                if size > 0 && !name.is_null() {
+                    let name = CStr::from_ptr(name).to_string_lossy().into_owned();
+                    out.push((name, size as usize));
+                }
+                llvm_sys::object::LLVMMoveToNextSymbol(it);
+            }
+            llvm_sys::object::LLVMDisposeSymbolIterator(it);
+            llvm_sys::object::LLVMDisposeBinary(file);
+        }
+        LLVMDisposeMemoryBuffer(buf);
     }
-    let mut m = MAP.lock().unwrap_or_else(|p| p.into_inner());
-    m.push((addr, name.to_string_lossy().into_owned()));
-    m.sort_unstable();
-    let mut out = String::new();
-    for (i, (a, n)) in m.iter().enumerate() {
-        let end = m.get(i + 1).map_or(a + 0x4000, |x| x.0);
-        out += &format!("{a:x} {:x} {n}\n", (end - a).min(0x10_0000));
-    }
-    let _ = std::fs::write(format!("/tmp/perf-{}.map", std::process::id()), out);
+    out
 }

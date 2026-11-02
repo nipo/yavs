@@ -35,8 +35,8 @@ pub use memo_fn::{MemoArg, MemoArr, MemoSig, native_is_pure};
 pub use program::{
     Block, CaseTable, CheckMsg, ConstData, CovArm, CovComb, CovCond, CovInfo, CovKind, CovNode,
     CovRow, CovWaiver, Dir, ElabRaw, FatLayout, ForeignArg, ForeignMode, ForeignRef, Func,
-    FuncFlags, FuncKind, Local, Mode, NativeRef, OptCopy, Param, ParamClass, Program, RootKind,
-    StmtInfo, StmtKind, VhpiIndex, VhpiModel, VhpiParam, ViaNode,
+    FuncFlags, FuncKind, Labels, Local, Mode, NativeRef, OptCopy, Param, ParamClass, Program,
+    RootKind, StmtInfo, StmtKind, VhpiIndex, VhpiModel, VhpiParam, ViaNode,
 };
 pub use program::{COV_INPUTS, native_shown};
 pub use program::{bytes, lazy_bodies, note_restart, optimised_functions, restarted_calls};

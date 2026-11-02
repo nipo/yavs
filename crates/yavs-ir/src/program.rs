@@ -52,6 +52,9 @@ pub struct Program {
     /// program starts without them.
     #[serde(skip)]
     pub copies: crate::Copies,
+    /// What the processes of each function are called (profiles and perf maps, [`Program::label`]).
+    #[serde(skip)]
+    pub labels: Labels,
     /// Functions elaboration-time code asked for often ([`ElabRaw`]).
     #[serde(skip)]
     #[doc(hidden)]
@@ -89,7 +92,57 @@ impl StoredOpt {
     }
 }
 
+/// The name of the first process that runs a function and how many more run it
+/// ([`Program::note_label`]); a copy of the program starts without them.
+#[derive(Default, Debug)]
+pub struct Labels(std::sync::Mutex<std::collections::HashMap<u32, (String, u32)>>);
+
+impl Clone for Labels {
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
+
 impl Program {
+    /// Process `name` (its instance path) runs function `f` (the process function or a copy of it).
+    pub fn note_label(&self, f: FuncId, name: &str) {
+        let mut m = (self.labels.0)
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        match m.get_mut(&f.0) {
+            Some(e) => e.1 += 1,
+            None => {
+                m.insert(f.0, (name.to_string(), 0));
+            }
+        }
+    }
+
+    /// What a profile calls function `f`: the first process that runs it by instance path, with
+    /// `+N` when N more processes run the same code (a copy without a name of its own goes by its
+    /// process function's); a subprogram by its name after those of the subprograms around it.
+    pub fn label(&self, f: FuncId) -> String {
+        let named = |f: FuncId| {
+            let m = (self.labels.0)
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            m.get(&f.0).map(|(n, more)| match more {
+                0 => n.clone(),
+                _ => format!("{n}+{more}"),
+            })
+        };
+        if let Some(n) = named(f).or_else(|| named(self.base_of(f))) {
+            return n;
+        }
+        let mut chain = Vec::new();
+        let mut at = self.raw(f);
+        while let Some(g) = at {
+            chain.push(g.name.as_str());
+            at = g.parent.and_then(|p| self.raw(p));
+        }
+        chain.reverse();
+        chain.join(".")
+    }
+
     /// The function as it executes: its code optimised (see `opt`), the first time asked for.
     /// `funcs` holds the code as lowering emitted it. Both are the same function: statements,
     /// frame, parameters and flags agree, instruction numbers, blocks and resume points do not.

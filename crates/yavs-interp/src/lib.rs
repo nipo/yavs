@@ -2436,7 +2436,7 @@ impl Process for InterpProcess {
             // Started, running, no shared state, no debugger: the activation of a process.
             self.m.execs += 1;
             if self.m.execs == u64::from(self.m.spec_at) {
-                self.m.specialise();
+                self.specialise(Some(ctx.process_name()));
             }
             if let Err(e) = self.m.borrow_scratch() {
                 return Err(self.m.error(e, Some(ctx)));
@@ -2525,11 +2525,22 @@ impl InterpProcess {
 }
 
 impl InterpProcess {
+    /// The switch to a copy of the process function (`Machine::specialise`); the copy is named
+    /// after the process (`Program::label`).
+    #[cold]
+    fn specialise(&mut self, name: Option<&str>) {
+        let was = self.m.entry;
+        self.m.specialise();
+        if let (Some(name), true) = (name, self.m.entry != was) {
+            self.m.rt.prog.note_label(self.m.entry, name);
+        }
+    }
+
     /// Runs the machine with the shared state locked, until it suspends or returns.
     fn exec(&mut self, ctx: Option<&mut Ctx<'_>>) -> Result<Outcome, Fault> {
         self.m.execs += 1;
         if self.m.execs == u64::from(self.m.spec_at) {
-            self.m.specialise();
+            self.specialise(ctx.as_deref().map(|c| c.process_name()));
         }
         let shared = self.shared.clone();
         let mut guard = match &shared {

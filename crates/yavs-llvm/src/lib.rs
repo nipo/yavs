@@ -28,6 +28,7 @@ mod lower;
 pub mod native;
 #[cfg(feature = "llvm")]
 mod objcache;
+pub mod perfmap;
 mod profile;
 pub mod regs;
 pub mod rt;

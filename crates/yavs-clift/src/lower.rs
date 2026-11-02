@@ -378,9 +378,48 @@ impl Jit {
         self.missed
     }
 
+    /// The symbol `fid` was declared under (`yavs_llvm::perfmap::symbol`).
+    fn symbol_of(&self, fid: ClifId) -> String {
+        let d = self.module.declarations().get_function_decl(fid);
+        d.linkage_name(fid).into_owned()
+    }
+
+    /// Compile `ctx` into `fid` (`define_code_in`) and list it for the perf map, whether the code
+    /// was compiled or linked from the compilation cache.
+    fn define_code(&mut self, fid: ClifId, ctx: &mut Context) -> Result<(), String> {
+        self.define_code_in(fid, ctx)?;
+        if self.perfmap.is_none() {
+            return Ok(());
+        }
+        let c = ctx.compiled_code().ok_or("no compiled code")?;
+        // IR pc of each stretch of machine code (`YAVS_CLIFT_CODEDIR`: `<name>.srcmap`).
+        let map = if srcmap() {
+            c.buffer
+                .get_srclocs_sorted()
+                .iter()
+                .map(|m| {
+                    let at = if m.loc.is_rel() {
+                        m.loc.relocate(ctx.func.params.base_srcloc())
+                    } else {
+                        m.loc.as_abs()
+                    };
+                    (m.start, m.end, if at.is_default() { 0 } else { at.bits() })
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let size = c.code_info().total_size as usize;
+        let name = self.symbol_of(fid);
+        if let Some(list) = self.perfmap.as_mut() {
+            list.push((name, fid, size, map));
+        }
+        Ok(())
+    }
+
     /// Compile `ctx` into `fid`: linked from the compilation cache when it has the function
     /// (`cache.rs`), else compiled, and stored when there is a cache.
-    fn define_code(&mut self, fid: ClifId, ctx: &mut Context) -> Result<(), String> {
+    fn define_code_in(&mut self, fid: ClifId, ctx: &mut Context) -> Result<(), String> {
         let Some(store) = crate::cache::store() else {
             return self
                 .module
@@ -553,7 +592,7 @@ impl Jit {
         let fid = self
             .module
             .declare_function(
-                &format!("c{}", nat.as_u32()),
+                &format!("c{}", &self.symbol_of(nat)[1..]),
                 Linkage::Export,
                 &ctx.func.signature,
             )
@@ -893,7 +932,7 @@ impl Jit {
         let fid = self
             .module
             .declare_function(
-                &format!("{}{}", if native { "n" } else { "f" }, id.0),
+                &yavs_llvm::perfmap::symbol(if native { "n" } else { "f" }, id.0, &prog.label(id)),
                 Linkage::Export,
                 &ctx.func.signature,
             )
@@ -938,32 +977,6 @@ impl Jit {
                 id.0
             );
         }
-        if let (Some(list), Some(c)) = (self.perfmap.as_mut(), ctx.compiled_code()) {
-            let kind = if native { "n" } else { "f" };
-            // IR pc of each stretch of machine code (`YAVS_CLIFT_CODEDIR`: `<name>.srcmap`).
-            let map = if srcmap() {
-                c.buffer
-                    .get_srclocs_sorted()
-                    .iter()
-                    .map(|m| {
-                        let at = if m.loc.is_rel() {
-                            m.loc.relocate(ctx.func.params.base_srcloc())
-                        } else {
-                            m.loc.as_abs()
-                        };
-                        (m.start, m.end, if at.is_default() { 0 } else { at.bits() })
-                    })
-                    .collect()
-            } else {
-                Vec::new()
-            };
-            list.push((
-                format!("{kind}{}_{}", id.0, f.name.replace(' ', "_")),
-                fid,
-                c.code_info().total_size as usize,
-                map,
-            ));
-        }
         self.module.clear_context(&mut ctx);
         if let Some(k) = shared {
             self.bodies.insert(k, fid);
@@ -976,39 +989,35 @@ impl Jit {
             .finalize_definitions()
             .map_err(|e| e.to_string())?;
         if let Some(list) = self.perfmap.take() {
-            use std::io::Write;
-            let path = format!("/tmp/perf-{}.map", std::process::id());
-            if let Ok(mut out) = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(path)
-            {
-                // `YAVS_CLIFT_CODEDIR=<dir>`: the machine code of each function as `<name>.bin`,
-                // for `objdump -D -b binary -mi386:x86-64` against `perf script` addresses.
-                let dir = std::env::var_os("YAVS_CLIFT_CODEDIR");
-                for (name, id, size, map) in &list {
-                    let at = self.module.get_finalized_function(*id) as usize;
-                    let _ = writeln!(out, "{at:x} {size:x} {name}");
-                    if let Some(d) = &dir {
-                        // SAFETY: the finalized function owns `size` bytes of code at `at`.
-                        let code = unsafe { std::slice::from_raw_parts(at as *const u8, *size) };
-                        let file: String = name
-                            .chars()
-                            .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
-                            .collect();
-                        let _ = std::fs::write(
-                            std::path::Path::new(d).join(format!("{file}.bin")),
-                            code,
-                        );
-                        let text: String = map
-                            .iter()
-                            .map(|(a, b, l)| format!("{a} {b} {l}\n"))
-                            .collect();
-                        let _ = std::fs::write(
-                            std::path::Path::new(d).join(format!("{file}.srcmap")),
-                            text,
-                        );
-                    }
+            // With `PERF_BUILDID_DIR` set (`perf record` sets it) the JIT module lists every
+            // function it finalizes under its symbol, the readable one: not twice.
+            let jit_writes = std::env::var_os("PERF_BUILDID_DIR").is_some();
+            // `YAVS_CLIFT_CODEDIR=<dir>`: the machine code of each function as `<name>.bin`,
+            // for `objdump -D -b binary -mi386:x86-64` against `perf script` addresses.
+            let dir = std::env::var_os("YAVS_CLIFT_CODEDIR");
+            for (name, id, size, map) in &list {
+                let at = self.module.get_finalized_function(*id) as usize;
+                if !jit_writes {
+                    yavs_llvm::perfmap::append(at, *size, name);
+                }
+                if let Some(d) = &dir {
+                    // SAFETY: the finalized function owns `size` bytes of code at `at`.
+                    let code = unsafe { std::slice::from_raw_parts(at as *const u8, *size) };
+                    let file: String = name
+                        .chars()
+                        .take(100)
+                        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+                        .collect();
+                    let _ =
+                        std::fs::write(std::path::Path::new(d).join(format!("{file}.bin")), code);
+                    let text: String = map
+                        .iter()
+                        .map(|(a, b, l)| format!("{a} {b} {l}\n"))
+                        .collect();
+                    let _ = std::fs::write(
+                        std::path::Path::new(d).join(format!("{file}.srcmap")),
+                        text,
+                    );
                 }
             }
             self.perfmap = Some(Vec::new());
