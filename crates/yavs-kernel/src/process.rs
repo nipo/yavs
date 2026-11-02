@@ -2322,6 +2322,18 @@ impl Ctx<'_> {
         let at = at.unwrap_or(now);
         if info.bdirect {
             if at == now {
+                // The signal and the driver hold the value and nothing of this run is pending:
+                // the commit would find no change (`Signal::commit_bytes`), so no entry.
+                if !self.has_entries(info, 3)
+                    && self.st.same_wanted(info.local)
+                    && self.st.same_seen(
+                        info.local,
+                        self.sh.signals[sig].direct_same_bytes(info.slot, r.offset, bytes),
+                    )
+                {
+                    self.note_skipped();
+                    return true;
+                }
                 // The commit writes it to the signal; a later assignment of the run to the driver
                 // is another entry (the last one wins), one that needs the waveform moves them.
                 self.mark_entries(info, 3);

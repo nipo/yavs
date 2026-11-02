@@ -1904,6 +1904,29 @@ impl Signal {
         Some(self.mark_pend(elem, 1))
     }
 
+    /// Whether `commit_bytes` of `v` to element `elem` through the direct driver in `slot` would
+    /// find the driver and the signal holding it already, on a signal that allows skipping.
+    #[inline(always)]
+    pub(crate) fn direct_same_bytes(&self, slot: u32, elem: u32, v: &[u8]) -> bool {
+        let (es, at) = (v.len(), elem as usize * v.len());
+        let (Buf::Bytes { data: drv, .. }, Buf::Bytes { data: cur, .. }) =
+            (&self.driving, &self.cur)
+        else {
+            return false;
+        };
+        if !self.skip_ok || !cur.get(at..at + es).is_some_and(|c| bytes_eq(c, v)) {
+            return false;
+        }
+        if self.exact {
+            let d = &self.drivers[slot as usize];
+            let rel = (elem - d.range.offset) as usize * es;
+            matches!(&d.value, Buf::Bytes { data, .. }
+                if data.get(rel..rel + es).is_some_and(|x| bytes_eq(x, v)))
+        } else {
+            drv.get(at..at + es).is_some_and(|x| bytes_eq(x, v))
+        }
+    }
+
     /// A zero-delay transaction of one element of a byte signal's direct driver
     /// (`DriverInfo::bdirect`), committed as `commit_code` commits a logic one: the driving
     /// value now (the driver value too after a deposit), the element waiting for the next update
