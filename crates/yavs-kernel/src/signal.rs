@@ -1825,7 +1825,7 @@ impl Signal {
 
     /// [`Signal::direct_same`] for `len` elements from `elem` (at most 64): `planes`, masked to
     /// `len`, is what `cur` and the driving value (the driver's, after a deposit) hold there.
-    #[inline]
+    #[inline(always)]
     pub(crate) fn direct_same_planes(
         &self,
         slot: u32,
@@ -1840,6 +1840,18 @@ impl Signal {
         let Buf::Planes { b: cur, .. } = &self.cur else {
             return false;
         };
+        let (w, sh) = (e / 64, e % 64);
+        // Inside one word, the usual case: the shifted value and the mask made once for both.
+        if sh + n <= 64
+            && !self.exact
+            && let (Some(x), Buf::Planes { b: drv, .. }) = (cur.get(w), &self.driving)
+            && let Some(y) = drv.get(w)
+        {
+            let v = planes.map(|p| p << sh);
+            let m = yavs_logic::wide::nmask(n) << sh;
+            let diff = |x: &Block| (x[0] ^ v[0]) | (x[1] ^ v[1]) | (x[2] ^ v[2]) | (x[3] ^ v[3]);
+            return diff(x) & m == 0 && diff(y) & m == 0;
+        }
         if yavs_logic::wide::get_block(cur, e, n) != planes {
             return false;
         }
