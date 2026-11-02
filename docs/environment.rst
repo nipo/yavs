@@ -269,6 +269,11 @@ Each one turns a fast path off or changes its threshold, to compare a run with a
      - not ``0``
      - unset
      - ``run``
+   * - ``YAVS_NO_PLACE``
+     - Reads logic rows and slices through a temporary copy instead of in place.
+     - not ``0``
+     - unset
+     - ``run``
    * - ``YAVS_NO_PROC_OBJECTS``
      - Keeps the composite variables of processes on the heap instead of in their frames.
      - not ``0``

@@ -1,0 +1,292 @@
+//! A logic row or slice read through a temporary copy is read in place:
+//! `Alloc t; LCopy t, 0, src, so, n; ...; LGet x, t, i` is `LGet x, src, so + i`.
+//!
+//! A value has no plane offset, so the lowering copies a row (`hconfig(j)`) or a slice into a
+//! temporary and reads that. The temporary goes when nothing can tell: `t` is read by nothing
+//! else, every reader is after the copy in its basic block, nothing between can write what `src`
+//! names, `src` and `so` keep their values and the reader stays inside the copied run. No check
+//! moves or goes. Rules and what still copies: `docs/decisions.md` "Logic rows read in place".
+
+use super::*;
+
+impl Opt<'_> {
+    /// The constant a register defined once holds.
+    fn place_k(&self, r: Reg) -> Option<i64> {
+        let r = self.resolve(r);
+        if self.defs.get(r.0 as usize) != Some(&1) {
+            return None;
+        }
+        self.kc.get(r.0 as usize).copied().flatten()
+    }
+
+    /// The instruction that defines the register, when it is defined once.
+    fn place_def(&self, r: Reg) -> Option<Inst> {
+        if !self.single(r) {
+            return None;
+        }
+        let i = *self.code.get(*self.def_pc.get(r.0 as usize)? as usize)?;
+        let mut defines = false;
+        i.visit(&mut |x, role, _| defines |= role == Role::Def && x == r);
+        defines.then_some(i)
+    }
+
+    /// Is `i` certainly an element below `n`: constants, or `n - 1 - pos` with `pos` a checked
+    /// position in the descriptor of `n` elements.
+    fn place_below(&self, i: Reg, n: Reg) -> bool {
+        let kn = self.place_k(n);
+        if let (Some(ki), Some(kn)) = (self.place_k(i), kn) {
+            return 0 <= ki && ki < kn;
+        }
+        let Some(Inst::Bin {
+            op: IntOp::Sub,
+            a: last,
+            b: p,
+            ..
+        }) = self.place_def(i)
+        else {
+            return false;
+        };
+        // (A repeated position is a `Move` of the first.)
+        let mut pos = self.place_def(p);
+        while let Some(Inst::Move { src, .. }) = pos {
+            pos = self.place_def(src);
+        }
+        let Some(Inst::Pos { dope, dim: 0, .. }) = pos else {
+            return false;
+        };
+        let last_ok = match self.place_def(last) {
+            Some(Inst::Bin {
+                op: IntOp::Sub,
+                a,
+                b,
+                ..
+            }) => a == n && self.place_k(b) == Some(1),
+            _ => kn.is_some() && self.place_k(last) == kn.map(|k| k - 1),
+        };
+        last_ok && self.place_len_of(dope, n)
+    }
+
+    /// Does the descriptor `dope` have `n` elements in its first dimension?
+    fn place_len_of(&self, dope: Reg, n: Reg) -> bool {
+        if let Some(Inst::DopeLen {
+            dope: d, dim: 0, ..
+        }) = self.place_def(n)
+            && d == dope
+        {
+            return true;
+        }
+        self.single(dope)
+            && self.place_k(n).is_some_and(|k| {
+                self.const_dim(self.opn(dope), 0)
+                    .and_then(|(l, r, dir)| dim_len(l, r, dir == 1))
+                    == u64::try_from(k).ok()
+            })
+    }
+
+    /// Read rows and slices of logic arrays where they are; whether any copy went.
+    pub(super) fn forward_logic_copies(&mut self) -> bool {
+        // Who reads the destination of each copy into a block defined once.
+        let mut readers: FxMap<u32, Vec<u32>> = FxMap::default();
+        let mut alloc: FxMap<u32, u32> = FxMap::default();
+        for (pc, i) in self.code.iter().enumerate() {
+            if let Inst::Alloc { dst, .. } = *i
+                && self.single(dst)
+            {
+                alloc.insert(dst.0, pc as u32);
+            }
+        }
+        if alloc.is_empty() {
+            return false;
+        }
+        for (pc, i) in self.code.iter().enumerate() {
+            if is_dead(i) {
+                continue;
+            }
+            self.place_uses(i, |r| {
+                if alloc.contains_key(&r.0) {
+                    readers.entry(r.0).or_default().push(pc as u32);
+                }
+            });
+        }
+        for (_, i) in &self.inserts {
+            self.place_uses(i, |r| {
+                alloc.remove(&r.0);
+            });
+        }
+        let mut done = false;
+        for b in 0..self.blocks.len() {
+            for pc in self.range(b) {
+                let Inst::LCopy {
+                    dst: t,
+                    dst_off,
+                    src,
+                    src_off,
+                    n,
+                } = self.code[pc]
+                else {
+                    continue;
+                };
+                if !alloc.contains_key(&t.0) || self.place_k(dst_off) != Some(0) || src == t {
+                    continue;
+                }
+                let Some(rs) = readers.get(&t.0).filter(|rs| rs.len() >= 2) else {
+                    continue;
+                };
+                let rest: Vec<usize> = rs
+                    .iter()
+                    .map(|&p| p as usize)
+                    .filter(|&p| p != pc)
+                    .collect();
+                if rest.len() + 1 != rs.len() || !self.place_can(b, pc, t, src, src_off, n, &rest) {
+                    continue;
+                }
+                for &q in &rest {
+                    self.place_rewrite(b, q, t, src, src_off);
+                }
+                self.code[pc] = dead();
+                self.changed = true;
+                done = true;
+            }
+        }
+        done
+    }
+
+    fn place_uses(&self, i: &Inst, mut f: impl FnMut(Reg)) {
+        i.visit(&mut |r, role, _| {
+            if role == Role::Use {
+                f(r);
+            }
+        });
+        if let Some(l) = i.list() {
+            for &r in self
+                .operands
+                .get(l.start as usize..(l.start + l.len) as usize)
+                .unwrap_or(&[])
+            {
+                f(r);
+            }
+        }
+    }
+
+    /// May the readers `rest` of block `t`, filled by the `LCopy` at `pc`, read `src` instead?
+    #[allow(clippy::too_many_arguments)]
+    fn place_can(
+        &self,
+        b: usize,
+        pc: usize,
+        t: Reg,
+        src: Reg,
+        so: Reg,
+        n: Reg,
+        rest: &[usize],
+    ) -> bool {
+        let block = self.range(b);
+        let Some(&last) = rest.iter().max() else {
+            return false;
+        };
+        for &q in rest {
+            if q <= pc || !block.contains(&q) {
+                return false;
+            }
+            let ok = match self.code[q] {
+                Inst::LGet { base, idx, .. } => base == t && idx != t && self.place_below(idx, n),
+                _ => false,
+            };
+            if !ok {
+                return false;
+            }
+        }
+        // Between the copy and the last reader: nothing that may write what `src` names and no
+        // new value of `src` or `so`. Blocks made after the copy are fresh memory.
+        let mut fresh: Vec<Reg> = Vec::new();
+        for q in pc + 1..last {
+            let i = self.code[q];
+            if is_dead(&i) {
+                continue;
+            }
+            let safe = match i {
+                Inst::Const { .. }
+                | Inst::ConstF { .. }
+                | Inst::Move { .. }
+                | Inst::Select { .. }
+                | Inst::AddrOf { .. }
+                | Inst::Load { .. }
+                | Inst::LGet { .. }
+                | Inst::Field { .. }
+                | Inst::LayoutOf { .. }
+                | Inst::Bin { .. }
+                | Inst::BinRange { .. }
+                | Inst::Un { .. }
+                | Inst::Cmp { .. }
+                | Inst::Bool { .. }
+                | Inst::Check { .. }
+                | Inst::Pos { .. }
+                | Inst::SlicePos { .. }
+                | Inst::DopeLen { .. }
+                | Inst::SubtypeCheck { .. }
+                | Inst::Deref { .. } => true,
+                Inst::Alloc { dst, .. } => {
+                    if self.single(dst) {
+                        fresh.push(dst);
+                    }
+                    true
+                }
+                Inst::Index { dst, base, .. } => {
+                    if fresh.contains(&base) && self.single(dst) {
+                        fresh.push(dst);
+                    }
+                    true
+                }
+                Inst::MakeDope { at, .. } => fresh.contains(&at),
+                Inst::Store { addr, .. } => fresh.contains(&addr),
+                Inst::LCopy { dst, .. } | Inst::Copy { dst, .. } => fresh.contains(&dst),
+                Inst::LSet { base, .. } | Inst::LFill { base, .. } => fresh.contains(&base),
+                _ => false,
+            };
+            if !safe {
+                return false;
+            }
+            let mut moved = false;
+            i.visit(&mut |r, role, _| moved |= role == Role::Def && (r == src || r == so));
+            if moved {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// The reader at `q` reads `src` from element `so` on instead of block `t`.
+    fn place_rewrite(&mut self, b: usize, q: usize, t: Reg, src: Reg, so: Reg) {
+        let off = |o: &mut Self, at: Reg| -> Reg {
+            match (o.place_k(so), o.place_k(at)) {
+                (Some(0), _) => at,
+                (_, Some(0)) => so,
+                (Some(x), Some(y)) => o.const_reg(b, q, x + y),
+                _ => {
+                    let dst = o.fresh(RegTy::I64, 1);
+                    o.inserts.push((
+                        q,
+                        Inst::Bin {
+                            op: IntOp::Add,
+                            dst,
+                            a: so,
+                            b: at,
+                        },
+                    ));
+                    dst
+                }
+            }
+        };
+        match self.code[q] {
+            Inst::LGet { dst, base, idx } if base == t => {
+                let idx = off(self, idx);
+                self.code[q] = Inst::LGet {
+                    dst,
+                    base: src,
+                    idx,
+                };
+            }
+            _ => {}
+        }
+    }
+}

@@ -42,6 +42,7 @@ mod layout_cache;
 mod licm;
 mod live;
 mod memo;
+mod place;
 mod proc_objects;
 mod range;
 mod share;
@@ -101,6 +102,17 @@ fn drives_enabled() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| {
         std::env::var("YAVS_NO_DRIVES")
+            .map(|v| v.is_empty() || v == "0")
+            .unwrap_or(true)
+    })
+}
+
+/// Are logic rows and slices read in place (`place.rs`)? Off with `YAVS_NO_PLACE` set to anything
+/// but `0` or the empty string (differential testing).
+fn place_enabled() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| {
+        std::env::var("YAVS_NO_PLACE")
             .map(|v| v.is_empty() || v == "0")
             .unwrap_or(true)
     })
@@ -220,13 +232,14 @@ pub fn fingerprint() -> String {
         slots_enabled(),
         frame_blocks_on(),
         proc_objects::enabled(),
+        place_enabled(),
     ])
 }
 
-fn fingerprint_of(f: [bool; 12]) -> String {
+fn fingerprint_of(f: [bool; 13]) -> String {
     let names = [
         "iropt", "memo", "cfg", "inline", "keep", "compiled", "external", "layouts", "drives",
-        "slots", "blocks", "objects",
+        "slots", "blocks", "objects", "place",
     ];
     let parts: Vec<String> = names
         .iter()
@@ -243,9 +256,9 @@ mod fingerprint_tests {
     /// Every switch is part of the fingerprint (#491).
     #[test]
     fn each_switch_changes_the_fingerprint() {
-        let base = fingerprint_of([false; 12]);
-        for i in 0..12 {
-            let mut f = [false; 12];
+        let base = fingerprint_of([false; 13]);
+        for i in 0..13 {
+            let mut f = [false; 13];
             f[i] = true;
             assert_ne!(fingerprint_of(f), base, "switch {i}");
         }
@@ -1783,6 +1796,15 @@ impl<'a> Opt<'a> {
         self.drop_clean_roots();
         // (Temporaries nothing reads are gone before the markers that free them are judged.)
         self.dce();
+        if place_enabled() && self.code.iter().any(|i| matches!(i, Inst::LCopy { .. })) {
+            self.reanalyse();
+            if let Some(inited) = &promoted {
+                self.hide_inits(inited);
+            }
+            if self.forward_logic_copies() {
+                self.dce();
+            }
+        }
         if self.has_gate_native() {
             self.reanalyse();
             if self.gate_results() {
@@ -3180,7 +3202,9 @@ impl<'a> Opt<'a> {
             return;
         }
         self.changed = true;
-        for i in &mut self.code {
+        // (Instructions still to be inserted read the merged constants too.)
+        let pending = self.inserts.iter_mut().map(|(_, i)| i);
+        for i in self.code.iter_mut().chain(pending) {
             if !is_dead(i) {
                 i.visit_mut(&mut |r, role, _| {
                     if role == Role::Use {
