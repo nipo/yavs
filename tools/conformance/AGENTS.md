@@ -42,6 +42,7 @@ report generator or regenerate the report (#780).
 - Exit statuses of the underlying tools are results, not errors (a failing suite is a number in the report), except `realbench`, whose failure stops the run.
 - The report text must be deterministic for a given commit: no timestamps outside the `Generated:` line, no timings, sorted keys.
 - A `--local` run needs a clean tree to record a meaningful commit (`-dirty` is appended otherwise); commit `docs/conformance-local.json` with the regenerated report.
+- The `Generated:` line says `-dirty` when `git status --porcelain` lists anything outside `docs/conformance*`, untracked files included. CI keeps its corpus cache in `.corpus-cache`, which `.gitignore` lists for that reason: any other untracked directory in a CI job would make the committed line say `-dirty`. To refresh the line from an artifact, run `--report-only` in a clean tree.
 - Every tool it calls keeps its scratch under `--out`, not the user's shared `~/.cache/yavs/std`.
 
 ## 5. How to work here

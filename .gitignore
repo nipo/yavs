@@ -6,6 +6,9 @@ __pycache__/
 *.pyc
 tools/discrepancies/sims.local.conf
 tools/sims.local.conf
+# The corpus cache of the CI jobs (YAVS_CORPUS in ci.yml and conformance.yml); untracked it would
+# make the conformance report's Generated line say -dirty.
+/.corpus-cache
 
 # Files written by test designs run from the repository root
 /*.txt
