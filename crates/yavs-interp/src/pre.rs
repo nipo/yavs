@@ -1312,7 +1312,8 @@ pub(crate) enum Op {
     /// and the one-element `Drive` of it, which nothing else reads, without delay limit: a
     /// scalar byte signal (integer, enumeration, real) assigned straight to the kernel. `size`
     /// (`FRAME_WAVE` and the bytes), `time` and `w` are the registers and size of the waveform,
-    /// for the cases the fast path does not take (a delay, a reference of several parts).
+    /// for the cases the fast path does not take (a reference of several parts, another kind of
+    /// signal).
     ByteDrive {
         v: u32,
         driver: u16,
@@ -1321,6 +1322,7 @@ pub(crate) enum Op {
         size: u16,
         w: u16,
         wd: Width,
+        inertial: bool,
     },
 }
 
@@ -2565,6 +2567,7 @@ fn peephole(
                                 size,
                                 w: w16,
                                 wd,
+                                inertial,
                             },
                         },
                     ))
@@ -2611,7 +2614,7 @@ fn peephole(
                     wave,
                     n,
                     reject: NONE,
-                    ..
+                    inertial,
                 }) = old.get(dj)
                 && int(n) == Some(1)
                 && let Some(&to) = old_at.get(dj)
@@ -2645,6 +2648,7 @@ fn peephole(
                         size: FRAME_WAVE | 16,
                         w,
                         wd,
+                        inertial,
                     },
                     ops.len() as u32,
                 ));
