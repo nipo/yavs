@@ -900,6 +900,26 @@ impl Db {
         if !self.ret_names.contains_key(&ps) {
             return id;
         }
+        let node = e as *const ast::Expr as usize;
+        if self.return_node == Some(node) {
+            let name = self.decls[callee].name;
+            self.report(
+                Diagnostic::error(
+                    diag::NAMED_RETURN_CONTEXT,
+                    format!(
+                        "`{name}` has a named return value and cannot be the value of a `return` \
+                         statement: a return statement gives it no result subtype \
+                         (LCS-2016-072b, VHDL-2019 4.2.1)"
+                    ),
+                )
+                .with_primary(e.span, "called in a return statement")
+                .with_help(
+                    "assign the call to a variable of the result subtype and return that \
+                     variable, or qualify the call with a constrained subtype (`t'(f)`)",
+                ),
+            );
+            return self.poison_expr();
+        }
         match self.top_context {
             Some((node, st))
                 if node == e as *const ast::Expr as usize

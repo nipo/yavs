@@ -62,7 +62,7 @@ codes! {
     NO_OVERLOAD = "E1301", "None of the visible subprograms or literals with this name accepts these operands.";
     AMBIGUOUS = "E1302", "More than one interpretation fits; qualify an operand or use a selected name.";
     BAD_OPERATOR_DECL = "E1303", "An operator symbol that is not a VHDL operator, or an operator function with the wrong number of parameters (LRM 4.5.2).";
-    NAMED_RETURN_CONTEXT = "E1304", "A function with a named return value (`return r of t`, VHDL-2019) takes its result subtype from the context of the call: the call must be the value of an assignment, initial value or `return`, an actual of a constrained formal or a qualified expression, of a fully constrained subtype.";
+    NAMED_RETURN_CONTEXT = "E1304", "A function with a named return value (`return r of t`, VHDL-2019) takes its result subtype from the context of the call: the call must be the value of an assignment or initial value, an actual of a constrained formal or the operand of a qualified expression, of a fully constrained subtype (LCS-2016-072b). The value of a `return` statement is not such a context.";
     FORMAL_TWICE = "E1310", "A formal is associated more than once.";
     MISSING_ACTUAL = "E1311", "A formal without a default has no actual.";
     FORMAL_CONV_UNCONSTRAINED = "E1312", "A conversion in the association of a formal that is not fully constrained must give the formal its bounds (5.3.2.2): in the formal part the parameter subtype of the function or the type mark of the type conversion, in the actual part the result subtype of the function or the type mark, must be constrained. A conversion that defines no bounds is an error; one that defines them is accepted.";

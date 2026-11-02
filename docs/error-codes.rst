@@ -307,7 +307,7 @@ Semantic analysis (E1 and W1)
    * - _`E1303`
      - An operator symbol that is not a VHDL operator, or an operator function with the wrong number of parameters (LRM 4.5.2).
    * - _`E1304`
-     - A function with a named return value (``return r of t``, VHDL-2019) takes its result subtype from the context of the call: the call must be the value of an assignment, initial value or ``return``, an actual of a constrained formal or a qualified expression, of a fully constrained subtype.
+     - A function with a named return value (``return r of t``, VHDL-2019) takes its result subtype from the context of the call: the call must be the value of an assignment or initial value, an actual of a constrained formal or the operand of a qualified expression, of a fully constrained subtype (LCS-2016-072b).
    * - _`E1310`
      - A formal is associated more than once.
    * - _`E1311`

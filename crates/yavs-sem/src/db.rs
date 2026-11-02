@@ -262,6 +262,10 @@ pub struct Db {
     /// `(top AST node address, context subtype)` of the complete context being resolved.
     #[serde(skip)]
     pub(crate) top_context: Option<(usize, SubtypeId)>,
+    /// The top AST node of the `return` statement value being resolved: a named-return call
+    /// there gets no result subtype (LCS-2016-072b, lrm-checks L62).
+    #[serde(skip)]
+    pub(crate) return_node: Option<usize>,
     /// Folds that overflowed in the complete context being resolved (Q5).
     /// `Some(why)` when the operation has no value (division by zero, ...); the value when
     /// only the base range is exceeded, which a folded parent of the same type absorbs (#872).
@@ -1039,6 +1043,7 @@ impl Db {
             context_subtype: None,
             relaxed_target: None,
             top_context: None,
+            return_node: None,
             tainted: Default::default(),
             stmt_owners: Vec::new(),
             config_specs: Default::default(),

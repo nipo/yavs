@@ -2212,7 +2212,11 @@ scalars; the on-disk format is implementation-defined, so it is fixed here (yavs
 - **Named return values in `return` and actuals (L62, #33; user, 2026-10-19):** a call of a function
   with a named return value stays accepted in a `return` statement and as the actual of a
   constrained formal (permissive), although only some reference simulators accept those contexts.
-  Recorded in `docs/design/lrm-checks.md` L62.
+  Recorded in `docs/design/lrm-checks.md` L62. **Reversed for `return` (user, 2026-11-02, rule 47
+  review):** the LCS-2016-072b list of contexts has no return statement and says "It is an error if
+  a function has a return identifier and the function is called from a context other than the ones
+  above", and every voting reference rejects it, so `return f;` is `E1304`. The actual of a
+  constrained formal (item c) stays accepted.
 - **Implicit operations of a generic type in positional generic maps (L69, #223; user, 2026-10-19):**
   they take no position, with no warning; two of three reference simulators agree.
 - **Calls through aliases of methods of shared and process variables (L15, #237; user, 2026-10-19):**

@@ -751,7 +751,13 @@ impl Db {
                 };
                 // A named return value (2019, 4.2.1): the value takes the call's subtype.
                 let ret = self.ret_names.get(&cx.labels).map_or(ret, |&(_, st)| st);
+                let mut top = e;
+                while let ast::ExprKind::Paren(inner) = &top.kind {
+                    top = inner;
+                }
+                let saved = self.return_node.replace(top as *const ast::Expr as usize);
                 let id = self.expr_in_subtype(cx.scope, e, ret);
+                self.return_node = saved;
                 if self.is_poison_expr(id) {
                     return Err(Reported);
                 }

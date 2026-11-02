@@ -135,7 +135,7 @@ LCS set; it is not checked against every change of the published standard.
 | 059a | Ordering on any scalar array | supported | probed 2026-10-28 | `<` on a `real_vector`; an error in 2008 |
 | 061 | Conditional compilation (`` `if ``, `` `elsif ``, `` `else ``, `` `end if ``) | supported | analysed, probed 2026-10-28 | |
 | 071a | Optional trailing semicolon | supported | probed 2026-10-28 | |
-| 072b | Function knows the vector size (`return rv_t of bit_vector`) | supported | simulated | |
+| 072b | Function knows the vector size (`return rv_t of bit_vector`) | supported | simulated | the call takes its size from an assignment target, an initial value, a constrained formal or a qualified expression; as the value of a `return` statement it is error `E1304` (the change text allows no other context): assign it to a variable and return that, or write `t'(f)` |
 | 075 | Closely related record types | supported | simulated | conversion between records of the same element names and types |
 | 082 | Empty record | supported | probed 2026-10-28 | |
 | 086 | All interface lists can be ordered | supported | analysed | later items refer to earlier ones through `'subtype` |

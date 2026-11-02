@@ -10792,3 +10792,5 @@ Constructs yavs accepted although the LRM text or every voting reference rejects
 
 - VHDL-1993 homograph (L134): an implicit and an explicit declaration with one profile, both visible through use clauses, are ambiguous in a
   93 file (`E1302`); `--relaxed` takes the explicit one with `W1302` (R7). GRLIB at 1993 runs with `--relaxed` and is unchanged.
+- Named return values (L62): a call as the value of a `return` statement is `E1304` (LCS-2016-072b), reversing the permissive ruling of
+  2026-10-19 on #33; actuals of constrained formals stay accepted.

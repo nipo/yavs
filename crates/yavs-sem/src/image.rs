@@ -53,6 +53,7 @@ impl Db {
         self.overflow.clear();
         self.context_subtype = None;
         self.top_context = None;
+        self.return_node = None;
         self.files.clear();
         self.facts = Some(self.scan_facts(self.facts.as_ref()));
         self.unit_facts.clear();
