@@ -1437,6 +1437,16 @@ enum Op {
     V(Value),
 }
 
+/// The element count and offsets of an `LCopy` whose run-time tests the constants settle: all
+/// three in the range of those tests, at most `LCOPY_BLOCKS` blocks on each side. Anything else
+/// stays with the general lowering, which sends it to the interpreter.
+fn lcopy_shape(n: Option<i64>, so: Option<i64>, d: Option<i64>) -> Option<(u64, u64, u64)> {
+    let small = |v: i64| u64::try_from(v).ok().filter(|&v| v < 1 << 32);
+    let (n, so, d) = (small(n?)?, small(so?)?, small(d?)?);
+    let fits = |off: u64| (off % 64 + n).div_ceil(64) <= LCOPY_BLOCKS;
+    (fits(so) && fits(d)).then_some((n, so, d))
+}
+
 fn ok<T>(r: Option<T>, what: &str) -> Result<T, String> {
     r.ok_or_else(|| what.to_string())
 }
@@ -2887,6 +2897,36 @@ fn gen_func(
                 }
                 g.join(join);
             }
+            // Length and offsets known: nothing about the shape is left to run time. The tests of
+            // the access stay (`host`), it folds only those the constants prove.
+            Inst::LCopy {
+                dst,
+                dst_off,
+                src,
+                src_off,
+                n,
+            } if lcopy_shape(g.kint(n), g.kint(src_off), g.kint(dst_off)).is_some() => {
+                let (k, so, d) =
+                    lcopy_shape(g.kint(n), g.kint(src_off), g.kint(dst_off)).expect("guard");
+                // Nothing to copy: no memory is touched, as in the interpreter.
+                if k != 0 {
+                    let (slow, join) = g.slow_path(pc, &inst);
+                    let (s0, d0) = (so % 64, d % 64);
+                    let (ns, nd) = ((s0 + k).div_ceil(64), (d0 + k).div_ceil(64));
+                    let (sa, da) = (g.ld(src), g.ld(dst));
+                    let (sb, db) = (so / 64 * 32, d / 64 * 32);
+                    let ps = g.host(sa, Some(src), Op::C(sb), Op::C(ns * 32), false, slow);
+                    let pd = g.host(da, Some(dst), Op::C(db), Op::C(nd * 32), true, slow);
+                    if f.kind == FuncKind::Process && k <= 64 {
+                        g.lcopy_const(pd, d0, ps, s0, k);
+                    } else {
+                        let [vnd, vd0, vns, vs0, vk] = [nd, d0, ns, s0, k].map(|v| g.c64(v as i64));
+                        g.b.ins()
+                            .call(g.imp.lcopy, &[pd, vnd, vd0, ps, vns, vs0, vk]);
+                    }
+                    g.join(join);
+                }
+            }
             Inst::LCopy {
                 dst,
                 dst_off,
@@ -2934,9 +2974,9 @@ fn gen_func(
                 let ps = g.host(sa, Some(src), Op::V(sb), Op::V(sn), false, slow);
                 let pd = g.host(da, Some(dst), Op::V(db), Op::V(dn), true, slow);
                 // Up to 64 elements: at most two blocks each side, shifted in registers. In a
-                // process, whose copy count is a constant (a subprogram's body is not worth the
-                // code it saves a call for, nor is it for a count known at run time only: the
-                // 128-bit shifts cost more than the call).
+                // process, whose copy count is a constant and an offset is not (a subprogram's
+                // body is not worth the code it saves a call for, nor is it for a count known at
+                // run time only: the 128-bit shifts cost more than the call).
                 if f.kind == FuncKind::Process && g.kint(n).is_some_and(|v| v <= 64) {
                     let few = g.b.ins().icmp_imm_s(IntCC::UnsignedLessThanOrEqual, k, 64);
                     let (inl, call) = (g.b.create_block(), g.b.create_block());
@@ -4958,6 +4998,74 @@ impl Gen<'_> {
         let a = self.ld(base);
         let p = self.host(a, Some(base), Op::V(off), Op::C(32), write, slow);
         (p, self.b.ins().band_imm_s(i, 63))
+    }
+
+    /// `lcopy_inline` with `k` (1 to 64), `s0` and `d0` (under 64) known: constant shifts and
+    /// masks, the second block only where the run has one. The source planes are read first
+    /// (the ranges may overlap), the destination bits outside the run stay.
+    fn lcopy_const(&mut self, pd: Value, d0: u64, ps: Value, s0: u64, k: u64) {
+        let gf = self.gf;
+        let low = u64::MAX >> (64 - k);
+        let (two_s, two_d) = (s0 + k > 64, d0 + k > 64);
+        // In the same place in one block: no shift on either side, the mask is the hole.
+        let same = s0 == d0 && !two_s;
+        let mut vals = [None; 4];
+        for (plane, v) in vals.iter_mut().enumerate() {
+            let at = plane as i32 * 8;
+            let mut x = self.b.ins().load(I64, gf, ps, at);
+            if same {
+                if k != 64 {
+                    x = self.b.ins().band_imm_s(x, (low << s0) as i64);
+                }
+            } else {
+                if s0 != 0 {
+                    x = self.b.ins().ushr_imm_s(x, s0 as i64);
+                }
+                if two_s {
+                    let h = self.b.ins().load(I64, gf, ps, 32 + at);
+                    let h = self.b.ins().ishl_imm_s(h, (64 - s0) as i64);
+                    x = self.b.ins().bor(x, h);
+                }
+                // A run that ends at the top of its word has nothing above it.
+                if k != 64 && s0 + k != 64 {
+                    x = self.b.ins().band_imm_s(x, low as i64);
+                }
+            }
+            *v = Some(x);
+        }
+        for (plane, v) in vals.into_iter().enumerate() {
+            let (at, x) = (plane as i32 * 8, v.expect("set above"));
+            if same || !two_d {
+                let put = if same || d0 == 0 {
+                    x
+                } else {
+                    self.b.ins().ishl_imm_s(x, d0 as i64)
+                };
+                let out = if k == 64 {
+                    put
+                } else {
+                    let old = self.b.ins().load(I64, gf, pd, at);
+                    let kept = self.b.ins().band_imm_s(old, !(low << d0) as i64);
+                    self.b.ins().bor(kept, put)
+                };
+                self.b.ins().store(gf, out, pd, at);
+            } else {
+                let cut = 64 - d0;
+                let old = self.b.ins().load(I64, gf, pd, at);
+                let kept = self.b.ins().band_imm_s(old, ((1u64 << d0) - 1) as i64);
+                let put = self.b.ins().ishl_imm_s(x, d0 as i64);
+                let lo = self.b.ins().bor(kept, put);
+                self.b.ins().store(gf, lo, pd, at);
+                let old = self.b.ins().load(I64, gf, pd, 32 + at);
+                let kept = self
+                    .b
+                    .ins()
+                    .band_imm_s(old, !((1u64 << (k - cut)) - 1) as i64);
+                let put = self.b.ins().ushr_imm_s(x, cut as i64);
+                let hi = self.b.ins().bor(kept, put);
+                self.b.ins().store(gf, hi, pd, 32 + at);
+            }
+        }
     }
 
     /// `Inst::LCopy` of `k` (1 to 64) elements from bit `s0` of the one or two plane blocks at

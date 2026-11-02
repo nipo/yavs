@@ -3585,6 +3585,10 @@ runs (`clift` eager 0.5 s, LLVM O2 0.37 s). On clocked RTL it executes more inst
 (rtl_ff 26.5 G against 16 G): the entry and exit of compiled code and the callbacks cost more than the interpreter's
 predecoded dispatch.
 
+### clift: constant-shape `LCopy` (2026-11-02, #1057, branch `perf/iterative`)
+
+A slice copy with count and offsets known has its shape settled when the code is made. Forced compiled: instructions -5 percent, bytes -7.7 to -10.2 percent; at `--tier=auto` GRLIB -3 to -4 percent, Microwatt not established, since its big processes stay interpreted. A count known with a run-time offset still uses the general form. Numbers and gaps in `docs/decisions.md` "Constant-shape LCopy in Cranelift".
+
 ### clift: code quality, rounds 1 and 2 (2026-10-24, #481)
 
 Registers of a native-frame variant in Cranelift variables, closed frames with slot variables, held objects across blocks,
