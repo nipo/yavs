@@ -1,0 +1,11 @@
+exit	0
+diag	note	0	0	:subtype_indexed_prefix:_p0	1010 4
+diag	note	0	0	:subtype_indexed_prefix:_p0	0110 4 3
+diag	note	0	0	:subtype_indexed_prefix:_p0	2 2 4
+diag	note	0	0	:subtype_indexed_prefix:_p0	10
+diag	note	0	0	:subtype_indexed_prefix:_p0	4 4 0101
+diag	note	0	0	:subtype_indexed_prefix:_p0	4 4 1001
+diag	note	0	0	:subtype_indexed_prefix:_p0	1100
+diag	note	0	0	:subtype_indexed_prefix:_p0	344
+diag	note	0	0	:subtype_indexed_prefix:_p0	1100
+diag	note	0	0	:subtype_indexed_prefix:_p0	0011 4 4

@@ -66,6 +66,7 @@ const PASS: &[&str] = &[
     "generics/package_instance_deferred",
     "generics/package_instance_deferred_call",
     "composite/subtype_attr_conversion",
+    "composite/subtype_indexed_prefix",
     "composite/others_unconstrained_target",
     "sigassign/slice_param_range",
     "composite/static_slice_choice",

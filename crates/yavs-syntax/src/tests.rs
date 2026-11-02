@@ -274,6 +274,28 @@ fn subtype_of_an_indexed_name() {
     assert!(matches!(st(1).constraint, Some(Constraint::Array { .. })));
 }
 
+/// `a(0).v'subtype`: the indexed name is only a prefix, a selection follows (#1067).
+#[test]
+fn subtype_of_a_selected_indexed_name() {
+    let d = ok(&pkg("subtype s is a(0).v'subtype;
+        subtype t is r(1)(2).f.g(3 downto 0)'subtype;
+        subtype u is m(0 to 1)(2 downto 0);"));
+    let decls = pkg_decls(&d);
+    let st = |i: usize| match &decls[i] {
+        Decl::Subtype(s) => &s.subtype,
+        d => panic!("{d:?}"),
+    };
+    for i in 0..2 {
+        let NameKind::Attribute { prefix, attr } = &st(i).type_mark.kind else {
+            panic!("{:?}", st(i).type_mark.kind)
+        };
+        assert_eq!(attr.key.as_str(), "subtype");
+        assert!(st(i).constraint.is_none());
+        assert!(!matches!(prefix.kind, NameKind::Simple(_)));
+    }
+    assert!(matches!(st(2).constraint, Some(Constraint::Array { .. })));
+}
+
 #[test]
 fn objects_and_aliases() {
     let d = ok(&pkg(

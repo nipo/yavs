@@ -624,9 +624,9 @@ impl Parser<'_> {
             match self.peek() {
                 Tok::Dot => n = self.selected(n)?,
                 Tok::Tick if self.nth(1) != Tok::LParen => n = self.attribute(n)?,
-                // `arr(0)'subtype`: the parentheses index or slice the object name,
-                // they are not an index constraint (which never has a `'` after it).
-                Tok::LParen if self.toks[self.after_matching_paren(self.pos)].kind == Tok::Tick => {
+                // `arr(0)'subtype`, `a(0).v'subtype`: the parentheses index or slice the
+                // object name, they are not an index constraint (which never ends in `'`).
+                Tok::LParen if self.name_chain_ends_in_tick() => {
                     let args = self.assoc_list()?;
                     let span = self.span_from(n.span);
                     n = Name {
@@ -650,6 +650,22 @@ impl Parser<'_> {
                     };
                 }
                 _ => return Ok(n),
+            }
+        }
+    }
+
+    /// From a `(`: whether a chain of `(...)` groups and `.ident` selections ends at a `'`.
+    fn name_chain_ends_in_tick(&self) -> bool {
+        let mut p = self.pos;
+        loop {
+            match self.toks[p].kind {
+                Tok::LParen => p = self.after_matching_paren(p),
+                Tok::Dot if matches!(self.toks[p + 1].kind, Tok::Ident | Tok::ExtIdent) => p += 2,
+                Tok::Tick => return true,
+                _ => return false,
+            }
+            if p >= self.eof_index() {
+                return false;
             }
         }
     }
