@@ -3949,7 +3949,7 @@ verification-library tests are level.
 `spike/clift2` merged with main up to ac8d4e88. With a first-level generator alone (a Cranelift-only build), large
 subprograms are `Kind::Big`/`BigLoop` as LLVM's `OptLevel::Fast` makes them (`native::big`, `Tune::big`) and `Kind::Frame`
 subprograms stay interpreted (`Tune::frame_calls`; `Kind::Frame` processes are compiled since #1046, `docs/decisions.md`): their frame-mode code moved whole processes into the interpreter's loop for
-compiled code (`uvvm_axistream_vvc`: 8.8 percent more cycles than LLVM at level instructions). A Cranelift-only build runs
+compiled code (`uvvm_axistream_vvc`: 8.8 percent more cycles than LLVM at level instructions). With the first level the callback rule counts a sensitivity list once (`Tune::wait_same`, #1046), so Microwatt's `execute1_1`, `loadstore1_1` and `loadstore1_2` compile (whole run warm 0.956 in instructions, branch `perf/inv-leave`). A Cranelift-only build runs
 `--tier=auto` by default and names its tier in `--version`. Breadth, Cranelift-only / LLVM build, `--tier=auto`, loaded host,
 instructions primary: realbench 42 tests 1.004 warm and 0.981 cold in instructions (cycles 1.013 and 0.987; `grlib_leon3mp` 1.15 and 1.27 in
 cycles at level instructions); h2h 11 designs
