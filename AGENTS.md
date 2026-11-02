@@ -140,11 +140,14 @@ ownership, commit identity, shared-host limits) do not apply to them.
     one you meant to change: any diff outside your area means a bad rebase (commit 219eabe, a
     "tools only" commit, silently reverted another agent's Rust work through a conflicted rebase
     and skipped the checks; fixed in 6a21cb8).
-18. **Commit messages:** imperative subject and a body that says why. No `Co-Authored-By`
-    trailer (user rule), and commit as the GitHub noreply address
-    `1427336+ru551n@users.noreply.github.com` (set by `git config user.email` in this repo). No
-    session links. No em dashes anywhere (code,
-    comments, docs, commits): use a colon, full stop or comma.
+18. **Commit messages:** imperative subject and a body that says why. No session links. No em
+    dashes anywhere (code, comments, docs, commits): use a colon, full stop or comma.
+    **AI-written work is published as the agent that wrote it, never as a person.** Commits,
+    pushes, pull requests, issues and comments that an AI agent writes carry that agent's own
+    identity (for example its GitHub App bot account) as author and poster. Work a person
+    writes carries that person's identity. Don't present one as the other: no agent commit
+    under a maintainer's name and no person's commit under an agent's, and no `Co-Authored-By`
+    trailer standing in for either.
 19. **Worktrees:** parallel agents each use their own git worktree. Never edit another agent's
     worktree. Never use bare `git stash` (the stash is shared across worktrees).
 
