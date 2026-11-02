@@ -105,11 +105,31 @@ impl Parser<'_> {
                     }
                     params.push((self.make_ident(self.toks[self.pos]).key, group));
                     self.bump();
-                    if !self.eat(Tok::Comma) {
+                    if !self.at(Tok::Comma) {
                         break;
                     }
-                    // Tolerated: `(boolean x, sequence s)` with a comma between groups.
-                    if self.peek() != Tok::Ident || self.psl_param_kind_at(0).is_some() {
+                    let comma = self.bump();
+                    // `(sequence p, boolean y)`: a comma separates names of one kind, a `;`
+                    // kinds (#1078). Reported, then read as the `;` it should be.
+                    if self.psl_param_kind_at(0).is_some() {
+                        let kind = self.text(self.toks[self.pos]).to_string();
+                        self.diags.push(
+                            yavs_diag::Diagnostic::error(
+                                crate::codes::SYNTAX,
+                                "PSL formal parameters of different kinds are separated by `;`, \
+                                 not `,`",
+                            )
+                            .with_primary(self.tok_span(comma), "`;` expected here")
+                            .with_note(
+                                "IEEE 1850 (PSL 1.1 Box 38): Formal_Parameter_List ::= \
+                                 Formal_Parameter { ; Formal_Parameter }, and a comma separates \
+                                 the names of one Formal_Parameter",
+                            )
+                            .with_help(format!("write `; {kind}` instead of `, {kind}`")),
+                        );
+                        break;
+                    }
+                    if self.peek() != Tok::Ident {
                         break;
                     }
                 }

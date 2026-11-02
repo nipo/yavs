@@ -10806,3 +10806,4 @@ Constructs yavs accepted although the LRM text or every voting reference rejects
   homograph is `E1101` and a use in a VHDL expression `E1361`.
 - PSL declarations after `begin` (L176): `E1241`; `--relaxed` (R8) accepts them with `W1241`. The repo's own PSL corpus cases declare before
   `begin` now.
+- PSL formals (#1078): a comma between formals of different kinds is `E0002` (PSL separates kinds with `;`).

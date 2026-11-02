@@ -1209,7 +1209,7 @@ fn psl_named_sequences_and_properties() {
         property p2 (boolean x, y) is always (x -> next y);
         property p3 is always (s1 |=> c);
         property p4 (property q) is always (a -> next q);
-        property p5 (property q, sequence s) is always (s |=> q);
+        property p5 (property q; sequence s) is always (s |=> q);
         c1: cover s1;
         c2: cover s2(a, b);
         c3: cover s3(a, 2);
@@ -1610,4 +1610,17 @@ fn a_unit_declared_twice_in_a_file_warns() {
     let codes: Vec<&str> = p.diags.iter().map(|d| d.code).collect();
     assert_eq!(codes, ["W0005", "W0005"], "{:?}", p.diags);
     assert!(p.design.is_some());
+}
+
+#[test]
+fn psl_formals_of_different_kinds_need_a_semicolon() {
+    // IEEE 1850 (PSL 1.1 Box 38): `,` between names of one kind, `;` between kinds (#1078).
+    let src = "architecture a of e is\ndefault clock is rising_edge(clk);\n\
+               property p (sequence s, boolean y) is always (s |=> y);\nbegin\nend;";
+    let p = parse_std(src, Std::Vhdl2008);
+    let codes: Vec<&str> = p.diags.iter().map(|d| d.code).collect();
+    assert_eq!(codes, ["E0002"], "{:?}", p.diags);
+    let ok = "architecture a of e is\ndefault clock is rising_edge(clk);\n\
+              property p (sequence s; boolean x, y) is always (s |=> x and y);\nbegin\nend;";
+    assert!(psl_warnings(ok).is_empty());
 }

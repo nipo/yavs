@@ -17,9 +17,9 @@ architecture t of psl_named_formals is
   sequence both (sequence p, q) is {p; q};
   sequence twice (sequence p) is both(p, p);
   sequence upto (boolean x; const lo, hi) is {x[*lo to hi]; b = '1'};
-  property then_y (sequence p, boolean y) is always (p |=> y);
+  property then_y (sequence p; boolean y) is always (p |=> y);
   property whole (property q) is always q;
-  property within_next (property q, boolean x) is always (x -> next q);
+  property within_next (property q; boolean x) is always (x -> next q);
 begin
   clk <= not clk after 5 ns when now < 200 ns;
   process (clk) begin
