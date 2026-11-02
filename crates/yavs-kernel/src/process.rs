@@ -1964,7 +1964,48 @@ impl Ctx<'_> {
     /// done) where `assign_code` must run, which also produces every error.
     #[inline]
     pub fn assign_code_now(&mut self, d: DriverId, r: Range, code: u8) -> bool {
-        self.assign_code_fast(d, Some(r), Time::ZERO, code, DelayMode::Transport)
+        (r.len == 1 && self.assign_direct_code(d, r.offset, code))
+            || self.assign_code_fast(d, Some(r), Time::ZERO, code, DelayMode::Transport)
+    }
+
+    /// `assign_code_now` of one element for the usual case, an idle direct driver with no vector
+    /// entry of this run, in one pass: the skip test, else one entry. False, nothing done, for
+    /// anything else (`assign_code_fast` decides those).
+    #[inline(always)]
+    pub fn assign_direct_code(&mut self, d: DriverId, elem: u32, code: u8) -> bool {
+        let Some(info) = self.sh.drivers.get(d.0 as usize) else {
+            return false;
+        };
+        if !info.direct
+            || info.owner != self.pid
+            || code >= 9
+            || elem.wrapping_sub(info.range.offset) >= info.range.len
+        {
+            return false;
+        }
+        let w = &self.st.waveforms[info.local as usize];
+        if !w.idle() || !w.phantom.is_empty() || self.has_entries(info, 2) {
+            return false;
+        }
+        if !self.has_entries(info, 1)
+            && self.st.same_wanted(info.local)
+            && self.st.same_seen(
+                info.local,
+                self.sh.signals[info.signal.0 as usize].direct_same(info.slot, elem, code),
+            )
+        {
+            self.note_skipped();
+            return true;
+        }
+        self.mark_entries(info, 1);
+        self.st.act |= ACT_ASSIGNED;
+        self.st.out.push(Out {
+            sig: info.signal.0,
+            slot: info.slot,
+            elem,
+            code: u32::from(code),
+        });
+        true
     }
 
     /// `assign_code_now` where the assignment would change nothing (the driver and the signal
@@ -2060,12 +2101,18 @@ impl Ctx<'_> {
     /// `empty_delta`), the driver's waveform does not change, so later assignments of the run
     /// still take the fast path (a skipped assignment of a direct driver leaves nothing to
     /// preempt: the entries of the run are the last assignment that wins).
-    #[inline]
+    #[inline(always)]
     fn note_skipped(&mut self) {
         if self.st.phantoms.last() != Some(&SKIPPED) {
-            self.st.act |= ACT_ASSIGNED;
-            self.st.phantoms.push(SKIPPED);
+            self.first_skipped();
         }
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn first_skipped(&mut self) {
+        self.st.act |= ACT_ASSIGNED;
+        self.st.phantoms.push(SKIPPED);
     }
 
     /// `assign_code_now` for `n` elements (`RUN_MIN` or more that cover a run of at most 64

@@ -1142,6 +1142,15 @@ pub fn direct_drive_bits(
             break;
         }
         let rest = &entries[at..];
+        // Alone in the batch on its driver: no run to look for.
+        if rest
+            .get(1)
+            .is_none_or(|e| e[0] >> 32 != t >> 32 || e[1] & 0xffff != u64::from(driver))
+            && c.assign_direct_code(d.id, s.off as u32 + t as u32, (w >> 16 & 0xff) as u8)
+        {
+            at += 1;
+            continue;
+        }
         let n = rest
             .iter()
             .take_while(|e| e[0] >> 32 == t >> 32 && e[1] & 0xffff == u64::from(driver))
