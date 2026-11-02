@@ -75,6 +75,10 @@ Among the hand-written RTL designs, clocked designs with very many cheap process
   ([issue 1034](https://github.com/ru551n/yavs/issues/1034)).
 - Waves and coverage on, other tiers than `--tier=auto`, and more than one thread were not measured here.
 - The comparisons with B and C are of 2026-10-28.
+- **PoC testbenches.** The 41 testbenches of the 2026-10-28 and 2026-11-01 runs include six from the PoC Library v1.2 (`poc_arith_addw`, `poc_stat_histogram`, `poc_cache_cpu`, `poc_strings`,
+  `poc_uart_rx`, `poc_fifo_ic_assembly`), and the figures above, including the `poc_*` ratios named in "Where yavs is slower", are from those. The suite now uses PoC v3.0.0
+  ([issue 1060](https://github.com/ru551n/yavs/issues/1060)), whose old-style testbenches no longer exist, and has four OSVVM-based PoC testbenches instead (`poc_arith_addw`, now a different
+  testbench, `poc_arith_scaler`, `poc_ooo_buffer`, `poc_arith_counter_bcd`). The means and ratios on this page were not recomputed for that suite.
 
 ## Measure your own design
 
