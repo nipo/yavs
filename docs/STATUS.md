@@ -27,6 +27,10 @@ The Linux and Windows x86_64 release archives are built with `-C target-cpu=x86-
 
 From 2026-11-03 (user) each x86_64 platform also has a `yavs-<version>-<target>-compat` archive built for the Rust default CPU, with no CPU check compiled in (the smoke test fails a compat archive that has the check's text and a plain one that lacks it); the old-CPU message names that archive first and a source build second. Every archive carries a generated `README.txt`. Details: `docs/decisions.md` "x86-64-v3 baseline", amendment.
 
+### Index constraints check the type of the range (#1086, 2026-11-03)
+
+An index constraint, a slice or a generate selector whose discrete range is a type mark, a subtype indication or `t range ...` of another type than the index is `E1300` (lrm-checks L181, LRM 2008 5.3.2.2), as an attribute range of the wrong type already was. `Db::check_range_type` in `types.rs`; the analysed-unit format is bumped. Test `typ/index_constraint_wrong_type`; no corpus file or external test relied on the old behaviour.
+
 ### The implicit GUARD is not hidden (#1085, 2026-11-03)
 
 An explicit declaration with the name of the implicit signal `GUARD` of a guarded block (signal, generic, port, constant, type, subprogram, alias) is `E1101` (lrm-checks L180); `declare` lets an explicit declaration hide only an implicit subprogram or an implicit alias of one. No corpus file or external test relied on the old behaviour.

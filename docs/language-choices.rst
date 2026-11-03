@@ -83,6 +83,13 @@ yavs, with what to do about each.
      - Error ``E1101``: a guarded block implicitly declares the signal ``GUARD`` (LRM 2008 11.2),
        which an explicit declaration of the same name may not hide. A nested block has its own region.
      - Rename the declaration.
+   * - An index constraint whose discrete range has another type than its index:
+       ``type nv is array (natural range <>) of bit; signal s : nv(color);`` or
+       ``string_vec(severity_level)`` for an array indexed by ``natural``
+     - Error ``E1300`` at the range, in every revision, whether the range is a type mark, a subtype
+       indication, ``t range a to b`` or an attribute (LRM 2008 5.3.2.2: the type of each discrete
+       range is the type of its index).
+     - Constrain with a range of the index type, or declare the array type with the enumeration as its index.
    * - A static index out of range or a constant overflow in code that may be dead
      - Warning (``W1404``, ``W1401``); the check still runs if the code runs.
      - ``-Werror=W1404`` makes it an error.

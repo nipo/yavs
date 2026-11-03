@@ -1204,6 +1204,25 @@ impl Db {
         Ok(st)
     }
 
+    /// 5.3.2.2, 8.5: a discrete range has the type of the index it constrains or slices;
+    /// `E1300` otherwise.
+    fn check_range_type(&mut self, want: TypeId, t: TypeId, at: Span) -> Result<(), Reported> {
+        if want == t || want == self.poison.ty || t == self.poison.ty {
+            return Ok(());
+        }
+        let names = self.type_names(&[want, t]);
+        let d = Diagnostic::error(
+            diag::TYPE_MISMATCH,
+            format!(
+                "expected a range of `{}`, found one of `{}`",
+                names[0], names[1]
+            ),
+        )
+        .with_primary(at, "wrong type");
+        let d = self.same_name_note(d, &[want, t]);
+        Err(self.error(d))
+    }
+
     /// A discrete range: `l to r`, a type mark, `t range l to r`. Returns the range and its type.
     /// `want` is the index type when known (index constraints); otherwise bounds are resolved
     /// together and two universal integers give INTEGER (5.3.2.2).
@@ -1237,30 +1256,23 @@ impl Db {
             ast::DiscreteRange::Range(ast::Range::Name(n)) => {
                 if let Some(r) = self.range_attr(scope, n) {
                     let (rc, t) = r?;
-                    if let Some(w) = want
-                        && w != t
-                        && w != self.poison.ty
-                        && t != self.poison.ty
-                    {
-                        let names = self.type_names(&[w, t]);
-                        let d = Diagnostic::error(
-                            diag::TYPE_MISMATCH,
-                            format!(
-                                "expected a range of `{}`, found one of `{}`",
-                                names[0], names[1]
-                            ),
-                        )
-                        .with_primary(n.span, "wrong index type");
-                        let d = self.same_name_note(d, &[w, t]);
-                        return Err(self.error(d));
+                    if let Some(w) = want {
+                        self.check_range_type(w, t, n.span)?;
                     }
                     return Ok((rc, t));
                 }
                 if let Some(r) = self.range_record_object(scope, n) {
-                    return r;
+                    let (rc, t) = r?;
+                    if let Some(w) = want {
+                        self.check_range_type(w, t, n.span)?;
+                    }
+                    return Ok((rc, t));
                 }
                 let st = self.discrete_type_mark(scope, n)?;
                 let t = self.base(st);
+                if let Some(w) = want {
+                    self.check_range_type(w, t, n.span)?;
+                }
                 Ok((
                     RangeC::Attr {
                         prefix: AttrPrefix::Subtype(st),
@@ -1273,6 +1285,9 @@ impl Db {
             ast::DiscreteRange::Subtype(si) => {
                 let st = self.subtype_indication(scope, si)?;
                 let t = self.base(st);
+                if let Some(w) = want {
+                    self.check_range_type(w, t, si.span)?;
+                }
                 Ok((
                     RangeC::Attr {
                         prefix: AttrPrefix::Subtype(st),
@@ -1866,40 +1881,18 @@ impl Db {
         match self.range_attr(scope, n) {
             Some(r) => {
                 let (rc, t) = r?;
-                if t != base && t != self.poison.ty && base != self.poison.ty {
-                    let names = self.type_names(&[base, t]);
-                    let d = Diagnostic::error(
-                        diag::TYPE_MISMATCH,
-                        format!(
-                            "expected a range of `{}`, found one of `{}`",
-                            names[0], names[1]
-                        ),
-                    )
-                    .with_primary(n.span, "wrong type");
-                    let d = self.same_name_note(d, &[base, t]);
-                    return Err(self.error(d));
-                }
+                self.check_range_type(base, t, n.span)?;
                 Ok(rc)
             }
             None => {
                 if let Some(r) = self.range_record_object(scope, n) {
                     let (rc, t) = r?;
-                    if t != base && t != self.poison.ty && base != self.poison.ty {
-                        let names = self.type_names(&[base, t]);
-                        let d = Diagnostic::error(
-                            diag::TYPE_MISMATCH,
-                            format!(
-                                "expected a range of `{}`, found one of `{}`",
-                                names[0], names[1]
-                            ),
-                        )
-                        .with_primary(n.span, "wrong type");
-                        let d = self.same_name_note(d, &[base, t]);
-                        return Err(self.error(d));
-                    }
+                    self.check_range_type(base, t, n.span)?;
                     return Ok(rc);
                 }
                 let st = self.type_mark(scope, n)?;
+                let t = self.base(st);
+                self.check_range_type(base, t, n.span)?;
                 Ok(RangeC::Attr {
                     prefix: AttrPrefix::Subtype(st),
                     reverse: false,
@@ -2347,6 +2340,8 @@ impl Db {
                     }) => self.range_name(scope, rn, it)?,
                     ast::Actual::Subtype(si) => {
                         let st = self.subtype_indication(scope, si)?;
+                        let t = self.base(st);
+                        self.check_range_type(it, t, si.span)?;
                         RangeC::Attr {
                             prefix: AttrPrefix::Subtype(st),
                             reverse: false,

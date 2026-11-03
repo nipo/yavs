@@ -542,7 +542,7 @@ only checks at elaboration. No test depended on U-1 to U-6 or the L8 tie.
 | `static_value_outside_computed` | E1403 @7 | rejects @7 | warns |
 | `static_value_outside_subtype` | E1403 @6 | rejects @6 | warns |
 
-### typ (37)
+### typ (38)
 
 | File | Expected | The reference simulator | The second reference simulator |
 |---|---|---|---|
@@ -566,6 +566,7 @@ only checks at elaboration. No test depended on U-1 to U-6 or the L8 tie.
 | `incomplete_used_as_object` | E1220 @6 | rejects @6 | rejects @6 |
 | `index_constraint_arity` | E1214 @6 | rejects @6 | rejects @6 |
 | `index_constraint_arity_too_many` | E1214 @5 | rejects @5 | rejects @5 |
+| `index_constraint_wrong_type` | E1300 @16 to 21 | rejects @16 to 21 | rejects @16 to 21 |
 | `index_type_mismatch` | E1300 @7 | rejects @7 | rejects @7 |
 | `not_a_type_constant` | E1201 @6 | rejects @6 | rejects @6 |
 | `not_a_type_entity` | E1100 @6 | rejects @6 | rejects @6 |
