@@ -10804,3 +10804,7 @@ The optimiser reads an element of a logic row or slice, and copies a row or slic
 ## Drive compare in compiled code
 
 A zero-delay drive at a constant reference in a process copy compares with the signal's current value in Cranelift code and makes no call when equal (`YAVS_INLCMP=off` turns it off, `check` holds every skip against the kernel's full test, always in debug builds; `docs/decisions.md` "Drive compare in compiled code"). CI runs the corpus on process copies with skips checked (difftest candidate `yavs-clift-check`).
+
+## Cranelift: compiled code found before the body is made
+
+A warm `--tier=auto` run on Cranelift finds a function's code by a key made before the body is lowered (`yavs-clift` `cache.rs`, `Jit::link`; `docs/decisions.md` "Cranelift: compiled code found before the body is made"): the third run of a design is the first that links so, the second writes the entries. `YAVS_CLIFT_PREKEY_CHECK`, always on in debug builds, lowers anyway and aborts on a difference. A program with no identity (coverage, constant pools too large for the stage cache, such as `hdlm_lfsr`) keeps the key over the body and gains nothing. See `docs/decisions.md` for what the key holds and the mutation test.
