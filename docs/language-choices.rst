@@ -75,6 +75,11 @@ yavs, with what to do about each.
        architecture or entity, and two declarations in one region may not share a name. A label
        in a nested region only hides the outer name.
      - Rename the label or the declaration.
+   * - A declaration with the name ``guard`` in a guarded block: ``b : block (c)`` with a signal,
+       generic, port, constant, type, subprogram or alias called ``guard``
+     - Error ``E1101``: a guarded block implicitly declares the signal ``GUARD`` (LRM 2008 11.2),
+       which an explicit declaration of the same name may not hide. A nested block has its own region.
+     - Rename the declaration.
    * - A static index out of range or a constant overflow in code that may be dead
      - Warning (``W1404``, ``W1401``); the check still runs if the code runs.
      - ``-Werror=W1404`` makes it an error.

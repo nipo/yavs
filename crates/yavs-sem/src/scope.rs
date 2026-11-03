@@ -335,11 +335,24 @@ impl Db {
             if !self.homographs(old, d) {
                 continue;
             }
-            let (old_implicit, new_implicit) = (self.decls[old].implicit, self.decls[d].implicit);
+            // 12.3 lets an explicit declaration hide only the implicit declaration of a predefined
+            // operation (or an implicit alias of one): not the signal GUARD of a guarded block
+            // (#1085), and not a label (#1084).
+            let hideable = |x: DeclId| {
+                self.decls[x].implicit
+                    && matches!(
+                        self.decls[x].kind,
+                        DeclKind::Subprogram(_) | DeclKind::Alias(Alias::NonObject { .. })
+                    )
+            };
+            let (old_implicit, new_implicit) = (hideable(old), hideable(d));
             // A label hides nothing and is not hidden. Against an implicit operation 12.3 would
             // let it win; the old E1101 stays, open for the maintainer (lrm-checks L179, #1084).
             let label =
                 [old, d].map(|x| matches!(self.decls[x].kind, DeclKind::Label(_))) != [false; 2];
+            let guard = [old, d].map(|x| {
+                matches!(&self.decls[x].kind, DeclKind::Object(o) if o.role == crate::decl::ObjRole::Guard)
+            }) != [false; 2];
             if old_implicit && !new_implicit && !label {
                 // Explicit hides implicit: the implicit one leaves the region's names.
                 if let Some(v) = self.scopes[scope].names.get_mut(&key) {
@@ -366,6 +379,11 @@ impl Db {
                         "a statement label is declared in the enclosing process, subprogram, block, generate, architecture or entity (LRM 10.1, 11.1, 12.3)",
                     )
                     .with_help("rename the label or the declaration");
+            }
+            if guard {
+                e = e
+                    .with_note("a guarded block implicitly declares the signal GUARD (LRM 11.2)")
+                    .with_help("rename the declaration");
             }
             self.report(e);
             return;

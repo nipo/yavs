@@ -115,6 +115,7 @@ through is an error here. The common cases:
 * Division by zero in a constant range bound, and a type, subprogram or package in a parameter list.
 * A statement label with the name of a declaration of the same region (``E1101``), such as a variable
   and a sequential label in one process: see :doc:`language-choices`.
+* A declaration named ``guard`` in a guarded block (``E1101``): see :doc:`language-choices`.
 * No error is downgraded on its own, and a failed step never lets the next one run.
 
 Where yavs is more permissive
