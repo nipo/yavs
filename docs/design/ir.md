@@ -83,7 +83,7 @@ installs a compiled tier.
 All entries live under `<work library>/yavs-cache/` (store: `yavs-cache`; policy: `crates/yavs/src/cache.rs`
 and `yavs-elab` `libstage.rs`): the analysed design (`sem-*.img`), analysed units (`units/`), the lowered
 design and package state (`ir-*`, `low-*`, `init-*`, and the library-prefix kinds `lib-*`, `libinit-*`,
-`libopt-*`), compiled code (`obj/obj-*.img` for LLVM, `obj/clif-*.img` for Cranelift) and the shared
+`libopt-*`), compiled code (`obj/obj-*.img` for LLVM, `obj/clif-*.img` and `obj/clifpre-*.img` for Cranelift) and the shared
 analysed `std`/`ieee` units in a per-user store. Every entry is keyed by everything it depends on, damaged or
 foreign entries are misses, and `--no-cache` neither reads nor writes. The behaviour is specified in
 `docs/cli-contract.md` and described for users in `docs/running-faster.rst`.

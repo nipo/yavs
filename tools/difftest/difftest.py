@@ -44,7 +44,7 @@ YAVS_LLVM = YAVS.replace("--threads=", "--tier=llvm --threads=")
 YAVS_AUTO = YAVS.replace("--threads=", "--tier=auto --threads=")
 # `--tier=auto` after a dropped first pass (in its own directory: file_append, #806), comparing a second `elab` and
 # `run`: `.expected` holds both stages (#1030). The run links what the first compiled by pre-keys of the compilation
-# cache (with YAVS_LLVM_PREKEY_CHECK set it generates the code anyway and checks it, #785).
+# cache (with YAVS_LLVM_PREKEY_CHECK or YAVS_CLIFT_PREKEY_CHECK set it generates the code anyway and checks it, #785).
 _ELAB = YAVS_AUTO.index('"$R" elab')
 YAVS_AUTO_WARM = (YAVS_AUTO[:_ELAB] + "mkdir w1; (cd w1 && " + YAVS_AUTO[_ELAB:] + ") >/dev/null 2>&1; " + YAVS_AUTO[_ELAB:])
 # yavs with the Cranelift tier (needs a yavs built with `--features clift`): every function

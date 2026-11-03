@@ -146,6 +146,12 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           YAVS_BIN="$PWD/target/debug/yavs" python3 tools/difftest/difftest.py --candidate yavs-clift-check --threads 1,4 --shuffle 11 --no-sandbox --jobs 4
+      # A warm run links its code by a key made before the body is lowered. A debug build lowers anyway
+      # and aborts when the body is not the one the key names (`YAVS_CLIFT_PREKEY_CHECK`).
+      - name: Corpus warm, the key of compiled code checked
+        if: runner.os == 'Linux'
+        run: |
+          YAVS_BIN="$PWD/target/debug/yavs" YAVS_RUN_FLAGS=--tier-heat=1,0,0 python3 tools/difftest/difftest.py --candidate yavs-auto-warm --threads 4 --shuffle 11 --no-sandbox --jobs 4
 
   # Analysis corpora (tools/corpus): fetched at pinned revisions into the runner cache, never
   # part of the repository. Fails on any difference from the checked-in expected lists, in

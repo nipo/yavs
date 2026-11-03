@@ -449,6 +449,16 @@ Compiled tiers: Cranelift
      - ``speed``, ``none``
      - ``speed``
      - ``run``
+   * - ``YAVS_CLIFT_PREKEY_CHECK``
+     - Lowers the function even on a cache hit and fails when the body is not the one the cache names. On by default in a debug build.
+     - not ``0``
+     - unset
+     - ``run``
+   * - ``YAVS_CLIFT_PREKEY_DROP``
+     - Debug builds, the test of the check: leaves these inputs out of the key that finds compiled code.
+     - names, comma separated
+     - unset
+     - ``run``
    * - ``YAVS_CLIFT_PERFMAP``
      - Writes ``/tmp/perf-<pid>.map`` for ``perf report``.
      - ``1``
