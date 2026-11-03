@@ -27,7 +27,7 @@ An explicit declaration with the name of the implicit signal `GUARD` of a guarde
 
 ### Statement labels are declarations (#1084, 2026-11-03)
 
-A statement label that repeats a declaration of its region is `E1101`, sequential and concurrent, in every revision, in the region of an entity and its architecture too (lrm-checks L179). Nested regions still only hide. No corpus file or external test relied on the old behaviour. Open for the maintainer: a label against an implicit predefined operation of its own region stays `E1101` although 12.3 exempts it, and against one of a type declared in the entity stays accepted although both references reject. An explicit declaration named GUARD in a guarded block is #1085.
+A statement label that repeats a declaration of its region is `E1101`, sequential and concurrent, in every revision, in the region of an entity and its architecture too (lrm-checks L179). Nested regions still only hide. No corpus file or external test relied on the old behaviour. A label with the name of an implicit predefined operation, in its own region or against a type of the entity, is accepted and hides the operation, as 12.3 says (maintainer ruling 2026-11-03; both references reject the concurrent forms). `fifo : fifo` with the component visible through a use clause keeps `E1700`, now with a hint to rename the label. An alternative label of a generate and a declaration of it stay accepted. An explicit declaration named GUARD in a guarded block is #1085.
 
 ### Perf map of compiled code (#1074, 2026-11-02)
 

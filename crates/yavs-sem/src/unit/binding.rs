@@ -229,6 +229,7 @@ impl Db {
             DeclKind::Error => Err(Reported),
             other => {
                 let help = matches!(other, DeclKind::Unit(u) if matches!(self.units[*u].kind, UnitKind::Entity | UnitKind::Configuration));
+                let label = matches!(other, DeclKind::Label(_));
                 let mut diag = Diagnostic::error(
                     diag::NOT_INSTANTIABLE,
                     format!(
@@ -242,6 +243,11 @@ impl Db {
                     diag = diag.with_help(
                                 "instantiate an entity with `entity lib.name` and a configuration with `configuration lib.name`",
                             );
+                }
+                if label {
+                    diag = diag
+                        .with_note("the label is declared in this region and hides a component of the same name (LRM 11.1, 12.4)")
+                        .with_help("rename the label");
                 }
                 Err(self.error(diag))
             }

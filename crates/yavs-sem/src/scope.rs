@@ -335,9 +335,9 @@ impl Db {
             if !self.homographs(old, d) {
                 continue;
             }
-            // 12.3 lets an explicit declaration hide only the implicit declaration of a predefined
-            // operation (or an implicit alias of one): not the signal GUARD of a guarded block
-            // (#1085), and not a label (#1084).
+            // 12.3 lets an explicit declaration (a label too, #1084) hide only the implicit
+            // declaration of a predefined operation or an implicit alias of one: not the signal
+            // GUARD of a guarded block (#1085).
             let hideable = |x: DeclId| {
                 self.decls[x].implicit
                     && matches!(
@@ -346,21 +346,19 @@ impl Db {
                     )
             };
             let (old_implicit, new_implicit) = (hideable(old), hideable(d));
-            // A label hides nothing and is not hidden. Against an implicit operation 12.3 would
-            // let it win; the old E1101 stays, open for the maintainer (lrm-checks L179, #1084).
             let label =
                 [old, d].map(|x| matches!(self.decls[x].kind, DeclKind::Label(_))) != [false; 2];
             let guard = [old, d].map(|x| {
                 matches!(&self.decls[x].kind, DeclKind::Object(o) if o.role == crate::decl::ObjRole::Guard)
             }) != [false; 2];
-            if old_implicit && !new_implicit && !label {
+            if old_implicit && !new_implicit {
                 // Explicit hides implicit: the implicit one leaves the region's names.
                 if let Some(v) = self.scopes[scope].names.get_mut(&key) {
                     v.retain(|x| *x != old);
                 }
                 continue;
             }
-            if new_implicit && !old_implicit && !label {
+            if new_implicit && !old_implicit {
                 // An implicit op created after an explicit homograph stays hidden.
                 self.scopes[scope].order.push(d);
                 return;

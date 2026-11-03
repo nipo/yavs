@@ -73,7 +73,10 @@ yavs, with what to do about each.
        of an entity and a signal of its architecture
      - Error ``E1101``: a label is declared in the enclosing process, subprogram, block, generate,
        architecture or entity, and two declarations in one region may not share a name. A label
-       in a nested region only hides the outer name.
+       in a nested region only hides the outer name. A label with the name of an implicit
+       predefined operation (``minimum : process`` next to ``type t is (u, v)``) is accepted and
+       hides the operation, as LRM 2008 12.3 says, although both reference simulators reject the
+       concurrent form.
      - Rename the label or the declaration.
    * - A declaration with the name ``guard`` in a guarded block: ``b : block (c)`` with a signal,
        generic, port, constant, type, subprogram or alias called ``guard``

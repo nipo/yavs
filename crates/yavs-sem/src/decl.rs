@@ -196,7 +196,7 @@ pub enum DeclKind {
     },
     /// Entity class entries; `true` when followed by `<>` (6.9).
     GroupTemplate(Box<[(Kw, bool)]>),
-    /// A statement label, declared in the enclosing region (10.1, 11.1); a homograph is `E1101`.
+    /// A statement label, declared in the enclosing region (10.1, 11.1); a homograph is `E1101`, except an implicit predefined operation, which the label hides (12.3).
     Label(StmtId),
     /// A PSL `sequence` (`false`) or `property` (`true`) declaration: only its name, for the
     /// homograph rules; the parser expands its uses (#1077).
