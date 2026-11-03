@@ -133,7 +133,7 @@ pub struct Decl {
     pub kind: DeclKind,
     pub scope: ScopeId,
     pub span: Span,
-    /// Implicitly declared (predefined ops, range records, labels, ...).
+    /// Implicitly declared (predefined ops, range records, ...); labels are not, see `declare_label`.
     pub implicit: bool,
     /// First revision that has this declaration (sem.md 0.1); `V2008` unless std/ieee says otherwise.
     pub since: LangRev,
@@ -196,7 +196,7 @@ pub enum DeclKind {
     },
     /// Entity class entries; `true` when followed by `<>` (6.9).
     GroupTemplate(Box<[(Kw, bool)]>),
-    /// Statement labels are implicitly declared.
+    /// A statement label, declared in the enclosing region (10.1, 11.1); a homograph is `E1101`.
     Label(StmtId),
     /// A PSL `sequence` (`false`) or `property` (`true`) declaration: only its name, for the
     /// homograph rules; the parser expands its uses (#1077).

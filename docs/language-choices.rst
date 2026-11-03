@@ -68,6 +68,13 @@ yavs, with what to do about each.
      - Error ``E1201`` in a VHDL-1993 or VHDL-2008 file: the standard allows ``'base`` only as
        the prefix of another attribute (``t'base'left``). A VHDL-2019 file still accepts it.
      - Name the type directly, ``integer'(5)``.
+   * - A statement label with the name of a declaration of the same region: a signal and a process
+       label in one architecture, a variable and a loop label in one process, a statement label
+       of an entity and a signal of its architecture
+     - Error ``E1101``: a label is declared in the enclosing process, subprogram, block, generate,
+       architecture or entity, and two declarations in one region may not share a name. A label
+       in a nested region only hides the outer name.
+     - Rename the label or the declaration.
    * - A static index out of range or a constant overflow in code that may be dead
      - Warning (``W1404``, ``W1401``); the check still runs if the code runs.
      - ``-Werror=W1404`` makes it an error.

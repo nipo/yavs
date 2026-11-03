@@ -24,7 +24,7 @@ codes! {
     SOURCE_UNREADABLE = "E1009", "A source file named by a library manifest or the std/ieee tree cannot be read.";
     // E11xx scopes and visibility
     NOT_DECLARED = "E1100", "The name is not declared, or not visible, at this point.";
-    REDECLARED = "E1101", "A declaration with the same designator (and, for subprograms, the same parameter and result type profile) already exists in this declarative region.";
+    REDECLARED = "E1101", "A declaration with the same designator (and, for subprograms, the same parameter and result type profile) already exists in this declarative region. A statement label counts as a declaration of the region around its statement.";
     USE_CONFLICT = "E1102", "Two use clauses make different declarations with this name potentially visible, so neither is visible (LRM 12.4).";
     HIDDEN = "E1103", "The named entity exists but is hidden at this point.";
     NOT_A_PACKAGE = "E1104", "The prefix of a use clause, context reference or expanded name must denote a library, a package, a package instance or a context declaration (LRM 12.4, 13.4).";

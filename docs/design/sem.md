@@ -301,6 +301,7 @@ Non-overloadable names yield exactly one decl or a conflict.
 Profile (4.5.3): the base types of the parameters in order, plus the base type of the result.
 Parameter names, modes, classes and defaults are not part of it. Two subprograms in one region
 with the same designator and profile are `E1101` (redeclaration), except explicit-hides-implicit.
+A statement label is a declaration of the enclosing region (`DeclKind::Label`): it never hides or is hidden in that region (`lrm-checks.md` L179).
 
 ## 2. Type system (rule 1)
 

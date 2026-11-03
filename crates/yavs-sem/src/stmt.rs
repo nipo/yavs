@@ -230,7 +230,8 @@ impl Db {
                 kind: DeclKind::Label(stmt),
                 scope,
                 span: label.span,
-                implicit: true,
+                // Not `implicit`: 12.3 lets only predefined operations be hidden (#1084).
+                implicit: false,
                 since: LangRev::Vhdl1993,
             },
         )?;

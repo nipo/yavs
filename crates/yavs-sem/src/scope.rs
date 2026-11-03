@@ -336,28 +336,38 @@ impl Db {
                 continue;
             }
             let (old_implicit, new_implicit) = (self.decls[old].implicit, self.decls[d].implicit);
-            if old_implicit && !new_implicit {
+            // A label hides nothing and is not hidden. Against an implicit operation 12.3 would
+            // let it win; the old E1101 stays, open for the maintainer (lrm-checks L179, #1084).
+            let label =
+                [old, d].map(|x| matches!(self.decls[x].kind, DeclKind::Label(_))) != [false; 2];
+            if old_implicit && !new_implicit && !label {
                 // Explicit hides implicit: the implicit one leaves the region's names.
                 if let Some(v) = self.scopes[scope].names.get_mut(&key) {
                     v.retain(|x| *x != old);
                 }
                 continue;
             }
-            if new_implicit && !old_implicit {
+            if new_implicit && !old_implicit && !label {
                 // An implicit op created after an explicit homograph stays hidden.
                 self.scopes[scope].order.push(d);
                 return;
             }
             let name = self.decls[d].name;
             let (span, old_span) = (self.decls[d].name_span(), self.decls[old].name_span());
-            self.report(
-                Diagnostic::error(
-                    diag::REDECLARED,
-                    format!("`{name}` is declared twice in this region"),
-                )
-                .with_primary(span, "redeclared here")
-                .with_secondary(old_span, "first declared here"),
-            );
+            let mut e = Diagnostic::error(
+                diag::REDECLARED,
+                format!("`{name}` is declared twice in this region"),
+            )
+            .with_primary(span, "redeclared here")
+            .with_secondary(old_span, "first declared here");
+            if label {
+                e = e
+                    .with_note(
+                        "a statement label is declared in the enclosing process, subprogram, block, generate, architecture or entity (LRM 10.1, 11.1, 12.3)",
+                    )
+                    .with_help("rename the label or the declaration");
+            }
+            self.report(e);
             return;
         }
         if self.entity_homograph(scope, d) {
@@ -413,6 +423,7 @@ impl Db {
         let what = match &self.decls[old].kind {
             DeclKind::Object(o) if o.role == crate::decl::ObjRole::Port => "a port",
             DeclKind::Object(o) if o.role == crate::decl::ObjRole::Generic => "a generic",
+            DeclKind::Label(_) => "a label",
             _ => "a declaration",
         };
         let ename = self.scopes[entity]
@@ -421,19 +432,24 @@ impl Db {
             .unwrap_or_default();
         let name = self.decls[d].name;
         let (span, old_span) = (self.decls[d].span, self.decls[old].span);
-        self.report(
-            Diagnostic::error(
-                diag::REDECLARED,
-                format!("`{name}` is already declared as {what} of {head} `{ename}`"),
-            )
-            .with_primary(span, "redeclared here")
-            .with_secondary(old_span, format!("declared in the {head} here"))
-            .with_note(if is_body {
-                "a package and its body form one declarative region (LRM 4.8, 12.1)"
-            } else {
-                "an entity and its architectures form one declarative region (LRM 12.1)"
-            }),
-        );
+        let mut e = Diagnostic::error(
+            diag::REDECLARED,
+            format!("`{name}` is already declared as {what} of {head} `{ename}`"),
+        )
+        .with_primary(span, "redeclared here")
+        .with_secondary(old_span, format!("declared in the {head} here"))
+        .with_note(if is_body {
+            "a package and its body form one declarative region (LRM 4.8, 12.1)"
+        } else {
+            "an entity and its architectures form one declarative region (LRM 12.1)"
+        });
+        if [old, d]
+            .iter()
+            .any(|&x| matches!(self.decls[x].kind, DeclKind::Label(_)))
+        {
+            e = e.with_help("rename the label or the declaration");
+        }
+        self.report(e);
         true
     }
 

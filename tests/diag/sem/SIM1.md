@@ -38,6 +38,13 @@ The reference simulator (the primary reference). Every file the reference simula
 | `gen/subprogram_header_map_ok` | rejects @6,7,11 | rejects | LRM 4.2.1: a header with a generic list and a generic map declares an instance; the reference simulators (the third too) treat it as uninstantiated and reject its calls (#227). |
 | `gen/subprogram_header_map_call_mismatch` | rejects @6 | rejects | Same as `gen/subprogram_header_map_ok`: the references reject the header map itself, yavs the call that does not fit the instance (#227). |
 | `gen/unused_generic_warning` | accepts | accepts | yavs-only warning (W1501); the reference simulators do not warn. |
+| `hom/label_sequential_vs_declaration` | accepts | rejects at each label | LRM 2008 10.1, 12.1 and 12.3 are clear: a sequential label is declared in its process or subprogram (L179, #1084). |
+| `hom/label_entity_region` | rejects @12, 27 to 29 | rejects @12, 24 | LRM 2008 12.1 makes an entity and its architecture one region, so an entity statement label against the architecture is a homograph too (L179); the reference simulator misses that pair. |
+| `hom/label_concurrent_vs_declaration` | rejects, not @40 to 42 | rejects | The reference simulator reports no label on an empty generate statement in this file; with a statement in the generate it rejects (L179). |
+| `hom/label_hides_use_visible_component` | accepts | rejects @11 | LRM 2008 12.4: the label is directly visible and hides the component (L179). |
+| `hom/label_other_region_ok` | rejects @55 | accepts | LRM 2008 12.1: a loop label and its parameter are in two regions (L179). |
+| `hom/label_vs_implicit_operation` | rejects @11, 12 | rejects | yavs keeps `E1101` for a sequential label too, where the reference simulator accepts @16; 12.3 would let the label win, open for the maintainer (L179). |
+| `hom/label_vs_entity_implicit_operation_ok` | rejects @9 | rejects @5, 9 | LRM 2008 12.3 exempts an implicit predefined operation, so yavs keeps accepting; open for the maintainer (L179). |
 | `hom/interface_param_twice` | accepts | rejects @5 | The reference simulator bug: accepts two parameters with one name in a subprogram declaration; the second reference simulator rejects. |
 | `stat/static_intermediate_i64_overflow` | accepts | warns | `2 ** 63 - 1` in 2019 is INTEGER'HIGH, but `2 ** 63` overflows 64 bits; static arithmetic is checked i64 (rule 7, L156), so it stays `W1401` with the run-time check; the reference simulator accepts it without a diagnostic (#872). |
 | `mix/integer_high_in_2008_file` | accepts | accepts | yavs-only W1008: needs the mixed-revision design (2008 file in a 2019 design); the reference simulator analyzes one standard at a time and accepts the 2008 file silently. |
@@ -349,7 +356,7 @@ only checks at elaboration. No test depended on U-1 to U-6 or the L8 tie.
 | `unknown_generic_name` | E1100 @7 | rejects @7 | rejects @7 |
 | `unused_generic_warning` | W1501 @5 | accepts | accepts |
 
-### hom (22)
+### hom (30)
 
 | File | Expected | The reference simulator | The second reference simulator |
 |---|---|---|---|
@@ -365,6 +372,14 @@ only checks at elaboration. No test depended on U-1 to U-6 or the L8 tie.
 | `implicit_op_hidden_by_explicit_ok` | none | accepts | accepts |
 | `incomplete_type_twice` | E1101 @7 | rejects @7 | rejects @6,7 |
 | `interface_param_twice` | E1101 @5 | accepts | rejects @5 |
+| `label_block_generate_region` | E1101 @24,25,26,27,32,33,38,44,48 | rejects @24,25,26,27,32,33,38,44,48 | rejects, also at the declarations |
+| `label_concurrent_vs_declaration` | E1101 @38 to 57 | rejects @25,38,39,43 to 57 | rejects, also at the declarations |
+| `label_entity_region` | E1101 @12,25,27,28,29,30 | rejects @12,27,28,29 | rejects @10,12,24 |
+| `label_hides_use_visible_component` | E1700 @11 | accepts | rejects @11 |
+| `label_other_region_ok` | none | rejects @55 | accepts, with warnings |
+| `label_sequential_vs_declaration` | E1101 @23,27,31,36,46 to 50,52,54 to 58 | accepts | rejects, also at the declarations |
+| `label_vs_entity_implicit_operation_ok` | none | rejects @9 | rejects @5,9 |
+| `label_vs_implicit_operation` | E1101 @11,12,16 | rejects @11,12 | rejects @9,11,12,14,16 |
 | `overload_by_param_type_ok` | none | accepts | accepts |
 | `physical_unit_twice` | E1101 @9 | rejects @9 | rejects @8,9 |
 | `port_vs_generic` | E1101 @6 | rejects @6 | rejects @5,6 |
