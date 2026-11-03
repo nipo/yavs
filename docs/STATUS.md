@@ -10808,3 +10808,20 @@ A zero-delay drive at a constant reference in a process copy compares with the s
 ## Cranelift: compiled code found before the body is made
 
 A warm `--tier=auto` run on Cranelift finds a function's code by a key made before the body is lowered (`yavs-clift` `cache.rs`, `Jit::link`; `docs/decisions.md` "Cranelift: compiled code found before the body is made"): the third run of a design is the first that links so, the second writes the entries. `YAVS_CLIFT_PREKEY_CHECK`, always on in debug builds, lowers anyway and aborts on a difference. A program with no identity (coverage, constant pools too large for the stage cache, such as `hdlm_lfsr`) keeps the key over the body and gains nothing. See `docs/decisions.md` for what the key holds and the mutation test.
+
+Instructions in G, new against 176f5ec7, bench builds, `--threads=1`, all threads / main thread, median of 3 rounds unless said. Host loaded: no cycle figures.
+
+| run | cold, all | warm, all | warm, ratio all / main | store, MB of files |
+|---|---:|---:|---:|---:|
+| GRLIB whole | 342.3 to 342.2 | 263.6 to 249.3 | 0.946 / 0.974 | 7.39 to 7.85 |
+| GRLIB to 100 us, all compiled at first entry | 169.3 to 169.3 | 67.2 to 33.6 | 0.500 / 0.999 | 29.75 to 30.12 |
+| Microwatt whole, one round | 1 594.7 to 1 595.4 | 1 457.8 to 1 383.2 | 0.949 / 0.956 | 7.38 to 7.34 |
+| Microwatt to 600 us | 201.0 to 198.6 | 171.9 to 168.3 | 0.979 / 1.011 | 3.62 to 3.44 |
+| Microwatt to 100 us, all compiled at first entry | 92.3 to 92.3 | 42.6 to 25.9 | 0.608 / 1.000 | |
+| `uvvm_sb_slv` | 11.67 to 11.82 | 8.48 to 8.26 | 0.975 / 0.987 | 0.28 to 0.33 |
+| `neorv32_single_cache` | 24.13 to 24.13 | 21.11 to 20.59 | 0.975 / 0.990 | 0.26 to 0.26 |
+| `sc5_fifo_repack` | 28.31 to 28.32 | 22.08 to 21.99 | 0.996 / 1.010 | 0.67 to 0.74 |
+| `uvvm_util_rand` | 14.15 to 14.41 | 11.44 to 9.85 | 0.862 / 0.871 | 0.46 to 0.50 |
+| `hdlm_lfsr`, no identity | 25.44 to 25.08 | 23.19 to 23.23 | 1.002 / 1.001 | 0.04 to 0.04 |
+
+GRLIB, all compiled: the compile thread 34.7 to 1.09 G, for 355 listed functions of 261 159 IR instructions: about 133 000 to 4 200 instructions an IR instruction. `vunit_logging` compiles nothing at auto, so there is nothing to gain: on one world path 0.1765 against 0.1766 G main. Its count moves with the length of the path, which it passes to the design as a generic, so compare runs on the same path. The set compiled warm varies between rounds, `uvvm_util_rand` most: base 10.38 to 11.60, new 9.82 to 10.21, so 0.862 is not a bound; the main-thread gain on whole Microwatt (one round) was not traced and is not confirmed by the 600 us span. The run that writes the entries is level (Microwatt second run 1.003). Console and exit status equal to the base on whole GRLIB and Microwatt, cold and warm; Microwatt exits 1 on both, an error assertion at 25 ns in `log_buffer`.
