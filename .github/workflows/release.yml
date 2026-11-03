@@ -5,7 +5,8 @@
 # - the CI checks on the tagged commit, a release build of `yavs` per platform
 #   (std/ieee built in, the Cranelift compiled tier, `--features clift`), one archive yavs-<version>-<target> each (docs/decisions.md
 #   "Release archives", "One release archive per platform"); the Linux ones built with
-#   cargo-zigbuild against glibc 2.17 and smoke-tested in centos:7;
+#   cargo-zigbuild against glibc 2.17 and smoke-tested in centos:7; the x86_64 ones for x86-64-v3
+#   (RUSTFLAGS, docs/decisions.md "x86-64-v3 baseline"), smoke-tested on runners that have AVX2;
 # - the vunit-yavs wheel and sdist, tested on every platform against the archives of this run;
 #   the VS Code extension (.vsix, vscode.yml) tested against the Linux x86_64 archive of this run;
 # - the committed conformance report (docs/conformance.md and .json) as
@@ -91,13 +92,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-24.04, target: x86_64-unknown-linux-gnu }
-          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu }
-          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+          - { os: ubuntu-24.04, target: x86_64-unknown-linux-gnu, rustflags: "-C target-cpu=x86-64-v3" }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, rustflags: "" }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, rustflags: "-C target-cpu=x86-64-v3" }
     runs-on: ${{ matrix.os }}
     defaults:
       run:
         shell: bash
+    env:
+      # The x86_64 archives are built for x86-64-v3 (docs/decisions.md "x86-64-v3 baseline"); only
+      # here: CI and builds from source keep the Rust default. The binary checks the CPU at start.
+      RUSTFLAGS: ${{ matrix.rustflags }}
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
@@ -161,6 +166,8 @@ jobs:
           # Smoke test: the binary alone runs a design (std/ieee built in).
           "$name/yavs" --version | tee version.txt
           grep -q 'compiled tier: cranelift' version.txt
+          # The x86_64 archives really are x86-64-v3 builds: the CPU check of main is compiled in only then.
+          if [[ "$t" == x86_64-* ]]; then grep -aq 'needs a CPU with x86-64-v3' "$name"/yavs*; fi
           env -u YAVS_STDLIB "$name/yavs" analyze --work=work:$w t.vhd
           env -u YAVS_STDLIB "$name/yavs" run --work=work:$w t | grep -q ': ok'
           env -u YAVS_STDLIB "$name/yavs" run --tier=auto --work=work:$w t | grep -q ': ok'

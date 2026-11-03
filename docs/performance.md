@@ -90,7 +90,7 @@ an otherwise idle machine, repeat, and compare medians; a short run varies by te
 
 The testbenches come from open-source VHDL projects (verification libraries, FPGA libraries, processor
 designs), each run as its project's own scripts would: analysing the libraries and the testbench's files,
-elaborating and running. yavs is a release build at its default `--tier=auto`. Every pair of timings ran on
+elaborating and running. yavs is a release build at its default `--tier=auto`, built for the baseline x86-64 CPU with aligned functions: not the x86-64-v3 build of the x86_64 release archives from 2026-11-03 on, which was not measured here. Every pair of timings ran on
 the same CPU core, in turn, on a shared Linux host (AMD Ryzen 9 7950X3D), repeated two to five times; the 2026-11-01 run took the best of two passes for each measurement,
 with a median host load of 10 to 14. The
 other simulators are not named; all of them run compiled or generated code. The per-testbench tables, the

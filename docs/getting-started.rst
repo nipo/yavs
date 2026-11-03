@@ -67,6 +67,12 @@ Each archive unpacks into one directory of the same name (without ``.tar.gz`` or
 Requirements
 ^^^^^^^^^^^^
 
+* The two x86_64 archives (Linux and Windows) are built for the x86-64-v3 level of the instruction set: the CPU needs
+  AVX2, BMI1, BMI2, FMA, F16C, LZCNT and MOVBE, as every Intel CPU since Haswell (2013) and every AMD CPU since
+  Excavator (2015) and Zen has. Some low-end Intel Pentium, Celeron and Atom parts of later years lack AVX2, and
+  virtual machines or emulators may hide it from the guest. On a CPU without them ``yavs`` prints which features
+  are missing and that it can be built from source, then exits with status 1 (:doc:`troubleshooting`).
+  The aarch64 archive has no such requirement, and a build from source (below) runs on any x86-64 CPU.
 * The Linux archives require glibc 2.17 or newer (RHEL/CentOS 7+, Debian 8+, Ubuntu 14.04+). On
   musl-based systems such as Alpine, install the ``gcompat`` package. The archives are tested on
   x86_64 and aarch64 Linux and on Windows x86_64.
@@ -92,6 +98,10 @@ release archives are:
     git clone https://github.com/ru551n/yavs
     cd yavs
     cargo build --release -p yavs --features clift   # target/release/yavs
+
+A build from source targets the baseline x86-64 CPU, so it runs on CPUs older than the archives need. It
+can be faster on yours with ``RUSTFLAGS="-C target-cpu=native"``, at the cost of running on that CPU generation
+and newer only.
 
 Without ``--features clift`` the build has no compiled tier: ``yavs --version`` says
 ``interpreter only, no compiled tier``, the default is ``--tier=interp``, and ``--tier=auto`` is

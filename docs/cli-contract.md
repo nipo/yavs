@@ -71,6 +71,11 @@ Conventions:
   tier)` (a build with neither `llvm` nor `clift` fails `--tier=auto` and `--tier=llvm` with E0120;
   a build with the `clift` feature says `compiled tier: cranelift`, or `llvm, cranelift` with
   both, and runs `--tier=auto` with Cranelift when `llvm` is not built in). The release archives are built with `clift` only: one archive per platform, `compiled tier: cranelift` (#780).
+  The x86_64 release archives are built for x86-64-v3: on a CPU without it every command exits with status 1
+  and a plain message on stderr (`error: this build of yavs needs a CPU with x86-64-v3 ...`, naming the missing
+  features and building from source), before the command line is read. It has no code and no `--explain`
+  text: it runs before anything else can (`docs/decisions.md` "x86-64-v3 baseline"). A test runner that checks
+  `yavs --version` refuses the executable, and the message reaches the terminal.
   A second line carries the copyright notice, `Copyright (c) 2026 Sebastian Abrahamsson`; a
   consumer that embeds the version takes the first line only. The test runner takes the first
   `MAJOR.MINOR[.PATCH]` it finds; the prerelease tag is ignored for ordering.

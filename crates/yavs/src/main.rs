@@ -9,6 +9,8 @@ mod cache;
 mod console;
 mod counters;
 mod cov;
+#[cfg(all(target_arch = "x86_64", any(test, target_feature = "avx2")))]
+mod cpu;
 mod elab;
 mod explain;
 mod lint;
@@ -319,6 +321,17 @@ fn guard(format: MessageFormat, color: bool, f: impl FnOnce() -> ExitCode) -> Ex
 const READ_ERROR: &str = "E0100";
 
 fn main() -> ExitCode {
+    // A build that assumes x86-64-v3 (the x86_64 release archives) says why it cannot run here,
+    // before any other code, instead of dying with an illegal instruction (`cpu.rs`).
+    #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+    if let Some(code) = cpu::check() {
+        return code;
+    }
+    real_main()
+}
+
+#[inline(never)]
+fn real_main() -> ExitCode {
     yavs_cache::huge_heap();
     yavs_cache::set_sources(env!("YAVS_SRC_HASH"));
     yavs_vhpi::keep_exports();

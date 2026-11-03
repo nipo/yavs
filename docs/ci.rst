@@ -56,7 +56,9 @@ version you asked for and puts it on ``PATH``:
 Pin the version: it gives the same simulator on every run and keeps your cache valid. Without ``version`` you
 get the newest stable release, which can change your results on the day a release comes out. An unknown
 version, a runner without an archive or a failed download fails the step with an error naming the cause and
-the fix. The action's page has the outputs and the rest.
+the fix. The action's page has the outputs and the rest. The x86_64 archives need a CPU with AVX2
+(x86-64-v3, :ref:`installation`): GitHub-hosted runners have it; on a self-hosted runner without it, build yavs
+from source.
 
 On other CI systems, download the archive with plain commands:
 
