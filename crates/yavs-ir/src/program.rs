@@ -136,6 +136,10 @@ impl Program {
                 return raw.full();
             }
         }
+        // A reserved slot no copy has been made for: asking for it must not fix it empty for good.
+        if raw.spare && self.copies.get(f).is_none() {
+            return raw.full();
+        }
         let o = raw
             .opt
             .get_or_init(|| {

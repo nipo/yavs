@@ -120,6 +120,28 @@ fn a_copy_folds_the_instance_data_it_is_for() {
     assert_eq!((st.copies, st.reserved, st.full), (2, 2, 1));
 }
 
+/// Asking for a reserved slot before a copy is made in it (a tier listing every function) must
+/// leave it free: the copy made later has the body of a copy, not an empty one.
+#[test]
+fn a_slot_asked_for_before_its_copy_is_still_free() {
+    if !yavs_ir::opt::specialise_on() {
+        return;
+    }
+    let (mut p, f) = process();
+    p.reserve_copies(1);
+    for k in 0..p.funcs.len() {
+        let _ = p.func(FuncId(k as u32));
+    }
+    let c = p.copy_of(f, &data(3, 0), &[]).expect("a copy");
+    let body = p.func(c).expect("the copy");
+    assert!(
+        !body.resume.is_empty() && !body.code.is_empty(),
+        "an empty copy"
+    );
+    assert_eq!(branches(&p, c), 0);
+    assert_eq!(p.copy_stats().fresh, 1);
+}
+
 #[test]
 fn nothing_is_stored_for_the_slots() {
     if !yavs_ir::opt::specialise_on() {
