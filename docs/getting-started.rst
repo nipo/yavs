@@ -23,6 +23,11 @@ early), check it against ``SHA256SUMS``, unpack it and put the directory it crea
 * ``yavs-<version>-x86_64-unknown-linux-gnu.tar.gz``
 * ``yavs-<version>-aarch64-unknown-linux-gnu.tar.gz``
 * ``yavs-<version>-x86_64-pc-windows-msvc.zip``
+* ``yavs-<version>-x86_64-unknown-linux-gnu-compat.tar.gz`` and ``yavs-<version>-x86_64-pc-windows-msvc-compat.zip``:
+  the same for x86_64 CPUs without AVX2 (see Requirements)
+
+Pick the x86_64 archive without ``-compat`` unless your CPU is older than 2013 (Intel Haswell, AMD Excavator or Zen); the
+``-compat`` one runs on any x86-64 CPU.
 
 aarch64 is also known as arm64; run ``uname -m`` to see which one you need. There is no macOS
 build and no 32-bit build.
@@ -37,9 +42,10 @@ build and no 32-bit build.
 On Windows, compare ``(Get-FileHash yavs-<version>-x86_64-pc-windows-msvc.zip).Hash`` in
 PowerShell with the line of ``SHA256SUMS``, unzip the archive and add its directory to ``PATH``.
 ``yavs --version`` prints the version and the kind of archive on the first line, for example
-``yavs 0.13.0 (compiled tier: cranelift)``, and the copyright notice on the second.
+``yavs 0.13.0 (compiled tier: cranelift)``, the CPU level of the build on the second (``Build: x86-64-v3, AVX2 support``,
+``Build: x86-64 baseline`` or ``Build: aarch64``) and the copyright notice on the third.
 
-Every platform has one archive with everything in it: nothing else needs to be installed. Its
+Every archive has everything in it: nothing else needs to be installed. Its
 ``yavs`` has the compiled tier built in (:doc:`running-faster`). A release also carries the VS Code
 extension of the same version (:doc:`debugging`), and ``pip install vunit-yavs`` gets the VUnit package (:doc:`vunit`).
 
@@ -61,18 +67,19 @@ Each archive unpacks into one directory of the same name (without ``.tar.gz`` or
    * - ``LICENSE-IEEE``, ``LICENSE-IEEE-VITAL``, ``LICENSE-SYNOPSYS``
      - The licence and notices of the built-in ``std`` and ``ieee`` sources, the VITAL packages and the
        Synopsys packages.
-   * - ``README.md``
-     - The project readme.
+   * - ``README.txt``
+     - A few lines on this archive: version, target, CPU variant, the files, how to start.
 
 Requirements
 ^^^^^^^^^^^^
 
-* The two x86_64 archives (Linux and Windows) are built for the x86-64-v3 level of the instruction set: the CPU needs
+* The x86_64 archives without ``-compat`` (Linux and Windows) are built for the x86-64-v3 level of the instruction set: the CPU needs
   AVX2, BMI1, BMI2, FMA, F16C, LZCNT and MOVBE, as every Intel CPU since Haswell (2013) and every AMD CPU since
   Excavator (2015) and Zen has. Some low-end Intel Pentium, Celeron and Atom parts of later years lack AVX2, and
   virtual machines or emulators may hide it from the guest. On a CPU without them ``yavs`` prints which features
-  are missing and that it can be built from source, then exits with status 1 (:doc:`troubleshooting`).
-  The aarch64 archive has no such requirement, and a build from source (below) runs on any x86-64 CPU.
+  are missing and that the ``-compat`` archive or a build from source runs there, then exits with status 1
+  (:doc:`troubleshooting`). The ``-compat`` archives are built for the baseline x86-64 CPU and run on any x86-64 CPU.
+  The aarch64 archive has no such requirement, and neither has a build from source (below).
 * The Linux archives require glibc 2.17 or newer (RHEL/CentOS 7+, Debian 8+, Ubuntu 14.04+). On
   musl-based systems such as Alpine, install the ``gcompat`` package. The archives are tested on
   x86_64 and aarch64 Linux and on Windows x86_64.

@@ -863,7 +863,7 @@ Exit status
    * - 1
      - ``parse`` and ``analyze``: a file has errors. ``run``: a failed assertion or report at the
        exit severity, a runtime error, or ``stop(N)`` or ``finish(N)`` with N other than 0 (the
-       status is N when N is from 1 to 125). ``cov``: a database or exclusion file could not be read or a report written, or the total is below ``--fail-under``. ``cache``: a file could not be written. Any command of an x86_64 release archive on a CPU without x86-64-v3: it prints the missing features and the way out, and nothing else runs.
+       status is N when N is from 1 to 125). ``cov``: a database or exclusion file could not be read or a report written, or the total is below ``--fail-under``. ``cache``: a file could not be written. Any command of an x86_64 release archive (not a ``-compat`` one) on a CPU without x86-64-v3: it prints the missing features and the way out, and nothing else runs.
    * - 2
      - Usage error, or a library, analysis or elaboration error; also an unknown code for
        ``--explain``. A runtime error while the design is initialized, before time 0, is an

@@ -30,14 +30,43 @@ use yavs_syntax::{Encoding, Options, Std};
 /// What `yavs --version` prints after the name: the first line of its output is
 /// `yavs MAJOR.MINOR.PATCH (details)` (docs/cli-contract.md section 1); the details say whether
 /// the compiled tier is built in (release archives with and without it, #780). A second line
-/// carries the copyright notice.
+/// says which CPU level the binary was compiled for (`build_line!`, chosen from the target
+/// features, so it is true of the binary whatever archive it came from) and a third carries the
+/// copyright notice.
 macro_rules! version {
     ($details:literal) => {
         concat!(
             env!("CARGO_PKG_VERSION"),
             $details,
+            "\n",
+            build_line!(),
             "\nCopyright (c) 2026 Sebastian Abrahamsson"
         )
+    };
+}
+
+#[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+macro_rules! build_line {
+    () => {
+        "Build: x86-64-v3, AVX2 support"
+    };
+}
+#[cfg(all(target_arch = "x86_64", not(target_feature = "avx2")))]
+macro_rules! build_line {
+    () => {
+        "Build: x86-64 baseline"
+    };
+}
+#[cfg(target_arch = "aarch64")]
+macro_rules! build_line {
+    () => {
+        "Build: aarch64"
+    };
+}
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+macro_rules! build_line {
+    () => {
+        "Build: other architecture"
     };
 }
 
@@ -632,9 +661,19 @@ mod tests {
             "{v}"
         );
         assert_eq!(v.contains("cranelift"), cfg!(feature = "clift"), "{v}");
-        let (first, rest) = v.trim_end().split_once('\n').expect("two lines");
-        assert!(first.ends_with(')'), "{v}");
-        assert_eq!(rest, "Copyright (c) 2026 Sebastian Abrahamsson", "{v}");
+        let lines: Vec<&str> = v.trim_end().split('\n').collect();
+        assert_eq!(lines.len(), 3, "{v}");
+        assert!(lines[0].ends_with(')'), "{v}");
+        // The CPU level follows the target features of this very build.
+        let build = if cfg!(target_arch = "aarch64") {
+            "Build: aarch64"
+        } else if cfg!(all(target_arch = "x86_64", target_feature = "avx2")) {
+            "Build: x86-64-v3, AVX2 support"
+        } else {
+            "Build: x86-64 baseline"
+        };
+        assert_eq!(lines[1], build, "{v}");
+        assert_eq!(lines[2], "Copyright (c) 2026 Sebastian Abrahamsson", "{v}");
     }
 
     /// The default tier (#125): `auto` with a compiled tier (`llvm` or `clift`), also under

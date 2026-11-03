@@ -70,14 +70,17 @@ Conventions:
   built in: `yavs 0.8.0 (compiled tier: llvm)` or `yavs 0.9.0 (interpreter only, no compiled
   tier)` (a build with neither `llvm` nor `clift` fails `--tier=auto` and `--tier=llvm` with E0120;
   a build with the `clift` feature says `compiled tier: cranelift`, or `llvm, cranelift` with
-  both, and runs `--tier=auto` with Cranelift when `llvm` is not built in). The release archives are built with `clift` only: one archive per platform, `compiled tier: cranelift` (#780).
-  The x86_64 release archives are built for x86-64-v3: on a CPU without it every command exits with status 1
+  both, and runs `--tier=auto` with Cranelift when `llvm` is not built in). The release archives are built with `clift` only, `compiled tier: cranelift` (#780): one per platform, and for x86_64 a second `-compat` one.
+  The x86_64 release archives without `-compat` are built for x86-64-v3: on a CPU without it every command exits with status 1
   and a plain message on stderr (`error: this build of yavs needs a CPU with x86-64-v3 ...`, naming the missing
-  features and building from source), before the command line is read. It has no code and no `--explain`
+  features, the `-compat` archive and building from source), before the command line is read. It has no code and no `--explain`
   text: it runs before anything else can (`docs/decisions.md` "x86-64-v3 baseline"). A test runner that checks
   `yavs --version` refuses the executable, and the message reaches the terminal.
-  A second line carries the copyright notice, `Copyright (c) 2026 Sebastian Abrahamsson`; a
-  consumer that embeds the version takes the first line only. The test runner takes the first
+  A second line says which CPU level the binary was compiled for, chosen from the compile-time
+  target features (so it is true of the binary, not of its archive name): `Build: x86-64-v3, AVX2 support`
+  when AVX2 is enabled, `Build: x86-64 baseline` for x86-64 without it (the `-compat` archives and builds
+  from source), `Build: aarch64` on AArch64. A third line carries the copyright notice,
+  `Copyright (c) 2026 Sebastian Abrahamsson`; a consumer that embeds the version takes the first line only. The test runner takes the first
   `MAJOR.MINOR[.PATCH]` it finds; the prerelease tag is ignored for ordering.
   The version is available to the test runner packages as the `yavs_version` marker.
 

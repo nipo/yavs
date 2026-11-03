@@ -5,8 +5,9 @@
 # - the CI checks on the tagged commit, a release build of `yavs` per platform
 #   (std/ieee built in, the Cranelift compiled tier, `--features clift`), one archive yavs-<version>-<target> each (docs/decisions.md
 #   "Release archives", "One release archive per platform"); the Linux ones built with
-#   cargo-zigbuild against glibc 2.17 and smoke-tested in centos:7; the x86_64 ones for x86-64-v3
-#   (RUSTFLAGS, docs/decisions.md "x86-64-v3 baseline"), smoke-tested on runners that have AVX2;
+#   cargo-zigbuild against glibc 2.17 and smoke-tested in centos:7; the x86_64 ones twice: for x86-64-v3
+#   (RUSTFLAGS, docs/decisions.md "x86-64-v3 baseline") under the plain name, and for the Rust default
+#   CPU as yavs-<version>-<target>-compat; all smoke-tested on runners that have AVX2;
 # - the vunit-yavs wheel and sdist, tested on every platform against the archives of this run;
 #   the VS Code extension (.vsix, vscode.yml) tested against the Linux x86_64 archive of this run;
 # - the committed conformance report (docs/conformance.md and .json) as
@@ -92,21 +93,26 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-24.04, target: x86_64-unknown-linux-gnu, rustflags: "-C target-cpu=x86-64-v3" }
-          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, rustflags: "" }
-          - { os: windows-latest, target: x86_64-pc-windows-msvc, rustflags: "-C target-cpu=x86-64-v3" }
+          - { os: ubuntu-24.04, target: x86_64-unknown-linux-gnu, rustflags: "-C target-cpu=x86-64-v3", suffix: "" }
+          - { os: ubuntu-24.04, target: x86_64-unknown-linux-gnu, rustflags: "", suffix: "-compat" }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, rustflags: "", suffix: "" }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, rustflags: "-C target-cpu=x86-64-v3", suffix: "" }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, rustflags: "", suffix: "-compat" }
     runs-on: ${{ matrix.os }}
     defaults:
       run:
         shell: bash
     env:
-      # The x86_64 archives are built for x86-64-v3 (docs/decisions.md "x86-64-v3 baseline"); only
-      # here: CI and builds from source keep the Rust default. The binary checks the CPU at start.
+      # The plain x86_64 archives are built for x86-64-v3 (docs/decisions.md "x86-64-v3 baseline"), the
+      # -compat ones for the Rust default CPU; CI and builds from source keep the default. A v3 binary
+      # checks the CPU at start.
       RUSTFLAGS: ${{ matrix.rustflags }}
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}${{ matrix.suffix }}
       - name: Install zig and cargo-zigbuild
         if: runner.os == 'Linux'
         run: |
@@ -115,7 +121,14 @@ jobs:
           echo "$RUNNER_TEMP/zb/bin" >> "$GITHUB_PATH"
           rustup target add ${{ matrix.target }}
       - name: Version
-        run: echo "VERSION=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n1)" >> "$GITHUB_ENV"
+        run: |
+          echo "VERSION=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n1)" >> "$GITHUB_ENV"
+          # The CPU variant of the archive, named in its README.txt: x86-64-v3, compat or none (aarch64).
+          case "${{ matrix.target }}${{ matrix.suffix }}" in
+            x86_64-*-compat) echo "VARIANT=compat" >> "$GITHUB_ENV" ;;
+            x86_64-*) echo "VARIANT=x86-64-v3" >> "$GITHUB_ENV" ;;
+            *) echo "VARIANT=" >> "$GITHUB_ENV" ;;
+          esac
       - name: Build
         run: |
           t=${{ matrix.target }}
@@ -139,13 +152,45 @@ jobs:
           # The built-in std/ieee sources are Apache-2.0 (lib/LICENSE, lib/SOURCES.md); the VITAL
           # packages are IEEE-copyrighted without a grant (lib/LICENSE-IEEE-VITAL); the Synopsys packages
           # keep their notice (lib/LICENSE-SYNOPSYS).
-          name="yavs-$VERSION-$t"
+          name="yavs-$VERSION-$t${{ matrix.suffix }}"
           dir="dist/$name"
           mkdir -p "$dir"
-          cp LICENSE-MIT LICENSE-APACHE README.md "$dir/"
+          cp LICENSE-MIT LICENSE-APACHE "$dir/"
           cp lib/LICENSE "$dir/LICENSE-IEEE"
           cp lib/LICENSE-IEEE-VITAL lib/LICENSE-SYNOPSYS "$dir/"
           cp stage/yavs* "$dir/"
+          # README.txt: the one text for all archives (it replaces the project README.md, which says
+          # nothing about the archive). The first line is checked by the smoke test.
+          exe=yavs; [[ "$RUNNER_OS" == Windows ]] && exe=yavs.exe
+          case "$VARIANT" in
+            x86-64-v3) what="It is built for x86-64-v3 and needs a CPU with AVX2, BMI1, BMI2, FMA, F16C, LZCNT and MOVBE
+          (Intel Haswell, 2013, AMD Excavator or Zen, or newer). On an older CPU use the archive
+          $name-compat from the same release page, which runs on any x86-64 CPU." ;;
+            compat) what="It is built for the baseline x86-64 CPU and runs on any x86-64 CPU. On a CPU with AVX2 the archive
+          without -compat in its name (built for x86-64-v3) may run faster; pick that one unless your CPU is old." ;;
+            *) what="There is one archive for this platform." ;;
+          esac
+          cat > "$dir/README.txt" <<README
+          yavs $VERSION ($t${VARIANT:+, $VARIANT})
+
+          yavs is a VHDL simulator (VHDL-1993, 2008 and 2019). This archive holds the simulator for $t.
+          $what
+
+          Files:
+            $exe    the simulator; the std and ieee libraries are built in, nothing else needs installing
+            README.txt   this file
+            LICENSE-MIT, LICENSE-APACHE   the licences of yavs, MIT or Apache-2.0 at your option
+            LICENSE-IEEE, LICENSE-IEEE-VITAL, LICENSE-SYNOPSYS   the licence and notices of the built-in
+                                          std and ieee sources, the VITAL packages and the Synopsys packages
+
+          Start: put this directory on PATH, then
+            yavs --version
+            yavs analyze --work=work:build/work design.vhd
+            yavs run --work=work:build/work top_entity
+
+          Documentation: https://yavs.readthedocs.io/en/latest/
+          Releases and SHA256SUMS: https://github.com/ru551n/yavs/releases
+          README
           if [[ "$RUNNER_OS" == Windows ]]; then
             # No VHPI import library: plugins bring their own (user, 2026-10-18, #124).
             (cd dist && 7z a -tzip "$name.zip" "$name" > /dev/null)
@@ -158,16 +203,39 @@ jobs:
           t=${{ matrix.target }}
           cd dist
           printf 'entity t is end;\narchitecture a of t is begin\nprocess begin report "ok"; wait; end process;\nend;\n' > t.vhd
-          name="yavs-$VERSION-$t"
+          name="yavs-$VERSION-$t${{ matrix.suffix }}"
           # Unpack the archive that was made, not the directory it was made from.
           rm -rf "$name"
           if [[ "$RUNNER_OS" == Windows ]]; then 7z x -y "$name.zip" > /dev/null; else tar xzf "$name.tar.gz"; fi
           w=wd
+          # The binary of every archive, -compat included, is plain `yavs` (`yavs.exe`): only the archive name differs.
+          exe=yavs; [[ "$RUNNER_OS" == Windows ]] && exe=yavs.exe
+          set -- "$name"/yavs*
+          [[ $# == 1 && "$1" == "$name/$exe" && -f "$1" ]] || { echo "$name must hold exactly one yavs file, named $exe; found: $*"; exit 1; }
+          # The README of the archive is there and names this version, target and variant.
+          [[ "$(head -n1 "$name/README.txt")" == "yavs $VERSION ($t${VARIANT:+, $VARIANT})" ]] \
+            || { echo "$name/README.txt does not start with the version line"; exit 1; }
+          cat "$name/README.txt"
           # Smoke test: the binary alone runs a design (std/ieee built in).
           "$name/yavs" --version | tee version.txt
           grep -q 'compiled tier: cranelift' version.txt
-          # The x86_64 archives really are x86-64-v3 builds: the CPU check of main is compiled in only then.
-          if [[ "$t" == x86_64-* ]]; then grep -aq 'needs a CPU with x86-64-v3' "$name"/yavs*; fi
+          # The second line says the CPU level the binary was compiled for (target features, not the archive name).
+          case "$VARIANT" in
+            x86-64-v3) want="Build: x86-64-v3, AVX2 support" ;;
+            compat) want="Build: x86-64 baseline" ;;
+            *) want="Build: aarch64" ;;
+          esac
+          [[ "$(sed -n 2p version.txt)" == "$want" ]] || { echo "second line of --version is not '$want'"; exit 1; }
+          [[ "$(sed -n 3p version.txt)" == "Copyright (c) 2026 Sebastian Abrahamsson" ]]
+          # The CPU check of main is compiled in only with x86-64-v3: the plain x86_64 archives must have
+          # it, the -compat ones must not (they run on any x86-64 CPU).
+          if [[ "$t" == x86_64-* ]]; then
+            if [[ -z "${{ matrix.suffix }}" ]]; then
+              grep -aq 'needs a CPU with x86-64-v3' "$name"/yavs*
+            elif grep -aq 'needs a CPU with x86-64-v3' "$name"/yavs*; then
+              echo "$name has the x86-64-v3 CPU check"; exit 1
+            fi
+          fi
           env -u YAVS_STDLIB "$name/yavs" analyze --work=work:$w t.vhd
           env -u YAVS_STDLIB "$name/yavs" run --work=work:$w t | grep -q ': ok'
           env -u YAVS_STDLIB "$name/yavs" run --tier=auto --work=work:$w t | grep -q ': ok'
@@ -183,7 +251,7 @@ jobs:
           fi
       - uses: actions/upload-artifact@v4
         with:
-          name: yavs-${{ matrix.target }}
+          name: yavs-${{ matrix.target }}${{ matrix.suffix }}
           path: |
             dist/yavs-*.tar.gz
             dist/yavs-*.zip
@@ -300,11 +368,11 @@ jobs:
             cp "docs/conformance.$ext" "dist/yavs-$version-conformance.$ext"
           done
           cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS
-          for f in yavs-$version-{x86_64-unknown-linux-gnu.tar.gz,aarch64-unknown-linux-gnu.tar.gz,x86_64-pc-windows-msvc.zip} \
+          for f in yavs-$version-{x86_64-unknown-linux-gnu{,-compat}.tar.gz,aarch64-unknown-linux-gnu.tar.gz,x86_64-pc-windows-msvc{,-compat}.zip} \
             yavs-$version-conformance.{md,json} vunit_yavs-$version{-py3-none-any.whl,.tar.gz} yavs-debug-$version.vsix; do
             grep -q " $f\$" SHA256SUMS || { echo "$f is missing from the release files"; exit 1; }
           done
-          [[ $(wc -l < SHA256SUMS) == 8 ]] || { echo "unexpected files in the release"; exit 1; }
+          [[ $(wc -l < SHA256SUMS) == 10 ]] || { echo "unexpected files in the release"; exit 1; }
       - uses: actions/upload-artifact@v4
         with:
           name: SHA256SUMS-notes-and-conformance

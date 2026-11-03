@@ -3,7 +3,7 @@
 One release per version holds everything (maintainer, 2026-10-30, #903; `docs/decisions.md` "One
 release with every artifact"):
 
-- the simulator archives `yavs-<version>-<target>` for Linux x86_64, Linux aarch64 and Windows x86_64;
+- the simulator archives `yavs-<version>-<target>` for Linux x86_64, Linux aarch64 and Windows x86_64, and `yavs-<version>-<target>-compat` for the two x86_64 ones (the plain x86_64 archives are built for x86-64-v3, the compat ones for the baseline x86-64 CPU), each with a generated `README.txt`;
 - the test runner package `vunit-yavs`: wheel and sdist, also published to PyPI;
 - the VS Code debugger extension `yavs-debug-<version>.vsix` (Marketplace and Open VSX: not yet);
 - the conformance report `yavs-<version>-conformance.md` and `.json`;

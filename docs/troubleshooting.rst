@@ -85,10 +85,12 @@ Common problems
        tiers it has; ``yavs --explain E0120`` says which tier needs which build). Use a tier it
        has or ``--tier=interp``, or rebuild (:ref:`installation`).
    * - "this build of yavs needs a CPU with x86-64-v3", exit status 1
-     - The x86_64 release archives need AVX2, BMI1, BMI2, FMA, F16C, LZCNT and MOVBE; the message lists
-       the ones this CPU lacks. A virtual machine may hide them from the guest: give it the host CPU model
-       (CPU passthrough). Otherwise build yavs from source, which runs on any x86-64 CPU
-       (:ref:`installation`).
+     - The x86_64 release archives without ``-compat`` in their name need AVX2, BMI1, BMI2, FMA, F16C, LZCNT
+       and MOVBE; the message lists the ones this CPU lacks. Install the ``-compat`` archive of the same
+       release (``yavs-<version>-x86_64-unknown-linux-gnu-compat.tar.gz`` or
+       ``yavs-<version>-x86_64-pc-windows-msvc-compat.zip``), which runs on any x86-64 CPU, or build yavs from
+       source (:ref:`installation`). A virtual machine may hide the features from the guest: giving it the
+       host CPU model (CPU passthrough) also works.
 
 A run that behaves differently than in another simulator may be one of the points where the
 standard leaves a choice open: see :doc:`language-choices`. ``--shuffle`` runs the processes in a

@@ -37,6 +37,22 @@ impl Words {
     }
 }
 
+/// The release archive that runs on any x86-64 CPU, named for this version and platform.
+#[cfg(windows)]
+#[cfg_attr(not(target_feature = "avx2"), allow(dead_code))]
+const COMPAT: &str = concat!(
+    "yavs-",
+    env!("CARGO_PKG_VERSION"),
+    "-x86_64-pc-windows-msvc-compat.zip"
+);
+#[cfg(not(windows))]
+#[cfg_attr(not(target_feature = "avx2"), allow(dead_code))]
+const COMPAT: &str = concat!(
+    "yavs-",
+    env!("CARGO_PKG_VERSION"),
+    "-x86_64-unknown-linux-gnu-compat.tar.gz"
+);
+
 /// What x86-64-v3 adds over the baseline that the compiler may use, as (name, word, bit). The
 /// order is the order of the message.
 const NEEDED: [(&str, Word, u32); 9] = [
@@ -108,8 +124,11 @@ pub(crate) fn check() -> Option<std::process::ExitCode> {
             let _ = e.write_all(name.as_bytes());
         }
     }
+    // Both ways out run on any x86-64 CPU: the -compat archive of this release, or a build from source.
+    let _ = e.write_all(b"\nhelp: use the -compat archive of this release, ");
+    let _ = e.write_all(COMPAT.as_bytes());
     let _ = e.write_all(
-        b"\nhelp: build yavs from source, which runs on any x86-64 CPU: cargo build --release -p yavs --features clift (https://yavs.readthedocs.io/en/latest/getting-started.html#installation)\n",
+        b", which runs on any x86-64 CPU; or build yavs from source: cargo build --release -p yavs --features clift (https://yavs.readthedocs.io/en/latest/getting-started.html#installation)\n",
     );
     Some(std::process::ExitCode::from(1))
 }
