@@ -1025,6 +1025,78 @@ begin
 end architecture;
 "#;
 
+/// Rows and slices the optimiser reads in place (`yavs_ir` `opt/place.rs`) as the values of drives
+/// that mostly hold, with one element or plane differing now and then.
+const IN_PLACE: &str = r#"
+library ieee;
+use ieee.std_logic_1164.all;
+entity unit is
+  generic (g : natural);
+end entity;
+architecture a of unit is
+  subtype word is std_logic_vector(31 downto 0);
+  type words is array (0 to 3) of word;
+  type rec is record
+    tag : integer;
+    cfg : words;
+  end record;
+  signal clk : std_logic := '0';
+  signal n : natural := 0;
+  signal rows : words := (x"000000A5", x"0000FFA5", x"00A500A5", x"A50000A5");
+  signal q32 : word := x"000000A5";
+  signal q8 : std_logic_vector(7 downto 0) := x"A5";
+  signal b1 : std_logic := '1';
+  signal hi : word := x"00000000";
+  signal lo4 : std_logic_vector(3 downto 0) := x"5";
+begin
+  clk <= not clk after 5 ns;
+  process (clk)
+    variable r : rec := (0, (x"000000A5", x"0000FFA5", x"00A500A5", x"A50000A5"));
+    variable k : integer := 0;
+    variable w : word;
+  begin
+    if rising_edge(clk) then
+      if g > 1000 then report "g"; end if;
+      -- Rows and slices through a temporary the pass forwards, into a waveform: mostly what the
+      -- target holds, one element or plane different now and then.
+      if n mod 16 = 3 then
+        r.cfg(0)(0) := not r.cfg(0)(0);
+      elsif n mod 16 = 9 then
+        r.cfg(0)(31) := 'X';
+      elsif n mod 16 = 13 then
+        r.cfg(0)(31) := '0';
+      end if;
+      k := (n / 4) mod 4;
+      q32 <= r.cfg(k);
+      q8 <= r.cfg(k)(7 downto 0);
+      lo4 <= r.cfg(k)(3 downto 0);
+      b1 <= r.cfg(k)(5);
+      w := r.cfg(k);
+      hi <= w;
+      if rows(0)(7 downto 0) = x"A5" then
+        q32 <= rows(k);
+        q8 <= rows(k)(7 downto 0);
+      end if;
+      n <= n + 1;
+    end if;
+  end process;
+  process (clk)
+  begin
+    if falling_edge(clk) then
+      report integer'image(n) & " " & to_hstring(q32) & " " & to_hstring(q8) & " " & to_hstring(lo4) & " " & std_logic'image(b1) & " " & to_hstring(hi);
+      if n = 60 then std.env.finish; end if;
+    end if;
+  end process;
+end architecture;
+entity top is
+end entity;
+architecture a of top is
+begin
+  u0 : entity work.unit generic map (0);
+  u1 : entity work.unit generic map (1);
+end architecture;
+"#;
+
 /// A process of 70 drivers: those past the gate's 64 bits take the host's way, and a kept drive of
 /// one stops a skip of none of the others wrongly.
 fn many_drivers() -> String {
@@ -1227,6 +1299,12 @@ fn a_drive_in_a_procedure_then_the_held_value_in_the_process() {
 fn a_signal_whose_activity_is_read_is_not_skipped() {
     let hits = against_interp("compiled_gate_activity", ACTIVITY);
     assert!(hits > 20, "the compare took only {hits} skips");
+}
+
+#[test]
+fn values_read_in_place_are_compared_as_they_are() {
+    let hits = against_interp("compiled_gate_in_place", IN_PLACE);
+    assert!(hits > 100, "the compare took only {hits} skips");
 }
 
 #[test]

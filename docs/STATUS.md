@@ -10801,3 +10801,6 @@ Constant-size temporaries are frame bytes in processes with nested subprograms t
 
 The optimiser reads an element of a logic row or slice, and copies a row or slice into a target, from the source instead of through a temporary (`yavs-ir` `opt/place.rs`; `docs/decisions.md` "Logic rows read in place"). Temporaries read any other way keep their copy, and so does a position that is a loop variable. Whole runs of two large designs print the same with and without it.
 
+## Drive compare in compiled code
+
+A zero-delay drive at a constant reference in a process copy compares with the signal's current value in Cranelift code and makes no call when equal (`YAVS_INLCMP=off` turns it off, `check` holds every skip against the kernel's full test, always in debug builds; `docs/decisions.md` "Drive compare in compiled code"). CI runs the corpus on process copies with skips checked (difftest candidate `yavs-clift-check`).
