@@ -107,17 +107,6 @@ fn drives_enabled() -> bool {
     })
 }
 
-/// Are logic rows and slices read in place (`place.rs`)? Off with `YAVS_NO_PLACE` set to anything
-/// but `0` or the empty string (differential testing).
-fn place_enabled() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| {
-        std::env::var("YAVS_NO_PLACE")
-            .map(|v| v.is_empty() || v == "0")
-            .unwrap_or(true)
-    })
-}
-
 /// Are the constant-size temporaries of processes kept in their frames (`slots.rs`)? Off with
 /// `YAVS_NO_SLOTS` set to anything but `0` or the empty string (differential testing).
 fn slots_enabled() -> bool {
@@ -232,14 +221,13 @@ pub fn fingerprint() -> String {
         slots_enabled(),
         frame_blocks_on(),
         proc_objects::enabled(),
-        place_enabled(),
     ])
 }
 
-fn fingerprint_of(f: [bool; 13]) -> String {
+fn fingerprint_of(f: [bool; 12]) -> String {
     let names = [
         "iropt", "memo", "cfg", "inline", "keep", "compiled", "external", "layouts", "drives",
-        "slots", "blocks", "objects", "place",
+        "slots", "blocks", "objects",
     ];
     let parts: Vec<String> = names
         .iter()
@@ -256,9 +244,9 @@ mod fingerprint_tests {
     /// Every switch is part of the fingerprint (#491).
     #[test]
     fn each_switch_changes_the_fingerprint() {
-        let base = fingerprint_of([false; 13]);
-        for i in 0..13 {
-            let mut f = [false; 13];
+        let base = fingerprint_of([false; 12]);
+        for i in 0..12 {
+            let mut f = [false; 12];
             f[i] = true;
             assert_ne!(fingerprint_of(f), base, "switch {i}");
         }
@@ -1796,7 +1784,7 @@ impl<'a> Opt<'a> {
         self.drop_clean_roots();
         // (Temporaries nothing reads are gone before the markers that free them are judged.)
         self.dce();
-        if place_enabled() && self.code.iter().any(|i| matches!(i, Inst::LCopy { .. })) {
+        if self.code.iter().any(|i| matches!(i, Inst::LCopy { .. })) {
             self.reanalyse();
             if let Some(inited) = &promoted {
                 self.hide_inits(inited);

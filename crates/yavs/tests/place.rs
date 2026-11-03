@@ -1,6 +1,7 @@
-//! Logic rows and slices read in place (`yavs_ir` `opt/place.rs`): every design runs with and
-//! without the pass on each tier and must print the same, the checks in the same order, the same
-//! error at the same place, and overlapping copies as if the source had been read first.
+//! Logic rows and slices read in place (`yavs_ir` `opt/place.rs`): every design runs on each tier
+//! and must print what it printed before the pass, the checks in the same order, the same error at
+//! the same place, and overlapping copies as if the source had been read first. The pass itself
+//! is tested on IR in `crates/yavs-ir/tests/opt_place.rs`.
 
 mod common;
 use common::tempdir as tmp;
@@ -153,7 +154,7 @@ begin
 end;
 "#;
 
-fn run(dir: &std::path::Path, env: &[(&str, &str)], tier: &str) -> (i32, String) {
+fn run(dir: &std::path::Path, tier: &str) -> (i32, String) {
     let yavs = env!("CARGO_BIN_EXE_yavs");
     let work = format!("work:{}", dir.join("lib").display());
     let a = Command::new(yavs)
@@ -164,7 +165,6 @@ fn run(dir: &std::path::Path, env: &[(&str, &str)], tier: &str) -> (i32, String)
     assert!(a.status.success(), "{}", String::from_utf8_lossy(&a.stderr));
     let o = Command::new(yavs)
         .current_dir(dir)
-        .envs(env.iter().copied())
         .args(["--color", "never", "run", "--no-cache", "--work", &work])
         .args([&format!("--tier={tier}"), "t"])
         .output()
@@ -179,51 +179,44 @@ fn run(dir: &std::path::Path, env: &[(&str, &str)], tier: &str) -> (i32, String)
     )
 }
 
-/// What a design prints on `tier` with and without the pass; they must agree.
-fn agreed(design: &str, tier: &str, name: &str) -> (i32, String) {
+/// What a design prints on `tier`.
+fn printed(design: &str, tier: &str, name: &str) -> (i32, String) {
     let d = tmp(name);
     std::fs::write(d.join("t.vhd"), design).expect("write");
-    let with = run(&d, &[], tier);
-    let without = run(&d, &[("YAVS_NO_PLACE", "1")], tier);
-    assert_eq!(with, without, "{name} on {tier}");
-    with
+    run(&d, tier)
 }
 
 fn all_of(tier: &str) {
-    let (code, out) = agreed(VALUES, tier, "place_values");
+    let (code, out) = printed(VALUES, tier, "place_values");
     assert_eq!(code, 0, "{out}");
-    assert!(out.contains("done"), "{out}");
-    let (code, out) = agreed(LENGTH, tier, "place_length");
+    assert!(
+        out.contains("impure index '0'") && out.contains("done"),
+        "{out}"
+    );
+    let (code, out) = printed(LENGTH, tier, "place_length");
     assert_eq!(code, 1, "{out}");
-    assert!(!out.contains("not reached") && out.contains("E3"), "{out}");
-    let (code, out) = agreed(ORDER, tier, "place_order");
+    assert!(!out.contains("not reached"), "{out}");
+    assert!(
+        out.contains("E3009]: value length 5 does not match variable S4 length 4"),
+        "{out}"
+    );
+    let (code, out) = printed(ORDER, tier, "place_order");
     assert_eq!(code, 1, "{out}");
-    assert!(!out.contains("not reached") && out.contains('7'), "{out}");
-    assert!(!out.contains("40"), "{out}");
+    assert!(!out.contains("not reached") && !out.contains("40"), "{out}");
+    assert!(
+        out.contains("E3009]: index 7 outside of range 0 to 3 for array"),
+        "{out}"
+    );
 }
 
 #[test]
-fn reading_in_place_changes_nothing_on_the_interpreter() {
+fn reading_in_place_prints_what_it_printed_on_the_interpreter() {
     all_of("interp");
 }
 
 #[cfg(feature = "clift")]
 #[test]
-fn reading_in_place_changes_nothing_in_compiled_code() {
+fn reading_in_place_prints_what_it_printed_in_compiled_code() {
     all_of("clift");
     all_of("clift-auto");
-}
-
-/// Fewer copies are left in the finished code with the pass than without it.
-#[test]
-fn row_reads_have_no_copy() {
-    let d = tmp("place_dump");
-    std::fs::write(d.join("t.vhd"), VALUES).expect("write");
-    let copies = |env: &[(&str, &str)]| {
-        let (_, dump) = run(&d, env, "interp");
-        dump.matches("LCopy").count()
-    };
-    let with = copies(&[("YAVS_DUMPIR", "1")]);
-    let without = copies(&[("YAVS_DUMPIR", "1"), ("YAVS_NO_PLACE", "1")]);
-    assert!(with < without, "{with} against {without}");
 }
