@@ -145,7 +145,7 @@ jobs:
       - name: Corpus on process copies, skips checked
         if: runner.os == 'Linux'
         run: |
-          YAVS_BIN="$PWD/target/debug/yavs" python3 tools/difftest/difftest.py --candidate yavs-clift-check --threads 1,4 --shuffle 11 --no-sandbox --jobs 2
+          YAVS_BIN="$PWD/target/debug/yavs" python3 tools/difftest/difftest.py --candidate yavs-clift-check --threads 1,4 --shuffle 11 --no-sandbox --jobs 4
 
   # Analysis corpora (tools/corpus): fetched at pinned revisions into the runner cache, never
   # part of the repository. Fails on any difference from the checked-in expected lists, in
