@@ -13387,3 +13387,25 @@ Whether a warm run can be kept from being slower than a cold one at any size, wi
 - **Amendment (user, 2026-11-03, the same day): a `-compat` archive beside the v3 one.** The "no extra baseline archive" in the first bullet is withdrawn. Linux x86_64 and Windows x86_64 each get two archives per release: `yavs-<version>-<target>` (x86-64-v3, the name `yavs-action` and the install docs pick) and `yavs-<version>-<target>-compat` (the Rust default CPU, so it runs on any x86-64 CPU, with no CPU check compiled in). The suffix goes before the extension, so the exact-name match of `yavs-action` (`yavs-<version>-<target>.<ext>`) cannot hit a compat file. aarch64 stays one archive. Cost: two more release build jobs (running in parallel with the others), and a `SHA256SUMS` of 10 lines. The old-CPU message names the compat archive of this version and platform first and a build from source second; the check is still free of the renderer. The release smoke test greps the plain x86_64 archives for the check's text and fails a compat archive that has it; both are smoke-tested. The `vunit-yavs` and VS Code jobs keep testing the plain archives only.
 - **Build line of `--version` (user, 2026-11-03).** `yavs --version` prints a second line, `Build: x86-64-v3, AVX2 support`, `Build: x86-64 baseline` or `Build: aarch64`, and the copyright notice moves to the third. It is chosen by `cfg(target_feature = "avx2")` and `target_arch` in `main.rs`, so it is true of the binary whatever archive or build it came from (the same condition compiles in the CPU check). The first line is byte-identical, which is all the test runner package reads (`docs/cli-contract.md` section 1). The release smoke test checks the line of each archive.
 - **Archive README (user, 2026-11-03).** Every archive holds a generated `README.txt` (one template in the build job of `release.yml`: version, target, CPU variant and which archive to pick, the files, how to start, the docs link). It replaces the project `README.md`, which the archives carried before and which said nothing about the archive. The smoke test checks that the first line names the version, target and variant.
+
+## A jump back of a process that never suspends is counted however it is reached (yavs-interp, #1087, 2026-11-03)
+
+A loop without a wait, with an `if` without an else as the last statement (`loop n := (n + 1) mod 1000; if n = 0 then m := m + 1; end if; end loop`),
+never ended in any tier: no `E3009`, a silent hang (reported for `--tier=clift`, where the run did not end after 100 s; the interpreter
+was affected too, see below).
+
+- **Cause.** The false edge of the `if` goes to a block that only holds the `Br` back to the head of the loop. `Pre::new` threads a jump
+  through such a block (`thread`, "an unconditional jump costs nothing"), so the branch went straight to the head and the stepped `Br` that
+  `Machine::step_out` counts (#583) was never executed. Interpreted, the loop counted only the iterations that took the other edge (one in a
+  thousand here), so the bound of 10^9 jumps back was 10^12 iterations. Compiled, the code counted every jump and left at the `Br` at a
+  multiple of `SPIN_CHECK`, but the interpreter resumed at the pc of the `Br` through the entry table, which the threading had pointed at the
+  head: the compiled code ran one iteration, left at the same `Br` with the same count, and so on for ever (`tier_go`, `run_tier`).
+- **Fix, in the predecoder, so every tier gets it.** `counted_brs` (`pre.rs`) lists the retreating `Br`s of a process that never suspends
+  that jump to a block laid out before them (the set compiled code polls). `Pre::new` does not thread a jump through them and `Code::new`
+  does not fuse them into the `Move` or `Store` before them (`MoveBr`, `StoreSlotBr`), so each stays an `Op::Step` that every way to it
+  reaches, including a resume from compiled code. Nothing changes for any other function or process, or for the dispatch loop.
+- **Paths that reach the same place.** The interpreter, `--tier=clift`, `--tier=clift-auto`, and by the same code the LLVM tier, which
+  polls the same `retreating_brs` set and leaves at the `Br` the same way (not run: no local LLVM tier runs). A stop request (Ctrl-C) and the
+  trim every `SPIN_CHECK` jumps leave at the same `Br`, so a threaded jump back skipped them as well.
+- **Not covered (as before).** A loop whose jump back is a `CondBr` or part of a fused loop op (`CmpBrStep`) is not a `Br` and is not counted
+  by any tier.

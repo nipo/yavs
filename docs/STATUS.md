@@ -27,6 +27,10 @@ The Linux and Windows x86_64 release archives are built with `-C target-cpu=x86-
 
 From 2026-11-03 (user) each x86_64 platform also has a `yavs-<version>-<target>-compat` archive built for the Rust default CPU, with no CPU check compiled in (the smoke test fails a compat archive that has the check's text and a plain one that lacks it); the old-CPU message names that archive first and a source build second. Every archive carries a generated `README.txt`. Details: `docs/decisions.md` "x86-64-v3 baseline", amendment.
 
+### A loop without a wait is bounded in every tier (#1087, 2026-11-03)
+
+A process that never suspends and reaches its jump back through a branch (`if` without else as the last statement of the loop) was neither counted nor diagnosed: `--tier=clift` hung, the interpreter needed 1000 times the bound. `E3009` now comes at the same count in the interpreter and under `--tier=clift` and `clift-auto` (`pre::counted_brs`; test `stuck::a_loop_whose_jump_back_is_threaded_ends_with_an_error`, unit test `counted_jumps_back_are_ops_of_their_own`). Not run: the LLVM tier (same code by reading). Decision: `docs/decisions.md` "A jump back of a process that never suspends is counted however it is reached".
+
 ### Index constraints check the type of the range (#1086, 2026-11-03)
 
 An index constraint, a slice or a generate selector whose discrete range is a type mark, a subtype indication or `t range ...` of another type than the index is `E1300` (lrm-checks L181, LRM 2008 5.3.2.2), as an attribute range of the wrong type already was. `Db::check_range_type` in `types.rs`; the analysed-unit format is bumped. Test `typ/index_constraint_wrong_type`; no corpus file or external test relied on the old behaviour.
