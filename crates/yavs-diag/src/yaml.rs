@@ -509,6 +509,13 @@ mod tests {
     }
 
     #[test]
+    fn an_empty_block_scalar_at_the_end_is_empty() {
+        // saphyr-parser 0.3 reads it as "", 0.2 as "\n".
+        let n = read("exclude: |\n", &FILE).unwrap();
+        assert_eq!(n.get("exclude").unwrap().words(), Vec::<String>::new());
+    }
+
+    #[test]
     fn every_problem_of_a_file_is_reported_with_its_line() {
         let e = err(
             "wavers: 1\nwaivers:\n  - rule: a\n    lins: [1]\n    lines: [x]\n    on: maybe\n    level: fatal\n  - lines: [1]\nexclude: a\n",

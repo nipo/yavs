@@ -72,8 +72,7 @@ pub fn start(mut h: Handlers) -> std::io::Result<()> {
     let usr1_in = usr1.clone();
     // The writing ends stay open for the life of the process (the handlers write to them), which
     // also means the thread never sees the end of the sockets while it waits for the tick. One
-    // descriptor serves every signal (`register_raw` does not take its own copy).
-    let (wake_tx, count_tx) = (wake_tx.into_raw_fd(), count_tx.into_raw_fd());
+    // descriptor serves every signal, as its own duplicate (`register_raw` takes ownership).
     // Started first: a signal that is registered has a thread that reads it.
     std::thread::Builder::new()
         .name("yavs-signals".into())
@@ -129,14 +128,17 @@ pub fn start(mut h: Handlers) -> std::io::Result<()> {
         })?;
     if has_first {
         for s in [SIGINT, SIGTERM, SIGHUP] {
-            pipe::register_raw(s, count_tx)?;
-            pipe::register_raw(s, wake_tx)?;
+            pipe::register(s, count_tx.try_clone()?)?;
+            pipe::register(s, wake_tx.try_clone()?)?;
         }
     }
     if has_usr1 {
         flag::register(SIGUSR1, usr1)?;
-        pipe::register_raw(SIGUSR1, wake_tx)?;
+        pipe::register(SIGUSR1, wake_tx.try_clone()?)?;
     }
+    // Leaked on purpose: with no signal registered the thread must still never see the end of the
+    // socket while it waits for the tick.
+    let _ = (wake_tx.into_raw_fd(), count_tx.into_raw_fd());
     Ok(())
 }
 
