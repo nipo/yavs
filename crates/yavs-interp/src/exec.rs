@@ -670,6 +670,10 @@ pub(crate) struct Machine {
     layouts: Vec<Option<LayoutMemo>>,
     /// The plans of record signal gathers and scatters this machine met (`gather.rs`).
     pub(crate) plans: Vec<crate::gather::MPlan>,
+    /// What compiled code reaches of the record images, once it can (`crate::ImageCell`).
+    pub(crate) icells: Box<[crate::ImageCell]>,
+    /// `TierFrame::cells`: their address as a number, 0 while there are none.
+    pub(crate) icells_at: usize,
     /// Argument cells of the call being made (`call_with`).
     cells: Vec<u64>,
     /// The staging buffer of `Copy` and `Fill` (`take_bytes`), reused.
@@ -1304,6 +1308,8 @@ impl Machine {
             ieee_fallback: false,
             layouts: Vec::new(),
             plans: Vec::new(),
+            icells: Box::default(),
+            icells_at: 0,
             cells: Vec::new(),
             bytes: Vec::new(),
             released: false,
@@ -9536,6 +9542,7 @@ impl Machine {
         tf.ret_bounds = &raw mut m.ret_bounds;
         tf.drivers = m.drivers.as_ptr();
         tf.ndrivers = m.drivers.len() as u64;
+        tf.cells = std::ptr::without_provenance(m.icells_at);
         // A process that is `hot` has no shared state (`sh`), which the call paths of a serial
         // process do not promise: its epoch and flags come from the heap and the frame alone.
         m.tier_heaps(tf);
@@ -11691,6 +11698,7 @@ impl crate::TierHost for Host<'_, '_, '_> {
         let m = &mut *self.m;
         tf.drivers = m.drivers.as_ptr();
         tf.ndrivers = m.drivers.len() as u64;
+        tf.cells = std::ptr::without_provenance(m.icells_at);
         let Some(c) = self.ctx.as_deref_mut() else {
             tf.sigtab_len = 0;
             tf.known = u64::MAX;
@@ -11698,7 +11706,7 @@ impl crate::TierHost for Host<'_, '_, '_> {
             tf.spin = &raw mut m.spin;
             tf.ret_bounds = &raw mut m.ret_bounds;
             tf.kctx = std::ptr::null_mut();
-            tf.gate = crate::NO_GATE.as_ptr();
+            tf.gate = crate::NO_GATE[0].as_ptr();
             return;
         };
         tf.kctx = (c as *mut Ctx<'_>).cast();
@@ -12240,6 +12248,26 @@ impl crate::TierHost for Host<'_, '_, '_> {
                 crate::Stepped::Fault
             }
         }
+    }
+
+    fn image_check(&mut self, pc: u32) -> Result<bool, String> {
+        let (m, prog) = (&mut *self.m, self.prog);
+        match self.f.code.get(pc as usize) {
+            Some(&Inst::SigScatter {
+                driver,
+                src,
+                desc,
+                tab,
+                ..
+            }) => m
+                .scatter_check(prog, driver, src, desc, tab, self.ctx)
+                .map(|()| true),
+            Some(&Inst::SigGather { dst, desc, tab, .. }) => m
+                .gather_check(prog, dst, desc, tab, self.ctx)
+                .map(|()| false),
+            _ => return Err(format!("no record signal instruction at pc {pc}")),
+        }
+        .map_err(|e| format!("{e:?}"))
     }
 
     fn signal(&mut self, tf: &mut crate::TierFrame, at: u32, edge: u32) -> crate::Stepped {
