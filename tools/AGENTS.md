@@ -2,7 +2,7 @@
 
 Read the root `AGENTS.md` first. This file is for an agent about to change or run a script under
 `tools/`. Subdirectories have their own guides: `tools/corpus/AGENTS.md` (analysis corpora) and
-`tools/difftest/AGENTS.md` (differential simulation corpus), `tools/conformance/AGENTS.md`, `tools/suites/AGENTS.md`, `tools/bench/AGENTS.md` and `tools/realbench/AGENTS.md`, `tools/stepcount/AGENTS.md`, `tools/waveq/AGENTS.md`, `tools/cocotb/AGENTS.md`, `tools/pgo/AGENTS.md`.
+`tools/difftest/AGENTS.md` (differential simulation corpus), `tools/conformance/AGENTS.md`, `tools/suites/AGENTS.md`, `tools/bench/AGENTS.md` and `tools/realbench/AGENTS.md`, `tools/stepcount/AGENTS.md`, `tools/waveq/AGENTS.md`, `tools/cocotb/AGENTS.md`, `tools/pgo/AGENTS.md`, `tools/install/AGENTS.md`.
 
 ## 1. Purpose and boundaries
 
@@ -27,6 +27,7 @@ Read the root `AGENTS.md` first. This file is for an agent about to change or ru
 | `release/bump.py X.Y.Z`, `release/bump.py --check [X.Y.Z]` | Set or check the one version of yavs, vunit-yavs and the VS Code extension in every spot (root `RELEASING.md`); `--check` is the `versions` job of `ci.yml` and `release.yml` |
 | `release/conformance_gate.py wait TAG SHA`, `list SHA`, `--selftest` | The release gate (#1017): `release.yml` waits for the `conformance.yml` run of the tag and fails unless it passed; `list` shows the runs of a commit (dry run) |
 | `claim <take|release|list|stale|core|build>` | Issue claims on GitHub for multi-agent work, plus host-local core and build locks (root `AGENTS.md` section 3a; `claim selftest` checks the comment parser) |
+| `install/` | Tests of the one-line installers `install.sh` and `install.ps1` at the repository root, against the real releases (`tools/install/AGENTS.md`) |
 | `suites/` | Drivers that simulate an external library's own testbenches on yavs (`tools/suites/AGENTS.md`) |
 | `corpus/` | Analysis corpus manifests, runner, report (`tools/corpus/AGENTS.md`) |
 | `difftest/` | Differential simulation harness (`tools/difftest/AGENTS.md`) |

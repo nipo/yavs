@@ -1,0 +1,46 @@
+# Tests install.sh and install.ps1 against the real releases (tools/install/AGENTS.md). Runs only when the
+# scripts, their tests or this file change, on a push to any branch, a pull request or by hand: it does not
+# run for other commits, and is not part of ci.yml.
+name: Install scripts
+
+on:
+  push:
+    paths: [install.sh, install.ps1, "tools/install/**", .github/workflows/install.yml]
+  pull_request:
+    paths: [install.sh, install.ps1, "tools/install/**", .github/workflows/install.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # The lookup of the newest version uses GitHub's API, which limits requests without a token.
+  GITHUB_TOKEN: ${{ github.token }}
+
+jobs:
+  linux:
+    name: install.sh (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - run: shellcheck -s sh install.sh
+      - run: shellcheck -S warning tools/install/test.sh
+      - run: tools/install/test.sh
+
+  windows:
+    name: install.ps1
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - name: Windows PowerShell 5.1
+        shell: powershell
+        run: ./tools/install/test.ps1
+      - name: PowerShell 7
+        shell: pwsh
+        run: ./tools/install/test.ps1

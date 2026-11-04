@@ -86,6 +86,18 @@ On other CI systems, download the archive with plain commands:
 
 For a CPU without AVX2 use ``A=yavs-$V-x86_64-unknown-linux-gnu-compat``, as ``variant: compat`` does in the action.
 
+The one-line installer (:ref:`one-line-install`) does the same on Linux x86_64 and aarch64 with the checksum check, and
+picks the ``-compat`` archive by itself on a CPU without AVX2. It asks no question without a terminal, so it can run in a
+job; pin the version and put the directory on ``PATH`` yourself:
+
+.. code-block:: bash
+
+    curl -fsSL https://raw.githubusercontent.com/ru551n/yavs/main/install.sh | sh -s -- --version 0.14.0
+    export PATH="$HOME/.local/bin:$PATH"
+    yavs --version
+
+Looking up the newest version uses GitHub's API, which limits requests without a token; ``--version`` needs no lookup.
+
 :ref:`installation` lists the archives of the other platforms.
 
 A coverage gate

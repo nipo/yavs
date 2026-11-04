@@ -22,7 +22,19 @@ yavs is a VHDL simulator written in Rust, for VHDL-1993, 2008 and 2019.
 
 ## Quickstart
 
-[Install yavs](https://yavs.readthedocs.io/en/latest/getting-started.html#installation), then follow [Getting started](https://yavs.readthedocs.io/en/latest/getting-started.html#your-first-simulation).
+Install yavs, or update it by running the same line again (Linux x86_64 and aarch64):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/ru551n/yavs/main/install.sh | sh
+```
+
+On Windows x86_64, in PowerShell:
+
+```powershell
+powershell -c "irm https://raw.githubusercontent.com/ru551n/yavs/main/install.ps1 | iex"
+```
+
+Both install for your user only, without administrator rights, and check the download against the release's checksums. They are short; read [install.sh](install.sh) and [install.ps1](install.ps1) first if you like ([what they do](https://yavs.readthedocs.io/en/latest/getting-started.html#one-line-install)). Or [install by hand](https://yavs.readthedocs.io/en/latest/getting-started.html#installation). Then follow [Getting started](https://yavs.readthedocs.io/en/latest/getting-started.html#your-first-simulation).
 
 ### In GitHub Actions
 

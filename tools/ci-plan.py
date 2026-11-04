@@ -19,9 +19,10 @@ PROSE = re.compile(
     r"|^(crates|docs|tools|python|editors|fuzz)/.*\.md$"
     r"|^docs/conformance.*\.json$"
     r"|^release_notes/"
+    r"|^install\.(sh|ps1)$|^tools/install/"
     r"|^(README|RELEASING|CONTRIBUTING)\.md$|^LICENSE|^context7\.json$|^\.readthedocs\.yaml$"
     r"|^\.github/dependabot\.yml$"
-    r"|^\.github/workflows/(docs|fuzz|nightly|release|vscode|conformance|cocotb-windows)\.yml$"
+    r"|^\.github/workflows/(docs|fuzz|nightly|release|vscode|conformance|cocotb-windows|install)\.yml$"
     r"|^tools/(bench|stepcount|realbench|waveq|vhpi-conformance|release)/"
     r"|^tools/(claim|build-bench\.sh|check-sim1\.sh|update-ieee-libs\.sh|derive_libs\.py|gen_native_md\.py)$"
 )
@@ -72,7 +73,8 @@ def selftest():
         if stubs is not None:
             assert len(p["stubs"]) == stubs, (files, p)
 
-    for f in ["AGENTS.md", "docs/STATUS.md", "crates/yavs-sem/AGENTS.md", "crates/yavs-ir/README.md",
+    for f in ["AGENTS.md", "install.sh", "install.ps1", "tools/install/test.sh", ".github/workflows/install.yml",
+              "docs/STATUS.md", "crates/yavs-sem/AGENTS.md", "crates/yavs-ir/README.md",
               "release_notes/news.d/1.bugfix.md", "tools/bench/run.py", "tools/claim", "README.md",
               ".github/workflows/docs.yml", "docs/design/ir.md", "tests/diag/AGENTS.md"]:
         t([f], "none", stubs=4)

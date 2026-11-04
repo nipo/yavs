@@ -13,10 +13,71 @@ them in a library, ``run`` elaborates a top level and simulates it.
 Installation
 ------------
 
+.. _one-line-install:
+
+One-line install
+~~~~~~~~~~~~~~~~
+
+On Linux (x86_64 or aarch64), one line installs yavs or updates it, without root:
+
+.. code-block:: bash
+
+    curl -fsSL https://raw.githubusercontent.com/ru551n/yavs/main/install.sh | sh
+
+On Windows (x86_64), in PowerShell, with no administrator rights:
+
+.. code-block:: powershell
+
+    powershell -c "irm https://raw.githubusercontent.com/ru551n/yavs/main/install.ps1 | iex"
+
+Piping a download into a shell runs whatever it fetched, so read it first if you like: both scripts are short
+plain text, `install.sh <https://github.com/ru551n/yavs/blob/main/install.sh>`__ and `install.ps1
+<https://github.com/ru551n/yavs/blob/main/install.ps1>`__. They are served from the ``main`` branch of the source
+repository because every release is still marked as a pre-release, and GitHub's ``latest`` download address skips
+those. All the logic is in one function that runs on the last line, so a download that stops early does nothing.
+
+What they do, the same on both systems:
+
+* They find the newest release (``--version 0.14.0`` on Linux, ``$env:YAVS_VERSION='0.14.0'`` on Windows installs that one;
+  older versions are allowed and the script says it is a downgrade) and choose the archive. On x86_64 that is the plain
+  archive if the CPU has AVX2 and the other features of x86-64-v3, and the ``-compat`` archive otherwise
+  (:ref:`installation`). The script says which one and why. ``install.sh`` reads the feature list in ``/proc/cpuinfo``;
+  ``install.ps1`` asks Windows for AVX2 (``IsProcessorFeaturePresent``), which every Intel and AMD CPU with AVX2
+  has the other features with, and the downloaded ``yavs`` checks them all before it is installed. ``--compat``
+  (Linux) or ``$env:YAVS_COMPAT=1`` (Windows) forces the ``-compat`` archive; it needs yavs 0.14.0 or newer.
+* They download the archive over HTTPS and check it against the ``SHA256SUMS`` of the release. A mismatch stops the
+  installation with nothing installed. That protects against a damaged download; it does not protect against a
+  release that was itself replaced, because ``SHA256SUMS`` comes from the same place. On Linux without ``sha256sum`` or
+  ``shasum`` the script refuses unless you pass ``--allow-unverified``.
+* They run the new ``yavs --version`` before they put it in place, and refuse if it does not run or is not the version
+  asked for.
+* They install into your own directories: on Linux ``yavs`` in ``~/.local/bin`` and ``README.txt`` and the licences in
+  ``~/.local/share/yavs`` (``--prefix DIR`` or ``YAVS_INSTALL_DIR`` chooses another prefix); on Windows everything in
+  ``%LOCALAPPDATA%\Programs\yavs`` (``YAVS_INSTALL_DIR`` chooses another directory). To remove yavs, delete those files.
+
+**Updating** is running the same line again. It says ``yavs 0.13.0 -> 0.14.0``, or ``already at 0.14.0`` and does
+nothing (``--force`` on Linux, ``$env:YAVS_FORCE=1`` on Windows installs it again). The new binary replaces the old one
+in a single rename, so a simulation that is running goes on with the old file, and an update that is interrupted leaves the
+old ``yavs`` working. On Windows a running ``yavs.exe`` cannot be overwritten or deleted but can be renamed: the old file
+stays as ``yavs.old.exe`` while it runs, and the next update deletes it.
+
+If the install directory is not on your ``PATH``, the script says so. In a terminal it asks, for example
+``Add $HOME/.local/bin to PATH in ~/.bashrc? [y/N]`` (the startup file of your shell: ``~/.bashrc``, ``~/.zshrc``,
+``~/.config/fish/config.fish`` or ``~/.profile``) or, on Windows, ``Add <dir> to your user PATH? [y/N]``. The default is no.
+On yes it appends one marked line (once, however often you run it) or adds the directory to your user ``PATH`` (never
+the machine's, other entries are kept as they are) and says what it changed; open a new terminal to use it. Without a
+terminal, in a CI job or with ``YAVS_NO_MODIFY_PATH=1``, it asks nothing, changes nothing and prints the line to add.
+
+The Linux script needs ``curl`` or ``wget``, ``tar`` and the usual tools of a base system; the options are listed by
+``sh -s -- --help`` (``curl -fsSL <url> | sh -s -- --version 0.13.0``). If the newest-release lookup stops at GitHub's
+rate limit, the script says so; name the version, or set ``GITHUB_TOKEN``. macOS and other systems have no archive: build
+from source (below). The scripts are tested on every change in CI against the real releases, on Linux x86_64 and aarch64
+and on Windows (``tools/install/test.sh`` and ``test.ps1``).
+
 Releases
 ~~~~~~~~
 
-Download the archive for your platform from the `releases
+To do it by hand instead, download the archive for your platform from the `releases
 <https://github.com/ru551n/yavs/releases>`__ page (releases are marked as pre-releases while yavs is
 early), check it against ``SHA256SUMS``, unpack it and put the directory it creates on ``PATH``:
 
@@ -91,7 +152,7 @@ Requirements
 Updating and removing
 ^^^^^^^^^^^^^^^^^^^^^
 
-Unpack the new archive in a new directory and change ``PATH``. A library directory written by a yavs
+With the one-line install, run it again (:ref:`one-line-install`). By hand, unpack the new archive in a new directory and change ``PATH``. A library directory written by a yavs
 whose library format differs is refused with error ``L0004`` naming the directory: delete it and
 analyze its files again (libraries are not converted). The compilation cache of another yavs build is
 ignored, never an error. To remove yavs, delete the directory; ``yavs cache clean --work=NAME:PATH``

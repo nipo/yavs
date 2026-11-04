@@ -206,6 +206,7 @@ jobs:
 
           Documentation: https://yavs.readthedocs.io/en/latest/
           Releases and SHA256SUMS: https://github.com/ru551n/yavs/releases
+          Update: run the one-line install command again (https://yavs.readthedocs.io/en/latest/getting-started.html#one-line-install)
           README
           if [[ "$RUNNER_OS" == Windows ]]; then
             # No VHPI import library: plugins bring their own (user, 2026-10-18, #124).
