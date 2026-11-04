@@ -1,0 +1,11 @@
+error[E1406]: the subtype has 4294967296 x 4294967296 elements, more than the 18446744073709551615 yavs supports in one array
+ --> $DIR/array_too_large_nested.vhd:9:10
+  |
+9 |   signal s : m;
+  |          ^ too many elements
+  |
+  = note: in instance array_too_large_nested
+  = help: narrow an index range of the array subtype, or of its element subtype, which multiplies in
+
+error: aborting due to 1 previous error
+

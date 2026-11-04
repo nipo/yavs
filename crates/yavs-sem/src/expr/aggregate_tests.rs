@@ -761,6 +761,45 @@ fn two_dimensional_with_string_rows_and_others() {
 }
 
 #[test]
+fn array_sizes_beyond_64_bits_are_e1406() {
+    let mut fx = Fx::new();
+    let mut m = Mock::new(&fx);
+    let (mt, _) = add_type(
+        &mut fx.db,
+        "bm",
+        TypeKind::Array {
+            indexes: Box::new([fx.natural, fx.natural]),
+            elem: fx.bit_st,
+        },
+        false,
+    );
+    let max = i64::from(u32::MAX);
+    // 2**32 * (2**32 - 1) elements fit the 64-bit counts and fold to one run of that length.
+    let fits = array_st(&mut fx.db, mt, &[(0, To, max), (1, To, max)]);
+    let e = agg(&mut fx, &mut m, "(others => (others => '0'))", fits).unwrap();
+    let Some(ConstValue::Array(a)) = fx.db.value(e) else {
+        panic!()
+    };
+    assert_eq!(
+        elem_runs(a),
+        vec![((1u64 << 32) * ((1u64 << 32) - 1), ConstValue::Enum(0))]
+    );
+    // 2**32 * 2**32 do not: an error naming the size, not a wrapped count.
+    let wide = array_st(&mut fx.db, mt, &[(0, To, max), (0, To, max)]);
+    assert!(agg(&mut fx, &mut m, "(others => (others => '0'))", wide).is_err());
+    assert_eq!(fx.codes(), [diag::ARRAY_TOO_LARGE]);
+    // The sizes themselves, with a null dimension and the full 64-bit range.
+    let r = |l, h| StaticRange::new(l, To, h);
+    assert_eq!(array_elems(&[r(0, max), r(0, max)]), None);
+    assert_eq!(array_elems(&[r(i64::MIN, i64::MAX)]), None);
+    assert_eq!(array_elems(&[r(i64::MIN + 1, i64::MAX)]), Some(u64::MAX));
+    assert_eq!(
+        array_elems(&[r(0, 1 << 40), r(1, 0), r(0, 1 << 40)]),
+        Some(0)
+    );
+}
+
+#[test]
 fn too_many_for_index_subtype_is_e1403() {
     let mut fx = Fx::new();
     let mut m = Mock::new(&fx);

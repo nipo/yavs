@@ -382,6 +382,8 @@ Semantic analysis (E1 and W1)
      - A static index is outside the static range of the array; the code may be dead, so this is checked again at runtime.
    * - _`E1405`
      - The static lengths of the two sides differ, for a whole array or for an element or field of a composite value.
+   * - _`E1406`
+     - An array has more than 2^64 - 1 elements in total (its dimensions multiplied), more than yavs supports for one array: counts, offsets and sizes are 64-bit (LRM 5.3.2 sets no limit, an implementation may).
    * - _`E1410`
      - The expression must be locally static here.
    * - _`E1501`

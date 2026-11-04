@@ -201,7 +201,7 @@ pub fn array_const(
     runs: Vec<(u64, ConstValue)>,
 ) -> ArrayConst {
     let runs = merge_runs(runs);
-    let len: u64 = runs.iter().map(|r| r.0).sum();
+    let len = run_total(&runs).expect("the runs of one array fit 64 bits (E1406)");
     let small_enum =
         matches!(&db.types[elem_ty].kind, TypeKind::Enum { lits } if lits.len() <= 256);
     let elems = if bounds.len() == 1 && small_enum && len <= BYTES_MAX {
@@ -239,7 +239,7 @@ pub fn elem_runs(a: &ArrayConst) -> Vec<(u64, ConstValue)> {
 /// `max` elements.
 pub fn array_positions(a: &ArrayConst, max: u64) -> Option<Vec<i64>> {
     let runs = elem_runs(a);
-    if runs.iter().map(|r| r.0).sum::<u64>() > max {
+    if run_total(&runs)? > max {
         return None;
     }
     let mut out = Vec::new();
@@ -257,18 +257,30 @@ fn merge_runs(runs: Vec<(u64, ConstValue)>) -> Vec<(u64, ConstValue)> {
             continue;
         }
         match out.last_mut() {
-            Some((m, w)) if *w == v => *m += n,
+            Some((m, w)) if *w == v => {
+                *m = m
+                    .checked_add(n)
+                    .expect("the runs of one array fit 64 bits (E1406)");
+            }
             _ => out.push((n, v)),
         }
     }
     out
 }
 
-fn array_len(bounds: &[(i64, Direction, i64)]) -> u64 {
-    bounds
-        .iter()
-        .map(|&(l, d, r)| StaticRange::new(l, d, r).len() as u64)
-        .product()
+/// Elements in `runs`, `None` when they do not fit `u64`.
+fn run_total(runs: &[(u64, ConstValue)]) -> Option<u64> {
+    runs.iter().try_fold(0u64, |t, r| t.checked_add(r.0))
+}
+
+/// Elements of an array with these dimensions: counts and offsets of folded values are `u64`, so
+/// an array of more than `u64::MAX` elements is an error (`E1406`), never a wrapped size.
+pub fn array_elems(dims: &[StaticRange]) -> Option<u64> {
+    if dims.iter().any(|r| r.is_null()) {
+        return Some(0);
+    }
+    dims.iter()
+        .try_fold(1u64, |n, r| n.checked_mul(u64::try_from(r.len()).ok()?))
 }
 
 // ---------------------------------------------------------------------------
@@ -1981,6 +1993,29 @@ fn array_agg(
         _ => None,
     };
 
+    // The size of the whole array, once its dimensions are known: counts of folded values and the
+    // offsets in them are 64 bits (E1406).
+    if dim == 0
+        && let Some(d) = &dims
+        && array_elems(d).is_none()
+    {
+        let lens: Vec<String> = d.iter().map(|r| r.len().to_string()).collect();
+        return Err(db.error(
+            Diagnostic::error(
+                diag::ARRAY_TOO_LARGE,
+                format!(
+                    "the aggregate has {} elements, more than the {} yavs supports in one array",
+                    lens.join(" x "),
+                    u64::MAX
+                ),
+            )
+            .with_primary(span, "too many elements")
+            .with_help(
+                "narrow an index range of the array subtype the aggregate takes its bounds from",
+            ),
+        ));
+    }
+
     // Fold (rule 12). Elements of an unconstrained composite subtype must all have the same
     // shape (9.3.3.3): a folded value could not say otherwise, so the run-time check decides.
     let runs = if stat == Staticness::Locally {
@@ -2092,7 +2127,8 @@ fn pos_value(db: &Db, ty: TypeId, p: i64) -> ConstValue {
 /// Static length of a slice piece.
 fn piece_len(db: &Db, e: ExprId) -> Option<u128> {
     if let Some(ConstValue::Array(a)) = db.value(e) {
-        return Some(u128::from(array_len(&a.bounds[..1])));
+        let &(l, d, r) = a.bounds.first()?;
+        return Some(StaticRange::new(l, d, r).len());
     }
     subtype_range(db, db.exprs[e].subtype, 0).map(|r| r.len())
 }
@@ -2401,6 +2437,9 @@ fn fold_runs(
             Val::Row(b) => b.runs.clone(),
         }
     };
+    // Counts are `u64`; a dimension of 2**64 elements and any overflow below give up (the
+    // aggregate itself is `E1406` when its whole size does not fit).
+    let total = u64::try_from(this.len()).ok()?;
     let positional = choices
         .iter()
         .all(|c| c.iter().all(|c| matches!(c, Choice::Others)));
@@ -2414,12 +2453,12 @@ fn fold_runs(
         };
         for v in &vals[..k] {
             let r = row(v)?;
-            n += if matches!(v, Val::Piece(_)) {
+            n = n.checked_add(if matches!(v, Val::Piece(_)) {
                 // Pieces exist only in 1-D aggregates: one element per position.
-                r.iter().map(|r| r.0).sum::<u64>()
+                run_total(&r)?
             } else {
                 1
-            };
+            })?;
             out.extend(r);
             if out.len() > RUNS_MAX {
                 return None;
@@ -2427,10 +2466,13 @@ fn fold_runs(
         }
         if has_others {
             let fill = row(vals.last()?)?;
-            let total = this.len() as u64;
+            // A fill of no elements (a null inner dimension) adds none, however many rows.
             for _ in n..total {
+                if fill.is_empty() {
+                    break;
+                }
                 if let [(c, v)] = fill.as_slice() {
-                    out.push((c * (total - n), v.clone()));
+                    out.push((c.checked_mul(total - n)?, v.clone()));
                     break;
                 }
                 out.extend(fill.iter().cloned());
@@ -2449,7 +2491,7 @@ fn fold_runs(
         }
         let v = &vals[it.alt];
         let off = this.offset(it.lo).min(this.offset(it.hi));
-        let n = (i128::from(it.hi) - i128::from(it.lo) + 1) as u64;
+        let n = u64::try_from(i128::from(it.hi) - i128::from(it.lo) + 1).ok()?;
         segs.push((off, n, row(v)?, matches!(v, Val::Piece(_))));
     }
     segs.sort_by_key(|s| s.0);
@@ -2458,15 +2500,17 @@ fn fold_runs(
     } else {
         None
     };
-    let total = this.len() as u64;
     let mut out: Vec<(u64, ConstValue)> = Vec::new();
     let mut at = 0u64;
     let emit = |out: &mut Vec<(u64, ConstValue)>, n: u64, r: &[(u64, ConstValue)]| -> bool {
-        if n == 0 {
+        if n == 0 || r.is_empty() {
             return true;
         }
         if let [(c, v)] = r {
-            out.push((c * n, v.clone()));
+            let Some(c) = c.checked_mul(n) else {
+                return false;
+            };
+            out.push((c, v.clone()));
         } else {
             for _ in 0..n {
                 out.extend(r.iter().cloned());
@@ -2491,7 +2535,7 @@ fn fold_runs(
         } else if !emit(&mut out, *n, r) {
             return None;
         }
-        at = off + n;
+        at = off.checked_add(*n)?;
     }
     if at < total {
         let fill = others_row.as_ref()?;

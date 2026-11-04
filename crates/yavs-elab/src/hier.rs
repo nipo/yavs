@@ -262,6 +262,16 @@ impl Bounds {
         }
     }
 
+    /// `len` without the 64-bit limit: a range over all of `i64` has 2**64 values.
+    pub fn len_wide(self) -> u128 {
+        let (lo, hi) = self.low_high();
+        if hi < lo {
+            0
+        } else {
+            (hi as i128 - lo as i128 + 1) as u128
+        }
+    }
+
     pub fn is_empty(self) -> bool {
         self.len() == 0
     }
@@ -320,6 +330,18 @@ impl Shape {
         match self {
             Shape::Array { dims, .. } => dims.iter().map(|d| d.len()).product(),
             _ => 1,
+        }
+    }
+
+    /// Most scalars one path through the nested arrays of this shape reaches: the `len`s of each
+    /// level multiplied, the larger field for a record. Shapes are built within `u64` (`E1406`).
+    pub fn path_len(&self) -> u64 {
+        match self {
+            Shape::Scalar { .. } => 1,
+            Shape::Array { elem, .. } => self.len().saturating_mul(elem.path_len()),
+            Shape::Record { fields, .. } => {
+                fields.iter().map(|f| f.1.path_len()).max().unwrap_or(1)
+            }
         }
     }
 

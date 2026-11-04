@@ -94,6 +94,7 @@ codes! {
     OVERFLOW = "E1401", "Static integer or physical arithmetic overflows 64 bits.";
     LITERAL_RANGE = "E1402", "A literal is too large to represent: integer literals and the value of a physical literal must fit 64 bits, also with a minus before them (LRM 9.5, 9.3.6). Write the 64-bit minimum as `-9223372036854775807 - 1`.";
     OUT_OF_SUBTYPE = "E1403", "A static value lies outside the static subtype it is converted to.";
+    ARRAY_TOO_LARGE = "E1406", "An array has more than 2^64 - 1 elements in total (its dimensions multiplied), more than yavs supports for one array: counts, offsets and sizes are 64-bit (LRM 5.3.2 sets no limit, an implementation may). Narrow an index range of the array subtype.";
     LENGTH_MISMATCH = "E1405", "The static lengths of the two sides differ, for a whole array or for an element or field of a composite value. Give the value the target's length, or change the target's constraint.";
     NOT_STATIC = "E1410", "The expression must be locally static here.";
     // E15xx generics

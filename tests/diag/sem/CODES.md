@@ -105,6 +105,7 @@ Status (2026-10-18): every proposed code in this table is now defined in `yavs-s
 | E1402 | literal out of range | 8.1 |
 | E1403 | static value outside subtype | 8.1 |
 | E1405 | static length mismatch | 8.1 |
+| E1406 | array of more than 2**64 - 1 elements | 5.3.2 (implementation limit) |
 | E1410 | not locally static where required | 8.1 |
 | E1501 | not a generic unit | 8.1 |
 | E1502 | missing generic actual | 8.1 |

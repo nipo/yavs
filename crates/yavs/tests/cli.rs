@@ -726,6 +726,23 @@ fn body_not_elaborated() {
     run_snapshot("body_not_elaborated", 2);
 }
 
+/// A signal of a subtype with more than 2**64 - 1 elements, also through nested arrays, is E1406 at
+/// elaboration; one with a null dimension is fine however large the others are (#1092).
+#[test]
+fn array_too_large_signal() {
+    run_snapshot("array_too_large_signal", 2);
+}
+
+#[test]
+fn array_too_large_nested() {
+    run_snapshot("array_too_large_nested", 2);
+}
+
+#[test]
+fn array_huge_null_signal() {
+    run_stdout("array_huge_null_signal", 0);
+}
+
 /// An external name whose subtype indication has another length than its object is E2121
 /// (LRM 8.7, #463).
 #[test]

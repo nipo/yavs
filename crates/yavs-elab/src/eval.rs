@@ -1772,6 +1772,36 @@ impl Model {
                     self.shape_c(db, elem, &ec, ev, scope, span)?
                 };
                 let Some(mut es) = es else { return Ok(None) };
+                // Element counts are 64-bit all through elaboration and lowering.
+                let own = if ds.iter().any(|b| b.is_empty()) {
+                    Some(0)
+                } else {
+                    ds.iter().try_fold(1u64, |n, b| {
+                        n.checked_mul(u64::try_from(b.len_wide()).ok()?)
+                    })
+                };
+                if own.and_then(|n| n.checked_mul(es.path_len())).is_none() {
+                    let mut lens: Vec<String> =
+                        ds.iter().map(|b| b.len_wide().to_string()).collect();
+                    // The scalars of each element, when the elements are arrays too.
+                    if es.path_len() > 1 {
+                        lens.push(es.path_len().to_string());
+                    }
+                    return Err(Box::new(
+                        Diagnostic::error(
+                            yavs_sem::diag::ARRAY_TOO_LARGE,
+                            format!(
+                                "the subtype has {} elements, more than the {} yavs supports in one array",
+                                lens.join(" x "),
+                                u64::MAX
+                            ),
+                        )
+                        .with_primary(span, "too many elements")
+                        .with_help(
+                            "narrow an index range of the array subtype, or of its element subtype, which multiplies in",
+                        ),
+                    ));
+                }
                 if let Some(Resolution::Element(r)) = &db.subtypes[st].resolution
                     && !apply_res(&mut es, r)
                 {

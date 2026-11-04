@@ -350,7 +350,10 @@ impl Db {
                 if want.dir != d0 || !have.contains(want.left) || !have.contains(want.right) {
                     return Err(Fold::No);
                 }
-                let (mut skip, mut take) = (have.offset(want.left), want.len() as u64);
+                let (mut skip, mut take) = (
+                    have.offset(want.left),
+                    u64::try_from(want.len()).map_err(|_| Fold::No)?,
+                );
                 let mut runs = Vec::new();
                 for (n, v) in elem_runs(&a) {
                     let drop = skip.min(n);
