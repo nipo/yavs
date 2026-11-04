@@ -57,8 +57,19 @@ Pin the version: it gives the same simulator on every run and keeps your cache v
 get the newest stable release, which can change your results on the day a release comes out. An unknown
 version, a runner without an archive or a failed download fails the step with an error naming the cause and
 the fix. The action's page has the outputs and the rest. The x86_64 archives need a CPU with AVX2
-(x86-64-v3, :ref:`installation`): GitHub-hosted runners have it. On a self-hosted runner without AVX2, download
-the ``-compat`` archive with the commands below (the action installs the other one), or build yavs from source.
+(x86-64-v3, :ref:`installation`): GitHub-hosted runners have it. On a self-hosted runner without AVX2, set
+``variant: compat`` to install the ``-compat`` archive, which runs on any x86-64 CPU, or build yavs from source:
+
+.. code-block:: yaml
+
+    - uses: ru551n/yavs-action@v1
+      with:
+        version: 0.14.0
+        variant: compat
+
+``variant`` is ``default`` or ``compat``; any other value fails the step. ``compat`` needs yavs 0.14.0 or
+newer and fails for an older version. On Linux aarch64 there is one archive, so ``compat`` installs it and
+prints a notice.
 
 On other CI systems, download the archive with plain commands:
 
@@ -73,7 +84,7 @@ On other CI systems, download the archive with plain commands:
     export PATH="$PWD/$A:$PATH"
     yavs --version
 
-For a CPU without AVX2 use ``A=yavs-$V-x86_64-unknown-linux-gnu-compat``.
+For a CPU without AVX2 use ``A=yavs-$V-x86_64-unknown-linux-gnu-compat``, as ``variant: compat`` does in the action.
 
 :ref:`installation` lists the archives of the other platforms.
 
