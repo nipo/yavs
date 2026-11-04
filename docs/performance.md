@@ -8,7 +8,10 @@ testbenches, and clearly slower on long runs of whole processors (below). These 
 (0.206 warm and 0.571 cold on 2026-10-28), and we have not found out why. The comparisons with the other two simulators are from that earlier run
 and were not repeated. Every figure is a recorded run with its conditions in "How we measured" at the end, not a promise for your design.
 
-**All the comparisons with other simulators on this page are older than the performance work merged on 2026-11-04.** They were not repeated on the merged code, so they say nothing about it, in either direction, until a new measurement is on this page.
+**Since then the simulator changed a lot** (the performance work merged on 2026-11-04, released in 0.15.0), and it was measured on its own, against the previous release: see "The performance work of 0.15.0". The short version: long simulations of whole processors
+take about half the processor cycles of the previous release, a run of everyday testbenches is about 9 percent cheaper warm, and short first (cold) runs got more expensive: 25 of 46 tests cost more cold, up to twice as much on one.
+
+**The tables in "Result" and "Where yavs is slower", and the comparisons with other simulators in them, are older than the performance work merged on 2026-11-04.** They were not repeated on the merged code and say nothing about it. The only comparison with another simulator on the merged code is the short one in "The performance work of 0.15.0", in processor cycles and for one simulator.
 
 ```{contents} On this page
 :local:
@@ -43,6 +46,57 @@ We do not know why. The hosts' load differed, about 60 commits lie between the t
 neither shown to be a slowdown nor shown to be noise. There was no fully quiet sitting at all: other jobs ran on the same host throughout, most of the time on
 the other half of the cores. Re-checking at `cb1a1295` (a later commit) changed instructions by at most 0.6 percent and cycles by at most 3 percent, with no direction.
 
+## The performance work of 0.15.0
+
+The performance work merged on 2026-11-04 (commit `b5663d516`, what 0.15.0 is built from) was measured against the previous release, 0.14.0, plus three commits that do not touch the simulator (`4ef7ec895`). It is a different measurement from the tables above: whole runs of 46 tests at `--tier=auto`, counted in processor cycles and instructions of the whole process, not in wall time, with the previous release as the baseline. The 46 are a LEON3 system (`grlib_leon3mp`), Microwatt, 39 of the testbenches of the real-world suite and five PoC testbenches (these five ran with the older PoC checkout, see "What these numbers do not cover").
+The output and exit status were identical to the baseline in every run of every test.
+
+Cycles of the new code divided by cycles of the previous release; below 1 is faster. Each measurement ran twice at once, on the two halves of the CPU (separate sets of cores); the figure in brackets is the other half. The control row compares a byte copy of the new binary with itself and shows how far two identical runs differ.
+
+| | Warm | Cold | Instructions, warm / cold |
+| --- | ---: | ---: | ---: |
+| Microwatt, a long run | 0.51 (0.48) | 0.50 (0.49) | 0.44 / 0.45 |
+| `grlib_leon3mp`, a long run | 0.50 (0.47) | 0.65 (0.60) | 0.51 / 0.61 |
+| The 20 tests of the 46 that take over 1 G cycles | 0.79 (0.77) | not computed | 0.77 |
+| All 46 tests, geometric mean | 0.91 (0.91) | **1.03** (1.02) | 0.90 / 1.00 |
+| Control: the same binary against itself, 46 tests | 1.00 | 1.00 | 1.00 |
+
+So long simulations run in about half the cycles, and so do the two big designs when the compiled code is already stored; the first run of `grlib_leon3mp` gets about two thirds of that gain, because it also has to compile. Across all 46 tests, which are mostly short, the gain warm is 9 percent, and cold the mean is **3 percent worse**.
+
+### Where it is slower
+
+Cold means a first run, with the compiled code still to be made. Of the 46 tests, 25 took clearly more cycles cold than before (against 10 that took fewer), where "clearly" means outside the control's range. The worst, new code divided by previous release in cycles (the other half of the CPU in brackets; peak memory is for the cold run):
+
+| Testbench | Cold | Peak memory, cold |
+| --- | ---: | ---: |
+| `uvvm_axistream_vvc` | 1.96 (1.84) | 2.1 times |
+| `neorv32_dual_full` | 1.43 (1.36) | 1.3 times |
+| `poc_cache_cpu` | 1.35 (1.29) | 1.3 times |
+| `osvvm_axi4_random` | 1.35 (1.31) | 1.7 times |
+| `uvvm_func_cov` | 1.27 (1.29) | |
+| `neorv32_single_cache` | 1.23 (1.17) | |
+
+Most of the short tests (a first run of one to a few seconds) also cost 3 to 10 percent more cold. `--tier=auto` now also decides by how often code runs when it chooses what to compile, and that policy is what costs the first run: on `neorv32_dual_full` the same binary with `YAVS_AUTO_POLICY=sampled`, the earlier policy, used 0.67 of the cycles of the default in an earlier sitting. It pays on long runs and does not for a run of a few seconds. `YAVS_AUTO_POLICY=sampled` goes back to the earlier policy ([Environment](environment.rst)). We did not measure how much of the cold loss shows in wall time on a host with free cores: in these runs every process was pinned to one core, so the compile thread and the simulation shared it, which leans toward a larger cold loss than a free core would show.
+
+Warm, 11 tests gained beyond the control (15 on the other half of the CPU) and one lost (two on the other half); the rest were not different from the control. `osvvm_axi4_random` read slowest warm (1.48 and 1.34, instructions 1.26 to 1.31, peak memory 2.1 times); its own warm runs fell into two groups of instructions, so the cycle figure has a wide band (19 and 12 percent) and is undecided, but the instructions point to a real loss. `hdlm_axis_bfm` (1.12 and 1.13) and `poc_fifo_ic_assembly` (1.06 and 1.08) were slightly slower warm on both halves.
+
+### What the profile and the x86-64-v3 build add
+
+The measurements above are of the plain Cranelift bench builds, not of the release archives, which are profile-guided. On top of the new code, a build with the profile and for x86-64-v3 (the plain x86_64 archives) took 0.90 of the new bench build's cycles warm across the 46 tests (0.89 on the other half), 0.88 on `grlib_leon3mp` and 0.87 on Microwatt (0.91 on the other half for both; the Microwatt band on the first half, 9.5 percent, reaches the control's). The x86-64-v3 build alone changed nothing beyond the control (0.99 across the 46). It was not measured cold. The profile-guided build in this comparison was built with a different `--target` setting than the two it was compared with, so some of the difference may be code layout.
+
+### Against the established simulator A, on the merged code
+
+A was timed apart from the squares above, on two cores of one half of the CPU, with one other job running; the new code ran in squares with three or four. Cycles of the whole process: for A, elaboration and run; for the new code, the whole run. One to a few runs each. Below 1 means yavs uses fewer cycles.
+
+| | Warm | Cold | Wall time, warm: yavs / A |
+| --- | ---: | ---: | ---: |
+| Microwatt, a long run | 1.78 | 1.78 | 125 s / 71 s |
+| `grlib_leon3mp`, a long run | 1.49 | 2.12 | 18 s / 13 s |
+| 46 tests, geometric mean | 0.27 | not measured | |
+| The 13 of the 46 where A takes at least a second, geometric mean | 0.92 | not measured | |
+
+yavs is still slower than A on the two long processor runs: 1.5 to 1.8 times the cycles warm, 2.1 times on the first run of `grlib_leon3mp`. For `grlib_leon3mp` this agrees with the older measurement above (3.1 warm, 3.3 cold in wall time): the previous release would be at about 3.0 warm (1.49 divided by 0.50) and 3.3 cold (2.12 divided by 0.65) in these numbers. The Microwatt run is not the CoreMark run above, so the two are not comparable. On the tests where A takes at least a second yavs is about level; the 0.27 of the whole set comes from the many short tests, where yavs's start-up and cache are the advantage. It is a figure in cycles and is not comparable to the 0.213 of wall time in the table above.
+
 ## Long runs of whole processors
 
 Two processors running a fixed CoreMark program for a long time, yavs warm (`--tier=auto`) divided by the same open-source simulator A, run including elaboration, as measured before the merge of 2026-11-04:
@@ -76,6 +130,8 @@ Among the hand-written RTL designs, clocked designs with very many cheap process
   are in [issue 1029](https://github.com/ru551n/yavs/issues/1029); they were not repeated for this page. A suite more than about three times over the limit is slower warm than cold, by 7 to 8 percent in instructions at six times
   ([issue 1034](https://github.com/ru551n/yavs/issues/1034)).
 - Waves and coverage on, other tiers than `--tier=auto`, and more than one thread were not measured here.
+- **The 0.15.0 measurement counts cycles, not wall time on a free host.** Every process was pinned to one core, so the compile thread shared it with the simulation. Wall time on a host with several free cores, which is what most users have, was not measured, and neither were Microwatt cold with more than three pairs, a set of designs the work was not tuned on, or the tests under waves.
+- Five of the 46 tests are PoC testbenches that ran with the older PoC checkout (see "PoC testbenches" below), because the list of the measured build no longer includes them. `uvvm_rand_perf` and the CoreMark runs of NEORV32 and Microwatt were not part of it.
 - The comparisons with B and C are of 2026-10-28.
 - **PoC testbenches.** The 41 testbenches of the 2026-10-28 and 2026-11-01 runs include six from the PoC Library v1.2 (`poc_arith_addw`, `poc_stat_histogram`, `poc_cache_cpu`, `poc_strings`,
   `poc_uart_rx`, `poc_fifo_ic_assembly`), and the figures above, including the `poc_*` ratios named in "Where yavs is slower", are from those. The suite now uses PoC v3.0.0
@@ -83,6 +139,8 @@ Among the hand-written RTL designs, clocked designs with very many cheap process
   testbench, `poc_arith_scaler`, `poc_ooo_buffer`, `poc_arith_counter_bcd`). The means and ratios on this page were not recomputed for that suite.
 
 ## Which build these numbers are for
+
+The figures in "The performance work of 0.15.0" are of plain bench builds (release, aligned functions, Cranelift for compiled code), built for the baseline x86-64 CPU, not of the release archives, which are profile-guided and, for the plain x86_64 ones, built for x86-64-v3. What the profile and x86-64-v3 add on top of those is given there (about 0.90 of the cycles warm across 46 tests). The tables of the profile gain below are wall-clock times on the GitHub runners.
 
 The release archives are profile-guided from 0.14.0 (see [Getting started](getting-started.rst)). Every comparison with other simulators on this page was made with a plain release build, so it says nothing about what the profile adds, and we have not repeated those comparisons with a profile-guided build.
 
@@ -116,10 +174,10 @@ an otherwise idle machine, repeat, and compare medians; a short run varies by te
 
 The testbenches come from open-source VHDL projects (verification libraries, FPGA libraries, processor
 designs), each run as its project's own scripts would: analysing the libraries and the testbench's files,
-elaborating and running. yavs is a plain release build at its default `--tier=auto`, built for the baseline x86-64 CPU with aligned functions: not the x86-64-v3 build of the x86_64 release archives from 2026-11-03 on and not a profile-guided one, which were not measured here. Every pair of timings ran on
+elaborating and running. yavs is a plain release build at its default `--tier=auto`, built for the baseline x86-64 CPU with aligned functions (for the 2026-11-04 measurement of 0.15.0, a Cranelift-only build of that kind): not the x86-64-v3 build of the x86_64 release archives from 2026-11-03 on and not a profile-guided one, which were not measured here. Every pair of timings ran on
 the same CPU core, in turn, on a shared Linux host (AMD Ryzen 9 7950X3D), repeated two to five times; the 2026-11-01 run took the best of two passes for each measurement,
 with a median host load of 10 to 14. The
-other simulators are not named; all of them run compiled or generated code. The per-testbench tables, the
+other simulators are not named; all of them run compiled or generated code. The 2026-11-04 measurement of 0.15.0 was different: whole runs, warm and cold, in a Latin square with a barrier (every core runs a different binary at any moment), each process on one core, two squares at once on the two halves of the CPU, with a byte copy of the new binary as control; load median 6.8, all of it from the measurement itself. The per-testbench tables, the
 method in full and earlier runs are in
 [`docs/STATUS.md`](https://github.com/ru551n/yavs/blob/main/docs/STATUS.md) ("Real-world performance suite").
 
