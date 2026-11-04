@@ -2184,8 +2184,14 @@ pub unsafe extern "C" fn yavs_rt_hold_check(
     // SAFETY: as in `yavs_rt_step`.
     let mut found = look(unsafe { &*mem });
     if found.is_none_or(|f| f != p) && unsafe { yavs_rt_obj(env, mem, a, write) } != 0 {
-        // SAFETY: as above; the object is in the table now.
-        found = look(unsafe { &*mem });
+        // SAFETY: as above; the object is in the table now, also an interpreter frame below the
+        // top one, which `span` does not know and a stable activation holds (`Mem::region`).
+        let m = unsafe { &*mem };
+        found = look(m).or_else(|| {
+            m.get(hi)
+                .filter(|o| off + n <= o.len)
+                .map(|o| o.ptr.wrapping_add(off as usize))
+        });
     }
     if found != Some(p) {
         eprintln!(
