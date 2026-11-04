@@ -51,7 +51,7 @@ version you asked for and puts it on ``PATH``:
 
     - uses: ru551n/yavs-action@v1
       with:
-        version: 0.13.0
+        version: 0.14.0
 
 Pin the version: it gives the same simulator on every run and keeps your cache valid. Without ``version`` you
 get the newest stable release, which can change your results on the day a release comes out. An unknown
@@ -64,7 +64,7 @@ On other CI systems, download the archive with plain commands:
 
 .. code-block:: bash
 
-    V=0.13.0
+    V=0.14.0
     A=yavs-$V-x86_64-unknown-linux-gnu
     curl -fsSLO https://github.com/ru551n/yavs/releases/download/v$V/$A.tar.gz
     curl -fsSLO https://github.com/ru551n/yavs/releases/download/v$V/SHA256SUMS
@@ -148,7 +148,7 @@ This is the walkthrough project (:doc:`project-walkthrough`) as a job. It needs 
       simulate:
         runs-on: ubuntu-latest
         env:
-          YAVS_VERSION: 0.13.0
+          YAVS_VERSION: 0.14.0
           YAVS_STD_CACHE: ${{ github.workspace }}/.yavs-std
         steps:
           - uses: actions/checkout@v4

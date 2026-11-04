@@ -525,7 +525,7 @@
    }
   },
   "discrepancies": {
-   "cases": 251,
+   "cases": 261,
    "output_tail": "",
    "yavs_matches_expected": true
   },
@@ -534,10 +534,9 @@
     "classes": {
      "analysis": 23,
      "elab": 7,
-     "oracle": 25,
+     "oracle": 26,
      "pass": 1014,
-     "skip": 403,
-     "timeout": 1
+     "skip": 403
     },
     "pass_list": 995,
     "pass_list_regressions": [],
@@ -614,8 +613,8 @@
   }
  },
  "generated": {
-  "commit": "4fc9a5c9f9",
-  "commit_date": "2026-11-02",
+  "commit": "fa4e2e4ae0",
+  "commit_date": "2026-11-04",
   "version": "0.13.0"
  },
  "local": {
@@ -1337,162 +1336,162 @@
   "corpus_refs": {
    "en_cl_fix-2008": {
     "pass": 149,
-    "recorded": "2026-10-22",
+    "recorded": "2026-11-04",
     "total": 149
    },
    "fletcher-2008": {
     "pass": 101,
-    "recorded": "2026-10-22",
+    "recorded": "2026-11-04",
     "total": 101
    },
    "grlib-1993": {
     "pass": 454,
-    "recorded": "2026-10-23",
+    "recorded": "2026-11-04",
     "total": 454
    },
    "grlib-2008": {
     "pass": 410,
-    "recorded": "2026-10-23",
+    "recorded": "2026-11-04",
     "total": 410
    },
    "hdl-modules-2008": {
     "pass": 86,
-    "recorded": "2026-10-22",
+    "recorded": "2026-11-04",
     "total": 86
    },
    "hdl-modules-2019": {
     "pass": 86,
-    "recorded": "2026-10-22",
+    "recorded": "2026-11-04",
     "total": 86
    },
    "json-for-vhdl-2008": {
     "pass": 149,
-    "recorded": "2026-10-22",
+    "recorded": "2026-11-04",
     "total": 149
    },
    "neorv32-2008": {
     "pass": 67,
-    "recorded": "2026-10-22",
+    "recorded": "2026-11-04",
     "total": 67
    },
    "neotrng-2008": {
     "pass": 2,
-    "recorded": "2026-10-22",
+    "recorded": "2026-11-04",
     "total": 2
    },
    "open-logic-2008": {
     "pass": 386,
-    "recorded": "2026-10-22",
+    "recorded": "2026-11-04",
     "total": 386
    },
    "osvvm-2008": {
     "pass": 174,
-    "recorded": "2026-10-22",
+    "recorded": "2026-11-04",
     "total": 174
    },
    "osvvm-2019": {
     "pass": 174,
-    "recorded": "2026-10-22",
+    "recorded": "2026-11-04",
     "total": 174
    },
    "poc-2008": {
     "pass": 417,
-    "recorded": "2026-11-02",
+    "recorded": "2026-11-04",
     "total": 417
    },
    "satcat5-2008": {
     "pass": 246,
-    "recorded": "2026-10-22",
+    "recorded": "2026-11-04",
     "total": 246
    },
    "surf-2008": {
     "pass": 310,
-    "recorded": "2026-10-22",
+    "recorded": "2026-11-04",
     "total": 318
    },
    "uvvm-2008": {
     "pass": 235,
-    "recorded": "2026-10-22",
+    "recorded": "2026-11-04",
     "total": 235
    },
    "uvvm-2019": {
     "pass": 235,
-    "recorded": "2026-10-22",
+    "recorded": "2026-11-04",
     "total": 235
    },
    "vests-1993": {
     "pass": 1939,
-    "recorded": "2026-10-23",
+    "recorded": "2026-11-04",
     "total": 1939
    },
    "vhdl-compliance-2008": {
     "pass": 171,
-    "recorded": "2026-10-22",
+    "recorded": "2026-11-04",
     "total": 171
    },
    "vhdl-compliance-2019": {
     "pass": 208,
-    "recorded": "2026-10-22",
+    "recorded": "2026-11-04",
     "total": 208
    },
    "vhdl-extras-2008": {
     "pass": 25,
-    "recorded": "2026-10-22",
+    "recorded": "2026-11-04",
     "total": 25
    },
    "vhdl-ideas-2019": {
     "pass": 18,
-    "recorded": "2026-10-22",
+    "recorded": "2026-11-04",
     "total": 19
    },
    "vhdl-interfaces-2019": {
     "pass": 34,
-    "recorded": "2026-10-22",
+    "recorded": "2026-11-04",
     "total": 34
    },
    "vhdl-tool-checks-2008": {
     "pass": 1,
-    "recorded": "2026-10-22",
+    "recorded": "2026-11-04",
     "total": 1
    },
    "vhdl-tool-checks-2019": {
     "pass": 1,
-    "recorded": "2026-10-22",
+    "recorded": "2026-11-04",
     "total": 1
    },
    "vhlib-2008": {
     "pass": 26,
-    "recorded": "2026-10-22",
+    "recorded": "2026-11-04",
     "total": 26
    },
    "vunit-2008": {
     "pass": 143,
-    "recorded": "2026-10-22",
+    "recorded": "2026-11-04",
     "total": 143
    },
    "vunit-2019": {
     "pass": 143,
-    "recorded": "2026-10-22",
+    "recorded": "2026-11-04",
     "total": 143
    },
    "vunit-tests-2008": {
     "pass": 218,
-    "recorded": "2026-10-22",
+    "recorded": "2026-11-04",
     "total": 218
    },
    "vunit-tests-2019": {
     "pass": 218,
-    "recorded": "2026-10-22",
+    "recorded": "2026-11-04",
     "total": 218
    },
    "yavs-lib-2008": {
     "pass": 27,
-    "recorded": "2026-10-22",
+    "recorded": "2026-11-04",
     "total": 27
    },
    "yavs-lib-2019": {
     "pass": 26,
-    "recorded": "2026-10-22",
+    "recorded": "2026-11-04",
     "total": 28
    }
   },
@@ -1743,6 +1742,13 @@
     "yavs": "OK"
    },
    {
+    "case": "concurrent-label-vs-implicit-operation",
+    "decided": "user, 2026-11-03 (#1084, L179)",
+    "kind": "LRM clear",
+    "lrm": "12.3",
+    "yavs": "OK"
+   },
+   {
     "case": "config-label-wrong-component",
     "decided": "agent (reference notes in tests/diag/sem)",
     "kind": "LRM clear",
@@ -1782,6 +1788,27 @@
     "decided": "agent (reference notes in tests/diag/sem)",
     "kind": "LRM clear",
     "lrm": "12.3 (homographs)",
+    "yavs": "REJECT"
+   },
+   {
+    "case": "entity-label-homograph",
+    "decided": "user, 2026-11-03 (#1084, L179)",
+    "kind": "LRM clear",
+    "lrm": "11.1, 12.1, 12.3",
+    "yavs": "REJECT"
+   },
+   {
+    "case": "guard-generic-homograph",
+    "decided": "agent (#1085, L180)",
+    "kind": "LRM clear",
+    "lrm": "11.2, 12.3",
+    "yavs": "REJECT"
+   },
+   {
+    "case": "guard-signal-homograph",
+    "decided": "agent (#1085, L180)",
+    "kind": "LRM clear",
+    "lrm": "11.2, 12.3",
     "yavs": "REJECT"
    },
    {
@@ -1932,10 +1959,31 @@
     "yavs": "OK"
    },
    {
+    "case": "label-hides-use-visible-component",
+    "decided": "agent, 2026-11-03 (#1084, L179)",
+    "kind": "LRM clear",
+    "lrm": "11.1, 12.4",
+    "yavs": "REJECT"
+   },
+   {
+    "case": "label-vs-entity-implicit-operation",
+    "decided": "user, 2026-11-03 (#1084, L179)",
+    "kind": "LRM clear",
+    "lrm": "12.1, 12.3",
+    "yavs": "OK"
+   },
+   {
     "case": "local-generic-package-same-unit",
     "decided": "agent (lrm-checks L81, #34)",
     "kind": "LRM ambiguity",
     "lrm": "4.9, 4.7 (2008)",
+    "yavs": "OK"
+   },
+   {
+    "case": "loop-label-same-as-parameter",
+    "decided": "agent, 2026-11-03 (#1084, L179)",
+    "kind": "LRM clear",
+    "lrm": "10.1, 12.1, 12.3",
     "yavs": "OK"
    },
    {
@@ -2202,6 +2250,20 @@
     "decided": "agent (L74, #250)",
     "kind": "LRM clear",
     "lrm": "8.3, 12.1",
+    "yavs": "OK"
+   },
+   {
+    "case": "sequential-label-homograph",
+    "decided": "agent reading, on the maintainer's instruction to follow the LRM, 2026-11-03 (#1084, L179)",
+    "kind": "LRM clear",
+    "lrm": "10.1, 12.1, 12.3",
+    "yavs": "REJECT"
+   },
+   {
+    "case": "sequential-label-vs-implicit-operation",
+    "decided": "user, 2026-11-03 (#1084, L179)",
+    "kind": "LRM clear",
+    "lrm": "12.3",
     "yavs": "OK"
    },
    {
@@ -3064,6 +3126,13 @@
     "kind": "LRM clear",
     "lrm": "5.2.1, 6.3",
     "yavs": "FATAL"
+   },
+   {
+    "case": "index-constraint-wrong-type",
+    "decided": "agent, 2026-11-03 (#1086, L181)",
+    "kind": "LRM clear",
+    "lrm": "5.3.2.2",
+    "yavs": "REJECT"
    },
    {
     "case": "index-constraint-outside-index-subtype-static",

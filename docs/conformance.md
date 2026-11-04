@@ -1,15 +1,15 @@
 # yavs conformance report
 
-Generated: yavs 0.13.0 at commit `4fc9a5c9f9` (2026-11-02) by `tools/conformance/run.py`; do not edit by hand.
+Generated: yavs 0.13.0 at commit `fa4e2e4ae0` (2026-11-04) by `tools/conformance/run.py`; do not edit by hand.
 
 yavs is checked by running the test suites of VHDL libraries, a VHDL language test suite and real designs on it, and by comparing its output
-with two established open-source VHDL simulators, called sim1 and sim2 here. Each suite judges its own tests. Over the suites below, 14996 of 15099
+with two established open-source VHDL simulators, called sim1 and sim2 here. Each suite judges its own tests. Over the suites below, 15006 of 15109
 tests pass; every failure is tracked as an issue. This is evidence, not a proof of correctness.
 
 | Project or suite | What it is | Passed / total |
 | --- | --- | ---: |
 | Differential testbenches | small testbenches of this repository; output must equal sim1's, at 1 and 4 threads | 610/610 |
-| Known simulator differences | one reproducer per case where simulators disagree | 251/251 |
+| Known simulator differences | one reproducer per case where simulators disagree | 261/261 |
 | sim1's regression tests | a reference simulator's own self-checking tests (runnable ones) | 1014/1070 |
 | sim2's regression tests | a reference simulator's own self-checking tests (runnable ones) | 463/504 |
 | VESTs | VHDL-1993 language test suite | 3694/3694 |
@@ -84,8 +84,8 @@ Not passing: sim1: 56; sim2: 41 (the classes of each are in `docs/conformance.js
 ### Known simulator differences
 
 [`docs/design/simulator-discrepancies.md`](https://github.com/ru551n/yavs/blob/main/docs/design/simulator-discrepancies.md) lists every case where the references disagree with each other, with the language reference or with yavs:
-251 catalogued behaviours, each with a reproducer under `tests/discrepancies/<case>/`. CI runs every reproducer on yavs and fails when yavs's output
-differs from the recorded one (matches). Kinds: LRM clear 163, LRM ambiguity 77, reference bug 6, other 4, library availability 1.
+261 catalogued behaviours, each with a reproducer under `tests/discrepancies/<case>/`. CI runs every reproducer on yavs and fails when yavs's output
+differs from the recorded one (matches). Kinds: LRM clear 173, LRM ambiguity 77, reference bug 6, other 4, library availability 1.
 
 Policy (`docs/plan.md`): where the language reference is clear, yavs follows it even against all references; where it is unclear yavs is permissive
 and follows the majority of the references that run the construct. The verdicts of each reference are in the catalogue; the table gives the clause, the kind,
@@ -130,12 +130,16 @@ and yavs's verdict.
 | [`alias-of-external-method`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/alias-of-external-method) | 6.6.2, 8.7 | LRM clear | OK |
 | [`block-config-default-bound`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/block-config-default-bound) | 3.4.3 | LRM ambiguity | OK |
 | [`call-conversions`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/call-conversions) | 6.5.7.1 | LRM clear | OK |
+| [`concurrent-label-vs-implicit-operation`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/concurrent-label-vs-implicit-operation) | 12.3 | LRM clear | OK |
 | [`config-label-wrong-component`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/config-label-wrong-component) | 3.4.2, 7.3 | LRM clear | REJECT |
 | [`config-rebinding`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/config-rebinding) | 7.3.2 | LRM clear | OK |
 | [`disconnect-others`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/disconnect-others) | 7.4 | LRM clear | OK |
 | [`disconnect-twice`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/disconnect-twice) | 7.4 | LRM clear | REJECT |
 | [`div-by-zero-in-range`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/div-by-zero-in-range) | 9.4.2 | LRM ambiguity | REJECT |
 | [`duplicate-interface-param`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/duplicate-interface-param) | 12.3 (homographs) | LRM clear | REJECT |
+| [`entity-label-homograph`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/entity-label-homograph) | 11.1, 12.1, 12.3 | LRM clear | REJECT |
+| [`guard-generic-homograph`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/guard-generic-homograph) | 11.2, 12.3 | LRM clear | REJECT |
+| [`guard-signal-homograph`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/guard-signal-homograph) | 11.2, 12.3 | LRM clear | REJECT |
 | [`formal-conversion-unconstrained-port`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/formal-conversion-unconstrained-port) | 6.5.7.1 | LRM ambiguity | REJECT |
 | [`formal-package-map-mismatch`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/formal-package-map-mismatch) | 6.5.7.2 | LRM clear | REJECT |
 | [`formal-package-subprograms`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/formal-package-subprograms) | 6.5.7.2 | LRM clear | OK |
@@ -157,7 +161,10 @@ and yavs's verdict.
 | [`incomplete-type-never-completed`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/incomplete-type-never-completed) | 5.4.2 | LRM clear | REJECT |
 | [`incremental-binding`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/incremental-binding) | 7.3.2.3 | LRM clear | OK |
 | [`individual-assoc-parts`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/individual-assoc-parts) | 6.5.7.1 | LRM clear | OK |
+| [`label-hides-use-visible-component`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/label-hides-use-visible-component) | 11.1, 12.4 | LRM clear | REJECT |
+| [`label-vs-entity-implicit-operation`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/label-vs-entity-implicit-operation) | 12.1, 12.3 | LRM clear | OK |
 | [`local-generic-package-same-unit`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/local-generic-package-same-unit) | 4.9, 4.7 (2008) | LRM ambiguity | OK |
+| [`loop-label-same-as-parameter`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/loop-label-same-as-parameter) | 10.1, 12.1, 12.3 | LRM clear | OK |
 | [`method-alias-objects-full`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/method-alias-objects-full) | 5.6.2, 6.6.3 | LRM ambiguity | OK |
 | [`method-alias-of-object`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/method-alias-of-object) | 5.6.2, 6.6.3 | LRM ambiguity | OK |
 | [`method-alias-of-process-variable`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/method-alias-of-process-variable) | 5.6.2, 6.6.3 | LRM ambiguity | OK |
@@ -196,6 +203,8 @@ and yavs's verdict.
 | [`protected-type-expanded-name-method`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/protected-type-expanded-name-method) | 8.3, 12.1 | LRM clear | OK |
 | [`protected-type-expanded-name-mixed`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/protected-type-expanded-name-mixed) | 8.3, 12.1 | LRM clear | OK |
 | [`protected-type-expanded-name-state`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/protected-type-expanded-name-state) | 8.3, 12.1 | LRM clear | OK |
+| [`sequential-label-homograph`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/sequential-label-homograph) | 10.1, 12.1, 12.3 | LRM clear | REJECT |
+| [`sequential-label-vs-implicit-operation`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/sequential-label-vs-implicit-operation) | 12.3 | LRM clear | OK |
 | [`shared-variable-before-body`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/shared-variable-before-body) | 14.4.2 | LRM clear | REJECT |
 | [`signal-param-parts`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/signal-param-parts) | 6.5.7.1 | LRM clear | OK |
 | [`signal-param-records`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/signal-param-records) | 6.5.7.1 | LRM clear | OK |
@@ -319,6 +328,7 @@ and yavs's verdict.
 | [`formal-package-without-actual`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/formal-package-without-actual) | 6.5.6.2, 6.5.7.2 | LRM clear | REJECT |
 | [`range-constraint-outside-type-mark-static`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/range-constraint-outside-type-mark-static) | 5.2.1, 6.3 | LRM clear | REJECT |
 | [`range-constraint-outside-type-mark-dynamic`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/range-constraint-outside-type-mark-dynamic) | 5.2.1, 6.3 | LRM clear | FATAL |
+| [`index-constraint-wrong-type`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/index-constraint-wrong-type) | 5.3.2.2 | LRM clear | REJECT |
 | [`index-constraint-outside-index-subtype-static`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/index-constraint-outside-index-subtype-static) | 5.3.2.2, 6.3 | LRM clear | REJECT |
 | [`index-constraint-outside-index-subtype`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/index-constraint-outside-index-subtype) | 5.3.2.2, 6.3 | LRM clear | FATAL |
 | [`array-conversion-index-outside-target-static`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/array-conversion-index-outside-target-static) | 9.3.6 | LRM clear | FATAL |

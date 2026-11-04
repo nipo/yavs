@@ -1,1 +1,0 @@
-Every release archive carries a short `README.txt` with its version, target and CPU variant, its files and how to start; it replaces the project `README.md` that the archives held before. `yavs --version` also prints a `Build:` line on its second line: `x86-64-v3, AVX2 support`, `x86-64 baseline` or `aarch64`.
