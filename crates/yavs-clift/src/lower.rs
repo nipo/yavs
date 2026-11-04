@@ -116,7 +116,7 @@ pub struct Jit {
     deopt_slots: ClifId,
     deopt_end: ClifId,
     /// The kernel-facing callbacks of `rt.rs`, in the order of `KERNEL`.
-    kernel: [ClifId; 24],
+    kernel: [ClifId; 25],
     /// `yavs_rt_host` and the `Deref` of `yavs_rt_fast` through stubs that keep every register
     /// (`cold_stub`).
     cold_host: ClifId,
@@ -509,6 +509,7 @@ impl Jit {
             (DRIVE_F, yavs_rt_drive_f as *const u8),
             (GATE_CHECK, yavs_rt_gate_check as *const u8),
             (IMAGE_CHECK, yavs_rt_image_check as *const u8),
+            (ELOOP_EXEC, yavs_rt_eloop_exec as *const u8),
             (CODES, yavs_rt_codes as *const u8),
             (PLANES, yavs_rt_planes as *const u8),
             (NATIVE, yavs_rt_native as *const u8),
@@ -599,6 +600,7 @@ impl Jit {
                 None,
             )?,
             imp(IMAGE_CHECK, &[I64, I32, I32], None)?,
+            imp(ELOOP_EXEC, &[I64; 8], Some(I64))?,
         ];
         let hold_check = imp(HOLD_CHECK, &[I64, I64, I64, I64, I64, I32, I64, I64], None)?;
         let cold_host = cold_stub(
@@ -1529,6 +1531,9 @@ impl Jit {
             image_check: self
                 .module
                 .declare_func_in_func(self.kernel[23], &mut ctx.func),
+            eloop_exec: self
+                .module
+                .declare_func_in_func(self.kernel[24], &mut ctx.func),
             tables: tabs,
             consts: cons,
             natives,
@@ -1658,6 +1663,9 @@ struct Imports {
     /// `yavs_rt_eloop(env, mem, prog, nprog, inputs, ind, bound, step, depth, fhi, slots,
     /// slots_len) -> iterations`: the element loops of a native frame (#757).
     eloop: FuncRef,
+    /// `yavs_rt_eloop_exec(src, s_e0, s_step, dst, d_e0, d_step, code, m) -> iterations`: a loop
+    /// planned in the code itself (`Gen::eloop_plan`).
+    eloop_exec: FuncRef,
     /// `yavs_rt_layout_word(env, ty, desc, dsz, k) -> i64`: one word of a layout from the
     /// interpreter's layout memo, -1 when it declines.
     layout_word: FuncRef,
@@ -2030,6 +2038,28 @@ fn quiet(i: &Inst) -> bool {
 struct Batch {
     entries: StackSlot,
     count: Variable,
+}
+
+/// A value of an element loop's plan: at the first and the last iteration, its change per
+/// iteration, and a bound of that change's size when one is known (no overflow test on it).
+#[derive(Clone, Copy)]
+struct EloopVal {
+    first: Value,
+    change: Value,
+    last: Value,
+    most: Option<u64>,
+}
+
+impl EloopVal {
+    /// A value that does not change (`zero` holds 0).
+    fn fixed(v: Value, zero: Value) -> Self {
+        EloopVal {
+            first: v,
+            change: zero,
+            last: v,
+            most: Some(0),
+        }
+    }
 }
 
 /// What a native-frame variant has instead of the interpreter's frame.
@@ -5199,6 +5229,12 @@ impl Gen<'_> {
     /// what it leaves (a fault, an overlap, memory it does not reach, nothing to gain) is the
     /// generic code after this, which also runs the last iteration.
     fn eloop(&mut self, l: &yavs_interp::ElemLoop) -> Result<(), String> {
+        if let Some(inv) = yavs_llvm::eloop::invariant_steps(&l.prog, l.inputs.len())
+            && std::env::var_os("YAVS_LLVM_ELOOP_HELPER").is_none()
+        {
+            self.eloop_plan(l, &inv);
+            return Ok(());
+        }
         let (ind, bound, step) = (self.ld(l.ind), self.ld(l.bound), self.ld(l.step));
         let (call, set, generic) = (
             self.b.create_block(),
@@ -5248,6 +5284,402 @@ impl Gen<'_> {
         self.b.switch_to_block(generic);
         self.clear();
         Ok(())
+    }
+
+    /// The iterations of an element loop but the last, planned and done in the code itself
+    /// (#757): the steps of `yavs_interp::elem_loops` as straight-line code at the loop's head,
+    /// each value at the first and the last iteration and its change per iteration, with the
+    /// checks of `yavs_llvm::eloop::run`. A failed check or memory the objects do not hold goes to the
+    /// generic code, nothing written.
+    fn eloop_plan(&mut self, l: &yavs_interp::ElemLoop, inv: &[bool]) {
+        use yavs_interp::eloop::{ADD, ADDR, GET, IND, KONST, LD, LEN, MOV, MUL, POS, SET, SUB};
+        let generic = self.b.create_block();
+        let (ind, bound, step) = (self.ld(l.ind), self.ld(l.bound), self.ld(l.step));
+        let (d0, o1) = self.b.ins().ssub_overflow(bound, ind);
+        let (dist, o2) = self.b.ins().smul_overflow(d0, step);
+        let lim = self.c64(ELOOP_LIMIT);
+        let less = self.b.ins().icmp(IntCC::SignedLessThan, dist, lim);
+        let m = self.b.ins().select(less, dist, lim);
+        let up = self.b.ins().icmp_imm_s(IntCC::Equal, step, 1);
+        let down = self.b.ins().icmp_imm_s(IntCC::Equal, step, -1);
+        let unit = self.b.ins().bor(up, down);
+        let two = self
+            .b
+            .ins()
+            .icmp_imm_s(IntCC::SignedGreaterThanOrEqual, m, 2);
+        let noof = self.b.ins().bor(o1, o2);
+        let noof = self.b.ins().icmp_imm_s(IntCC::Equal, noof, 0);
+        let okc = self.b.ins().band(unit, two);
+        let okc = self.b.ins().band(okc, noof);
+        self.guard(okc, generic);
+        let last = self.b.ins().iadd_imm_s(m, -1);
+        // `step` is 1 or -1 and `m` at most `ELOOP_LIMIT`: no overflow, the distance was checked.
+        let moved = self.b.ins().imul(step, last);
+        let ind_last = self.b.ins().iadd(ind, moved);
+        let c0 = self.c64(0);
+        let mut val: Vec<EloopVal> = Vec::new();
+        // Host address and bytes of what the plan read besides the vectors.
+        let mut reads: Vec<(Value, u64)> = Vec::new();
+        let mut gets: Option<(Option<Reg>, Value, EloopVal)> = None;
+        let input = |v: i64| (v <= -2).then(|| l.inputs[(-2 - v) as usize]);
+        let val_inv = |v: i64, inv: &[bool]| if v >= 0 { inv[v as usize] } else { v != IND };
+        for (j, st) in l.prog.as_chunks::<4>().0.iter().enumerate() {
+            let (a, bb, cc) = (st[1], st[2], st[3]);
+            let get = |g: &mut Self, v: i64, val: &[EloopVal]| {
+                if v >= 0 {
+                    val[v as usize]
+                } else if v == IND {
+                    EloopVal {
+                        first: ind,
+                        change: step,
+                        last: ind_last,
+                        most: Some(1),
+                    }
+                } else {
+                    let x = g.ld(l.inputs[(-2 - v) as usize]);
+                    EloopVal::fixed(x, c0)
+                }
+            };
+            let r = match st[0] {
+                MOV => get(self, a, &val),
+                KONST => EloopVal::fixed(self.c64(a), c0),
+                ADD | SUB => {
+                    let (x, y) = (get(self, a, &val), get(self, bb, &val));
+                    let add = st[0] == ADD;
+                    let (first, o) = self.ovf2(add, x.first, y.first);
+                    if inv[j] {
+                        self.ok_if(o, generic);
+                        EloopVal::fixed(first, c0)
+                    } else {
+                        let (last, o2) = self.ovf2(add, x.last, y.last);
+                        let mut bad = self.b.ins().bor(o, o2);
+                        let most = x.most.zip(y.most).map(|(p, q)| p + q);
+                        let change = if most.is_some() {
+                            if add {
+                                self.b.ins().iadd(x.change, y.change)
+                            } else {
+                                self.b.ins().isub(x.change, y.change)
+                            }
+                        } else {
+                            let (c, o) = self.ovf2(add, x.change, y.change);
+                            bad = self.b.ins().bor(bad, o);
+                            c
+                        };
+                        self.ok_if(bad, generic);
+                        EloopVal {
+                            first,
+                            change,
+                            last,
+                            most,
+                        }
+                    }
+                }
+                MUL => {
+                    // One of them does not change (`invariant_steps`).
+                    let (x, y) = (get(self, a, &val), get(self, bb, &val));
+                    let (k, v) = if val_inv(a, inv) {
+                        (x.first, y)
+                    } else {
+                        (y.first, x)
+                    };
+                    let (first, o) = self.b.ins().smul_overflow(k, v.first);
+                    if inv[j] {
+                        self.ok_if(o, generic);
+                        EloopVal::fixed(first, c0)
+                    } else {
+                        let (last, o2) = self.b.ins().smul_overflow(k, v.last);
+                        let (change, o3) = self.b.ins().smul_overflow(k, v.change);
+                        let bad = self.b.ins().bor(o, o2);
+                        let bad = self.b.ins().bor(bad, o3);
+                        self.ok_if(bad, generic);
+                        EloopVal {
+                            first,
+                            change,
+                            last,
+                            most: None,
+                        }
+                    }
+                }
+                POS | LEN => {
+                    let d = get(self, a, &val).first;
+                    let p = self.host(
+                        d,
+                        input(a),
+                        Op::C(bb as u64 * 24),
+                        Op::C(24),
+                        false,
+                        generic,
+                    );
+                    reads.push((p, 24));
+                    let (dl, dr, dir) = self.dope_words(p);
+                    if st[0] == LEN {
+                        let (n, fits) = self.len_of(dl, dr, dir);
+                        let big = self
+                            .b
+                            .ins()
+                            .icmp_imm_s(IntCC::SignedGreaterThanOrEqual, n, 0);
+                        let okc = self.b.ins().band(fits, big);
+                        self.guard(okc, generic);
+                        EloopVal::fixed(n, c0)
+                    } else {
+                        let x = get(self, cc, &val);
+                        let dn = self.b.ins().icmp_imm_s(IntCC::Equal, dir, 1);
+                        let u = self.b.ins().icmp_imm_s(IntCC::Equal, dir, 0);
+                        let known = self.b.ins().bor(u, dn);
+                        self.guard(known, generic);
+                        let lo = self.b.ins().select(dn, dr, dl);
+                        let hi = self.b.ins().select(dn, dl, dr);
+                        let ge = self.b.ins().icmp(IntCC::SignedLessThanOrEqual, lo, x.first);
+                        let le = self.b.ins().icmp(IntCC::SignedLessThanOrEqual, x.first, hi);
+                        let ge1 = self.b.ins().icmp(IntCC::SignedLessThanOrEqual, lo, x.last);
+                        let le1 = self.b.ins().icmp(IntCC::SignedLessThanOrEqual, x.last, hi);
+                        let inside = self.b.ins().band(ge, le);
+                        let inside1 = self.b.ins().band(ge1, le1);
+                        let inside = self.b.ins().band(inside, inside1);
+                        self.guard(inside, generic);
+                        // Both ends lie between the bounds: the positions lie between 0 and
+                        // their distance, which the first one tests.
+                        let from = self.b.ins().select(dn, dl, x.first);
+                        let to = self.b.ins().select(dn, x.first, dl);
+                        let (p0, o) = self.b.ins().ssub_overflow(from, to);
+                        let froml = self.b.ins().select(dn, dl, x.last);
+                        let tol = self.b.ins().select(dn, x.last, dl);
+                        let (p1, o2) = self.b.ins().ssub_overflow(froml, tol);
+                        let mut bad = self.b.ins().bor(o, o2);
+                        let change = if x.most.is_some() {
+                            let neg = self.b.ins().ineg(x.change);
+                            self.b.ins().select(dn, neg, x.change)
+                        } else {
+                            let (neg, o) = self.b.ins().ssub_overflow(c0, x.change);
+                            let o = self.b.ins().band(o, dn);
+                            bad = self.b.ins().bor(bad, o);
+                            self.b.ins().select(dn, neg, x.change)
+                        };
+                        self.ok_if(bad, generic);
+                        EloopVal {
+                            first: p0,
+                            change,
+                            last: p1,
+                            most: x.most,
+                        }
+                    }
+                }
+                LD => {
+                    let base = get(self, a, &val).first;
+                    let p = self.host(
+                        base,
+                        input(a),
+                        Op::C(bb as u64),
+                        Op::C(cc as u64),
+                        false,
+                        generic,
+                    );
+                    reads.push((p, cc as u64));
+                    let nf = self.gf;
+                    let w = match cc {
+                        1 => self.b.ins().uload8(I64, nf, p, 0),
+                        4 => self.b.ins().uload32(nf, p, 0),
+                        _ => self.b.ins().load(I64, nf, p, 0),
+                    };
+                    EloopVal::fixed(w, c0)
+                }
+                ADDR => {
+                    let base = get(self, a, &val).first;
+                    let lo = self.lo32(base);
+                    let lo = self.b.ins().iadd_imm_s(lo, bb);
+                    let fits =
+                        self.b
+                            .ins()
+                            .icmp_imm_s(IntCC::UnsignedLessThanOrEqual, lo, 0xffff_ffff);
+                    self.guard(fits, generic);
+                    let hi = self.b.ins().ushr_imm_s(base, 32);
+                    let hi = self.b.ins().ishl_imm_s(hi, 32);
+                    EloopVal::fixed(self.b.ins().bor(hi, lo), c0)
+                }
+                GET => {
+                    let base = get(self, a, &val).first;
+                    let x = get(self, bb, &val);
+                    gets = Some((input(a), base, x));
+                    EloopVal::fixed(c0, c0)
+                }
+                SET => {
+                    let base = get(self, a, &val).first;
+                    let x = get(self, bb, &val);
+                    let (dp, dlo, dhi) = self.eloop_stream(input(a), base, x, true, generic);
+                    // Nothing it read is among the elements it writes.
+                    for &(rs, n) in &reads {
+                        let re = self.b.ins().iadd_imm_s(rs, n as i64);
+                        let below = self.b.ins().icmp(IntCC::UnsignedLessThan, rs, dhi);
+                        let above = self.b.ins().icmp(IntCC::UnsignedLessThan, dlo, re);
+                        let hit = self.b.ins().band(below, above);
+                        let apart = self.b.ins().icmp_imm_s(IntCC::Equal, hit, 0);
+                        self.guard(apart, generic);
+                    }
+                    let (sp, s_e0, s_step, code) = if cc >= 0 {
+                        let (sr, sb, sx) = gets.expect("`invariant_steps` has a GET");
+                        let (sp, _, _) = self.eloop_stream(sr, sb, sx, false, generic);
+                        (sp, sx.first, sx.change, c0)
+                    } else {
+                        let code = get(self, cc, &val).first;
+                        let okc = self
+                            .b
+                            .ins()
+                            .icmp_imm_s(IntCC::UnsignedLessThanOrEqual, code, 8);
+                        self.guard(okc, generic);
+                        (c0, c0, c0, code)
+                    };
+                    let next = self.b.create_block();
+                    let done = self.b.append_block_param(next, I64);
+                    if cc >= 0 {
+                        let sx = gets.expect("`invariant_steps` has a GET").2;
+                        self.eloop_short(sp, sx, dp, x, m, last, next);
+                    }
+                    let c = self.b.ins().call(
+                        self.imp.eloop_exec,
+                        &[sp, s_e0, s_step, dp, x.first, x.change, code, m],
+                    );
+                    let r = self.b.inst_results(c)[0];
+                    self.b.ins().jump(next, &[BlockArg::Value(r)]);
+                    self.b.switch_to_block(next);
+                    let moved = self.b.ins().imul(done, step);
+                    let v = self.b.ins().iadd(ind, moved);
+                    self.st(l.ind, v);
+                    self.b.ins().jump(generic, &[]);
+                    self.b.switch_to_block(generic);
+                    self.clear();
+                    return;
+                }
+                _ => unreachable!("`invariant_steps` knows the operations"),
+            };
+            val.push(r);
+        }
+        unreachable!("`invariant_steps`: the program ends with a SET");
+    }
+
+    /// `x + y` or `x - y` and its overflow flag.
+    fn ovf2(&mut self, add: bool, x: Value, y: Value) -> (Value, Value) {
+        if add {
+            self.b.ins().sadd_overflow(x, y)
+        } else {
+            self.b.ins().ssub_overflow(x, y)
+        }
+    }
+
+    /// On to `slow` when the flag `bad` is set.
+    fn ok_if(&mut self, bad: Value, slow: Block) {
+        let okc = self.b.ins().icmp_imm_s(IntCC::Equal, bad, 0);
+        self.guard(okc, slow);
+    }
+
+    /// The elements `x` of the vector at `base`, all in its object: the host pointer to its first
+    /// byte and the byte range of the blocks they touch.
+    fn eloop_stream(
+        &mut self,
+        reg: Option<Reg>,
+        base: Value,
+        x: EloopVal,
+        write: bool,
+        slow: Block,
+    ) -> (Value, Value, Value) {
+        let a = self
+            .b
+            .ins()
+            .icmp_imm_s(IntCC::UnsignedLessThan, x.first, 1 << 32);
+        let b = self
+            .b
+            .ins()
+            .icmp_imm_s(IntCC::UnsignedLessThan, x.last, 1 << 32);
+        let inside = self.b.ins().band(a, b);
+        self.guard(inside, slow);
+        let lower = self.b.ins().icmp(IntCC::UnsignedLessThan, x.first, x.last);
+        let lo = self.b.ins().select(lower, x.first, x.last);
+        let hi = self.b.ins().select(lower, x.last, x.first);
+        let blo = self.b.ins().ushr_imm_s(lo, 6);
+        let blo = self.b.ins().ishl_imm_s(blo, 5);
+        let bhi = self.b.ins().ushr_imm_s(hi, 6);
+        let bhi = self.b.ins().ishl_imm_s(bhi, 5);
+        let end = self.b.ins().iadd_imm_s(bhi, 32);
+        let p = self.host(base, reg, Op::C(0), Op::V(end), write, slow);
+        let from = self.b.ins().iadd(p, blo);
+        let to = self.b.ins().iadd(p, end);
+        (p, from, to)
+    }
+
+    /// A copy within one plane block each side, the same direction, the blocks apart: the plane
+    /// copy of `yavs_llvm::eloop::exec` inline, on to `done` with `m`; anything else goes on in
+    /// a new block.
+    #[allow(clippy::too_many_arguments)]
+    fn eloop_short(
+        &mut self,
+        sp: Value,
+        s: EloopVal,
+        dp: Value,
+        d: EloopVal,
+        m: Value,
+        last: Value,
+        done: Block,
+    ) {
+        let low = |g: &mut Self, x: EloopVal| {
+            let less = g.b.ins().icmp(IntCC::UnsignedLessThan, x.last, x.first);
+            g.b.ins().select(less, x.last, x.first)
+        };
+        let (ls, ld) = (low(self, s), low(self, d));
+        let (os, od) = (
+            self.b.ins().band_imm_s(ls, 63),
+            self.b.ins().band_imm_s(ld, 63),
+        );
+        let blk = |g: &mut Self, p: Value, e: Value| {
+            let k = g.b.ins().ushr_imm_s(e, 6);
+            let k = g.b.ins().ishl_imm_s(k, 5);
+            g.b.ins().iadd(p, k)
+        };
+        let (ps, pd) = (blk(self, sp, ls), blk(self, dp, ld));
+        let same = self.b.ins().icmp(IntCC::Equal, s.change, d.change);
+        let up = self.b.ins().icmp_imm_s(IntCC::Equal, s.change, 1);
+        let down = self.b.ins().icmp_imm_s(IntCC::Equal, s.change, -1);
+        let unit = self.b.ins().bor(up, down);
+        let se = self.b.ins().iadd(os, m);
+        let de = self.b.ins().iadd(od, m);
+        let fs = self
+            .b
+            .ins()
+            .icmp_imm_s(IntCC::UnsignedLessThanOrEqual, se, 64);
+        let fd = self
+            .b
+            .ins()
+            .icmp_imm_s(IntCC::UnsignedLessThanOrEqual, de, 64);
+        // The blocks' bytes apart, as `exec` compares them.
+        let es = self.b.ins().iadd_imm_s(ps, 32);
+        let ed = self.b.ins().iadd_imm_s(pd, 32);
+        let sb = self.b.ins().icmp(IntCC::UnsignedLessThanOrEqual, es, pd);
+        let db = self.b.ins().icmp(IntCC::UnsignedLessThanOrEqual, ed, ps);
+        let apart = self.b.ins().bor(sb, db);
+        let okc = self.b.ins().band(same, unit);
+        let okc = self.b.ins().band(okc, fs);
+        let okc = self.b.ins().band(okc, fd);
+        let okc = self.b.ins().band(okc, apart);
+        let (inl, call) = (self.b.create_block(), self.b.create_block());
+        self.brif_split(okc, inl, call);
+        self.b.switch_to_block(inl);
+        // `m` is 2 to 64: `(2 << (m - 1)) - 1` is its mask.
+        let two = self.c64(2);
+        let mask = self.b.ins().ishl(two, last);
+        let mask = self.b.ins().iadd_imm_s(mask, -1);
+        let hole = self.b.ins().ishl(mask, od);
+        let hole = self.b.ins().bnot(hole);
+        let nf = self.gf;
+        for k in 0..4 {
+            let w = self.b.ins().load(I64, nf, ps, k * 8);
+            let w = self.b.ins().ushr(w, os);
+            let w = self.b.ins().band(w, mask);
+            let w = self.b.ins().ishl(w, od);
+            let keep = self.b.ins().load(I64, nf, pd, k * 8);
+            let keep = self.b.ins().band(keep, hole);
+            let v = self.b.ins().bor(keep, w);
+            self.b.ins().store(nf, v, pd, k * 8);
+        }
+        self.b.ins().jump(done, &[BlockArg::Value(m)]);
+        self.b.switch_to_block(call);
     }
 
     /// A search loop at its head: the iterations that need nothing special run in
