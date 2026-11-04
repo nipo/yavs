@@ -139,10 +139,11 @@ def run(template, vhd, hdr, work, threads, shuffle, sandbox=True):
         shuffle_on="--shuffle" if shuffle else "")
     if hdr["spin"]:  # the references do not read it
         script = f"export YAVS_SPIN_LIMIT={int(hdr['spin'])}; {script}"
-    cmd = ["timeout", str(TIMEOUT)]
+    # By full path: on Windows a bare name finds System32's `timeout` and `bash` before those on PATH.
+    cmd = [shutil.which("timeout"), str(TIMEOUT)]
     if sandbox:
         cmd += ["systemd-run", "--user", "--scope", "-q", "-p", "MemoryMax=2G"]
-    cmd += ["bash", "-c", script]
+    cmd += [shutil.which("bash"), "-c", script]
     p = subprocess.run(cmd, capture_output=True, text=True, errors="replace", cwd=work)
     (work / "stdout.txt").write_text(p.stdout)
     (work / "stderr.txt").write_text(p.stderr)

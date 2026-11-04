@@ -29,7 +29,7 @@ A passing case's directory is removed at once and the whole run directory when t
 (also on interrupt or SIGTERM); only failing cases stay, and the path is printed on stderr.
 A run killed with SIGKILL leaves its directory, and old `run-*` directories are never swept.
 `tools/difftest/test_cleanup.py` checks this. `--no-sandbox` skips
-systemd-run for debugging.
+systemd-run for debugging, and is what runs on Windows (from Git Bash, whose `timeout` and `bash` it finds through `PATH`); the release workflow runs the corpus so on the binary of each archive.
 
 ## Test header
 
