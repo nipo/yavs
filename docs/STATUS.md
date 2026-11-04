@@ -10862,3 +10862,5 @@ The inline `Alloc` checks its limit once and clears the pad and the object by st
 ## Array parameters as cells
 
 An array parameter of one dimension (`Ty::flat_array`) is `data, left, right, dir`, the bounds in the callee's parameter slots; descriptors a function makes or gets are read in registers where it can see them (`yavs-ir` `opt/dopes.rs`, `Inst::BoundsLen`, `BoundsPos`, `BoundsSlice`; `docs/decisions.md` "Array parameters as cells"). A function result of such a type is its data address and three words the machine holds (`Func::ret_flat`, `Inst::RetBounds`, `TakeBounds`), except the functions with an `ieee` native and arrays of composite elements, which keep the fat pair.
+
+The pass that reads descriptors in registers takes time proportional to the function (one scan of the code for all candidates; it had been one per candidate, 13 percent of a cold run of a large testbench). Counter `dopes_scans`, design `dopes_scan`.

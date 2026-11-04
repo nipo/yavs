@@ -6,8 +6,19 @@
 //! nothing reads any more. Works on the code before registers are shared, where nearly every
 //! register is defined once. `YAVS_NO_DOPES=1` turns it off (fingerprint `dopes`).
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use super::cfg::counts;
 use super::*;
+
+/// Instructions the pass looked at to find what writes or lets escape the blocks of descriptors.
+static SCANS: AtomicU64 = AtomicU64::new(0);
+
+/// How many instructions the pass looked at in this process: a function's code once or twice per
+/// round, never once per candidate (a work counter: `YAVS_COUNTERS`).
+pub fn scans() -> u64 {
+    SCANS.load(Ordering::Relaxed)
+}
 
 /// Is the pass on?
 pub(super) fn enabled() -> bool {
@@ -82,14 +93,17 @@ fn not_read_only(f: &crate::Func, i: &Inst, mut out: impl FnMut(Reg)) {
 
 /// Drops from `keep` every register some instruction of `f` does not only read.
 fn keep_read_only(f: &crate::Func, keep: &mut FxMap<Reg, impl Sized>) {
+    let mut scans = 0;
     for i in &f.code {
         if keep.is_empty() {
             break;
         }
+        scans += 1;
         not_read_only(f, i, |r| {
             keep.remove(&r);
         });
     }
+    SCANS.fetch_add(scans, Ordering::Relaxed);
 }
 
 /// `dom[b]`: the blocks that dominate `b`, as bits; `None` for a function too big for the sets.
@@ -195,6 +209,7 @@ fn made(f: &crate::Func, defs: &[u8], frame: bool) -> FxMap<Reg, Made> {
     let mut homes: Option<Homes> = None;
     // The registers an `Alloc` of this block filled and nothing since has written or let escape.
     let mut fresh: FxMap<Reg, ()> = FxMap::default();
+    let mut scans = 0;
     for (b, blk) in f.blocks.values().iter().enumerate() {
         let (s, e) = (blk.start as usize, blk.end as usize);
         fresh.clear();
@@ -204,11 +219,7 @@ fn made(f: &crate::Func, defs: &[u8], frame: bool) -> FxMap<Reg, Made> {
                 && let Some(&[l, r, d]) = f.regs(parts)
             {
                 let alloc = fresh.contains_key(&at);
-                if (alloc
-                    || (frame
-                        && homes
-                            .get_or_insert_with(|| Homes::new(f))
-                            .frame_home(at)))
+                if (alloc || (frame && homes.get_or_insert_with(|| Homes::new(f)).frame_home(at)))
                     && once(at)
                     && once(l)
                     && once(r)
@@ -230,6 +241,7 @@ fn made(f: &crate::Func, defs: &[u8], frame: bool) -> FxMap<Reg, Made> {
                     bad.push(at);
                 }
             }
+            scans += 1;
             not_read_only(f, i, |r| {
                 fresh.remove(&r);
             });
@@ -238,6 +250,7 @@ fn made(f: &crate::Func, defs: &[u8], frame: bool) -> FxMap<Reg, Made> {
             }
         }
     }
+    SCANS.fetch_add(scans, Ordering::Relaxed);
     for r in bad {
         out.remove(&r);
     }
@@ -419,6 +432,7 @@ fn round(prog: &Program, f: &mut crate::Func, regs: bool, params: bool) -> bool 
     let blocks: Vec<(u32, u32)> = f.blocks.values().iter().map(|b| (b.start, b.end)).collect();
     // The lengths made so far by bounds: the register and its block, in the order made.
     let mut lens: FxMap<(Reg, Reg, Reg), Vec<(Reg, usize)>> = FxMap::default();
+    let mut out: Vec<Inst> = Vec::new();
     // The constants of registers defined once.
     let consts: FxMap<Reg, i64> = f
         .code
@@ -439,7 +453,7 @@ fn round(prog: &Program, f: &mut crate::Func, regs: bool, params: bool) -> bool 
         }
         for pc in start as usize..end as usize {
             let i = f.code[pc];
-            let mut out: Vec<Inst> = Vec::new();
+            out.clear();
             match i {
                 Inst::DopeLen { dst, dope, dim: 0 } if at(dope, pc).is_some() => {
                     let (left, right, dir) = at(dope, pc).unwrap_or((dope, dope, dope));
@@ -613,7 +627,7 @@ fn round(prog: &Program, f: &mut crate::Func, regs: bool, params: bool) -> bool 
                 _ => out.push(i),
             }
             any |= out.len() != 1 || out[0] != i;
-            for x in out {
+            for &x in &out {
                 code.push(x);
                 loc.push(f.loc[pc]);
                 if let Some(&v) = f.via.get(pc) {
