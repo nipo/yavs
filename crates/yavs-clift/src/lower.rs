@@ -120,6 +120,9 @@ pub struct Jit {
     /// (`cold_stub`).
     cold_host: ClifId,
     cold_deref: ClifId,
+    /// `yavs_rt_step` and `yavs_rt_signal` of a frame-mode slow path, `(mem, pc[, edge])`.
+    cold_step: ClifId,
+    cold_signal: ClifId,
     /// Module data by its bytes and whether it is 8-byte aligned.
     tables: HashMap<(Vec<u8>, bool), DataId>,
     /// What a body's reference to module data names in another run (`Name::Data`), by data id.
@@ -568,6 +571,9 @@ impl Jit {
             imp(IMAGE_CHECK, &[I64, I32, I32], None)?,
         ];
         let cold_host = cold_stub(&mut module, "cold_host", host, &[I64, I64, I64, I64, I64, I32], 1, &[])?;
+        let z = [(0, 0, I64), (1, 0, I64)];
+        let cold_step = cold_stub(&mut module, "cold_step", step, &[I64, I32], 0, &z)?;
+        let cold_signal = cold_stub(&mut module, "cold_signal", signal, &[I64, I32, I32], 0, &z)?;
         // `(env, regs, mem, dst, h)`, as `yavs_rt_fast(env, regs, mem, FAST_DEREF, dst, h, 0)`.
         let cold_deref = cold_stub(
             &mut module,
@@ -605,6 +611,8 @@ impl Jit {
             kernel,
             cold_host,
             cold_deref,
+            cold_step,
+            cold_signal,
             tables: HashMap::new(),
             table_names: HashMap::new(),
             sig,
@@ -1380,6 +1388,10 @@ impl Jit {
         let imports = Imports {
             step: self.module.declare_func_in_func(self.step, &mut ctx.func),
             host: self.module.declare_func_in_func(self.cold_host, &mut ctx.func),
+            cold_step: self.module.declare_func_in_func(self.cold_step, &mut ctx.func),
+            cold_signal: self
+                .module
+                .declare_func_in_func(self.cold_signal, &mut ctx.func),
             signal: self.module.declare_func_in_func(self.signal, &mut ctx.func),
             lcopy: self.module.declare_func_in_func(self.lcopy, &mut ctx.func),
             zero: self.module.declare_func_in_func(self.zero, &mut ctx.func),
@@ -1567,6 +1579,8 @@ struct Imports {
     wait_on: FuncRef,
     wait_same: FuncRef,
     drive: FuncRef,
+    cold_step: FuncRef,
+    cold_signal: FuncRef,
     drive_bit: FuncRef,
     codes: FuncRef,
     planes: FuncRef,
@@ -4148,14 +4162,14 @@ fn gen_func(
         }
         if let Some(e) = s.edge {
             let (p, ev) = (g.c32(s.pc), g.c32(e));
-            g.call_go(g.imp.signal, &[p, ev], false);
+            g.cold_go(g.imp.cold_signal, &[p, ev]);
             let args = back(&mut g);
             g.b.ins().jump(s.join, &args);
             continue;
         }
         let at = if s.keep { s.pc | KEEP } else { s.pc };
         let pcv = g.c32(at);
-        g.call_go(g.imp.step, &[pcv], false);
+        g.cold_go(g.imp.cold_step, &[pcv]);
         let args = back(&mut g);
         g.b.ins().jump(s.join, &args);
     }
@@ -5175,6 +5189,26 @@ impl Gen<'_> {
             }
             IntOp::Pow => return None,
         })
+    }
+
+    /// A frame-mode slow path's call of a `cold_stub` (the arguments after `Mem`): `call_go` with
+    /// the result in `Mem::cold_ret`.
+    fn cold_go(&mut self, f: FuncRef, rest: &[Value]) {
+        self.spill(self.pc);
+        let mut args = vec![self.mem];
+        args.extend_from_slice(rest);
+        self.b.ins().call(f, &args);
+        let r = self.b.ins().load(I32, self.mf, self.mem, MEM_COLD_RET as i32);
+        self.clear();
+        let cont = self.b.create_block();
+        let go = self
+            .b
+            .ins()
+            .icmp_imm_s(IntCC::Equal, r, i64::from(GO as i32));
+        self.b
+            .ins()
+            .brif(go, cont, &[], self.exit, &[BlockArg::Value(r)]);
+        self.b.switch_to_block(cont);
     }
 
     /// Call a callback (the arguments after env, regs, mem) that returns `GO` or what the
