@@ -5863,15 +5863,16 @@ impl Gen<'_> {
         self.brif_split(is_up, upb, other);
         for (bb, lo, hi) in [(upb, l, r), (dnb, r, l)] {
             self.b.switch_to_block(bb);
-            let nonempty = self.b.ins().icmp(IntCC::SignedLessThanOrEqual, lo, hi);
-            let (rel, span) = if bb == upb {
-                (self.b.ins().isub(i, l), self.b.ins().isub(r, l))
-            } else {
-                (self.b.ins().isub(l, i), self.b.ins().isub(l, r))
-            };
-            let inside = self.b.ins().icmp(IntCC::UnsignedLessThanOrEqual, rel, span);
-            let okv = self.b.ins().band(nonempty, inside);
+            // As the interpreter: `lo <= i <= hi` leaves out an empty range too.
+            let above = self.b.ins().icmp(IntCC::SignedGreaterThanOrEqual, i, lo);
+            let below = self.b.ins().icmp(IntCC::SignedLessThanOrEqual, i, hi);
+            let okv = self.b.ins().band(above, below);
             self.guard(okv, slow);
+            let rel = if bb == upb {
+                self.b.ins().isub(i, l)
+            } else {
+                self.b.ins().isub(l, i)
+            };
             self.b.ins().jump(cont, &[BlockArg::Value(rel)]);
             if bb == upb {
                 self.b.switch_to_block(other);
