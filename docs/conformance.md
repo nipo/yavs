@@ -1,15 +1,15 @@
 # yavs conformance report
 
-Generated: yavs 0.13.0 at commit `fa4e2e4ae0` (2026-11-04) by `tools/conformance/run.py`; do not edit by hand.
+Generated: yavs 0.14.0 at commit `6494ba05ef` (2026-11-04) by `tools/conformance/run.py`; do not edit by hand.
 
 yavs is checked by running the test suites of VHDL libraries, a VHDL language test suite and real designs on it, and by comparing its output
-with two established open-source VHDL simulators, called sim1 and sim2 here. Each suite judges its own tests. Over the suites below, 15006 of 15109
+with two established open-source VHDL simulators, called sim1 and sim2 here. Each suite judges its own tests. Over the suites below, 15048 of 15151
 tests pass; every failure is tracked as an issue. This is evidence, not a proof of correctness.
 
 | Project or suite | What it is | Passed / total |
 | --- | --- | ---: |
-| Differential testbenches | small testbenches of this repository; output must equal sim1's, at 1 and 4 threads | 610/610 |
-| Known simulator differences | one reproducer per case where simulators disagree | 261/261 |
+| Differential testbenches | small testbenches of this repository; output must equal sim1's, at 1 and 4 threads | 648/648 |
+| Known simulator differences | one reproducer per case where simulators disagree | 265/265 |
 | sim1's regression tests | a reference simulator's own self-checking tests (runnable ones) | 1014/1070 |
 | sim2's regression tests | a reference simulator's own self-checking tests (runnable ones) | 463/504 |
 | VESTs | VHDL-1993 language test suite | 3694/3694 |
@@ -40,16 +40,17 @@ Every testbench of `tests/corpus` runs on yavs and its normalised output is comp
 | --- | --- | --- | --- |
 | access | 8/8 | 8/8 | 8/8 |
 | arith | 8/8 | 8/8 | 8/8 |
-| composite | 139/139 | 139/139 | 139/139 |
-| delta | 13/13 | 13/13 | 13/13 |
+| composite | 155/155 | 155/155 | 155/155 |
+| delta | 14/14 | 14/14 | 14/14 |
 | env | 16/16 | 16/16 | 16/16 |
 | force | 12/12 | 12/12 | 12/12 |
 | generics | 58/58 | 58/58 | 58/58 |
-| hierarchy | 90/90 | 90/90 | 90/90 |
+| held | 10/10 | 10/10 | 10/10 |
+| hierarchy | 91/91 | 91/91 | 91/91 |
 | ieee | 21/21 | 21/21 | 21/21 |
 | implicit | 6/6 | 6/6 | 6/6 |
 | postponed | 2/2 | 2/2 | 2/2 |
-| process | 40/40 | 40/40 | 40/40 |
+| process | 46/46 | 46/46 | 46/46 |
 | protected | 27/27 | 27/27 | 27/27 |
 | psl | 16/16 | 16/16 | 16/16 |
 | reflect | 14/14 | 14/14 | 14/14 |
@@ -58,11 +59,11 @@ Every testbench of `tests/corpus` runs on yavs and its normalised output is comp
 | rtl | 4/4 | 4/4 | 4/4 |
 | scalar | 20/20 | 20/20 | 20/20 |
 | shared | 4/4 | 4/4 | 4/4 |
-| sigassign | 33/33 | 33/33 | 33/33 |
+| sigassign | 37/37 | 37/37 | 37/37 |
 | std93 | 6/6 | 6/6 | 6/6 |
 | synopsys | 20/20 | 20/20 | 20/20 |
 | textio | 19/19 | 19/19 | 19/19 |
-| total | 610/610 | 610/610 | 610/610 |
+| total | 648/648 | 648/648 | 648/648 |
 
 Failing: none.
 
@@ -84,8 +85,8 @@ Not passing: sim1: 56; sim2: 41 (the classes of each are in `docs/conformance.js
 ### Known simulator differences
 
 [`docs/design/simulator-discrepancies.md`](https://github.com/ru551n/yavs/blob/main/docs/design/simulator-discrepancies.md) lists every case where the references disagree with each other, with the language reference or with yavs:
-261 catalogued behaviours, each with a reproducer under `tests/discrepancies/<case>/`. CI runs every reproducer on yavs and fails when yavs's output
-differs from the recorded one (matches). Kinds: LRM clear 173, LRM ambiguity 77, reference bug 6, other 4, library availability 1.
+265 catalogued behaviours, each with a reproducer under `tests/discrepancies/<case>/`. CI runs every reproducer on yavs and fails when yavs's output
+differs from the recorded one (matches). Kinds: LRM clear 175, LRM ambiguity 78, reference bug 7, other 4, library availability 1.
 
 Policy (`docs/plan.md`): where the language reference is clear, yavs follows it even against all references; where it is unclear yavs is permissive
 and follows the majority of the references that run the construct. The verdicts of each reference are in the catalogue; the table gives the clause, the kind,
@@ -318,6 +319,9 @@ and yavs's verdict.
 | [`protected-path-name`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/protected-path-name) | 16.2.5 (2019) | LRM ambiguity | OK |
 | [`reflect-integer-simple-name`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/reflect-integer-simple-name) | 16.11 (2019) | LRM ambiguity | OK |
 | [`last-value-composite`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/last-value-composite) | 16.2.4 | LRM clear | OK |
+| [`null-slice-result-right-bound`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/null-slice-result-right-bound) | 8.5 | LRM clear | OK |
+| [`result-length-return-subtype-generic`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/result-length-return-subtype-generic) | 10.13 | LRM clear | FATAL |
+| [`resolved-array-subtype-function`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/resolved-array-subtype-function) | 6.3, 4.6 | reference bug | OK |
 | [`active-in-delta-of-assignment`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/active-in-delta-of-assignment) | 14.7.3.2, 16.2.4 | LRM clear | OK |
 | [`use-type-operations`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/use-type-operations) | 12.4 | LRM ambiguity | OK |
 | [`resolution-array-bounds`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/resolution-array-bounds) | 4.6, 14.7.3.2 | LRM ambiguity | OK |
@@ -353,6 +357,7 @@ and yavs's verdict.
 | [`record-constrained-formal-length`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/record-constrained-formal-length) | 5.3.2.2, 6.5.7.1 | LRM clear | FATAL |
 | [`array-of-arrays-element-length-assign`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/array-of-arrays-element-length-assign) | 10.6.2.1 | LRM clear | FATAL |
 | [`external-constant-length`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/external-constant-length) | 8.7 | LRM clear | REJECT |
+| [`external-signal-attribute`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/external-signal-attribute) | 8.1, 16.2 | LRM ambiguity | OK |
 | [`aggregate-declared-operator-direction`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/aggregate-declared-operator-direction) | 9.3.3.3 | LRM ambiguity | OK |
 | [`record-static-default-length`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/record-static-default-length) | 5.3.2.2, 6.5.2 | LRM clear | REJECT |
 | [`qualified-record-own-bounds`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/qualified-record-own-bounds) | 9.3.5 | LRM clear | OK |

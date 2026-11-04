@@ -231,12 +231,12 @@
        8
       ],
       "composite": [
-       139,
-       139
+       155,
+       155
       ],
       "delta": [
-       13,
-       13
+       14,
+       14
       ],
       "env": [
        16,
@@ -250,9 +250,13 @@
        58,
        58
       ],
+      "held": [
+       10,
+       10
+      ],
       "hierarchy": [
-       90,
-       90
+       91,
+       91
       ],
       "ieee": [
        21,
@@ -267,8 +271,8 @@
        2
       ],
       "process": [
-       40,
-       40
+       46,
+       46
       ],
       "protected": [
        27,
@@ -303,8 +307,8 @@
        4
       ],
       "sigassign": [
-       33,
-       33
+       37,
+       37
       ],
       "std93": [
        6,
@@ -332,12 +336,12 @@
        8
       ],
       "composite": [
-       139,
-       139
+       155,
+       155
       ],
       "delta": [
-       13,
-       13
+       14,
+       14
       ],
       "env": [
        16,
@@ -351,9 +355,13 @@
        58,
        58
       ],
+      "held": [
+       10,
+       10
+      ],
       "hierarchy": [
-       90,
-       90
+       91,
+       91
       ],
       "ieee": [
        21,
@@ -368,8 +376,8 @@
        2
       ],
       "process": [
-       40,
-       40
+       46,
+       46
       ],
       "protected": [
        27,
@@ -404,8 +412,8 @@
        4
       ],
       "sigassign": [
-       33,
-       33
+       37,
+       37
       ],
       "std93": [
        6,
@@ -433,12 +441,12 @@
        8
       ],
       "composite": [
-       139,
-       139
+       155,
+       155
       ],
       "delta": [
-       13,
-       13
+       14,
+       14
       ],
       "env": [
        16,
@@ -452,9 +460,13 @@
        58,
        58
       ],
+      "held": [
+       10,
+       10
+      ],
       "hierarchy": [
-       90,
-       90
+       91,
+       91
       ],
       "ieee": [
        21,
@@ -469,8 +481,8 @@
        2
       ],
       "process": [
-       40,
-       40
+       46,
+       46
       ],
       "protected": [
        27,
@@ -505,8 +517,8 @@
        4
       ],
       "sigassign": [
-       33,
-       33
+       37,
+       37
       ],
       "std93": [
        6,
@@ -525,7 +537,7 @@
    }
   },
   "discrepancies": {
-   "cases": 261,
+   "cases": 265,
    "output_tail": "",
    "yavs_matches_expected": true
   },
@@ -613,9 +625,9 @@
   }
  },
  "generated": {
-  "commit": "fa4e2e4ae0",
+  "commit": "6494ba05ef",
   "commit_date": "2026-11-04",
-  "version": "0.13.0"
+  "version": "0.14.0"
  },
  "local": {
   "records": {
@@ -3058,6 +3070,27 @@
     "yavs": "OK"
    },
    {
+    "case": "null-slice-result-right-bound",
+    "decided": "agent (decisions.md \"Array parameters as cells\")",
+    "kind": "LRM clear",
+    "lrm": "8.5",
+    "yavs": "OK"
+   },
+   {
+    "case": "result-length-return-subtype-generic",
+    "decided": "agent (decisions.md \"Array parameters as cells\")",
+    "kind": "LRM clear",
+    "lrm": "10.13",
+    "yavs": "FATAL"
+   },
+   {
+    "case": "resolved-array-subtype-function",
+    "decided": "agent (decisions.md \"Array parameters as cells\")",
+    "kind": "reference bug",
+    "lrm": "6.3, 4.6",
+    "yavs": "OK"
+   },
+   {
     "case": "active-in-delta-of-assignment",
     "decided": "agent, 2026-10-24 (#519)",
     "kind": "LRM clear",
@@ -3301,6 +3334,13 @@
     "kind": "LRM clear",
     "lrm": "8.7",
     "yavs": "REJECT"
+   },
+   {
+    "case": "external-signal-attribute",
+    "decided": "agent, 2026-11-04 (#1091, L182)",
+    "kind": "LRM ambiguity",
+    "lrm": "8.1, 16.2",
+    "yavs": "OK"
    },
    {
     "case": "aggregate-declared-operator-direction",
