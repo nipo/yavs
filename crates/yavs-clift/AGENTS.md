@@ -68,6 +68,10 @@ tier of the release archives (user, 2026-10-28: one archive per platform); tunin
   (`broken`, a debug assertion).
 - Compiled code never reports an error itself: an inline instruction that fails returns its own
   pc and the interpreter re-executes it (rule 5).
+- Slow paths, entry stubs and the exit block are generated after the body, so they have no pc of
+  their own in `known`: `gen_func` resets it to `base_known` first (#1089). State that depends on
+  the pc is taken when the slow path is made (`snaps`, `jparams`, the fields of `Slow`), or read
+  through the Cranelift variables.
 
 ## 5. How to work here
 

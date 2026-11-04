@@ -27,6 +27,10 @@ The Linux and Windows x86_64 release archives are built with `-C target-cpu=x86-
 
 From 2026-11-03 (user) each x86_64 platform also has a `yavs-<version>-<target>-compat` archive built for the Rust default CPU, with no CPU check compiled in (the smoke test fails a compat archive that has the check's text and a plain one that lacks it); the old-CPU message names that archive first and a source build second. Every archive carries a generated `README.txt`. Details: `docs/decisions.md` "x86-64-v3 baseline", amendment.
 
+### A native frame's slow path reads its own registers (#1089, 2026-11-04)
+
+Under the Cranelift tier a slow path that hands its instruction to the interpreter (`LFill`, `LEq`, `MemEq`, `LogicOp`, `Cat`) is generated after the body and read the facts of the function's last instruction, so a register that shares its cell with one a late constant defines went in as that constant: a silent wrong value, reproduced with plain VHDL under `--tier=clift`, `clift-auto` and `auto` (first call right, later calls wrong; test `clift_slow_path_facts`, which depends on the register sharing of that design). `gen_func` now resets `known` to `base_known` before that code. By reading, the LLVM tier does not have this: its slow paths are generated at their own pc and its exit block clears the facts first.
+
 ### A loop without a wait is bounded in every tier (#1087, 2026-11-03)
 
 A process that never suspends and reaches its jump back through a branch (`if` without else as the last statement of the loop) was neither counted nor diagnosed: `--tier=clift` hung, the interpreter needed 1000 times the bound. `E3009` now comes at the same count in the interpreter and under `--tier=clift` and `clift-auto` (`pre::counted_brs`; test `stuck::a_loop_whose_jump_back_is_threaded_ends_with_an_error`, unit test `counted_jumps_back_are_ops_of_their_own`). Not run: the LLVM tier (same code by reading). Decision: `docs/decisions.md` "A jump back of a process that never suspends is counted however it is reached".
