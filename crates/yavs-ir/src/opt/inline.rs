@@ -334,7 +334,12 @@ fn make(prog: &crate::Program, callee: FuncId, level: u8, wide: bool) -> Option<
 /// definition in a block that is no longer reached moves to the entry.
 fn keep_definitions(blocks: &mut [Vec<Ent>], seen: &[bool], operands: &[Reg]) {
     let (mut read, mut defined) = (HashSet::new(), HashSet::new());
-    for (i, ..) in blocks.iter().zip(seen).filter(|(_, s)| **s).flat_map(|(b, _)| b) {
+    for (i, ..) in blocks
+        .iter()
+        .zip(seen)
+        .filter(|(_, s)| **s)
+        .flat_map(|(b, _)| b)
+    {
         i.visit(&mut |r, role, _| {
             if role == Role::Def {
                 defined.insert(r);
