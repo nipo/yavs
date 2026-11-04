@@ -10841,3 +10841,36 @@ Constructs yavs accepted although the LRM text or every voting reference rejects
   files; `T'base'attr` stays legal; 2019 files still accept it (LCS-2016-018 not checked).
 - `'subtype` and `'element` as type marks, also in allocators (L178): accepted as before, the verdict and its quotes recorded; two catalogue
   cases.
+
+## Profile-guided release archives (`tools/pgo`, 2026-11-04)
+
+Every release archive is a profile-guided build, trained on its own runner with its own flags (`tools/pgo/build.sh`, `docs/decisions.md` "Profile-guided release archives"). The training set is 21 original testbenches in `tools/pgo/train/` and a sweep over `tests/corpus`: about 420 instrumented runs. A profile problem fails the job, naming the cause (`tools/pgo/check.py`). Each job runs `tests/corpus` on the binary of its archive, five tiers at 1 and 4 threads, 610 of 610 passing in every job. The default command of `build.sh` was run on Linux x86_64 only.
+
+Gain on the runners, per archive: `docs/performance.md` "Which build these numbers are for" (`tools/pgo/gain.py`, three runs of seven rounds, ten held-out designs). Per design, warm run, lowest to highest median of the three runs, on Linux x86_64 and aarch64 (the -compat and Windows archives are in the artifacts of the runs named below):
+
+| design | Linux x86_64 | Linux aarch64 | aarch64 instructions |
+|---|---:|---:|---:|
+| `rtl_bus` | 0.888 to 0.923 | 0.913 to 0.929 | 0.965 to 1.015 |
+| `rtl_chain` | 0.898 to 0.980 | 0.758 to 0.762 | 0.837 to 0.838 |
+| `rtl_ram` | 0.804 to 0.932 | 0.829 to 0.870 | 0.891 to 0.893 |
+| `rec_pair` | 0.955 to 0.966 | 0.869 to 0.874 | 0.938 to 0.939 |
+| `protected_queue` | 0.967 to 1.030 | 0.979 to 0.984 | 0.980 to 0.987 |
+| `textio_heavy` | 0.754 to 0.817 | 0.834 to 0.839 | 0.864 to 0.865 |
+| `ieee_heavy` | 0.982 to 1.004 | 0.996 to 1.000 | 0.996 to 1.006 |
+| `strings_heavy` | 0.906 to 0.951 | 0.875 to 0.884 | 0.964 to 0.968 |
+| `calls` | 0.996 to 0.999 | 0.943 to 0.947 | 1.027 to 1.031 |
+| `compute_h2h` | 0.999 to 1.004 | 0.998 to 1.000 | 1.001 to 1.007 |
+
+Runs: release workflow dispatches 41733257723, 41748695004, 41748708419. Worst repeatable held-out cell: `rtl_bus` on Linux `-compat`, warm, 1.038 to 1.058, cause not established. `ieee_heavy` on the same archive reads 1.002 to 1.023. No cell of the other four archives stays above 1 in all three runs.
+
+On our own host, x86-64-v3, binary built by the release recipe, shared and loaded (load 25 to 45), so instructions are the exact figure:
+
+- 34 real testbenches (`tools/realbench --compare`, one pass per binary; `osvvm_axi4_random` and `osvvm_axis_random` recorded nothing): `run` instructions 0.944, highest 1.026 (`olo_fix_cordic_rot`), cycles 0.889 (indicative); `elab` 0.967, highest 1.053 (`uvvm_axistream_vvc`); analysis of their own files 0.992, highest 1.020.
+- 26 designs of `tools/bench/designs`, one pass: instructions 0.963 analysis, 0.966 cold run, 0.978 warm run. Above 1.04: `rtl_lfsr` warm 1.162 (cold 0.980), `compute_loop` warm 1.127 (cold 0.914), `calls` warm 1.047 (cold 1.022). Their cold cells are lower, which suggests the `auto` tier's compile timing; not established.
+- A binary built by the runner and one built here, same core: instructions 0.955 and 0.964 on the ten held-out designs, so the place of training changes little.
+- Whole processor designs, plain against profile-guided: GRLIB LEON3 output and exit status equal, instructions 0.961; Microwatt the same (exit status 1, as its test expects), 0.970.
+- Discrepancy catalogue `--sims yavs --check` passes; external lists sim1 995 and sim2 455 pass.
+
+Earlier measurement, branch `perf/pgo` off `176f5ec7` (36 real testbenches, three runs, bench builds, cycles indicative): `run` instructions 0.944 (highest 0.999), cycles 0.895; with a profile trained on real designs 0.948 and 0.894. On the 23 designs neither profile saw, 0.945 and 0.949. `x86-64-v3` alone: instructions 0.989, cycles 1.003; profile-guided on top of it: 0.947 instructions, cycles 0.878. VHPI plugin runs of five conformance plugins 0.984 to 0.998; `--cov=sbt` on five designs 0.89 to 0.99.
+
+Not measured: the DAP debugger, `--interactive`, `--profile`, `--activity`, other `--cov` kinds, 16 or more threads, the head-to-head with the reference simulators on a profile-guided build. Builds are not bit-reproducible: the profile depends on the `auto` tier's timing during training.

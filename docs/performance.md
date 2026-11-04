@@ -80,6 +80,30 @@ Among the hand-written RTL designs, clocked designs with very many cheap process
   ([issue 1060](https://github.com/ru551n/yavs/issues/1060)), whose old-style testbenches no longer exist, and has four OSVVM-based PoC testbenches instead (`poc_arith_addw`, now a different
   testbench, `poc_arith_scaler`, `poc_ooo_buffer`, `poc_arith_counter_bcd`). The means and ratios on this page were not recomputed for that suite.
 
+## Which build these numbers are for
+
+The release archives are profile-guided from 0.14.0 (see [Getting started](getting-started.rst)). Every comparison with other simulators on this page was made with a plain release build, so it says nothing about what the profile adds, and we have not repeated those comparisons with a profile-guided build.
+
+What the profile adds was measured on 2026-11-04 on the GitHub runners that build the archives. Each archive was built with and without a profile from the same source and flags, and ten benchmark designs that the training never ran took turns on all arms, with a second plain binary as a control for the machine's noise. Three workflow runs of seven rounds each; each cell gives the lowest and highest geometric mean of the three runs, profile-guided divided by plain, so below 1 is faster. Times are wall-clock. Only the aarch64 runner has an instruction counter.
+
+| Archive | Run, warm | Run, cold | Analysis | Control, warm | Instructions, warm |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Linux x86_64 | 0.924 to 0.938 | 0.922 to 0.937 | 1.001 to 1.003 | 0.998 to 1.007 | no counter |
+| Linux x86_64 `-compat` | 0.931 to 0.940 | 0.929 to 0.939 | 0.993 to 1.003 | 1.001 to 1.004 | no counter |
+| Linux aarch64 | 0.899 to 0.903 | 0.893 to 0.897 | 0.991 to 1.009 | 1.001 to 1.002 | 0.946 to 0.951 |
+| Windows x86_64 | 0.903 to 0.910 | 0.904 to 0.916 | 0.978 to 0.983 | 1.005 to 1.008 | no counter |
+| Windows x86_64 `-compat` | 0.904 to 0.933 | 0.914 to 0.930 | 0.972 to 0.975 | 0.993 to 1.005 | no counter |
+
+What this does not say:
+
+- **The gain differs a lot per design.** Text I/O gained 14 to 25 percent on every archive, a long chain of signals 2 to 25 percent, while a design that spends its run in compiled code (`compute_h2h`) gained nothing on any.
+- **Two designs are slower on one archive.** On the Linux `-compat` archive `rtl_bus` took 4 to 6 percent longer warm and 1 to 2 percent longer cold, in all three runs, and `ieee_heavy` up to 2 percent longer. We do not know why: on our own host `rtl_bus` executes about the same number of instructions. The same design on Windows `-compat` read 0.98 to 1.05, and on the archives for x86-64-v3 and aarch64 it gained 7 to 11 percent. No other cell on any archive stayed above 1 in all three runs.
+- **Analysis of a small file does not get faster on Linux:** it is mostly start-up. On aarch64 it executes 3 percent fewer instructions and takes the same time.
+- **Elaboration of very wide port connections can lose.** Before the training had a case for it, a design with an out port on each of 20000 elements of one vector took 2.3 times the instructions of a plain build. A training case cured that, but we did not find out why it happened, so another path the training does not run could do the same. That design is left out of the table.
+- **The runners differ.** The Linux x86_64 runners were AMD EPYC 7763, 9V45 and 9V74 in these runs, and different runs of one archive landed on different CPUs. These are not figures for your machine.
+
+On our own host (AMD Ryzen 9 7950X3D, shared and loaded), a binary built the same way for x86-64-v3 executed 0.944 of the instructions of the plain build in the run of 34 real testbenches (highest 1.026), 0.967 in elaboration (highest 1.053) and 0.992 in analysis of their own files (highest 1.020). That is one pass per binary, and the machine was too loaded for its times to count.
+
 ## Measure your own design
 
 `--time-report` and `--profile` show where a run spends its time, and the tiers and the cache
@@ -90,7 +114,7 @@ an otherwise idle machine, repeat, and compare medians; a short run varies by te
 
 The testbenches come from open-source VHDL projects (verification libraries, FPGA libraries, processor
 designs), each run as its project's own scripts would: analysing the libraries and the testbench's files,
-elaborating and running. yavs is a release build at its default `--tier=auto`, built for the baseline x86-64 CPU with aligned functions: not the x86-64-v3 build of the x86_64 release archives from 2026-11-03 on, which was not measured here. Every pair of timings ran on
+elaborating and running. yavs is a plain release build at its default `--tier=auto`, built for the baseline x86-64 CPU with aligned functions: not the x86-64-v3 build of the x86_64 release archives from 2026-11-03 on and not a profile-guided one, which were not measured here. Every pair of timings ran on
 the same CPU core, in turn, on a shared Linux host (AMD Ryzen 9 7950X3D), repeated two to five times; the 2026-11-01 run took the best of two passes for each measurement,
 with a median host load of 10 to 14. The
 other simulators are not named; all of them run compiled or generated code. The per-testbench tables, the

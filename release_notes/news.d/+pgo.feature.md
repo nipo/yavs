@@ -1,0 +1,1 @@
+Every release archive is now a profile-guided build, trained on bundled testbenches on its own platform and CPU level, so simulations run faster. A build from source can do the same with `tools/pgo/build.sh` on Linux and Windows.

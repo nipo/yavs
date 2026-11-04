@@ -49,6 +49,9 @@ Every archive has everything in it: nothing else needs to be installed. Its
 ``yavs`` has the compiled tier built in (:doc:`running-faster`). A release also carries the VS Code
 extension of the same version (:doc:`debugging`), and ``pip install vunit-yavs`` gets the VUnit package (:doc:`vunit`).
 
+Every archive is a profile-guided build: it is built, trained on testbenches bundled with the source on its own platform and
+CPU level, and built again with what those runs recorded. The speed this gives on each platform is on :doc:`performance`.
+
 What is in the archive
 ^^^^^^^^^^^^^^^^^^^^^^
 
@@ -113,6 +116,24 @@ and newer only.
 Without ``--features clift`` the build has no compiled tier: ``yavs --version`` says
 ``interpreter only, no compiled tier``, the default is ``--tier=interp``, and ``--tier=auto`` is
 error ``E0120``.
+
+Profile-guided build
+^^^^^^^^^^^^^^^^^^^^
+
+A build from source can be profile-guided as well, as the release archives are. ``tools/pgo/build.sh`` builds
+yavs with instrumentation, runs a set of bundled testbenches with it, and builds again using what
+the runs recorded. It needs the ``llvm-tools`` component of the Rust toolchain, a ``bash`` (on Windows the one of Git for Windows) and Python 3:
+
+.. code-block:: bash
+
+    rustup component add llvm-tools
+    tools/pgo/build.sh target/yavs-pgo     # the profile-guided yavs
+
+It takes about three times the processor time of a plain release build (two builds and the training runs) and the
+result gives the same output as a plain build. Set ``RUSTFLAGS`` (for example ``-C target-cpu=x86-64-v3``) to give both builds the
+same flags. The script fails and says why when a training run fails or when the final build did not use the profile;
+it never leaves a binary built without one. The command above was run on Linux x86_64; the release archives run the same script on
+Linux x86_64, Linux aarch64 and Windows x86_64 with a build command of their own.
 
 Problems with the installation are covered in :doc:`troubleshooting`.
 

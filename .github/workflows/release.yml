@@ -2,12 +2,14 @@
 # every artifact", #903), on a `v[0-9]*` tag:
 # - the version of yavs, vunit-yavs and the VS Code extension must equal the tag
 #   (tools/release/bump.py --check);
-# - the CI checks on the tagged commit, a release build of `yavs` per platform
+# - the CI checks on the tagged commit, a profile-guided release build of `yavs` per archive, trained on its
+#   own runner with its own flags (tools/pgo, docs/decisions.md "Profile-guided release archives")
 #   (std/ieee built in, the Cranelift compiled tier, `--features clift`), one archive yavs-<version>-<target> each (docs/decisions.md
 #   "Release archives", "One release archive per platform"); the Linux ones built with
 #   cargo-zigbuild against glibc 2.17 and smoke-tested in centos:7; the x86_64 ones twice: for x86-64-v3
 #   (RUSTFLAGS, docs/decisions.md "x86-64-v3 baseline") under the plain name, and for the Rust default
-#   CPU as yavs-<version>-<target>-compat; all smoke-tested on runners that have AVX2;
+#   CPU as yavs-<version>-<target>-compat; all smoke-tested on runners that have AVX2, and each binary runs the
+#   tests/corpus differential tests;
 # - the vunit-yavs wheel and sdist, tested on every platform against the archives of this run;
 #   the VS Code extension (.vsix, vscode.yml) tested against the Linux x86_64 archive of this run;
 # - the committed conformance report (docs/conformance.md and .json) as
@@ -36,6 +38,10 @@ on:
         description: Run the CI checks first (a tag push always does)
         type: boolean
         default: true
+      pgo_gain:
+        description: Also build each archive without a profile and measure the difference (tools/pgo/gain.py)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -109,10 +115,10 @@ jobs:
       RUSTFLAGS: ${{ matrix.rustflags }}
     steps:
       - uses: actions/checkout@v5
+      # No rust-cache here: cargo does not see the content of a profile, so a cached dependency would keep an older one.
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.target }}${{ matrix.suffix }}
+          components: llvm-tools
       - name: Install zig and cargo-zigbuild
         if: runner.os == 'Linux'
         run: |
@@ -129,21 +135,29 @@ jobs:
             x86_64-*) echo "VARIANT=x86-64-v3" >> "$GITHUB_ENV" ;;
             *) echo "VARIANT=" >> "$GITHUB_ENV" ;;
           esac
-      - name: Build
+      - name: Profile-guided build
+        env:
+          PGO_DIR: ${{ runner.temp }}/pgo
+          PGO_JOBS: 3
         run: |
           t=${{ matrix.target }}
+          exe=; [[ "$RUNNER_OS" == Windows ]] && exe=.exe
           mkdir -p stage
+          # Linux: against glibc 2.17; the target directory and the archive name stay the plain triple. Zig cannot link the
+          # profile runtime, so the instrumented build alone links with cc. Its command stays the same, or the profile matches
+          # nothing (tools/pgo/AGENTS.md section 4).
           if [[ "$RUNNER_OS" == Linux ]]; then
-            # glibc 2.17; the target directory and the archive name stay the plain triple.
-            cargo zigbuild --release --locked -p yavs --features clift --target $t.2.17
-            cp target/$t/release/yavs stage/
+            export PGO_BUILD="cargo zigbuild --release --locked -p yavs --features clift --target $t.2.17" PGO_INSTR_RUSTFLAGS="-C linker=cc"
+          else
+            export PGO_BUILD="cargo build --release --locked -p yavs --features clift --target $t"
+          fi
+          export PGO_BIN_REL="$t/release/yavs$exe"
+          tools/pgo/build.sh "stage/yavs$exe"
+          if [[ "$RUNNER_OS" == Linux ]]; then
             v=$(objdump -T stage/yavs | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -n1)
             echo "stage/yavs: highest glibc symbol version: $v"
             [[ "$(printf '%s\n' GLIBC_2.17 "$v" | sort -V | tail -n1)" == GLIBC_2.17 ]] || { echo "needs more than glibc 2.17"; exit 1; }
             readelf -d stage/yavs | grep NEEDED
-          else
-            cargo build --release --locked -p yavs --features clift
-            cp target/release/yavs.exe stage/
           fi
       - name: Package
         run: |
@@ -175,6 +189,8 @@ jobs:
 
           yavs is a VHDL simulator (VHDL-1993, 2008 and 2019). This archive holds the simulator for $t.
           $what
+          It is a profile-guided build: built, trained on bundled testbenches on this platform, and built again with what
+          those runs recorded.
 
           Files:
             $exe    the simulator; the std and ieee libraries are built in, nothing else needs installing
@@ -249,6 +265,38 @@ jobs:
             docker run --rm -v "$PWD:/w" -w /w centos:7 sh -ec \
               "rm -rf w2; ldd $name/yavs; $name/yavs --version; $name/yavs analyze --work=work:w2 t.vhd && $name/yavs run --work=work:w2 t | grep -q ': ok' && $name/yavs run --tier=clift --work=work:w2 t | grep -q ': ok'"
           fi
+      - name: The corpus on the binary of the archive
+        env:
+          DIFFTEST_CACHE: ${{ runner.temp }}/difftest
+        run: |
+          cd "dist/yavs-$VERSION-${{ matrix.target }}${{ matrix.suffix }}"
+          export YAVS_BIN="$PWD/yavs"
+          cd "$GITHUB_WORKSPACE"
+          for c in yavs-interp yavs-auto yavs-auto-warm yavs-clift yavs-clift-auto; do
+            s=$SECONDS
+            python3 tools/difftest/difftest.py --candidate "$c" --threads 4 --no-sandbox --jobs 4
+            echo "$c: $((SECONDS - s)) s"
+          done
+      - name: The same build without a profile, and the difference
+        if: inputs.pgo_gain
+        run: |
+          t=${{ matrix.target }}
+          exe=; [[ "$RUNNER_OS" == Windows ]] && exe=.exe
+          build="cargo build"; triple=$t
+          [[ "$RUNNER_OS" == Linux ]] && { build="cargo zigbuild"; triple=$t.2.17; }
+          CARGO_TARGET_DIR="$RUNNER_TEMP/plain" $build --release --locked -p yavs --features clift --target "$triple"
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            sudo apt-get install -y "linux-tools-$(uname -r)" || echo "no perf for this kernel: timings only"
+            sudo sysctl kernel.perf_event_paranoid=1 || true
+          fi
+          python3 -I tools/pgo/gain.py "$RUNNER_TEMP/plain/$t/release/yavs$exe" "dist/yavs-$VERSION-$t${{ matrix.suffix }}/yavs$exe" \
+            --out "dist/gain-$t${{ matrix.suffix }}.json" | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: inputs.pgo_gain
+        with:
+          name: pgo-gain-${{ matrix.target }}${{ matrix.suffix }}
+          path: dist/gain-*.json
+          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
           name: yavs-${{ matrix.target }}${{ matrix.suffix }}

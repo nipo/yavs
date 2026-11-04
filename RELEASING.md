@@ -3,7 +3,7 @@
 One release per version holds everything (maintainer, 2026-10-30, #903; `docs/decisions.md` "One
 release with every artifact"):
 
-- the simulator archives `yavs-<version>-<target>` for Linux x86_64, Linux aarch64 and Windows x86_64, and `yavs-<version>-<target>-compat` for the two x86_64 ones (the plain x86_64 archives are built for x86-64-v3, the compat ones for the baseline x86-64 CPU), each with a generated `README.txt`;
+- the simulator archives `yavs-<version>-<target>` for Linux x86_64, Linux aarch64 and Windows x86_64, and `yavs-<version>-<target>-compat` for the two x86_64 ones (the plain x86_64 archives are built for x86-64-v3, the compat ones for the baseline x86-64 CPU), each with a generated `README.txt`. Each one is a profile-guided build, trained on its own runner with its own flags (`tools/pgo/AGENTS.md`);
 - the test runner package `vunit-yavs`: wheel and sdist, also published to PyPI;
 - the VS Code debugger extension `yavs-debug-<version>.vsix` (Marketplace and Open VSX: not yet);
 - the conformance report `yavs-<version>-conformance.md` and `.json`;
@@ -45,6 +45,7 @@ the tag's version. A new version spot goes into the `SPOTS` table of `bump.py`.
    `gh workflow run release.yml --ref main -f dry_run=true -f checks=true`. It builds and tests
    everything and keeps the files as workflow artifacts; it creates no release and publishes
    nothing Its `conformance` job only lists the conformance runs of the commit: a dry run has no tag run to wait for.
+   With `-f pgo_gain=true` each build job also builds the same archive without a profile and measures the difference on held-out designs (`tools/pgo/gain.py`, in the job summary and as artifacts `pgo-gain-*`). Do that when the training set, the toolchain or the runners changed, and update `docs/performance.md`.
 3. The release commit:
    - `python3 -I tools/release/bump.py X.Y.Z`, then read `git diff`;
    - `uvx towncrier build --config release_notes/towncrier.toml --version X.Y.Z --yes`, and rename
@@ -71,3 +72,13 @@ the tag's version. A new version spot goes into the `SPOTS` table of `bump.py`.
 
 Never move or delete a tag or a release that was published; a broken release is followed by the
 next patch version.
+
+## When a build job stops at the profile
+
+Every archive is trained in its own job, and no job ships a binary built without a profile. In the last full dry run a build job took 10 to 17 minutes on Linux x86_64, 12 on aarch64 and 20 to 31 on Windows (the same job varies with the runner's CPU), of which the corpus on the binary is 1 to 2 minutes on Linux and 4 to 7 on Windows. All jobs of a dry run with checks came to about 170 runner minutes and 53 minutes of waiting. The last lines of the `Profile-guided build` step name the cause:
+
+- `train: exit status N` with a command and its output: a training run failed, usually a compiler change that rejects a case in `tools/pgo/train/` or `tests/corpus`. The `corpus` job of `ci.yml` runs the training cases on every push, so this should show on `main` first. Fix the case or the compiler.
+- `train: corpus run differs`: a `tests/corpus` testbench did not end as its header says.
+- `pgo: the compiler complains about the profile`: the source changed between the two builds of the job.
+- `pgo: the profile does not fit the final build`: the two builds differ in something cargo mixes into symbol names (`--target`, the linker it is configured with). See `tools/pgo/AGENTS.md` section 4; never lower the check.
+- `pgo: the profile is empty` or `no usable profile`: the training wrote nothing. Check that the instrumented build has the runtime and that `llvm-tools` is installed.
