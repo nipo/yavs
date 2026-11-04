@@ -291,6 +291,94 @@ fn accesses_through_held_regions_are_checked_in_debug_builds() {
     assert!(n > 1000, "held accesses checked: {n}");
 }
 
+const BELOW: &str = r#"entity below is end;
+architecture a of below is
+  -- Nothing here moves a frame: a stable activation holds what its parameter points into.
+  procedure leaf (variable i : inout integer; k : integer) is
+  begin
+    for t in 1 to 3 loop
+      if i mod 2 = 0 then i := (i * 7 + k) mod 10007; else i := (i + t) mod 10007; end if;
+      if i mod 3 = 0 then i := (i * 3 + k) mod 10009; else i := (i + t) mod 10009; end if;
+      if i mod 4 = 0 then i := (i * 5 + k) mod 10037; else i := (i + t) mod 10037; end if;
+      if i mod 5 = 0 then i := (i * 11 + k) mod 10039; else i := (i + t) mod 10039; end if;
+      if i mod 6 = 0 then i := (i * 13 + k) mod 10061; else i := (i + t) mod 10061; end if;
+      if i mod 7 = 0 then i := (i * 17 + k) mod 10067; else i := (i + t) mod 10067; end if;
+      if i mod 8 = 0 then i := (i * 19 + k) mod 10069; else i := (i + t) mod 10069; end if;
+      if i mod 9 = 0 then i := (i * 23 + k) mod 10079; else i := (i + t) mod 10079; end if;
+      if i mod 10 = 0 then i := (i * 29 + k) mod 10091; else i := (i + t) mod 10091; end if;
+      if i mod 11 = 0 then i := (i * 31 + k) mod 10093; else i := (i + t) mod 10093; end if;
+      if i mod 12 = 0 then i := (i * 37 + k) mod 10099; else i := (i + t) mod 10099; end if;
+      if i mod 13 = 0 then i := (i * 41 + k) mod 10103; else i := (i + t) mod 10103; end if;
+      if i mod 14 = 0 then i := (i * 43 + k) mod 10111; else i := (i + t) mod 10111; end if;
+      if i mod 15 = 0 then i := (i * 47 + k) mod 10133; else i := (i + t) mod 10133; end if;
+      if i mod 16 = 0 then i := (i * 53 + k) mod 10139; else i := (i + t) mod 10139; end if;
+      if i mod 17 = 0 then i := (i * 59 + k) mod 10141; else i := (i + t) mod 10141; end if;
+    end loop;
+  end procedure;
+  -- Waits, so these two run on interpreter frames: `i` points below the top frame.
+  procedure middle (variable i : inout integer; k : integer) is
+  begin
+    wait for 1 ns;
+    leaf(i, k);
+  end procedure;
+  procedure outer (variable s : inout integer; k : integer) is
+    variable v : integer := k;
+  begin
+    wait for 1 ns;
+    middle(v, k + 1);
+    s := (s + v) mod 100003;
+  end procedure;
+begin
+  process
+    variable s : integer := 0;
+  begin
+    for i in 1 to 20 loop
+      outer(s, i);
+    end loop;
+    report "sum " & integer'image(s);
+    wait;
+  end process;
+end;
+"#;
+
+/// An address parameter of a stable activation may point into an interpreter frame below the top
+/// one, which the table finds and nothing moves. The check holds it against the same lookup (it
+/// called such a hold stale, on a call chain materialised from native frames).
+#[test]
+fn a_hold_in_a_frame_below_the_top_is_no_stale_hold() {
+    let dir = tempdir("clift_hold_below");
+    std::fs::write(dir.join("below.vhd"), BELOW).expect("write");
+    let common = ["--std=2008", "--work=work:work"];
+    let a = yavs(
+        &dir,
+        &[&["analyze"], &common[..], &["below.vhd"]].concat(),
+        &[],
+    );
+    assert!(a.status.success(), "{a:?}");
+    let go = |tier: &'static str| {
+        let o = yavs(
+            &dir,
+            &[&["run"], &common[..], &["--no-cache", tier, "below"]].concat(),
+            &[("YAVS_CLIFT_HOLD_CHECK", "1"), ("YAVS_COUNTERS", "1")],
+        );
+        let e = String::from_utf8_lossy(&o.stderr).into_owned();
+        assert!(o.status.success(), "{tier}: {e}");
+        let counted = e
+            .lines()
+            .find_map(|l| l.strip_prefix("counters: hold_checked="))
+            .and_then(|n| n.trim().parse::<u64>().ok())
+            .unwrap_or(0);
+        let out = String::from_utf8_lossy(&o.stdout);
+        let sum = out.lines().find(|l| l.contains("sum ")).map(str::to_string);
+        (sum, counted)
+    };
+    let (want, _) = go("--tier=interp");
+    assert!(want.is_some());
+    let (got, counted) = go("--tier=clift");
+    assert_eq!(got, want);
+    assert!(counted > 0, "no held access was checked");
+}
+
 /// The mutation test: without the recheck the object freed under a parameter is read through the
 /// stale pointer, and the check says so.
 #[test]
