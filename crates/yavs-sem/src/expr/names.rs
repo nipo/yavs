@@ -848,6 +848,8 @@ impl Db {
         match self.classify(scope, n) {
             NameRes::One(d) => self.decl_is_signal(d),
             NameRes::Value => match &n.kind {
+                // A signal external name denotes a signal (8.7); 16.2 takes it as `S`.
+                ast::NameKind::External(x) => x.class == ast::ExternalClass::Signal,
                 ast::NameKind::Selected { prefix, .. } | ast::NameKind::Apply { prefix, .. } => {
                     self.ast_root_signal(scope, prefix)
                 }

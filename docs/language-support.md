@@ -50,7 +50,7 @@ probed:
 - Package and subprogram generics, generic types, formal packages, package instantiation in any declarative part.
 - `fixed_pkg` and `float_pkg`, `numeric_std_unsigned`, `numeric_bit_unsigned`, the 2008 `std_logic_1164`,
   `numeric_std` and `math_real`, `to_string` and its relatives, `minimum` and `maximum`, the predefined vector types.
-- External names (also as port actuals and with `force`), `force` and `release`, conditional and selected sequential
+- External names (also as port actuals, as the prefix of attributes such as `<<signal ...>>'event`, and with `force`), `force` and `release`, conditional and selected sequential
   assignments, `process (all)`, `elsif` and `case` generate, the condition operator `??`, matching `case?` and
   `select?` (probed), `rising_edge` and `falling_edge` on `boolean` (probed), context declarations (probed),
   extended bit string literals (probed), delimited comments (probed).

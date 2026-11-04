@@ -1,0 +1,3 @@
+exit	0
+diag	note	1000000	1	:external_attr:watch	n event at 1000000 fs
+diag	note	7000000	0	:external_attr:chk	checked
