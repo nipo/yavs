@@ -152,6 +152,10 @@ fn a_warm_clift_auto_run_links_the_hot_process_from_the_cache() {
         if !cold.is_empty() {
             break;
         }
+        // (A run can store its code and end before it prints the line: start from an empty cache.)
+        for e in entries(&dir) {
+            std::fs::remove_file(&e).expect("remove");
+        }
         (_, cold, err) = run();
     }
     assert!(
