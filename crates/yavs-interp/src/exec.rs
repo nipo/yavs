@@ -671,6 +671,8 @@ pub(crate) struct Machine {
     /// The last `LayoutOf` of each type (indexed by `TyId`): descriptor size, descriptor bytes
     /// and the layout words written. Layouts are pure functions of type and descriptor.
     layouts: Vec<Option<LayoutMemo>>,
+    /// For each type the memo before the one in `layouts`.
+    layouts2: Vec<Option<LayoutMemo>>,
     /// The plans of record signal gathers and scatters this machine met (`gather.rs`).
     pub(crate) plans: Vec<crate::gather::MPlan>,
     /// What compiled code reaches of the record images, once it can (`crate::ImageCell`).
@@ -793,6 +795,29 @@ struct LayoutMemo {
     /// The address of the descriptor `words` came from when that is constant data (it never
     /// changes), else 0: a layout of the same constant needs no descriptor read.
     ckey: u64,
+}
+
+/// The memo that takes over from `memo` for the descriptor bytes `d`: the one before it when it
+/// was made from them (a slice of an array assigned to the whole of it asks for two layouts of
+/// one type in turn), else that one refilled; `memo` is then the one before.
+fn memo_next(
+    prog: &Program,
+    ty: TyId,
+    memo: Option<LayoutMemo>,
+    before: &mut Option<LayoutMemo>,
+    dsz: u64,
+    d: &[u8],
+    ckey: u64,
+) -> R<LayoutMemo> {
+    let old = before.take();
+    *before = memo;
+    match old {
+        Some(mut m) if m.simple.is_none() && m.dsz == dsz && m.desc == d => {
+            m.ckey = ckey;
+            Ok(m)
+        }
+        old => memo_fill(prog, ty, old, dsz, d, ckey),
+    }
 }
 
 /// The layout memo of `ty` (`Machine::layouts`) made from the descriptor bytes `d` of `dsz`
@@ -1310,6 +1335,7 @@ impl Machine {
             ieee_stop: false,
             ieee_fallback: false,
             layouts: Vec::new(),
+            layouts2: Vec::new(),
             plans: Vec::new(),
             icells: Box::default(),
             icells_at: 0,
@@ -3803,6 +3829,7 @@ impl Machine {
         let t = ty.0 as usize;
         if self.layouts.len() <= t {
             self.layouts.resize_with(t + 1, || None);
+            self.layouts2.resize_with(t + 1, || None);
         }
         // A memo made from the same descriptor bytes (a loop asks for the same layout again and
         // again), or an array of scalars whose words come straight from the bounds: answered
@@ -3840,6 +3867,7 @@ impl Machine {
         let t = ty.0 as usize;
         if self.layouts.len() <= t {
             self.layouts.resize_with(t + 1, || None);
+            self.layouts2.resize_with(t + 1, || None);
         }
         let memo = self.layouts[t].take();
         let dsz = match &memo {
@@ -3847,9 +3875,11 @@ impl Machine {
             None => Ty::desc_size(&prog.types, ty)
                 .ok_or_else(|| ice_f!("type {ty} has no descriptor size"))?,
         };
+        let mut before = self.layouts2[t].take();
         let d = self.rd(desc, dsz)?;
         let ckey = if split(desc).0 == CONST { desc } else { 0 };
-        let m = memo_fill(prog, ty, memo, dsz, d, ckey)?;
+        let m = memo_next(prog, ty, memo, &mut before, dsz, d, ckey)?;
+        self.layouts2[t] = before;
         let m = self.layouts[t].insert(m);
         Ok(&m.words)
     }
@@ -3860,6 +3890,7 @@ impl Machine {
         let t = ty.0 as usize;
         if self.layouts.len() <= t {
             self.layouts.resize_with(t + 1, || None);
+            self.layouts2.resize_with(t + 1, || None);
         }
         if let Some(m) = &self.layouts[t]
             && m.dsz == d.len() as u64
@@ -3875,7 +3906,7 @@ impl Machine {
             }
         }
         let memo = self.layouts[t].take();
-        let m = memo_fill(prog, ty, memo, d.len() as u64, d, 0)?;
+        let m = memo_next(prog, ty, memo, &mut self.layouts2[t], d.len() as u64, d, 0)?;
         word_of(&self.layouts[t].insert(m).words, k)
     }
 
