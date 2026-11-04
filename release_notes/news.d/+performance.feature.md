@@ -1,1 +1,1 @@
-Long simulations do less work, most of all at `--tier=auto` on Cranelift: compiled code reaches signals, record drives, array parameters and library subprograms in fewer steps, more of a design stays compiled, and a warm run links its compiled code without translating it first. The earlier compile policy is one switch away, `YAVS_AUTO_POLICY=sampled` (see the environment variables page), for comparing the two.
+Long simulations run faster, the code compiled for them is smaller, and a warm run links its stored compiled code instead of translating it again.

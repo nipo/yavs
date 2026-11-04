@@ -1,0 +1,1 @@
+`--tier=auto` now also goes by how often code is entered when it decides what to compile, so a short cold run of a few seconds may take longer than before. `YAVS_AUTO_POLICY=sampled` goes back to the earlier policy.
