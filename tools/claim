@@ -103,6 +103,8 @@ def release(n, who, note=""):
             api(f"issues/{n}/labels/{LABEL}", "DELETE")
         except RuntimeError:
             pass  # label already gone
+        if active(comments(n)):  # a take raced with the delete: its label must stay, or `list` omits it (#1012)
+            api(f"issues/{n}/labels", "POST", **{"labels[]": LABEL})
     print(f"released #{n} as {who}")
 
 
@@ -175,6 +177,26 @@ def selftest():
     assert [w for _, w, _ in active(cs)] == ["b/y", "a/x"]
     assert active([c(1, "RELEASE a/x t"), c(2, "CLAIM a/x t")])[0][1] == "a/x"
     assert active([c(1, "CLAIM a/x t"), c(2, "RELEASE b/y t")])[0][1] == "a/x"
+    # A take that lands between release's check and its label delete keeps its label.
+    global api, comments
+    saved, st = (api, comments), {"cs": [c(1, "CLAIM a/x t")], "labels": {LABEL}}
+
+    def fake(path, method="GET", **f):
+        if method == "DELETE":
+            st["labels"].discard(LABEL)
+            st["cs"].append(c(9, "CLAIM b/y t"))  # b/y takes now
+        elif path.endswith("/labels"):
+            st["labels"].add(LABEL)
+        else:
+            st["cs"].append(c(len(st["cs"]) + 2, f["body"]))
+        return {"id": 0}
+
+    api, comments = fake, lambda n: st["cs"]
+    try:
+        release(1, "a/x")
+    finally:
+        api, comments = saved
+    assert st["labels"] == {LABEL} and [w for _, w, _ in active(st["cs"])] == ["b/y"], st
     print("selftest ok")
 
 
