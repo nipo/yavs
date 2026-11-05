@@ -311,7 +311,7 @@ Semantic analysis (E1 and W1)
    * - _`E1302`
      - More than one interpretation fits; qualify an operand or use a selected name.
    * - _`W1302`
-     - ``--relaxed`` (R7): in a VHDL-1993 file an operation is declared implicitly by one package and explicitly, with the same profile, by another, both made visible by use clauses (``=`` on ``std_logic_vector`` from ``std_logic_1164`` and ``std_logic_unsigned``).
+     - ``--relaxed``: in a VHDL-1993 file an operation is declared implicitly by one package and explicitly, with the same profile, by another, both made visible by use clauses (``=`` on ``std_logic_vector`` from ``std_logic_1164`` and ``std_logic_unsigned``).
    * - _`E1303`
      - An operator symbol that is not a VHDL operator, or an operator function with the wrong number of parameters (LRM 4.5.2).
    * - _`E1304`
@@ -401,7 +401,7 @@ Semantic analysis (E1 and W1)
    * - _`E1506`
      - A generic subprogram of a component or block cannot be the actual of an entity's generic subprogram in a generic map.
    * - _`W1506`
-     - An instance of a generic with a 2008 ``type T`` (or 2019 ``type T is private``) compares values with the actual type's predefined ``=``/``/=`` (LRM 6.5.3), while a different user ``"="`` for the actual type is visible at the instantiation; some simulators use that one.
+     - An instance of a generic with a 2008 ``type T`` (or 2019 ``type T is private``) compares values with the actual type's predefined ``=``/``/=`` (LRM 6.5.3), while a different user ``"="`` for the actual type is visible at the instantiation; the predefined one is used.
    * - _`E1507`
      - A generic or port declared with an anonymous type (``type is ...``, VHDL-2019) takes the type of its actual (LRM 6.5.2, 6.5.3), so its association has no conversion function or type conversion on the formal side: the converted type would have to come from the actual, which the conversion hides.
    * - _`E1601`
@@ -483,7 +483,7 @@ Semantic analysis (E1 and W1)
    * - _`E1906`
      - This declaration is not allowed in a protected type declaration or body (LRM 5.6): the declaration holds method declarations, use clauses, attribute specifications and, in VHDL-2019, private variables and aliases of methods; the body holds no signals or shared variables.
    * - _`E1907`
-     - A variable port of a composite (array or record) of protected types is not supported by yavs, and most reference simulators reject it too.
+     - A variable port of a composite (array or record) of protected types is not supported by yavs.
    * - _`E1910`
      - The construct needs VHDL-2019.
    * - _`E1999`

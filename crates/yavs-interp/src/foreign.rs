@@ -361,7 +361,7 @@ impl Machine {
                 Ok((et, ct, bit, dims))
             }
             _ => rt_err(format!(
-                "foreign `{name}`: arrays of composite elements are not supported (ir.md 1.7)"
+                "foreign `{name}`: arrays of composite elements are not supported"
             )),
         }
     }
@@ -532,7 +532,7 @@ impl Machine {
             let ft = self.ty(f.ty)?;
             let Some(ct) = ctype_in(&ft, layout) else {
                 return rt_err(format!(
-                    "foreign `{name}`: record field `{}` is not a scalar (ir.md 1.7)",
+                    "foreign `{name}`: record field `{}` is not a scalar",
                     f.name
                 ));
             };

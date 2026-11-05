@@ -238,7 +238,7 @@ impl Db {
             .with_note("LRM 5.4.2: before the full type declaration, an incomplete type may only be named in an access type definition");
         if in_profile {
             d = d
-                .with_note("only units of library `std` (e.g. `std.reflection`) may use an incomplete type in a protected method profile; sim1, sim2 and sim3 reject it in user code")
+                .with_note("only units of library `std` (e.g. `std.reflection`) may use an incomplete type in a protected method profile")
                 .with_help(format!("declare an access type to `{name}` and use that in the profile"));
         }
         Err(self.error(d))

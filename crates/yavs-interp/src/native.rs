@@ -94,14 +94,12 @@ pub(crate) fn lookup(symbol: &str) -> Result<Option<NativeFn>, String> {
     if found.is_some() {
         debug_assert!(
             valid(),
-            "`{symbol}` is implemented but not in lib/NATIVE.md"
+            "`{symbol}` is implemented but not listed as a native subprogram"
         );
         return Ok(found);
     }
     if !valid() {
-        return Err(format!(
-            "`{symbol}` is not a native subprogram (lib/NATIVE.md defines the symbols)"
-        ));
+        return Err(format!("`{symbol}` is not a native subprogram"));
     }
     Ok(None)
 }

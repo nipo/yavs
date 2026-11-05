@@ -854,7 +854,7 @@ impl Elaborated {
                         ),
                     )
                     .with_primary(db.decls[d].span, "declared here")
-                    .with_note("declare it in the architecture or a package (#164)"),
+                    .with_note("declare it in the architecture or a package"),
                 ]);
             }
         }

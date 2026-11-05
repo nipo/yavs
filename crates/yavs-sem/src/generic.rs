@@ -2286,7 +2286,7 @@ impl Db {
                 )
                 .with_primary(span, format!("the generic type's `=` is the predefined `=` of `{an}`"))
                 .with_secondary(self.decls[u].span, "this `\"=\"` is visible here but not used")
-                .with_note("LRM 6.5.3: the `=` of an interface type is the actual's predefined operator; sim1 uses the visible user one instead (yavs decision U-6)")
+                .with_note("LRM 6.5.3: the `=` of an interface type is the actual's predefined operator, not a visible user-defined one")
                 .with_help("to use the user `\"=\"`, declare a formal `function \"=\" (l, r : t) return boolean is <>` in the generic"),
             );
         }

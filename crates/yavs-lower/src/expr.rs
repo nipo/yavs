@@ -320,9 +320,7 @@ impl<'a> Fx<'a, '_> {
             // Every external name elab binds is used through an alias; one left is in a package
             // declaration and names the hierarchy (elab rejects those) or something not
             // supported yet.
-            ExprKind::External(_) => Err(self
-                .cx
-                .unsupported(span, "this use of an external name (#255)")),
+            ExprKind::External(_) => Err(self.cx.unsupported(span, "this use of an external name")),
             // The value of a user-defined attribute is its specification's expression.
             ExprKind::AttrValue { spec } => {
                 let v = db.attr_values[*spec].value;

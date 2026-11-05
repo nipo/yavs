@@ -1952,9 +1952,7 @@ impl Db {
                         "a variable port of a composite of protected types is not supported",
                     )
                     .with_primary(o.span, "variable port")
-                    .with_help(
-                        "most reference simulators reject this form; declare the port with a protected type, or one port per object",
-                    ),
+                    .with_help("declare the port with a protected type, or one port per object"),
                 ));
             }
             if !matches!(

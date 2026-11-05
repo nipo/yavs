@@ -350,8 +350,7 @@ fn parse_threads(s: &str) -> Result<usize, String> {
         Ok(0) => Err("the number of threads must be at least 1".into()),
         Ok(n) => Ok(n),
         Err(_) if s.trim() == "auto" => Err(
-            "`auto` is not implemented yet (#901): give a number of threads, such as `--threads=4`"
-                .into(),
+            "`auto` is not implemented yet: give a number of threads, such as `--threads=4`".into(),
         ),
         Err(_) => Err(format!(
             "`{s}` is not a number of threads: give a whole number of at least 1, such as `--threads=4`"

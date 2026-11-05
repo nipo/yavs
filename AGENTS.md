@@ -75,6 +75,9 @@ ownership, commit identity, shared-host limits) do not apply to them.
    environment. A broken invariant is an internal-compiler-error diagnostic ("this is a bug in
    yavs"), never a bare panic. Not-yet-implemented features report an explicit "not implemented"
    diagnostic naming the construct, never a guess and no milestone (maintainer, 2026-10-31, #966).
+   A message says what is wrong and, for a language rule, cites the LRM clause. It compares with
+   no other tool and names no internal document, label or issue (user, 2026-11-05;
+   `crates/yavs/tests/message_text.rs`).
 2. **LRM policy.** Where the LRM is clear, follow it and fail early. Where it is unclear or silent,
    be permissive: accept what the other major simulators accept, pick the
    semantics that lets the most designs elaborate, and warn only when simulators give different
