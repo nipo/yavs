@@ -800,6 +800,25 @@ fn order_mask(text: &str, by_text: bool) -> String {
     out
 }
 
+/// The blessed output next to a testbench; a missing file is named, with the fix.
+fn read_expected(f: &Path) -> String {
+    let e = f.with_extension("expected");
+    std::fs::read_to_string(&e).unwrap_or_else(|err| {
+        panic!(
+            "{} has no .expected ({err}): generate {} with a reference simulator through \
+             `tools/difftest/difftest.py --bless`",
+            f.display(),
+            e.display()
+        )
+    })
+}
+
+#[test]
+#[should_panic(expected = "zz_new.vhd has no .expected")]
+fn missing_expected_names_the_testbench() {
+    read_expected(Path::new("/nonexistent/zz_new.vhd"));
+}
+
 #[test]
 fn corpus_groups() {
     let mut summary = String::new();
@@ -819,7 +838,7 @@ fn corpus_groups() {
         files.sort();
         for f in files {
             let name = format!("{g}/{}", f.file_stem().unwrap().to_string_lossy());
-            let expected = std::fs::read_to_string(f.with_extension("expected")).unwrap();
+            let expected = read_expected(&f);
             // Testbenches write files relative to the working directory: give each its own.
             let cwd = tempfile::tempdir().unwrap();
             std::env::set_current_dir(cwd.path()).unwrap();
