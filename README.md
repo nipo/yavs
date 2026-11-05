@@ -71,6 +71,13 @@ yavs is a pre-release: expect gaps, and please [report](https://github.com/ru551
 
 Pull requests and bug reports are welcome: see [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
+### Contributors
+
+Thanks to everyone who has contributed so far:
+
+- [malles030](https://github.com/malles030)
+- [Paebbels](https://github.com/Paebbels)
+
 ## License
 
 yavs is licensed under either of [Apache-2.0](https://github.com/ru551n/yavs/blob/main/LICENSE-APACHE) or [MIT](https://github.com/ru551n/yavs/blob/main/LICENSE-MIT), at your option. The bundled IEEE, VITAL and Synopsys packages have their own terms: see [`lib/SOURCES.md`](https://github.com/ru551n/yavs/blob/main/lib/SOURCES.md), [`lib/LICENSE`](https://github.com/ru551n/yavs/blob/main/lib/LICENSE), [`lib/LICENSE-IEEE-VITAL`](https://github.com/ru551n/yavs/blob/main/lib/LICENSE-IEEE-VITAL) and [`lib/LICENSE-SYNOPSYS`](https://github.com/ru551n/yavs/blob/main/lib/LICENSE-SYNOPSYS).
