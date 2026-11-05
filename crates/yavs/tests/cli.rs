@@ -1522,6 +1522,41 @@ fn per_file_processes_across_libraries() {
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
+/// A record element whose type is in a package of another library that this process has not
+/// loaded yet: the package is loaded while the record's elements are analysed and makes types
+/// of its own before the record's.
+#[test]
+fn record_element_loads_a_package_of_another_library() {
+    let tmp = tempdir("recload");
+    let yavs = |lib: &str, name: &str, text: &str| {
+        let f = tmp.join(name);
+        std::fs::write(&f, text).expect("write");
+        let o = Command::new(env!("CARGO_BIN_EXE_yavs"))
+            .args(["--color", "never", "analyze", "--std=93"])
+            .arg(format!("--work={lib}:{}/{lib}", tmp.display()))
+            .arg(format!("--map=la:{}/la", tmp.display()))
+            .arg(&f)
+            .output()
+            .expect("run");
+        assert_eq!(
+            o.status.code(),
+            Some(0),
+            "{name}: {}",
+            String::from_utf8_lossy(&o.stderr)
+        );
+    };
+    yavs(
+        "la",
+        "p.vhd",
+        "package p is\n  type t is (x, y);\nend package;\n",
+    );
+    yavs(
+        "lb",
+        "q.vhd",
+        "library la;\npackage q is\n  type r is record\n    e : la.p.t;\n  end record;\nend package;\n",
+    );
+}
+
 #[test]
 fn explain() {
     let yavs = |code: &str| {
