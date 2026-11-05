@@ -23,7 +23,7 @@ the same files again into the populated libraries), `elab` (elaboration only, co
 `--tier=interp`, both stopped at time 0; cold and warm cache; the reference generates code inside its elaboration), `run` (the --tiers cells).
 Python is stdlib only (run with `python3 -I`) except that the OSVVM driver tests need pyEDAA.OSVVM (tools/suites/requirements.txt). See AGENTS.md.
 """
-import argparse, concurrent.futures as cf, functools, importlib.util, json, math, os, re, shlex, shutil, statistics, subprocess, sys, tempfile, threading, time, tomllib, types
+import argparse, concurrent.futures as cf, fcntl, functools, importlib.util, json, math, os, re, shlex, shutil, statistics, subprocess, sys, tempfile, threading, time, tomllib, types
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -223,16 +223,22 @@ def ensure_base(tool, manifest, Y=None, key=None):
     """The library directories of one corpus manifest built by one tool (cached; builds with tools/corpus/run.py)."""
     d = CACHE / "lib" / (key if tool == "yavs" else tool) / manifest
     log = d.parent / f"{manifest}.log"
-    if log.exists() and re.search(r"\[\w+\]: \d+ PASS, \d+ FAIL of \d+ run", log.read_text()[-300:]) and d.is_dir():
+    built = lambda: log.exists() and re.search(r"\[\w+\]: \d+ PASS, \d+ FAIL of \d+ run", log.read_text()[-300:]) and d.is_dir()
+    if built():
         return d
     d.parent.mkdir(parents=True, exist_ok=True)
-    argv = [sys.executable, "-I", str(REPO / "tools/corpus/run.py"), manifest, "--out", str(d), "--std-cache", str(CACHE / "std"), "--keep-going", "--expected", "none", "--root", str(CORPUS)]
-    argv += ["--cmd", f"{Y} analyze --std={{std}} --work={{lib}}:{{dir}}/{{lib}} {{map}} {{flags}} {{file}}"] if tool == "yavs" else ["--tool", tool]
-    p = subprocess.run(argv, capture_output=True, text=True, errors="replace")
-    log.write_text(p.stdout + p.stderr)
-    if not re.search(r"\[\w+\]: \d+ PASS", p.stdout[-300:]):
-        raise Fail(f"building {manifest} with {tool} failed: {(p.stdout + p.stderr)[-300:]}")
-    return d
+    with open(d.parent / f"{manifest}.lock", "w") as lk:
+        fcntl.flock(lk, fcntl.LOCK_EX)  # one builder per library: jobs sharing lib/ wait, then find it built (#1043)
+        if built():
+            return d
+        shutil.rmtree(d, ignore_errors=True)  # a build that was stopped leaves a half-built library
+        argv = [sys.executable, "-I", str(REPO / "tools/corpus/run.py"), manifest, "--out", str(d), "--std-cache", str(CACHE / "std"), "--keep-going", "--expected", "none", "--root", str(CORPUS)]
+        argv += ["--cmd", f"{Y} analyze --std={{std}} --work={{lib}}:{{dir}}/{{lib}} {{map}} {{flags}} {{file}}"] if tool == "yavs" else ["--tool", tool]
+        p = subprocess.run(argv, capture_output=True, text=True, errors="replace")
+        log.write_text(p.stdout + p.stderr)
+        if not re.search(r"\[\w+\]: \d+ PASS", p.stdout[-300:]):
+            raise Fail(f"building {manifest} with {tool} failed: {(p.stdout + p.stderr)[-300:]}")
+        return d
 
 
 def copy_tree(src, dst):
@@ -1039,6 +1045,7 @@ def markdown(res):
 # ---- main ----
 
 def self_test():
+    global REPO, CACHE, CORPUS
     assert abs(geomean([1, 4]) - 2) < 1e-9 and geomean([]) is None and ratio(2, 4) == 0.5 and ratio(None, 1) is None
     assert auto_runs(0.2) == 5 and auto_runs(10) == 3 and auto_runs(100) == 2
     tests = load_tests()
@@ -1063,7 +1070,18 @@ def self_test():
             raise AssertionError("a like of a missing test passed")
         except Fail as e:
             assert "like" in str(e)
-    global CORPUS
+    with tempfile.TemporaryDirectory() as d:  # two jobs building one library: the second waits (#1043)
+        fake = Path(d) / "tools/corpus/run.py"
+        fake.parent.mkdir(parents=True)
+        fake.write_text('import sys, time\nfrom pathlib import Path\no = Path(sys.argv[sys.argv.index("--out") + 1])\n'
+                        'o.mkdir()\ntime.sleep(1)\nprint("[m]: 1 PASS, 0 FAIL of 1 run")\n')
+        saved_repo, saved_cache, REPO, CACHE = REPO, CACHE, Path(d), Path(d) / "cache"
+        try:
+            with cf.ThreadPoolExecutor(2) as ex:
+                got = [f.result() for f in [ex.submit(ensure_base, "t", "m") for _ in range(2)]]
+            assert got[0] == got[1] and got[0].is_dir(), got
+        finally:
+            REPO, CACHE = saved_repo, saved_cache
     saved, CORPUS = CORPUS, Path("/nonexistent-corpus")  # a missing checkout must fail by name, not be skipped
     try:
         check_sources(tests[:1])
