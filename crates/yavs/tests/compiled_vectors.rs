@@ -197,3 +197,118 @@ fn vector_operations_in_compiled_code_match_the_interpreter() {
         assert_eq!(run(&dir, &flags), want, "{flags:?}");
     }
 }
+
+/// `to_01` of every length class (null, 1, 63 to 65, 70 elements), ascending and descending
+/// with a lower bound other than zero, with and without metavalues, every `xmap`, as
+/// `std_logic_vector`, `unsigned` and `signed`, in a function (native frame) and in a process
+/// (frame mode).
+const TO01: &str = r#"library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+entity z is end;
+architecture a of z is
+  function img(v : std_logic_vector) return string is
+  begin
+    return integer'image(v'left) & "," & integer'image(v'right) & "," &
+           boolean'image(v'ascending) & ":" & to_string(v);
+  end function;
+  function pick(i : natural; meta : boolean) return std_logic is
+  begin
+    if meta and i mod 7 = 3 then return std_logic'val(i mod 9); end if;
+    case (i * 5 + i / 3) mod 4 is
+      when 0 => return '0';
+      when 1 => return '1';
+      when 2 => return 'L';
+      when others => return 'H';
+    end case;
+  end function;
+  function down(n : natural; k : natural; meta : boolean) return std_logic_vector is
+    variable r : std_logic_vector(n + 4 downto 5);
+  begin
+    for i in r'range loop r(i) := pick(i * k, meta); end loop;
+    return r;
+  end function;
+  function up(n : natural; k : natural; meta : boolean) return std_logic_vector is
+    variable r : std_logic_vector(3 to n + 2);
+  begin
+    for i in r'range loop r(i) := pick(i * k + 1, meta); end loop;
+    return r;
+  end function;
+  function all_forms(v : std_logic_vector; x : std_logic) return string is
+  begin
+    return img(to_01(v, x)) & " " & img(to_01(v)) & " " &
+           img(std_logic_vector(to_01(unsigned(v), x))) & " " &
+           img(std_logic_vector(to_01(signed(v)))) & " " &
+           img(std_logic_vector(to_01(unsigned(v)) + 1));
+  end function;
+begin
+  process
+    constant lens : integer_vector := (0, 1, 2, 7, 8, 9, 31, 32, 33, 63, 64, 65, 70);
+    constant xs : string := "UX01ZWLH-";
+    variable n : natural := 0;
+    variable w : std_logic_vector(7 downto 0) := "10LH0101";
+    variable m : std_logic_vector(3 downto 0) := "10X1";
+  begin
+    for i in lens'range loop
+      for k in 1 to 3 loop
+        for meta in boolean'range loop
+          for j in xs'range loop
+            report integer'image(lens(i)) & "/" & integer'image(k) & "/" & boolean'image(meta) &
+                   ": " & all_forms(down(lens(i), k, meta), std_logic'val(j - 1)) &
+                   " | " & all_forms(up(lens(i), k, meta), std_logic'val(j - 1));
+          end loop;
+        end loop;
+      end loop;
+    end loop;
+    for k in 0 to 300 loop
+      w := std_logic_vector(unsigned(w) + k);
+      n := n + to_integer(unsigned(to_01(w, 'X')));
+      if k mod 60 = 0 then
+        report integer'image(n) & " " & img(to_01(w)) & " " & img(to_01(m, '1')) & " " &
+               img(to_01(m)) & " " & img(to_01(w(5 downto 2), 'X'));
+      end if;
+    end loop;
+    report "done " & integer'image(n);
+    wait;
+  end process;
+end;
+"#;
+
+fn run_z(dir: &Path, flags: &[&str]) -> (Option<i32>, String) {
+    let mut args = vec!["run", "--std=2008", "--work=work:work"];
+    args.extend_from_slice(flags);
+    args.push("z");
+    let o = yavs(dir, &args);
+    (
+        o.status.code(),
+        String::from_utf8_lossy(&o.stdout).into_owned(),
+    )
+}
+
+#[test]
+fn to_01_in_compiled_code_matches_the_interpreter() {
+    let dir = tempdir("compiled_to01");
+    std::fs::write(dir.join("z.vhd"), TO01).expect("write");
+    let a = yavs(
+        &dir,
+        &["analyze", "--std=2008", "--work=work:work", "z.vhd"],
+    );
+    assert!(a.status.success(), "{a:?}");
+    let want = run_z(&dir, &["--tier=interp"]);
+    assert_eq!(want.0, Some(0), "{want:?}");
+    assert!(want.1.lines().count() >= 700, "{}", want.1);
+    for flags in [
+        #[cfg(feature = "llvm")]
+        vec!["--tier=llvm"],
+        #[cfg(feature = "llvm")]
+        vec!["--tier=auto", "--tier-heat=1,0,0"],
+        #[cfg(feature = "clift")]
+        vec!["--tier=clift"],
+        #[cfg(feature = "clift")]
+        vec!["--tier=clift-auto", "--tier-heat=1,0,0"],
+        #[cfg(all(feature = "llvm", feature = "clift"))]
+        vec!["--tier=auto3", "--tier-heat=1,0,0"],
+    ] {
+        assert_eq!(run_z(&dir, &flags), want, "{flags:?}");
+    }
+}

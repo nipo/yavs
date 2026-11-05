@@ -7283,6 +7283,11 @@ impl Gen {
                     let (n, bits, _) = arrs[0];
                     Out::Vector(n, not(bits), op == Op::VecNot)
                 }
+                // Only `0 1 L H` got here: the bits as `(n-1 downto 0)`, `xmap` unused.
+                Op::To01 => {
+                    let (n, bits, _) = arrs[0];
+                    Out::Vector(n, bits, false)
+                }
                 _ => return Err("not a native computed in place".into()),
             };
             match out {

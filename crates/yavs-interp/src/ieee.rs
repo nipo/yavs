@@ -570,6 +570,9 @@ fn to_01(v: &LogicVec, xmap: StdULogic) -> LogicVec {
 }
 
 fn to_01_vec(m: &mut Machine, _: Cx<'_, '_, '_>, _: Option<TyId>, a: &[u64]) -> Ret {
+    if let Some(r) = fast_to_01(m, a) {
+        return Ok(Some(r));
+    }
     let l = vh(m, a, 0)?;
     let x = sul(a, A1)?;
     put(m, &Vh::down(to_01(&l.v, x)))
@@ -1755,6 +1758,13 @@ fn fast_mul<const SIGNED: bool>(m: &mut Machine, a: &[u64]) -> Option<u64> {
     put_down(m, n, x.wrapping_mul(y)).ok()
 }
 
+/// `to_01` of 1 to 64 elements that are all `0 1 L H`: the bits as `(n-1 downto 0)`, whatever the
+/// operand's bounds. A metavalue (the result is `xmap`), a null or a longer vector takes the general path.
+fn fast_to_01(m: &mut Machine, a: &[u64]) -> Option<u64> {
+    let l = small(m, a, 0)?;
+    put_down(m, l.n, l.bits).ok()
+}
+
 fn fast_compare<const C: u8, const SIGNED: bool, const FORM: u8>(
     m: &mut Machine,
     a: &[u64],
@@ -2251,6 +2261,7 @@ pub(crate) fn lookup_fast(symbol: &str) -> Option<FastFn> {
             }
             cs!(0, 1, 2, 3, 4, 5)
         }
+        Op::To01 => fast_to_01,
         Op::Mul { signed: false } => fast_mul::<false>,
         Op::Mul { signed: true } => fast_mul::<true>,
         Op::ToInteger { signed: false } => fast_to_integer::<false>,

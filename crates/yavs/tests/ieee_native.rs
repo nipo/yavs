@@ -853,6 +853,87 @@ fn native_mul_limits_match_bodies() {
     diff_run("mul_limits", &tb(&body), "t", "2008", 880);
 }
 
+/// `to_01` around the limit of its fast path (1, 63 to 65, 70 and 128 elements), null operands,
+/// ascending and descending bounds, slices that start inside a word, every metavalue at the
+/// first, a middle and the last element, and every `xmap`.
+#[test]
+fn native_to_01_limits_match_bodies() {
+    let pats = |n: usize| -> Vec<String> {
+        let alt: String = (0..n).map(|i| if i % 2 == 0 { '1' } else { '0' }).collect();
+        vec![
+            "0".repeat(n),
+            "1".repeat(n),
+            alt.clone(),
+            alt.replace('1', "H").replace('0', "L"),
+        ]
+    };
+    let metas = |n: usize| -> Vec<String> {
+        let mut v = Vec::new();
+        for m in "UXZW-".chars() {
+            for at in [0, n / 2, n - 1] {
+                let mut s: Vec<char> = pats(n)[2].chars().collect();
+                s[at] = m;
+                v.push(s.into_iter().collect());
+            }
+        }
+        v
+    };
+    let mut body = String::new();
+    for n in [1, 2, 63, 64, 65, 70, 128] {
+        for (l, asc) in [(n - 1, "false"), (n + 3, "true")] {
+            for x in pats(n) {
+                for ty in ["sv", "uv", "gv"] {
+                    let _ = writeln!(body, "    report img(to_01({ty}(\"{x}\", {l}, {asc})));");
+                }
+                let _ = writeln!(body, "    report img(to_01(sv(\"{x}\", {l}, {asc}), '1'));");
+            }
+            for x in metas(n) {
+                for xm in "UX01ZWLH-".chars() {
+                    let _ = writeln!(
+                        body,
+                        "    report img(to_01(sv(\"{x}\", {l}, {asc}), '{xm}'));"
+                    );
+                }
+                for ty in ["uv", "gv"] {
+                    let _ = writeln!(
+                        body,
+                        "    report img(to_01({ty}(\"{x}\", {l}, {asc}), 'X'));"
+                    );
+                    let _ = writeln!(body, "    report img(to_01({ty}(\"{x}\", {l}, {asc})));");
+                }
+            }
+        }
+    }
+    for asc in ["true", "false"] {
+        let _ = writeln!(body, "    report img(to_01(sv(\"\", -1, {asc})));");
+        let _ = writeln!(body, "    report img(to_01(sv(\"\", -1, {asc}), 'X'));");
+        let _ = writeln!(body, "    report img(to_01(uv(\"\", -1, {asc})));");
+        let _ = writeln!(body, "    report img(to_01(gv(\"\", -1, {asc}), 'U'));");
+    }
+    let wide: String = (0..72)
+        .map(|i| if i % 3 == 0 { '1' } else { 'H' })
+        .collect();
+    for (hi, lo) in [
+        (40, 9),
+        (70, 7),
+        (63, 0),
+        (64, 0),
+        (65, 1),
+        (71, 6),
+        (62, 62),
+    ] {
+        let _ = writeln!(
+            body,
+            "    report img(to_01(sv(\"{wide}\", 71, false)({hi} downto {lo})));"
+        );
+        let _ = writeln!(
+            body,
+            "    report img(to_01(sv(\"{wide}\", 71, false)({hi} downto {lo}), '1'));"
+        );
+    }
+    diff_run("to_01_limits", &tb(&body), "t", "2008", 3500);
+}
+
 /// Wrap generated statements into the shared header (entity `t`).
 fn tb(body: &str) -> String {
     format!("{HEAD}{body}    wait;\n  end process;\nend architecture;\n")
