@@ -36,9 +36,14 @@ fn yavs(args: &[&str]) -> (i32, String, String) {
 #[cfg(unix)]
 fn build_plugin(vhpi: &std::path::Path, _tmp: &std::path::Path, so: &std::path::Path, name: &str) {
     let tool = compiler();
-    let status = tool
-        .to_command()
-        .args(["-shared", "-fPIC", "-I"])
+    let mut cmd = tool.to_command();
+    cmd.args(["-shared", "-fPIC"]);
+    // The vhpi_* symbols come from the executable that loads the plugin.
+    if cfg!(target_os = "macos") {
+        cmd.args(["-undefined", "dynamic_lookup"]);
+    }
+    let status = cmd
+        .arg("-I")
         .arg(vhpi.join("include"))
         .arg(vhpi.join(format!("tests/plugin/{name}.c")))
         .arg("-o")

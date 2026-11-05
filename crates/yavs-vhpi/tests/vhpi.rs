@@ -74,6 +74,10 @@ fn compile(src: &Path, include: &Path, out: &Path, shared: bool, link: Option<&P
             if !cfg!(windows) {
                 cmd.arg("-fPIC");
             }
+            // The vhpi_* symbols come from the executable that loads the plugin.
+            if cfg!(target_os = "macos") {
+                cmd.args(["-undefined", "dynamic_lookup"]);
+            }
         }
         if let Some(lib) = link {
             cmd.arg(lib);

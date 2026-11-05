@@ -6,6 +6,8 @@
 //! - `yavs-vhpi.map` (Linux): a linker version script, passed as
 //!   `-rdynamic -Wl,--version-script` (`--dynamic-list` is rejected by cargo-zigbuild).
 //! - `exports.def` (Windows): passed to the linker of the executable.
+//! - `exports.sym` (macOS): the Mach-O names (leading `_`), passed as
+//!   `-Wl,-exported_symbols_list`.
 //! - `yavs-vhpi-host.lib` (Windows): import library for this crate's tests,
 //!   naming the spike host. No import library for `yavs.exe` is built or
 //!   shipped (plugins bring their own).
@@ -52,6 +54,7 @@ fn main() {
     );
     let mut dynlist = String::from("{\n  global:\n");
     let mut def = String::from("EXPORTS\n");
+    let mut macho = String::new();
     for (name, data) in &exports {
         let addr = if *data {
             format!("(&raw const {name}).cast()")
@@ -61,6 +64,7 @@ fn main() {
         writeln!(rs, "        (\"{name}\", {addr}),").unwrap();
         writeln!(dynlist, "    {name};").unwrap();
         writeln!(def, "    {name}{}", if *data { " DATA" } else { "" }).unwrap();
+        writeln!(macho, "_{name}").unwrap();
     }
     rs.push_str("    ]\n}\n");
     dynlist.push_str("  local:\n    *;\n};\n");
@@ -69,9 +73,12 @@ fn main() {
     fs::write(&dynlist_path, dynlist).unwrap();
     let def_path = out.join("exports.def");
     fs::write(&def_path, def).unwrap();
+    let macho_path = out.join("exports.sym");
+    fs::write(&macho_path, macho).unwrap();
 
     println!("cargo:version_script={}", dynlist_path.display());
     println!("cargo:def={}", def_path.display());
+    println!("cargo:exported_symbols={}", macho_path.display());
     println!(
         "cargo:include={}",
         Path::new(&env::var("CARGO_MANIFEST_DIR").unwrap())
@@ -104,7 +111,12 @@ fn main() {
                 out.join("yavs-vhpi-host.lib").display()
             );
         }
-        "macos" | "ios" => {}
+        "macos" | "ios" => {
+            println!(
+                "cargo:rustc-link-arg-bins=-Wl,-exported_symbols_list,{}",
+                macho_path.display()
+            );
+        }
         _ => {
             println!("cargo:rustc-link-arg-bins=-rdynamic");
             println!(

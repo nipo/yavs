@@ -586,16 +586,21 @@ are rare on a bus.
   (`crates/yavs/tests/vhpi_exports.rs`) reads the binary's `.dynsym` and fails if any symbol
   of `vhpi_user.h` is missing. Plugins leave `vhpi_*` unresolved; plugin loading uses
   `RTLD_NOW | RTLD_GLOBAL`, so a missing symbol fails at load, naming it.
+- **Export, macOS:** the executable is linked with `-Wl,-exported_symbols_list` naming the
+  `src/exports.txt` symbols with the Mach-O leading `_`, so it exports exactly that list.
+  Plugins are linked with `-undefined dynamic_lookup` and bind to the executable at load
+  (`RTLD_NOW`, as on Linux). `crates/yavs/tests/vhpi_exports.rs` reads the exports with
+  `nm -gU`, which comes with the C compiler the plugin tests need anyway (user, 2026-11-05).
 - **Export, Windows:** no VHPI DLL. The executable is linked with a generated `.def`
   (`/DEF:` for MSVC, the `.def` as linker input for MinGW). `yavs`'s `build.rs` passes it; no `yavs.lib` is built.
   `yavs-vhpi`'s `build.rs` writes only the test import library `yavs-vhpi-host.lib` with `lib.exe` (MSVC), else
   `llvm-dlltool`, else MinGW `dlltool`; short-format import libraries work with both MSVC link
   and GNU ld. The import names the executable, so a renamed `yavs.exe` breaks plugins linked
   that way (shims that use `GetProcAddress` on the main module do not care).
-- **One list:** `build.rs` turns `src/exports.txt` into the version script, the `.def`, the host test
-  import library and a Rust table that references every symbol, which keeps them linked from the rlib.
-  Other packages (the `yavs` CLI) get the paths as `DEP_YAVS_VHPI_VERSION_SCRIPT`, `_DEF` and
-  `_IMPORT_LIB_DIR` (the crate has `links = "yavs_vhpi"`) and must pass them to their own binary
+- **One list:** `build.rs` turns `src/exports.txt` into the version script, the `.def`, the macOS
+  symbols list, the host test import library and a Rust table that references every symbol, which keeps
+  them linked from the rlib. Other packages (the `yavs` CLI) get the paths as
+  `DEP_YAVS_VHPI_VERSION_SCRIPT`, `_DEF`, `_EXPORTED_SYMBOLS` and `_IMPORT_LIB_DIR` (the crate has `links = "yavs_vhpi"`) and must pass them to their own binary
   link. The spike binary `yavs-vhpi-host` gets them via `rustc-link-arg-bins`.
 - **Variadics:** `vhpi_printf`, `vhpi_vprintf`, `vhpi_assert`, `vhpi_control` are in `src/shim.c`
   (stable Rust cannot define C-variadic functions) and call plain Rust functions.

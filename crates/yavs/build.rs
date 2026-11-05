@@ -85,7 +85,12 @@ fn main() {
                 println!("cargo:rustc-link-arg-bins=-Wl,--stack,8388608");
             }
         }
-        "macos" | "ios" => {}
+        "macos" | "ios" => {
+            println!(
+                "cargo:rustc-link-arg-bins=-Wl,-exported_symbols_list,{}",
+                var("DEP_YAVS_VHPI_EXPORTED_SYMBOLS")
+            );
+        }
         // -rdynamic makes lld (and so cargo-zigbuild) export from an executable;
         // the version script limits the export to the vhpi_* list.
         _ => {
