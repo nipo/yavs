@@ -2671,9 +2671,10 @@ impl Db {
                             Staticness::Locally
                         } else if self.constrainedness(st) == crate::types::Constrainedness::Full
                             || self.is_port_or_generic(p)
+                            || self.is_static_constant_name(p)
                         {
-                            // A port or generic gets its bounds once, at elaboration, so its
-                            // array attributes are globally static (9.4.3).
+                            // A port, generic or constant gets its bounds once, at elaboration,
+                            // so its array attributes are globally static (9.4.3).
                             Staticness::Globally
                         } else {
                             Staticness::None
@@ -3252,6 +3253,20 @@ impl Db {
             ),
             _ => false,
         }
+    }
+
+    /// A name of (a part of) a constant declaration that is itself static: the
+    /// constant's bounds come from its initial value when its subtype leaves them open.
+    fn is_static_constant_name(&self, e: ExprId) -> bool {
+        self.exprs[e].stat >= Staticness::Globally
+            && match self.lsp(e).map(|l| l.root) {
+                Some(crate::hir::ObjRoot::Decl(d)) => matches!(
+                    &self.decls[d].kind,
+                    DeclKind::Object(o) if o.class == crate::decl::ObjClass::Constant
+                        && o.role == crate::decl::ObjRole::Plain
+                ),
+                _ => false,
+            }
     }
 
     /// `high` bound helper for attribute folding.
