@@ -149,11 +149,13 @@ pub enum Op {
         signed: bool,
         form: Form,
     },
-    /// `/` (0), `rem` (1) or `mod` (2) of two vectors; a zero divisor is handed back to the
-    /// body (its error report and what follows).
+    /// `/` (0), `rem` (1) or `mod` (2) of two vectors, or of a vector and an integer (the
+    /// one-word path takes the integer only when it fits the vector's length); a zero divisor
+    /// and every integer form it does not take are handed back to the body.
     Div {
         kind: u8,
         signed: bool,
+        form: Form,
     },
     Compare {
         cmp: Cmp,
@@ -295,12 +297,12 @@ pub fn parse(key: &str) -> Option<Op> {
             let (signed, form, t) = num_form(ps)?;
             (r == t).then_some(Op::Mul { signed, form })
         }
-        ("numeric_std", n @ ("/" | "rem" | "mod"), [a, b], r)
-            if a == b && a == &r && (r == "unsigned" || r == "signed") =>
-        {
-            Some(Op::Div {
+        ("numeric_std", n @ ("/" | "rem" | "mod"), ps, r) => {
+            let (signed, form, t) = num_form(ps)?;
+            (r == t).then_some(Op::Div {
                 kind: ["/", "rem", "mod"].iter().position(|x| *x == n)? as u8,
-                signed: r == "signed",
+                signed,
+                form,
             })
         }
         ("numeric_std", n @ ("?>" | "?<" | "?<=" | "?>=" | "?=" | "?/="), ps, "std_ulogic")

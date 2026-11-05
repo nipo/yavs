@@ -1044,3 +1044,441 @@ end;
     );
     all_tiers_match("compiled_wide_rotate", &src);
 }
+
+/// `/`, `rem` and `mod` of two vectors, `unsigned` and `signed`: lengths around and above the 64
+/// element limit, every sign combination and the most negative value, weak bits, metavalues, null,
+/// non-zero lower bounds in both directions, in functions, in a process and in a counted loop.
+const DIV: &str = r#"library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+entity y is end;
+architecture a of y is
+  function img(v : unsigned) return string is
+  begin
+    return integer'image(v'left) & "," & integer'image(v'right) & "," &
+           boolean'image(v'ascending) & ":" & to_string(std_logic_vector(v));
+  end function;
+  function img(v : signed) return string is
+  begin
+    return img(unsigned(v));
+  end function;
+  function pick(i : natural; meta : boolean) return std_logic is
+  begin
+    if meta and i mod 7 = 3 then return std_logic'val(i mod 9); end if;
+    case (i * 5 + i / 3) mod 4 is
+      when 0 => return '0';
+      when 1 => return '1';
+      when 2 => return 'L';
+      when others => return 'H';
+    end case;
+  end function;
+  function down(n : natural; k : natural; meta : boolean) return unsigned is
+    variable r : unsigned(n + 4 downto 5);
+  begin
+    for i in r'range loop r(i) := pick(i * k, meta); end loop;
+    return r;
+  end function;
+  -- A divisor: never zero (the body's error ends the run).
+  function up(n : natural; k : natural; meta : boolean) return unsigned is
+    variable r : unsigned(3 to n + 2);
+  begin
+    for i in r'range loop r(i) := pick(i * k + 1, meta); end loop;
+    if n > 0 then r(n + 2) := '1'; end if;
+    return r;
+  end function;
+  function ext(n : natural; top : std_logic; rest : std_logic) return unsigned is
+    variable r : unsigned(n - 1 downto 0) := (others => rest);
+  begin
+    if n > 0 then r(n - 1) := top; end if;
+    return r;
+  end function;
+  -- A divisor: never zero.
+  function dext(n : natural; top : std_logic; rest : std_logic) return unsigned is
+    variable r : unsigned(n - 1 downto 0) := ext(n, top, rest);
+  begin
+    if n > 0 then r(0) := '1'; end if;
+    return r;
+  end function;
+  function du(x, y : unsigned) return string is
+  begin
+    return img(x / y) & " " & img(x rem y) & " " & img(x mod y);
+  end function;
+  function ds(x, y : signed) return string is
+  begin
+    return img(x / y) & " " & img(x rem y) & " " & img(x mod y);
+  end function;
+begin
+  process
+    constant la : integer_vector := (1, 1, 2, 7, 8, 32, 33, 31, 63, 64, 64, 1, 65, 1, 65, 70, 3, 128, 0, 5, 3);
+    constant lb : integer_vector := (1, 63, 2, 8, 9, 32, 31, 33, 64, 64, 1, 64, 1, 65, 65, 3, 70, 128, 5, 0, 4);
+    variable n : integer := 0;
+    variable w : signed(15 downto 0) := x"8001";
+    variable u : unsigned(11 downto 0) := x"801";
+    variable p : signed(15 downto 0);
+    variable q : unsigned(15 downto 0);
+  begin
+    for i in la'range loop
+      for k in 1 to 3 loop
+        for meta in boolean'range loop
+          report integer'image(la(i)) & "/" & integer'image(lb(i)) & "/" & integer'image(k) & "/" &
+                 boolean'image(meta) & ": " &
+                 du(down(la(i), k, meta), up(lb(i), k + 1, meta)) & " " &
+                 du(up(la(i), k, meta), up(lb(i), k + 1, meta)) & " " &
+                 ds(signed(down(la(i), k, meta)), signed(up(lb(i), k + 1, meta))) & " " &
+                 ds(signed(up(la(i), k, meta)), signed(up(lb(i), k + 1, meta))) & " " &
+                 ds(signed(ext(la(i), '1', '0')), signed(dext(lb(i), '1', '1'))) & " " &
+                 ds(signed(ext(la(i), '1', '0')), signed(dext(lb(i), '0', '1'))) & " " &
+                 ds(signed(ext(la(i), '0', '1')), signed(dext(lb(i), '1', '1'))) & " " &
+                 ds(signed(ext(la(i), '1', '1')), signed(dext(lb(i), '1', '0'))) & " " &
+                 du(ext(la(i), '1', '1'), dext(lb(i), '1', '1')) & " " &
+                 du(ext(la(i), '0', '0'), dext(lb(i), '0', '1'));
+        end loop;
+      end loop;
+    end loop;
+    for k in 0 to 300 loop
+      p := (w(11 downto 4) & w(7 downto 0)) / to_signed(k mod 100 - 50 + 51, 8) + w(15 downto 0) rem to_signed(k mod 61 + 1, 8);
+      q := resize((u(7 downto 0) & u(7 downto 0)) mod to_unsigned(k mod 200 + 1, 8), 16);
+      n := n + to_integer(p) + to_integer(q);
+      w := p + k + (w mod to_signed(k mod 7 + 1, 4));
+      u := q(11 downto 0) + k;
+      if k mod 60 = 0 then
+        report integer'image(n) & " " & img(p) & " " & img(q) & " " & ds(w(11 downto 4), w(5 downto 2) & "1");
+      end if;
+    end loop;
+    report "done " & integer'image(n);
+    wait;
+  end process;
+end;
+"#;
+
+#[test]
+fn div_in_compiled_code_matches_the_interpreter() {
+    all_tiers_match("compiled_div", DIV);
+}
+
+/// `/`, `rem` and `mod` of a vector and an integer, both orders: the integer fits, just fits or
+/// just does not (the body's results and warnings come from the callback), the most negative value,
+/// lengths around and above 64, weak bits, metavalues, null, non-zero lower bounds, loops.
+const DIVINT: &str = r#"library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+entity y is end;
+architecture a of y is
+  function img(v : unsigned) return string is
+  begin
+    return integer'image(v'left) & "," & integer'image(v'right) & "," &
+           boolean'image(v'ascending) & ":" & to_string(std_logic_vector(v));
+  end function;
+  function img(v : signed) return string is
+  begin
+    return img(unsigned(v));
+  end function;
+  function pick(i : natural; meta : boolean) return std_logic is
+  begin
+    if meta and i mod 7 = 3 then return std_logic'val(i mod 9); end if;
+    case (i * 5 + i / 3) mod 4 is
+      when 0 => return '0';
+      when 1 => return '1';
+      when 2 => return 'L';
+      when others => return 'H';
+    end case;
+  end function;
+  function down(n : natural; k : natural; meta : boolean) return unsigned is
+    variable r : unsigned(n + 4 downto 5);
+  begin
+    for i in r'range loop r(i) := pick(i * k, meta); end loop;
+    return r;
+  end function;
+  -- A divisor: never zero (the body's error ends the run).
+  function up(n : natural; k : natural; meta : boolean) return unsigned is
+    variable r : unsigned(3 to n + 2);
+  begin
+    for i in r'range loop r(i) := pick(i * k + 1, meta); end loop;
+    if n > 0 then r(n + 2) := '1'; end if;
+    return r;
+  end function;
+  -- Integers for a vector of n elements: they fit, just fit or just do not; never zero.
+  function ui(n : natural; k : natural) return natural is
+  begin
+    case k mod 8 is
+      when 0 => return 3;
+      when 1 => return 1;
+      when 2 => return 255;
+      when 3 => return integer'high;
+      when 4 => if n < 31 and n > 0 then return 2 ** n - 1; else return 12345; end if;
+      when 5 => if n < 31 then return 2 ** n; else return 99; end if;
+      when 6 => if n < 31 then return 2 ** n + 1; else return 7; end if;
+      when others => return 65535;
+    end case;
+  end function;
+  function si(n : natural; k : natural) return integer is
+  begin
+    case k mod 10 is
+      when 0 => return 3;
+      when 1 => return -1;
+      when 2 => return integer'low;
+      when 3 => return integer'high;
+      when 4 => if n < 32 and n > 1 then return 2 ** (n - 1) - 1; else return 77; end if;
+      when 5 => if n < 32 and n > 0 then return 2 ** (n - 1); else return 78; end if;
+      when 6 => if n < 32 and n > 0 then return -(2 ** (n - 1)); else return -79; end if;
+      when 7 => if n < 32 and n > 0 then return -(2 ** (n - 1)) - 1; else return -80; end if;
+      when 8 => return -1000;
+      when others => return 1000;
+    end case;
+  end function;
+  function vi(x : unsigned; i : natural) return string is
+  begin
+    return img(x / i) & " " & img(x rem i) & " " & img(x mod i);
+  end function;
+  -- `natural rem unsigned` is a length error (the body has no RESIZE) for an integer wider than x.
+  function iv(i : natural; x : unsigned) return string is
+  begin
+    if x'length >= 31 or i < 2 ** x'length then
+      return img(i / x) & " " & img(i rem x) & " " & img(i mod x);
+    end if;
+    return img(i / x) & " " & img(i mod x);
+  end function;
+  function vs(x : signed; i : integer) return string is
+  begin
+    return img(x / i) & " " & img(x rem i) & " " & img(x mod i);
+  end function;
+  function sv(i : integer; x : signed) return string is
+  begin
+    return img(i / x) & " " & img(i rem x) & " " & img(i mod x);
+  end function;
+begin
+  process
+    constant la : integer_vector := (1, 2, 31, 32, 33, 64, 65, 70, 128, 0, 5, 16, 30, 3);
+    variable n : integer := 0;
+    variable w : signed(15 downto 0) := x"8001";
+    variable u : unsigned(11 downto 0) := x"801";
+    variable p : signed(15 downto 0);
+    variable q : unsigned(15 downto 0);
+    variable z : unsigned(7 downto 0);
+  begin
+    for i in la'range loop
+      for k in 0 to 9 loop
+        for meta in boolean'range loop
+          report integer'image(la(i)) & "/" & integer'image(k) & "/" & boolean'image(meta) & ": " &
+                 vi(down(la(i), k, meta), ui(la(i), k)) & " " &
+                 iv(ui(la(i), k), up(la(i), k + 1, meta)) & " " &
+                 vs(signed(down(la(i), k + 2, meta)), si(la(i), k)) & " " &
+                 sv(si(la(i), k), signed(up(la(i), k + 3, meta))) & " " &
+                 vi(up(la(i), k, meta), ui(la(i), k + 1)) & " " &
+                 iv(ui(la(i), k + 2), up(la(i), k, meta)) & " " &
+                 vs(signed(up(la(i), k, meta)), si(la(i), k + 1)) & " " &
+                 sv(si(la(i), k + 2), signed(up(la(i), k + 4, meta)));
+        end loop;
+      end loop;
+    end loop;
+    for k in 0 to 300 loop
+      p := w(7 downto 0) / (k mod 100 - 50 + 51) + (w mod (k mod 9 + 1)) + ((k - 150) rem (w(14 downto 8) & "1"));
+      q := resize(u(7 downto 0) mod (k mod 200 + 1), 16) + ((k mod 77) / ("1" & u(5 downto 0)));
+      z := resize(u(3 downto 0) rem (k mod 40 + 1), 8);
+      n := n + to_integer(p) + to_integer(q) + to_integer(z);
+      w := p + k;
+      u := q(11 downto 0) + k;
+      if k mod 60 = 0 then
+        report integer'image(n) & " " & img(p) & " " & img(q) & " " & img(z) & " " & img(w(5 downto 2) mod 3);
+      end if;
+    end loop;
+    report "done " & integer'image(n);
+    wait;
+  end process;
+end;
+"#;
+
+#[test]
+fn div_integer_in_compiled_code_matches_the_interpreter() {
+    all_tiers_match("compiled_div_integer", DIVINT);
+}
+
+/// `/`, `rem` and `mod` of 4 and 8 element vectors and integers around and beyond their range
+/// (`x mod 16` of a 4 element `unsigned`), both orders, every value of the 4 element vectors: the
+/// integer wider than the vector, whose results and truncation warnings are the body's.
+const DIVSMALL: &str = r#"library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+entity y is end;
+architecture a of y is
+  type ints_t is array (natural range <>) of integer;
+  constant ints : ints_t := (-1000, -33, -17, -9, -8, -5, -4, -3, -2, -1, 1, 2, 3, 4, 5, 7, 8, 9, 15,
+                             16, 17, 31, 32, 100, 255, 256, 1000);
+  function img(v : unsigned) return string is
+  begin
+    return to_string(std_logic_vector(v));
+  end function;
+  function img(v : signed) return string is
+  begin
+    return to_string(std_logic_vector(v));
+  end function;
+  function vi(x : unsigned; i : natural) return string is
+  begin
+    return img(x / i) & " " & img(x rem i) & " " & img(x mod i);
+  end function;
+  -- `natural rem unsigned` is a length error for an integer wider than x (the body has no RESIZE).
+  function iv(i : natural; x : unsigned) return string is
+  begin
+    if x = 0 then return "-"; end if;
+    if i < 2 ** x'length then
+      return img(i / x) & " " & img(i rem x) & " " & img(i mod x);
+    end if;
+    return img(i / x) & " " & img(i mod x);
+  end function;
+  function vs(x : signed; i : integer) return string is
+  begin
+    return img(x / i) & " " & img(x rem i) & " " & img(x mod i);
+  end function;
+  function sv(i : integer; x : signed) return string is
+  begin
+    if x = 0 then return "-"; end if;
+    return img(i / x) & " " & img(i rem x) & " " & img(i mod x);
+  end function;
+begin
+  process
+    variable n : integer := 0;
+  begin
+    for v in 0 to 15 loop
+      for t in ints'range loop
+        n := n + t;
+        report integer'image(v) & "," & integer'image(ints(t)) & ": " &
+               vs(to_signed(v - 8, 4), ints(t)) & " | " & sv(ints(t), to_signed(v - 8, 4)) & " | " &
+               vs(to_signed(v * 17 - 128, 8), ints(t)) & " | " & sv(ints(t), to_signed(v * 17 - 128, 8)) &
+               " | " & vi(to_unsigned(v, 4), abs ints(t)) & " | " & iv(abs ints(t), to_unsigned(v, 4)) &
+               " | " & vi(to_unsigned(v * 17, 8), abs ints(t)) & " | " & iv(abs ints(t), to_unsigned(v * 17, 8));
+      end loop;
+    end loop;
+    report "done " & integer'image(n);
+    wait;
+  end process;
+end;
+"#;
+
+#[test]
+fn div_small_in_compiled_code_matches_the_interpreter() {
+    all_tiers_match("compiled_div_small", DIVSMALL);
+}
+
+/// A zero divisor after a compiled loop is the body's error report and the run ends there, in
+/// every tier alike (a vector, the integer 0, a vector of weak zeros, 16 and 70 elements).
+const DIVZERO: &str = r#"library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+entity y is end;
+architecture a of y is
+  function zero(n : natural; c : std_logic) return unsigned is
+    variable r : unsigned(n - 1 downto 0) := (others => c);
+  begin
+    return r;
+  end function;
+  function dv(x : unsigned; k : natural; c : std_logic) return unsigned is
+  begin
+    case k mod 3 is
+      when 0 => return x / zero(x'length, c);
+      when 1 => return x rem zero(x'length, c);
+      when others => return x mod zero(x'length, c);
+    end case;
+  end function;
+  function dsv(x : signed; k : natural; c : std_logic) return signed is
+  begin
+    case k mod 3 is
+      when 0 => return x / signed(zero(x'length, c));
+      when 1 => return x rem signed(zero(x'length, c));
+      when others => return x mod signed(zero(x'length, c));
+    end case;
+  end function;
+  function di(x : unsigned; k : natural; c : integer) return unsigned is
+  begin
+    case k mod 3 is
+      when 0 => return x / c;
+      when 1 => return x rem c;
+      when others => return x mod c;
+    end case;
+  end function;
+begin
+  process
+    variable x : unsigned(15 downto 0) := x"8001";
+    variable n : integer := 0;
+    variable stop : boolean := false;
+  begin
+    for k in 0 to 120 loop
+      x := dv(x, k, '1') + k;
+      n := n + to_integer(x(7 downto 0));
+      if k mod 40 = 0 then report integer'image(n); end if;
+    end loop;
+    report "zero divisors " & integer'image(n);
+    report @STMT@;
+    report "not reached";
+    wait;
+  end process;
+end;
+"#;
+
+/// Runs `src` (entity `y`, which ends in a fatal error) on every compiled tier and compares the
+/// output, the error report and the exit status with `--tier=interp`.
+fn all_tiers_fail(name: &str, src: &str) {
+    let dir = tempdir(name);
+    std::fs::write(dir.join("y.vhd"), src).expect("write");
+    let a = yavs(
+        &dir,
+        &["analyze", "--std=2008", "--work=work:work", "y.vhd"],
+    );
+    assert!(a.status.success(), "{a:?}");
+    let go = |flags: &[&str]| {
+        let mut args = vec!["run", "--std=2008", "--work=work:work"];
+        args.extend_from_slice(flags);
+        args.push("y");
+        let o = yavs(&dir, &args);
+        (
+            o.status.code(),
+            String::from_utf8_lossy(&o.stdout).into_owned(),
+            String::from_utf8_lossy(&o.stderr).into_owned(),
+        )
+    };
+    let want = go(&["--tier=interp"]);
+    assert_ne!(want.0, Some(0), "{want:?}");
+    assert!(want.1.contains("zero divisors"), "{want:?}");
+    assert!(
+        want.1.contains("by zero") || want.2.contains("by zero"),
+        "{want:?}"
+    );
+    for flags in [
+        #[cfg(feature = "llvm")]
+        vec!["--tier=llvm"],
+        #[cfg(feature = "llvm")]
+        vec!["--tier=auto", "--tier-heat=1,0,0"],
+        #[cfg(feature = "clift")]
+        vec!["--tier=clift"],
+        #[cfg(feature = "clift")]
+        vec!["--tier=clift-auto", "--tier-heat=1,0,0"],
+        #[cfg(all(feature = "llvm", feature = "clift"))]
+        vec!["--tier=auto3", "--tier-heat=1,0,0"],
+    ] {
+        assert_eq!(go(&flags), want, "{flags:?}");
+    }
+}
+
+#[test]
+fn div_by_zero_in_compiled_code_matches_the_interpreter() {
+    for (i, stmt) in [
+        "to_string(dv(x, 0, '0'))",
+        "to_string(dv(x, 1, '0'))",
+        "to_string(dv(x, 2, 'L'))",
+        "to_string(dv(resize(x, 70), 0, '0'))",
+        "to_string(dv(resize(x, 64), 2, '0'))",
+        "to_string(dsv(signed(x), 0, '0'))",
+        "to_string(dsv(signed(x), 1, 'L'))",
+        "to_string(dsv(signed(resize(x, 1)), 2, '0'))",
+        "to_string(di(x, 0, 0))",
+        "to_string(di(x, 1, 0))",
+        "to_string(di(x, 2, 0))",
+    ]
+    .iter()
+    .enumerate()
+    {
+        all_tiers_fail(
+            &format!("compiled_div_zero{i}"),
+            &DIVZERO.replace("@STMT@", stmt),
+        );
+    }
+}

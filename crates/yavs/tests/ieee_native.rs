@@ -2302,3 +2302,498 @@ fn native_wide_matches_bodies() {
     }
     diff_run("wide", &tb(&g.out), "t", "2008", 1000 / scale());
 }
+
+/// Dividends and divisors of `n` elements: zero, all ones, the most negative value, one, an
+/// alternating pattern, weak bits and weak signs, metavalues. A divisor that is zero (no `1` or
+/// `H`, no metavalue) is the body's error and ends the run, so it is not in the second list.
+fn div_pats(n: usize, bit: bool) -> (Vec<String>, Vec<String>) {
+    let alt: String = (0..n).map(|i| if i % 2 == 0 { '1' } else { '0' }).collect();
+    let mut v = vec![
+        "0".repeat(n),
+        "1".repeat(n),
+        format!("1{}", "0".repeat(n - 1)),
+        format!("{}1", "0".repeat(n - 1)),
+        alt.clone(),
+    ];
+    if !bit {
+        v.extend([
+            alt.replace('1', "H").replace('0', "L"),
+            format!("H{}", "0".repeat(n - 1)),
+            format!("L{}", "1".repeat(n - 1)),
+            format!("X{}", &alt[1..]),
+        ]);
+    }
+    v.sort();
+    v.dedup();
+    let divisors = v
+        .iter()
+        .filter(|s| s.contains(['1', 'H', 'U', 'X']))
+        .cloned()
+        .collect();
+    (v, divisors)
+}
+
+/// `/`, `rem` and `mod` of two vectors of one type around the limits of the one-word path (1, 63,
+/// 64, 65 elements), narrower, as wide and wider than each other, extremes, weak signs, metavalues,
+/// null, both directions with a lower bound other than zero.
+fn div_limits_body(f: &str, pairs: &[(usize, usize)], lower: &[(usize, usize)]) -> String {
+    let mut body = String::new();
+    for &(a, b) in pairs {
+        let (xs, _) = div_pats(a, false);
+        let (_, ys) = div_pats(b, false);
+        for x in &xs {
+            for y in &ys {
+                for op in ["/", "rem", "mod"] {
+                    let _ = writeln!(
+                        body,
+                        "    report img({f}(\"{x}\", {}, true) {op} {f}(\"{y}\", {}, false));",
+                        a - 1,
+                        b - 1
+                    );
+                }
+            }
+        }
+    }
+    // Non-zero lower bounds, both directions for each operand.
+    for &(a, b) in lower {
+        let (xs, _) = div_pats(a, false);
+        let (_, ys) = div_pats(b, false);
+        for x in xs.iter().step_by(2) {
+            for y in ys.iter().step_by(2) {
+                for (da, db) in [("false", "true"), ("true", "false")] {
+                    for op in ["/", "rem", "mod"] {
+                        let _ = writeln!(
+                            body,
+                            "    report img({f}(\"{x}\", {}, {da}) {op} {f}(\"{y}\", {}, {db}));",
+                            a + 6,
+                            b + 2
+                        );
+                    }
+                }
+            }
+        }
+    }
+    for op in ["/", "rem", "mod"] {
+        for (x, y) in [
+            ("\"\", -1", "\"101\", 2"),
+            ("\"101\", 2", "\"\", -1"),
+            ("\"\", -1", "\"\", -1"),
+        ] {
+            let _ = writeln!(body, "    report img({f}({x}, true) {op} {f}({y}, false));");
+        }
+    }
+    let wide: String = (0..72)
+        .map(|i| if i % 3 == 0 { '1' } else { '0' })
+        .collect();
+    for (hi, lo, hj, lj) in [
+        (40, 9, 70, 39),
+        (70, 40, 5, 4),
+        (66, 33, 63, 34),
+        (63, 0, 0, 0),
+    ] {
+        for op in ["/", "rem", "mod"] {
+            let _ = writeln!(
+                body,
+                "    report img({f}(\"{wide}\", 71, false)({hi} downto {lo}) {op} {f}(\"{wide}\", 71, false)({hj} downto {lj}));"
+            );
+        }
+    }
+    body
+}
+
+const DIV_PAIRS: [(usize, usize); 16] = [
+    (1, 1),
+    (1, 63),
+    (63, 1),
+    (3, 5),
+    (5, 3),
+    (32, 33),
+    (64, 64),
+    (1, 64),
+    (64, 1),
+    (65, 1),
+    (1, 65),
+    (65, 64),
+    (64, 65),
+    (65, 65),
+    (70, 3),
+    (3, 70),
+];
+const DIV_LOWER: [(usize, usize); 6] = [(3, 5), (33, 31), (1, 64), (64, 1), (65, 3), (3, 65)];
+
+#[test]
+fn native_div_limits_unsigned_match_bodies() {
+    let body = div_limits_body("uv", &DIV_PAIRS, &DIV_LOWER);
+    diff_run("div_limits_u", &tb(&body), "t", "2008", 1500);
+}
+
+#[test]
+fn native_div_limits_signed_match_bodies() {
+    let body = div_limits_body("gv", &DIV_PAIRS, &DIV_LOWER);
+    diff_run("div_limits_s", &tb(&body), "t", "2008", 1500);
+}
+
+/// The division bodies of 1993 and 2019 are those of 2008 (the integers are 32 and 64 bits): a
+/// smaller run of the same shapes in each.
+#[test]
+fn native_div_limits_other_revisions_match_bodies() {
+    let pairs = [(1, 1), (3, 5), (5, 3), (64, 65), (65, 64), (64, 1)];
+    for f in ["uv", "gv"] {
+        let body = div_limits_body(f, &pairs, &[(33, 31)]);
+        for std in ["1993", "2019"] {
+            diff_run("div_limits_rev", &tb(&body), "t", std, 400);
+        }
+    }
+}
+
+/// A zero divisor is the body's error report and the run ends there; each case is its own run.
+#[test]
+fn native_div_by_zero_matches_bodies() {
+    for n in [1, 4, 64, 65, 130] {
+        let zero = "0".repeat(n);
+        let weak = "L".repeat(n);
+        for f in ["uv", "gv"] {
+            for op in ["/", "rem", "mod"] {
+                for z in [&zero, &weak] {
+                    let stmt = format!(
+                        "img({f}(\"{}\", {}, true) {op} {f}(\"{z}\", {}, false))",
+                        "1".repeat(n),
+                        n - 1,
+                        n - 1
+                    );
+                    let body = format!(
+                        "    report \"before\";\n    report {stmt};\n    report \"after\";\n"
+                    );
+                    diff_run("div_zero", &tb(&body), "t", "2008", 1);
+                }
+            }
+        }
+    }
+    // An integer divisor or dividend of zero, the vector forms of the same.
+    for stmt in [
+        "img(uv(\"0101\", 3, true) / 0)",
+        "img(uv(\"0101\", 3, true) rem 0)",
+        "img(uv(\"0101\", 3, true) mod 0)",
+        "img(gv(\"1101\", 3, true) / 0)",
+        "img(gv(\"1101\", 3, true) rem 0)",
+        "img(gv(\"1101\", 3, true) mod 0)",
+        "img(5 / uv(\"0000\", 3, true))",
+        "img(5 rem uv(\"0000\", 3, true))",
+        "img(5 mod uv(\"0000\", 3, true))",
+        "img(-5 / gv(\"0000\", 3, true))",
+        "img(-5 rem gv(\"0000\", 3, true))",
+        "img(-5 mod gv(\"0000\", 3, true))",
+        "img(uv(\"01\", 1, true) / 0)",
+        "img(gv(\"1\", 0, true) mod 0)",
+        "img(uv(\"01\", 1, true) / (2 ** 31 - 1))",
+        "img(uv(\"01\", 1, true) rem uv(\"00000000000000000000000000000000000000000000000000000000000000000\", 64, true))",
+    ] {
+        let body = format!("    report \"before\";\n    report {stmt};\n    report \"after\";\n");
+        for std in ["2008", "1993"] {
+            diff_run("div_zero_int", &tb(&body), "t", std, 1);
+        }
+    }
+}
+
+/// `/`, `rem` and `mod` of a vector and an integer, both orders: the integer fits, just fits or
+/// just does not (the body's warning or quotient of zero), negative and extreme values, weak bits,
+/// metavalues, null, both directions with a lower bound. Zero divisors are separate runs.
+fn div_integer_body(types: &[(&str, bool)], wide_int: bool, lens: &[usize], bit: bool) -> String {
+    let mut body = String::new();
+    for &(f, signed) in types {
+        for &n in lens {
+            let (xs, ys) = div_pats(n, bit);
+            let top: i128 = if wide_int { 1 << 63 } else { 1 << 31 };
+            let mut ints: Vec<i128> = vec![0, 1, 3, 255, top - 1];
+            if signed {
+                ints.extend([-1, -2, -7, -top]);
+            }
+            for k in [n as u32, (n as u32).saturating_sub(1)] {
+                if (1..63).contains(&k) {
+                    let w: i128 = if signed { 1i128 << k >> 1 } else { 1i128 << k };
+                    ints.extend([w - 1, w, w + 1]);
+                    if signed {
+                        ints.extend([-w, -w - 1]);
+                    }
+                }
+            }
+            ints.retain(|v| *v < top && *v >= if signed { -top } else { 0 });
+            ints.sort();
+            ints.dedup();
+            let lit = |v: i128| {
+                if v == -(1i128 << 63) {
+                    "(-9223372036854775807 - 1)".to_string()
+                } else if v == -(1i128 << 31) && !wide_int {
+                    "(-2147483647 - 1)".to_string()
+                } else if v < 0 {
+                    format!("(-{})", -v)
+                } else {
+                    v.to_string()
+                }
+            };
+            // The second shape (ascending, a lower bound) with a third of the patterns.
+            for (l, asc, step) in [(n - 1, false, 1), (n + 6, true, 3)] {
+                for x in xs.iter().step_by(step) {
+                    let vec = format!("{f}(\"{x}\", {l}, {asc})");
+                    for v in ints.iter().filter(|v| **v != 0) {
+                        for op in ["/", "rem", "mod"] {
+                            let _ = writeln!(body, "    report img({vec} {op} {});", lit(*v));
+                        }
+                    }
+                }
+                for y in ys.iter().step_by(step) {
+                    let vec = format!("{f}(\"{y}\", {l}, {asc})");
+                    for v in &ints {
+                        for op in ["/", "mod"] {
+                            let _ = writeln!(body, "    report img({} {op} {vec});", lit(*v));
+                        }
+                        // The body of `natural rem unsigned` has no RESIZE: it is a length error
+                        // for an integer wider than the vector (its own run).
+                        if signed || *v < (1i128 << n) {
+                            let _ = writeln!(body, "    report img({} rem {vec});", lit(*v));
+                        }
+                    }
+                }
+            }
+        }
+        let _ = writeln!(body, "    report img({f}(\"\", -1, true) / 5);");
+        let _ = writeln!(body, "    report img({f}(\"\", -1, true) rem 5);");
+        let _ = writeln!(body, "    report img({f}(\"\", -1, true) mod 5);");
+        let _ = writeln!(body, "    report img(5 / {f}(\"\", -1, false));");
+        let _ = writeln!(body, "    report img(5 mod {f}(\"\", -1, false));");
+        if signed {
+            let _ = writeln!(body, "    report img({f}(\"\", -1, true) / (-5));");
+            let _ = writeln!(body, "    report img((-5) mod {f}(\"\", -1, false));");
+        }
+    }
+    body
+}
+
+const U: [(&str, bool); 1] = [("uv", false)];
+const G: [(&str, bool); 1] = [("gv", true)];
+
+#[test]
+fn native_div_integer_forms_unsigned_match_bodies() {
+    for (std, lens) in [
+        ("2008", vec![1, 2, 31, 33, 64, 65]),
+        ("2019", vec![1, 33, 64]),
+        ("1993", vec![2, 33]),
+    ] {
+        let body = div_integer_body(&U, std == "2019", &lens, false);
+        diff_run("div_integer_u", &tb(&body), "t", std, 300);
+    }
+}
+
+#[test]
+fn native_div_integer_forms_signed_match_bodies() {
+    for (std, lens) in [
+        ("2008", vec![1, 2, 31, 33, 64, 65]),
+        ("2019", vec![1, 33, 64]),
+        ("1993", vec![2, 33]),
+    ] {
+        let body = div_integer_body(&G, std == "2019", &lens, false);
+        diff_run("div_integer_s", &tb(&body), "t", std, 300);
+    }
+}
+
+#[test]
+fn native_div_integer_numeric_bit_matches_bodies() {
+    let body = div_integer_body(&[("uv", false), ("gv", true)], false, &[1, 2, 33], true);
+    let src = format!("{BIT_HEAD}{body}    wait;\n  end process;\nend architecture;\n");
+    diff_run("div_integer_bit", &src, "t", "2008", 300);
+}
+
+/// `natural rem unsigned` and its signed twin with an integer wider than the vector: the unsigned
+/// body is a length error (no RESIZE), the signed one resizes. Native and body must agree.
+#[test]
+fn native_div_rem_integer_wider_than_vector_matches_bodies() {
+    for stmt in [
+        "img(300 rem uv(\"101\", 2, true))",
+        "img(8 rem uv(\"101\", 2, false))",
+        "img(300 rem uv(\"1\", 0, true))",
+        "img(300 rem gv(\"101\", 2, true))",
+        "img(-300 rem gv(\"101\", 2, false))",
+        "img(300 mod uv(\"101\", 2, true))",
+        "img(300 / uv(\"101\", 2, true))",
+        "img(uv(\"101\", 2, true) rem 300)",
+        "img(5 rem uv(\"\", -1, true))",
+        "img(5 rem uv(\"\", -1, false))",
+        "img(5 rem uv(\"01\", 1, true))",
+    ] {
+        let body = format!("    report \"before\";\n    report {stmt};\n    report \"after\";\n");
+        for std in ["2008", "2019", "1993"] {
+            diff_run("div_rem_wide_int", &tb(&body), "t", std, 1);
+        }
+    }
+}
+
+/// The word-wise path against the bodies: lengths at and around each word boundary up to 1024,
+/// one operand small and the other wide, the dividend smaller than, equal to and larger than the
+/// divisor, powers of two and all-ones operands, random operands of both signs.
+#[test]
+fn native_div_wide_matches_bodies() {
+    let mut rng = Rng(1109);
+    const LENS: [usize; 17] = [
+        1, 2, 33, 63, 64, 65, 66, 100, 127, 128, 129, 192, 193, 300, 513, 1023, 1024,
+    ];
+    let shape = |len: usize, k: u64, rng: &mut Rng| -> String {
+        (0..len)
+            .map(|i| match k {
+                0 => '1',
+                1 => {
+                    if i == len - 1 {
+                        '1'
+                    } else {
+                        '0'
+                    }
+                }
+                2 => {
+                    if i == 0 {
+                        '1'
+                    } else {
+                        '0'
+                    }
+                }
+                3 => {
+                    if i % 64 == 0 {
+                        '1'
+                    } else {
+                        '0'
+                    }
+                }
+                // Mostly zero above a few low bits: a small divisor, or a sparse dividend.
+                4 => {
+                    if i < 9 {
+                        b"01"[rng.below(2) as usize] as char
+                    } else {
+                        '0'
+                    }
+                }
+                _ => b"01"[rng.below(2) as usize] as char,
+            })
+            .collect()
+    };
+    let mut body = String::new();
+    for _ in 0..iters(150) {
+        let a = LENS[rng.below(LENS.len() as u64) as usize];
+        let b = if rng.below(3) == 0 {
+            LENS[rng.below(LENS.len() as u64) as usize]
+        } else {
+            a
+        };
+        for f in ["uv", "gv"] {
+            let (ka, kb) = (rng.below(7), rng.below(7));
+            let x = shape(a, ka, &mut rng);
+            let mut y = shape(b, kb, &mut rng);
+            if !y.contains('1') {
+                y.replace_range(0..1, "1");
+            }
+            let l = rng.below(9) as i64 + 1100;
+            for op in ["/", "rem", "mod"] {
+                let _ = writeln!(
+                    body,
+                    "    report img({f}(\"{x}\", {l}, false) {op} {f}(\"{y}\", {l}, true));"
+                );
+            }
+        }
+    }
+    diff_run("div_wide", &tb(&body), "t", "2008", 400 / scale());
+}
+
+/// A negative `NATURAL` operand of `/`, `rem` or `mod` is the body's subtype error, also when the
+/// vector is null or has a metavalue; each case is its own run since the error ends it.
+#[test]
+fn native_div_negative_natural_matches_bodies() {
+    for op in ["/", "rem", "mod"] {
+        for (x, n) in [
+            ("uv(\"101\", 2, true)", "(-1)"),
+            ("uv(\"\", -1, true)", "(-3)"),
+            ("uv(\"X1\", 1, true)", "(-2147483647 - 1)"),
+        ] {
+            for stmt in [format!("img({x} {op} {n})"), format!("img({n} {op} {x})")] {
+                let body =
+                    format!("    report \"before\";\n    report {stmt};\n    report \"after\";\n");
+                diff_run("div_natural", &tb(&body), "t", "2008", 1);
+            }
+        }
+    }
+}
+
+/// Small vectors against integers around their range, both orders: wider than the vector (the
+/// bodies divide at the larger length and resize back: the `mod` truncation warnings, a quotient
+/// of zero, the sign element of the larger length), just fitting, and fitting.
+fn div_small_body(f: &str, signed: bool, bit: bool) -> String {
+    let mut body = String::new();
+    let mut vecs: Vec<String> = Vec::new();
+    for n in 2..=3usize {
+        for v in 0..1u32 << n {
+            vecs.push(format!("{v:0n$b}"));
+        }
+    }
+    vecs.extend(["0000", "1000", "1111", "0111", "0001", "1010"].map(String::from));
+    if !bit {
+        vecs.extend(["1H", "L1", "H0L", "X10", "1L0H"].map(String::from));
+    }
+    let ints: &[i64] = &[
+        -33, -17, -9, -8, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 31, 32, 100,
+    ];
+    for x in &vecs {
+        let n = x.len();
+        let vec = format!("{f}(\"{x}\", {}, false)", n - 1);
+        for &v in ints.iter().filter(|v| signed || **v >= 0) {
+            let lit = if v < 0 {
+                format!("(-{})", -v)
+            } else {
+                v.to_string()
+            };
+            if v != 0 {
+                for op in ["/", "rem", "mod"] {
+                    let _ = writeln!(body, "    report img({vec} {op} {lit});");
+                }
+            }
+            // A divisor of zero (weak ones too) ends the run; `natural rem unsigned` is a length error.
+            if x.contains(['1', 'H', 'X']) {
+                for op in ["/", "mod"] {
+                    let _ = writeln!(body, "    report img({lit} {op} {vec});");
+                }
+                if signed || (v as u64) < 1 << n {
+                    let _ = writeln!(body, "    report img({lit} rem {vec});");
+                }
+            }
+        }
+    }
+    body
+}
+
+#[test]
+fn native_div_small_unsigned_match_bodies() {
+    diff_run(
+        "div_small_u",
+        &tb(&div_small_body("uv", false, false)),
+        "t",
+        "2008",
+        1500,
+    );
+}
+
+#[test]
+fn native_div_small_signed_match_bodies() {
+    diff_run(
+        "div_small_s",
+        &tb(&div_small_body("gv", true, false)),
+        "t",
+        "2008",
+        1500,
+    );
+}
+
+#[test]
+fn native_div_small_numeric_bit_matches_bodies() {
+    let body = format!(
+        "{}{}",
+        div_small_body("uv", false, true),
+        div_small_body("gv", true, true)
+    );
+    let src = format!("{BIT_HEAD}{body}    wait;\n  end process;\nend architecture;\n");
+    diff_run("div_small_bit", &src, "t", "2008", 1500);
+}

@@ -1563,21 +1563,22 @@ fn neg(x: &BitVec) -> BitVec {
     BitVec::new(x.len()).sub(x)
 }
 
-/// `/`, `rem` and `mod` of `numeric_std` vectors (`KIND` 0, 1, 2), as the bodies compute them
-/// through `DIVMOD` on magnitudes. A zero divisor is the body's.
-fn divide<const KIND: u8, const SIGNED: bool>(
-    m: &mut Machine,
-    _: Cx<'_, '_, '_>,
-    _: Option<TyId>,
-    a: &[u64],
-) -> Ret {
-    let (l, r) = (vh(m, a, 0)?.v, vh(m, a, A1)?.v);
+/// `UNSIGNED_NUM_BITS` / `SIGNED_NUM_BITS` of the bodies: the elements an integer needs.
+fn num_bits(i: i64, signed: bool) -> usize {
+    let n = if signed && i < 0 { !i as u64 } else { i as u64 };
+    let len = 64 - n.leading_zeros() as usize;
+    if signed { len + 1 } else { len.max(1) }
+}
+
+/// The `DIVMOD` of the vector bodies (`KIND` 0, 1, 2): magnitudes divided, signs applied as the
+/// bodies do. `None` for a zero divisor, which is the body's error.
+fn div_vh<const KIND: u8, const SIGNED: bool>(l: &LogicVec, r: &LogicVec) -> Option<Vh> {
     if l.is_empty() || r.is_empty() {
-        return put(m, &Vh::null());
+        return Some(Vh::null());
     }
     let (Some(x), Some(y)) = (l.to_bitvec(), r.to_bitvec()) else {
         let n = if KIND == 0 { l.len() } else { r.len() };
-        return put(m, &Vh::down(x_vec(n)));
+        return Some(Vh::down(x_vec(n)));
     };
     let (xneg, yneg) = (SIGNED && x.get(x.len() - 1), SIGNED && y.get(y.len() - 1));
     // The `mod` body tests the raw dividend's sign (`L(L'left) = '1'`), where `H` is not `1`.
@@ -1587,7 +1588,7 @@ fn divide<const KIND: u8, const SIGNED: bool>(
         if yneg { neg(&y) } else { y },
     );
     if ym.words().iter().all(|w| *w == 0) {
-        return fallback(m);
+        return None;
     }
     let (q, mut rm) = divmod(&xm, &ym);
     let out = match KIND {
@@ -1612,7 +1613,102 @@ fn divide<const KIND: u8, const SIGNED: bool>(
             }
         }
     };
-    put(m, &Vh::down(LogicVec::from_bitvec(&out)))
+    Some(Vh::down(LogicVec::from_bitvec(&out)))
+}
+
+/// `RESIZE (res, n)` of a result computed at a larger length, after the body's check that no
+/// element is lost (`"/"`, `rem`, `mod` of an integer wider than the vector): the warning when
+/// the elements above `n` are not zeros (copies of element `n - 1` for `signed`).
+fn narrow<const KIND: u8, const SIGNED: bool>(
+    m: &mut Machine,
+    ctx: Cx<'_, '_, '_>,
+    res: Vh,
+    n: usize,
+    bit: bool,
+) -> R<Vh> {
+    let v = res.v;
+    let big = v.len();
+    // A metavalue result is all `X`: no warning, and `X` at the new length.
+    let Some(b) = v.to_bitvec() else {
+        return Ok(Vh::down(x_vec(n)));
+    };
+    let top = SIGNED && b.get(n - 1);
+    if (n..big).any(|j| b.get(j) != top) {
+        let (op, what) =
+            [("/", "Quotient"), ("rem", "Remainder"), ("mod", "Modulus")][KIND as usize];
+        warnb(
+            m,
+            ctx,
+            &format!("NUMERIC_STD.\"{op}\": {what} Truncated"),
+            bit,
+        )?;
+    }
+    // Signed: the sign element of the larger vector on top of the low elements.
+    Ok(Vh::down(if SIGNED {
+        LogicVec::new(1, v.get(big - 1)).concat(&v.slice(0, n - 1))
+    } else {
+        v.slice(0, n)
+    }))
+}
+
+/// `/`, `rem` and `mod` of `numeric_std` vectors (`KIND` 0, 1, 2), as the bodies compute them
+/// through `DIVMOD` on magnitudes. A zero divisor is the body's, and so is the length error of
+/// `natural rem unsigned` with an integer wider than the vector.
+fn divide<const KIND: u8, const SIGNED: bool, const FORM: u8>(
+    m: &mut Machine,
+    ctx: Cx<'_, '_, '_>,
+    t: Option<TyId>,
+    a: &[u64],
+) -> Ret {
+    if let Some(r) = fast_div::<KIND, SIGNED, FORM>(m, a) {
+        return Ok(Some(r));
+    }
+    let bit = t.is_some();
+    // An integer is `TO_UNSIGNED`/`TO_SIGNED` at the vector's length, or at the larger length it
+    // needs, which the bodies then resize back (`narrow`).
+    let mut narrow_to = None;
+    let (l, r) = match FORM {
+        0 => (vh(m, a, 0)?.v, vh(m, a, A1)?.v),
+        _ => {
+            let (v, i) = if FORM == 1 {
+                (vh(m, a, 0)?.v, int(a, A1)?)
+            } else {
+                (vh(m, a, 1)?.v, int(a, 0)?)
+            };
+            let i = if SIGNED { i } else { natural(m, i)? };
+            let n = v.len();
+            if n == 0 {
+                // NAU/NAS; `natural rem unsigned` has no such check and fails on the length.
+                return if FORM == 2 && KIND == 1 && !SIGNED {
+                    fallback(m)
+                } else {
+                    put(m, &Vh::null())
+                };
+            }
+            let nb = num_bits(i, SIGNED);
+            let w = if nb <= n {
+                from_int(m, ctx, i, n as i64, SIGNED, bit)?.v
+            } else {
+                match (FORM, KIND) {
+                    // The body returns zeros whatever the vector holds.
+                    (1, 0) => return put(m, &Vh::down(LogicVec::new(n, StdULogic::Zero))),
+                    (2, 1) if !SIGNED => return fallback(m),
+                    _ => {}
+                }
+                narrow_to = (FORM == 1 || KIND == 0).then_some(n);
+                from_int(m, ctx, i, nb as i64, SIGNED, bit)?.v
+            };
+            if FORM == 1 { (v, w) } else { (w, v) }
+        }
+    };
+    let Some(res) = div_vh::<KIND, SIGNED>(&l, &r) else {
+        return fallback(m);
+    };
+    let res = match narrow_to {
+        Some(n) => narrow::<KIND, SIGNED>(m, ctx, res, n, bit)?,
+        None => res,
+    };
+    put(m, &res)
 }
 
 fn cmp_name(c: Cmp) -> &'static str {
@@ -2005,6 +2101,127 @@ fn fast_mul<const SIGNED: bool, const FORM: u8>(m: &mut Machine, a: &[u64]) -> O
     put_down(m, n, x.wrapping_mul(y)).ok()
 }
 
+/// `/`, `rem` and `mod` of a vector of `n` elements (`v` its bits) and an integer `i` that does
+/// not fit them: the bodies divide at the larger length and resize back. The result bits, or
+/// `None` where the body warns, fails (`natural rem unsigned`, a zero divisor) or is `narrow`'s.
+fn div_wide_int<const KIND: u8, const SIGNED: bool, const FORM: u8>(
+    n: usize,
+    v: u64,
+    i: i64,
+) -> Option<u64> {
+    let x: i128 = if SIGNED {
+        signed_of(v, n).into()
+    } else {
+        v.into()
+    };
+    let i = i128::from(i);
+    // Floored division's remainder has the divisor's sign.
+    let modulo = |a: i128, b: i128| {
+        let r = a % b;
+        if r != 0 && (r < 0) != (b < 0) {
+            r + b
+        } else {
+            r
+        }
+    };
+    let out = if FORM == 1 {
+        match KIND {
+            // Zeros whatever the vector holds; the vector is its own remainder when unsigned.
+            0 => 0,
+            _ if !SIGNED => x,
+            1 => x % i,
+            _ => modulo(x, i),
+        }
+    } else {
+        if x == 0 {
+            return None;
+        }
+        match (KIND, SIGNED) {
+            (1, false) => return None,
+            (0, _) => i / x,
+            (1, true) | (2, false) => i % x,
+            _ => modulo(i, x),
+        }
+    };
+    // Warns (and resizes by the larger vector's sign) where the result needs more elements.
+    let fits = if SIGNED {
+        (-(1i128 << (n - 1))..1i128 << (n - 1)).contains(&out)
+    } else {
+        (0..1i128 << n).contains(&out)
+    };
+    fits.then_some(out as u64 & low(n))
+}
+
+/// `/`, `rem` and `mod` of operands without a metavalue or a weak bit (`mod` reads the raw sign
+/// element): `u64` magnitudes, the signs applied as the bodies do, the word-wise path above 64
+/// elements. A zero divisor and an integer that does not fit the vector take the general path.
+fn fast_div<const KIND: u8, const SIGNED: bool, const FORM: u8>(
+    m: &mut Machine,
+    a: &[u64],
+) -> Option<u64> {
+    let pure = |v: Small| v.pure.then_some(v);
+    let ((n, x), (k, y)) = match FORM {
+        0 => {
+            let (Some(l), Some(r)) = (small(m, a, 0), small(m, a, A1)) else {
+                return wide::divide(m, a, KIND, SIGNED, 0);
+            };
+            let (l, r) = (pure(l)?, pure(r)?);
+            ((l.n, l.bits), (r.n, r.bits))
+        }
+        1 => {
+            let Some(l) = small(m, a, 0) else {
+                return wide::divide(m, a, KIND, SIGNED, 1);
+            };
+            let l = pure(l)?;
+            let i = nat_or_int(cell(a, A1)?, SIGNED)?;
+            let Some(y) = fit_bits(i, l.n, SIGNED) else {
+                let out = div_wide_int::<KIND, SIGNED, FORM>(l.n, l.bits, i)?;
+                return put_down(m, l.n, out).ok();
+            };
+            ((l.n, l.bits), (l.n, y))
+        }
+        _ => {
+            let Some(r) = small(m, a, 1) else {
+                return wide::divide(m, a, KIND, SIGNED, 2);
+            };
+            let r = pure(r)?;
+            let i = nat_or_int(cell(a, 0)?, SIGNED)?;
+            let Some(x) = fit_bits(i, r.n, SIGNED) else {
+                let out = div_wide_int::<KIND, SIGNED, FORM>(r.n, r.bits, i)?;
+                return put_down(m, r.n, out).ok();
+            };
+            ((r.n, x), (r.n, r.bits))
+        }
+    };
+    // Magnitude and sign; the most negative value is its own magnitude as an unsigned one.
+    let mag = |v: u64, n: usize| {
+        let neg = SIGNED && v >> (n - 1) & 1 == 1;
+        (if neg { v.wrapping_neg() & low(n) } else { v }, neg)
+    };
+    let ((xm, xneg), (ym, yneg)) = (mag(x, n), mag(y, k));
+    if ym == 0 {
+        return None;
+    }
+    let (q, r) = (xm / ym, xm % ym);
+    let (len, out) = match KIND {
+        0 => (n, if xneg != yneg { q.wrapping_neg() } else { q }),
+        1 => (k, if xneg { r.wrapping_neg() } else { r }),
+        _ => (
+            k,
+            if yneg && xneg {
+                r.wrapping_neg()
+            } else if yneg && r != 0 {
+                r.wrapping_sub(ym)
+            } else if xneg && r != 0 {
+                ym.wrapping_sub(r)
+            } else {
+                r
+            },
+        ),
+    };
+    put_down(m, len, out & low(len)).ok()
+}
+
 /// `to_01` of 1 to 64 elements that are all `0 1 L H`: the bits as `(n-1 downto 0)`, whatever the
 /// operand's bounds. A metavalue (the result is `xmap`), a null or a longer vector takes the general path.
 fn fast_to_01(m: &mut Machine, a: &[u64]) -> Option<u64> {
@@ -2367,6 +2584,32 @@ fn fast_to_bitvector(m: &mut Machine, a: &[u64]) -> Option<u64> {
     to_bitvector_small(m, a).or_else(|| to_bitvector(m, &mut None, None, a).ok().flatten())
 }
 
+/// The instance of `$f::<KIND, SIGNED, FORM>` for a runtime `kind` (0 to 2), `signed` and `form`.
+macro_rules! divs {
+    ($f:ident, $t:ty, $k:expr, $s:expr, $fm:expr) => {
+        match ($k, $s, $fm) {
+            (0, false, 0) => $f::<0, false, 0> as $t,
+            (0, false, 1) => $f::<0, false, 1> as $t,
+            (0, false, _) => $f::<0, false, 2> as $t,
+            (0, true, 0) => $f::<0, true, 0> as $t,
+            (0, true, 1) => $f::<0, true, 1> as $t,
+            (0, true, _) => $f::<0, true, 2> as $t,
+            (1, false, 0) => $f::<1, false, 0> as $t,
+            (1, false, 1) => $f::<1, false, 1> as $t,
+            (1, false, _) => $f::<1, false, 2> as $t,
+            (1, true, 0) => $f::<1, true, 0> as $t,
+            (1, true, 1) => $f::<1, true, 1> as $t,
+            (1, true, _) => $f::<1, true, 2> as $t,
+            (_, false, 0) => $f::<2, false, 0> as $t,
+            (_, false, 1) => $f::<2, false, 1> as $t,
+            (_, false, _) => $f::<2, false, 2> as $t,
+            (_, true, 0) => $f::<2, true, 0> as $t,
+            (_, true, 1) => $f::<2, true, 1> as $t,
+            (_, true, _) => $f::<2, true, 2> as $t,
+        }
+    };
+}
+
 macro_rules! pick3 {
     ($f:ident, $a:expr, $b:expr, $c:expr) => {
         match ($a, $b, $c) {
@@ -2455,14 +2698,11 @@ pub(crate) fn lookup(symbol: &str) -> Option<NativeFn> {
             signed,
             form: f,
         } => pick3!(add, sub, signed, form(f)),
-        Op::Div { kind, signed } => match (kind, signed) {
-            (0, false) => divide::<0, false>,
-            (0, true) => divide::<0, true>,
-            (1, false) => divide::<1, false>,
-            (1, true) => divide::<1, true>,
-            (_, false) => divide::<2, false>,
-            (_, true) => divide::<2, true>,
-        },
+        Op::Div {
+            kind,
+            signed,
+            form: f,
+        } => divs!(divide, NativeFn, kind, signed, form(f)),
         Op::Mul { signed, form: f } => match (signed, form(f)) {
             (false, 0) => mul::<false, 0>,
             (false, 1) => mul::<false, 1>,
@@ -2713,6 +2953,11 @@ pub(crate) fn lookup_fast(symbol: &str) -> Option<FastFn> {
         } => pick3_fast!(fast_minmax, max, signed, form(f)),
         Op::Match => fast_match,
         Op::To01 => fast_to_01,
+        Op::Div {
+            kind,
+            signed,
+            form: f,
+        } => divs!(fast_div, FastFn, kind, signed, form(f)),
         Op::Mul { signed, form: f } => match (signed, form(f)) {
             (false, 0) => fast_mul::<false, 0>,
             (false, 1) => fast_mul::<false, 1>,

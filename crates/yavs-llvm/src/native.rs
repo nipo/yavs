@@ -453,7 +453,8 @@ pub fn ieee_layout(op: yavs_ir::ieee::Op) -> Option<&'static [Arg]> {
         | Op::Compare { form, .. }
         | Op::QCompare { form, .. }
         | Op::MinMax { form, .. }
-        | Op::Mul { form, .. } => match form {
+        | Op::Mul { form, .. }
+        | Op::Div { form, .. } => match form {
             Form::Vv => &[Arg::Arr, Arg::Arr],
             Form::Vi => &[Arg::Arr, Arg::Int],
             Form::Iv => &[Arg::Int, Arg::Arr],

@@ -3225,11 +3225,11 @@ user's performance priority:
   designator, parameter and result base types) reduces to a key `yavs_ir::ieee::parse` knows;
   the VHDL body stays in the library and is the reference. Implemented in `yavs-interp`
   `src/ieee.rs` on bit-plane vectors: `std_logic_1164` gates, `not`, `to_x01`/`to_x01z`/`to_ux01`,
-  `to_01`, `??`, `rising_edge`/`falling_edge` of `std_ulogic`; `numeric_std` `+ - *`, unary `-` and `abs` of `signed`, the six
+  `to_01`, `??`, `rising_edge`/`falling_edge` of `std_ulogic`; `numeric_std` `+ - * / rem mod`, unary `-` and `abs` of `signed`, the six
   relational operators and the six matching ones `?=` ... `?>=` (vector/vector, vector/integer,
   integer/vector), `maximum`, `minimum`, `std_match` of vectors, `to_integer`,
   `to_unsigned`, `to_signed`, `resize` and the local `xsll`..`xror` the shift and rotate
-  functions call. Everything else (division, string conversions, `numeric_bit`,
+  functions call. Everything else (string conversions, `numeric_bit`,
   Synopsys packages) still runs from VHDL.
 - **Same results by construction of the test, not by fallback:** each native ports its body,
   including metavalue handling (a metavalue anywhere gives an all-`X` result), result bounds
@@ -3284,9 +3284,18 @@ user's performance priority:
   error after it). `is_less`, `is_less_or_equal`, `unsigned_is_less`, `unsigned_is_less_or_equal`
   of `std_logic_arith` run natively for `(n-1 downto 0)` operands of one length with `0`/`1`
   elements only (`L`/`H` compare differently in the bodies) and are handed back otherwise;
-  `make_binary` now covers every result type. The vector/integer forms of `/` `rem` `mod`,
-  `std_match`, the `?=` family and the `*_unsigned`/`std_logic_unsigned` wrappers stay VHDL:
-  none of them was above 0.5% of the instructions of any benchmark.
+  `make_binary` now covers every result type. `std_match`, the `?=` family and the
+  `*_unsigned`/`std_logic_unsigned` wrappers stay VHDL: none of them was above 0.5% of the
+  instructions of any benchmark. The vector/integer forms of `/` `rem` `mod` are natives since
+  #1108 (`Op::Div { form }`): an integer that fits the vector's length is converted at that
+  length and divided as the vector form is. One that does not is what the body computes at the
+  larger length and resizes back: a quotient of zero for `vector / integer`, the vector itself or
+  the remainder for `rem` and `mod`, the truncation warning of `vector mod integer` and
+  `integer / vector` (`narrow`), computed in place when no warning is due. Only a zero divisor and
+  the length error of `natural rem unsigned` with a wider integer are handed back to the body. One-word path for operands of up to 64 elements
+  without a metavalue or a weak bit (the `mod` body reads the raw sign element, so a weak bit
+  takes the general path), word-wise path above (`ieee_wide::divide`, up to 1024 elements), in
+  place in compiled code up to 64 elements.
 - **Compiled tier:** `YAVS_IEEE_TIER=llvm` (with `YAVS_IEEE_SCALE=n` to shrink the straight-line
   testbenches, which take the JIT many minutes at full size) makes `ieee_native.rs` run the
   on/off comparison on `--tier=llvm`.

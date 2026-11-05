@@ -4281,6 +4281,22 @@ impl<'a> Opt<'a> {
                     a.checked_add(b)?
                 })
             }
+            // The dividend's length for `/`, the divisor's for `rem` and `mod`; the integer
+            // forms have the vector's.
+            Op::Div { kind, form, .. } => match form {
+                Form::Vv => {
+                    let (a, b) = (alen(0)?, alen(1)?);
+                    Some(if a == 0 || b == 0 {
+                        0
+                    } else if kind == 0 {
+                        a
+                    } else {
+                        b
+                    })
+                }
+                Form::Vi => alen(0),
+                Form::Iv => alen(1),
+            },
             // Only proven equal operands: unequal ones keep the native's report and the check
             // of the result (#1063).
             Op::VecGate(_) | Op::NumGate(_) => {

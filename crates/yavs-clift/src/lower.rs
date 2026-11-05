@@ -7235,6 +7235,159 @@ impl Gen<'_> {
         (n, mask, w)
     }
 
+    /// The `u64` division of `ieee::fast_div` for operands of `n` and `k` elements (bits `x`,
+    /// `y`): the result's element count and bits.
+    #[allow(clippy::too_many_arguments)]
+    fn div_core(
+        &mut self,
+        kind: u8,
+        signed: bool,
+        n: Value,
+        x: Value,
+        k: Value,
+        y: Value,
+        fb: Block,
+    ) -> (Value, Value) {
+        let (c0, c1) = (self.c64(0), self.c64(1));
+        // Magnitude and whether the operand is negative (the most negative value is its own
+        // magnitude as an unsigned one).
+        let mag = |g: &mut Self, v: Value, n: Value| {
+            let nm1 = g.b.ins().isub(n, c1);
+            let sh = g.b.ins().ushr(v, nm1);
+            let sb = g.b.ins().band(sh, c1);
+            let neg = g.b.ins().icmp_imm_s(IntCC::NotEqual, sb, 0);
+            let nv = g.b.ins().ineg(v);
+            let lm = g.low_mask(n);
+            let nv = g.b.ins().band(nv, lm);
+            (g.b.ins().select(neg, nv, v), neg)
+        };
+        let ((xm, xneg), (ym, yneg)) = if signed {
+            (mag(self, x, n), mag(self, y, k))
+        } else {
+            ((x, c0), (y, c0))
+        };
+        let nz = self.b.ins().icmp_imm_s(IntCC::NotEqual, ym, 0);
+        self.guard(nz, fb);
+        if kind == 0 {
+            let q = self.b.ins().udiv(xm, ym);
+            if !signed {
+                return (n, q);
+            }
+            let flip = self.b.ins().bxor(xneg, yneg);
+            let nq = self.b.ins().ineg(q);
+            return (n, self.b.ins().select(flip, nq, q));
+        }
+        let r = self.b.ins().urem(xm, ym);
+        if !signed {
+            return (k, r);
+        }
+        let nr = self.b.ins().ineg(r);
+        let res = if kind == 1 {
+            self.b.ins().select(xneg, nr, r)
+        } else {
+            let rz = self.b.ins().icmp_imm_s(IntCC::NotEqual, r, 0);
+            let r_ym = self.b.ins().isub(r, ym);
+            let ym_r = self.b.ins().isub(ym, r);
+            let both = self.b.ins().band(xneg, yneg);
+            let yz = self.b.ins().band(yneg, rz);
+            let xz = self.b.ins().band(xneg, rz);
+            let t = self.b.ins().select(xz, ym_r, r);
+            let t = self.b.ins().select(yz, r_ym, t);
+            self.b.ins().select(both, nr, t)
+        };
+        (k, res)
+    }
+
+    /// `ieee::div_wide_int`: the vector (`n` elements, bits `vb`) and an integer `v` that does not
+    /// fit it. The result bits; where the body warns, fails or divides by zero the callback runs.
+    #[allow(clippy::too_many_arguments)]
+    fn div_wide_int(
+        &mut self,
+        kind: u8,
+        signed: bool,
+        form: yavs_ir::ieee::Form,
+        n: Value,
+        vb: Value,
+        v: Value,
+        fb: Block,
+    ) -> Value {
+        let c0 = self.c64(0);
+        if !signed {
+            // A negative `natural` is the native's error.
+            let nn = self.b.ins().icmp(IntCC::SignedGreaterThanOrEqual, v, c0);
+            self.guard(nn, fb);
+        }
+        let x = if signed { self.sext_bits(vb, n) } else { vb };
+        // Floored remainder: the divisor's sign.
+        let floor_mod = |g: &mut Self, r: Value, d: Value| {
+            let rz = g.b.ins().icmp_imm_s(IntCC::NotEqual, r, 0);
+            let xr = g.b.ins().bxor(r, d);
+            let opp = g.b.ins().icmp_imm_s(IntCC::SignedLessThan, xr, 0);
+            let adj = g.b.ins().band(rz, opp);
+            let rd = g.b.ins().iadd(r, d);
+            g.b.ins().select(adj, rd, r)
+        };
+        // The result fits `n` elements, else the body warns.
+        let fits_n = |g: &mut Self, r: Value| {
+            let ok = if signed {
+                let m = g.low_mask(n);
+                let t = g.b.ins().band(r, m);
+                let e = g.sext_bits(t, n);
+                g.b.ins().icmp(IntCC::Equal, e, r)
+            } else {
+                let m = g.low_mask(n);
+                let hi = g.b.ins().band_not(r, m);
+                g.b.ins().icmp_imm_s(IntCC::Equal, hi, 0)
+            };
+            g.guard(ok, fb);
+        };
+        if form == yavs_ir::ieee::Form::Vi {
+            return match (kind, signed) {
+                (0, _) => c0,
+                (_, false) => vb,
+                (1, true) => self.b.ins().srem(x, v),
+                _ => {
+                    let r = self.b.ins().srem(x, v);
+                    let r = floor_mod(self, r, v);
+                    fits_n(self, r);
+                    r
+                }
+            };
+        }
+        // An integer dividend: the vector must not be zero (nor -1, where a signed division
+        // overflows for the most negative integer).
+        let nz = self.b.ins().icmp_imm_s(IntCC::NotEqual, x, 0);
+        self.guard(nz, fb);
+        if signed {
+            let ok = self.b.ins().icmp_imm_s(IntCC::NotEqual, x, -1);
+            self.guard(ok, fb);
+        }
+        match (kind, signed) {
+            // `natural rem unsigned` is a length error in the body.
+            (1, false) => {
+                let never = self.b.ins().icmp_imm_s(IntCC::Equal, c0, 1);
+                self.guard(never, fb);
+                c0
+            }
+            (0, false) => {
+                let q = self.b.ins().udiv(v, x);
+                fits_n(self, q);
+                q
+            }
+            (0, true) => {
+                let q = self.b.ins().sdiv(v, x);
+                fits_n(self, q);
+                q
+            }
+            (_, false) => self.b.ins().urem(v, x),
+            (1, true) => self.b.ins().srem(v, x),
+            _ => {
+                let r = self.b.ins().srem(v, x);
+                floor_mod(self, r, x)
+            }
+        }
+    }
+
     /// The low `n` bits (0 to 64) as a mask.
     fn low_mask(&mut self, n: Value) -> Value {
         let full = self.b.ins().icmp_imm_s(IntCC::Equal, n, 64);
@@ -7269,7 +7422,10 @@ impl Gen<'_> {
         let d = ok(dst, "a native without a result")?;
         let layout = ok(ieee_layout(op), "not a native computed in place")?;
         let (fb, done) = (self.b.create_block(), self.b.create_block());
-        let pure = matches!(op, Op::Resize { .. } | Op::Shift(_) | Op::ShiftFn(_));
+        let pure = matches!(
+            op,
+            Op::Resize { .. } | Op::Shift(_) | Op::ShiftFn(_) | Op::Div { .. }
+        );
         // `std_match` and `?=` / `?/=` take every element value: all four planes.
         let plane_op = matches!(
             op,
@@ -7481,6 +7637,37 @@ impl Gen<'_> {
                 let r = self.b.ins().select(t, cx, r);
                 let t = self.b.ins().icmp_imm_s(IntCC::NotEqual, un, 0);
                 Out::Scalar(self.b.ins().select(t, c0, r))
+            }
+            // `ieee::fast_div`: the magnitudes divided, the signs applied as the bodies do. A zero
+            // divisor goes to the callback, which hands the call to the body. An integer wider than
+            // the vector is `div_wide_int`; where the body warns, or fails, the callback runs.
+            Op::Div { kind, signed, form } => {
+                if form == Form::Vv {
+                    let (len, bits) =
+                        self.div_core(kind, signed, arrs[0].0, arrs[0].1, arrs[1].0, arrs[1].1, fb);
+                    Out::Vector(len, bits, false)
+                } else {
+                    let (n, vb, mask) = arrs[0];
+                    let v = ints[0];
+                    let fit = fits(self, v, n, mask, signed);
+                    let (fit_b, wide_b, join) = (
+                        self.b.create_block(),
+                        self.b.create_block(),
+                        self.b.create_block(),
+                    );
+                    let res = self.b.append_block_param(join, I64);
+                    self.brif_split(fit, fit_b, wide_b);
+                    self.b.switch_to_block(fit_b);
+                    let iv = self.b.ins().band(v, mask);
+                    let (x, y) = if form == Form::Vi { (vb, iv) } else { (iv, vb) };
+                    let (_, bits) = self.div_core(kind, signed, n, x, n, y, fb);
+                    self.b.ins().jump(join, &[BlockArg::Value(bits)]);
+                    self.b.switch_to_block(wide_b);
+                    let bits = self.div_wide_int(kind, signed, form, n, vb, v, fb);
+                    self.b.ins().jump(join, &[BlockArg::Value(bits)]);
+                    self.b.switch_to_block(join);
+                    Out::Vector(n, res, false)
+                }
             }
             Op::Compare {
                 cmp: k,

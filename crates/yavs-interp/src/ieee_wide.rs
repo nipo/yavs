@@ -608,6 +608,121 @@ pub(crate) fn abs(m: &mut Machine, a: &[u64]) -> Option<u64> {
     emit(m, &out, x.n, Bounds::Down)
 }
 
+/// The magnitude of `x` (`signed`: the most negative value is its own) and whether it is negative.
+fn magnitude(x: &Wide, signed: bool) -> (W, bool) {
+    if signed && x.bit(x.n - 1) {
+        (add_words(&[0; WORDS], &x.w, x.n, true), true)
+    } else {
+        (x.w, false)
+    }
+}
+
+/// The number of bits up to and including the highest set one.
+fn bit_len(w: &W) -> usize {
+    w.iter()
+        .rposition(|&u| u != 0)
+        .map_or(0, |i| i * 64 + 64 - w[i].leading_zeros() as usize)
+}
+
+/// Quotient and remainder of `x` by `y`, which is not zero: word by word for a divisor of one
+/// word, else shift and subtract over the `bit_len(x) - bit_len(y) + 1` quotient bits.
+fn divmod_words(x: &W, y: &W) -> (W, W) {
+    let (bx, by) = (bit_len(x), bit_len(y));
+    let (mut q, mut r) = ([0u64; WORDS], [0u64; WORDS]);
+    if bx < by {
+        return (q, *x);
+    }
+    if by <= 64 {
+        let (d, mut rem) = (u128::from(y[0]), 0u128);
+        for i in (0..bx.div_ceil(64)).rev() {
+            let cur = rem << 64 | u128::from(x[i]);
+            (q[i], rem) = ((cur / d) as u64, cur % d);
+        }
+        r[0] = rem as u64;
+        return (q, r);
+    }
+    // The top `by` bits of `x` to start with, then one more bit of `x` per quotient bit.
+    let (s, nw) = (bx - by, (by / 64 + 1).min(WORDS));
+    let (ws, bs) = (s / 64, s % 64);
+    for (i, o) in r.iter_mut().enumerate().take(nw) {
+        let at = |j: usize| x.get(j).copied().unwrap_or(0);
+        *o = at(i + ws) >> bs
+            | if bs > 0 {
+                at(i + ws + 1) << (64 - bs)
+            } else {
+                0
+            };
+    }
+    for i in (0..=s).rev() {
+        if cmp_words(&r, y, nw * 64, false) != std::cmp::Ordering::Less {
+            sub_in_place(&mut r, y, nw);
+            q[i / 64] |= 1 << (i % 64);
+        }
+        if i > 0 {
+            // r < y, so 2 r + bit < 2 y has `by + 1` bits, which `nw` words hold: a divisor
+            // of 1024 bits leaves no bit of the dividend to shift in (`s` is 0).
+            let mut carry = x[(i - 1) / 64] >> ((i - 1) % 64) & 1;
+            for w in &mut r[..nw] {
+                let c = *w >> 63;
+                *w = *w << 1 | carry;
+                carry = c;
+            }
+            debug_assert_eq!(carry, 0);
+        }
+    }
+    (q, r)
+}
+
+/// `r -= y` over the low `nw` words (wrapping).
+fn sub_in_place(r: &mut W, y: &W, nw: usize) {
+    let mut borrow = false;
+    for (a, &b) in r[..nw].iter_mut().zip(&y[..nw]) {
+        let (d, b1) = a.overflowing_sub(b);
+        let (d, b2) = d.overflowing_sub(u64::from(borrow));
+        (*a, borrow) = (d, b1 | b2);
+    }
+}
+
+/// `/`, `rem` and `mod` (`kind` 0, 1, 2) of vectors without a metavalue or a weak bit, one longer
+/// than 64, or of such a vector and an integer (`form` as in [`add`]; it always fits): magnitudes
+/// divided, signs applied as the bodies do. A zero divisor is the general path's.
+pub(crate) fn divide(m: &mut Machine, a: &[u64], kind: u8, signed: bool, form: u8) -> Option<u64> {
+    let (l, r) = match form {
+        0 => (wide_of(m, a, 0, true)?, wide_of(m, a, A1, true)?),
+        1 => {
+            let l = wide_of(m, a, 0, true).filter(|l| l.n > 64)?;
+            let i = int_operand(*a.get(A1)?, signed)?;
+            let w = int_words(i, l.n, signed);
+            let r = Wide { n: l.n, w };
+            (l, r)
+        }
+        _ => {
+            let r = wide_of(m, a, 1, true).filter(|r| r.n > 64)?;
+            let i = int_operand(*a.first()?, signed)?;
+            let w = int_words(i, r.n, signed);
+            let l = Wide { n: r.n, w };
+            (l, r)
+        }
+    };
+    let ((xm, xneg), (ym, yneg)) = (magnitude(&l, signed), magnitude(&r, signed));
+    if ym.iter().all(|&u| u == 0) {
+        return None;
+    }
+    let (q, rem) = divmod_words(&xm, &ym);
+    let neg = |v: &W, n| add_words(&[0; WORDS], v, n, true);
+    let (n, k) = (l.n, r.n);
+    let nonzero = rem.iter().any(|&u| u != 0);
+    let (len, out) = match kind {
+        0 => (n, if xneg != yneg { neg(&q, n) } else { q }),
+        1 => (k, if xneg { neg(&rem, k) } else { rem }),
+        _ if yneg && xneg => (k, neg(&rem, k)),
+        _ if yneg && nonzero => (k, add_words(&rem, &ym, k, true)),
+        _ if xneg && nonzero => (k, add_words(&ym, &rem, k, true)),
+        _ => (k, rem),
+    };
+    emit(m, &out, len, Bounds::Down)
+}
+
 /// The gate `g` of two vectors of one length (`bounds` as the native writes them), or of one
 /// vector for `not` (`y` is `None`), where an operand is longer than 64 elements.
 pub(crate) fn gate(m: &mut Machine, a: &[u64], g: Option<Gate>, bounds: Bounds) -> Option<u64> {

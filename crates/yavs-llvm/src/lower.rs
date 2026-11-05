@@ -7088,7 +7088,10 @@ impl Gen {
                 let k = sub(self.c64(64), n);
                 LLVMBuildAShr(b, shl(x, k), k, c"".as_ptr())
             };
-            let pure = matches!(op, Op::Resize { .. } | Op::Shift(_) | Op::ShiftFn(_));
+            let pure = matches!(
+                op,
+                Op::Resize { .. } | Op::Shift(_) | Op::ShiftFn(_) | Op::Div { .. }
+            );
             // The operands in argument order.
             // `std_match` and `?=` / `?/=` take every element value: all four planes.
             let plane_op = matches!(
@@ -7256,6 +7259,39 @@ impl Gen {
                     let r = pick(cmp(LLVMIntNE, mis, c0), self.c64(m_val), self.c64(e_val));
                     let r = pick(cmp(LLVMIntNE, xx, c0), c1, r);
                     Out::Scalar(pick(cmp(LLVMIntNE, un, c0), c0, r))
+                }
+                // `ieee::fast_div`: the magnitudes divided, the signs applied as the bodies do. A
+                // zero divisor goes to the callback, which hands the call to the body. An integer
+                // wider than the vector is `div_wide_int`; where the body warns or fails, the
+                // callback runs.
+                Op::Div { kind, signed, form } => {
+                    if form == Form::Vv {
+                        let (len, bits) = self.div_core(
+                            c, slow, kind, signed, arrs[0].0, arrs[0].1, arrs[1].0, arrs[1].1,
+                        );
+                        Out::Vector(len, bits, false)
+                    } else {
+                        let (n, vb, mask) = arrs[0];
+                        let v = ints[0];
+                        let fit = fits(v, n, mask, signed);
+                        let (fit_b, wide_b, join) = (self.block(c), self.block(c), self.block(c));
+                        self.cond_br(fit, fit_b, wide_b, true);
+                        LLVMPositionBuilderAtEnd(b, fit_b);
+                        let iv = and(v, mask);
+                        let (x, y) = if form == Form::Vi { (vb, iv) } else { (iv, vb) };
+                        let (_, bits1) = self.div_core(c, slow, kind, signed, n, x, n, y);
+                        let end1 = LLVMGetInsertBlock(b);
+                        LLVMBuildBr(b, join);
+                        LLVMPositionBuilderAtEnd(b, wide_b);
+                        let bits2 = self.div_wide_int(c, slow, kind, signed, form, n, vb, v);
+                        let end2 = LLVMGetInsertBlock(b);
+                        LLVMBuildBr(b, join);
+                        LLVMPositionBuilderAtEnd(b, join);
+                        let phi = LLVMBuildPhi(b, self.i64, c"".as_ptr());
+                        LLVMAddIncoming(phi, &mut { bits1 }, &mut { end1 }, 1);
+                        LLVMAddIncoming(phi, &mut { bits2 }, &mut { end2 }, 1);
+                        Out::Vector(n, phi, false)
+                    }
                 }
                 Op::Compare {
                     cmp: k,
@@ -7439,6 +7475,179 @@ impl Gen {
             }
             self.join(c, join);
             Ok(())
+        }
+    }
+
+    /// The `u64` division of `ieee::fast_div` for operands of `n` and `k` elements (bits `x`,
+    /// `y`): the result's element count and bits. A zero divisor takes `slow`.
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn div_core(
+        &self,
+        c: &Cur,
+        slow: LLVMBasicBlockRef,
+        kind: u8,
+        signed: bool,
+        n: LLVMValueRef,
+        x: LLVMValueRef,
+        k: LLVMValueRef,
+        y: LLVMValueRef,
+    ) -> (LLVMValueRef, LLVMValueRef) {
+        // SAFETY: integer arithmetic on registers; well-formed blocks of c.f.
+        unsafe {
+            let b = self.b;
+            let (c0, c1) = (self.c64(0), self.c64(1));
+            let sub = |x, y| LLVMBuildSub(b, x, y, c"".as_ptr());
+            let and = |x, y| LLVMBuildAnd(b, x, y, c"".as_ptr());
+            let pick = |t, x, y| LLVMBuildSelect(b, t, x, y, c"".as_ptr());
+            let cmp = |p, x, y| self.icmp(p, x, y);
+            let mag = |v, n| {
+                if !signed {
+                    return (v, cmp(IP::LLVMIntNE, c0, c0));
+                }
+                let neg = cmp(
+                    IP::LLVMIntNE,
+                    and(LLVMBuildLShr(b, v, sub(n, c1), c"".as_ptr()), c1),
+                    c0,
+                );
+                (pick(neg, and(sub(c0, v), self.low_bits(n)), v), neg)
+            };
+            let ((xm, xneg), (ym, yneg)) = (mag(x, n), mag(y, k));
+            self.guard(c, cmp(IP::LLVMIntNE, ym, c0), slow);
+            if kind == 0 {
+                let q = LLVMBuildUDiv(b, xm, ym, c"".as_ptr());
+                let flip = LLVMBuildXor(b, xneg, yneg, c"".as_ptr());
+                return (n, pick(flip, sub(c0, q), q));
+            }
+            let r = LLVMBuildURem(b, xm, ym, c"".as_ptr());
+            let nr = sub(c0, r);
+            let res = if kind == 1 {
+                pick(xneg, nr, r)
+            } else {
+                let rz = cmp(IP::LLVMIntNE, r, c0);
+                let t = pick(and(xneg, rz), sub(ym, r), r);
+                let t = pick(and(yneg, rz), sub(r, ym), t);
+                pick(and(xneg, yneg), nr, t)
+            };
+            (k, res)
+        }
+    }
+
+    /// `ieee::div_wide_int`: the vector (`n` elements, bits `vb`) and an integer `v` that does not
+    /// fit it. The result bits; where the body warns, fails or divides by zero `slow` runs.
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn div_wide_int(
+        &self,
+        c: &Cur,
+        slow: LLVMBasicBlockRef,
+        kind: u8,
+        signed: bool,
+        form: yavs_ir::ieee::Form,
+        n: LLVMValueRef,
+        vb: LLVMValueRef,
+        v: LLVMValueRef,
+    ) -> LLVMValueRef {
+        // SAFETY: integer arithmetic on registers; well-formed blocks of c.f.
+        unsafe {
+            let b = self.b;
+            let c0 = self.c64(0);
+            let and = |x, y| LLVMBuildAnd(b, x, y, c"".as_ptr());
+            let pick = |t, x, y| LLVMBuildSelect(b, t, x, y, c"".as_ptr());
+            let cmp = |p, x, y| self.icmp(p, x, y);
+            if !signed {
+                // A negative `natural` is the native's error.
+                self.guard(c, cmp(IP::LLVMIntSGE, v, c0), slow);
+            }
+            let x = if signed { self.sext_bits(vb, n) } else { vb };
+            // Floored remainder: the divisor's sign.
+            let floor_mod = |r, d| {
+                let opp = cmp(IP::LLVMIntSLT, LLVMBuildXor(b, r, d, c"".as_ptr()), c0);
+                let adj = and(cmp(IP::LLVMIntNE, r, c0), opp);
+                pick(adj, LLVMBuildAdd(b, r, d, c"".as_ptr()), r)
+            };
+            // The result fits `n` elements, else the body warns.
+            let fits_n = |r| {
+                let ok = if signed {
+                    cmp(
+                        IP::LLVMIntEQ,
+                        self.sext_bits(and(r, self.low_bits(n)), n),
+                        r,
+                    )
+                } else {
+                    cmp(
+                        IP::LLVMIntEQ,
+                        and(r, LLVMBuildNot(b, self.low_bits(n), c"".as_ptr())),
+                        c0,
+                    )
+                };
+                self.guard(c, ok, slow);
+            };
+            let srem = |x, y| LLVMBuildSRem(b, x, y, c"".as_ptr());
+            if form == yavs_ir::ieee::Form::Vi {
+                return match (kind, signed) {
+                    (0, _) => c0,
+                    (_, false) => vb,
+                    (1, true) => srem(x, v),
+                    _ => {
+                        let r = floor_mod(srem(x, v), v);
+                        fits_n(r);
+                        r
+                    }
+                };
+            }
+            // An integer dividend: the vector must not be zero (nor -1, where a signed division
+            // overflows for the most negative integer).
+            self.guard(c, cmp(IP::LLVMIntNE, x, c0), slow);
+            if signed {
+                self.guard(c, cmp(IP::LLVMIntNE, x, self.c64(-1)), slow);
+            }
+            match (kind, signed) {
+                // `natural rem unsigned` is a length error in the body.
+                (1, false) => {
+                    self.guard(c, cmp(IP::LLVMIntEQ, c0, self.c64(1)), slow);
+                    c0
+                }
+                (0, false) => {
+                    let q = LLVMBuildUDiv(b, v, x, c"".as_ptr());
+                    fits_n(q);
+                    q
+                }
+                (0, true) => {
+                    let q = LLVMBuildSDiv(b, v, x, c"".as_ptr());
+                    fits_n(q);
+                    q
+                }
+                (_, false) => LLVMBuildURem(b, v, x, c"".as_ptr()),
+                (1, true) => srem(v, x),
+                _ => floor_mod(srem(v, x), x),
+            }
+        }
+    }
+
+    /// The `k` low bits as a mask, for `k` from 0 to 64.
+    unsafe fn low_bits(&self, k: LLVMValueRef) -> LLVMValueRef {
+        // SAFETY: integer arithmetic on registers.
+        unsafe {
+            let b = self.b;
+            let one = self.c64(1);
+            let sh = LLVMBuildShl(
+                b,
+                one,
+                LLVMBuildAnd(b, k, self.c64(63), c"".as_ptr()),
+                c"".as_ptr(),
+            );
+            let m = LLVMBuildSub(b, sh, one, c"".as_ptr());
+            let full = self.icmp(IP::LLVMIntEQ, k, self.c64(64));
+            LLVMBuildSelect(b, full, self.c64(-1), m, c"".as_ptr())
+        }
+    }
+
+    /// The value of `bits` of `n` elements as a signed integer.
+    unsafe fn sext_bits(&self, x: LLVMValueRef, n: LLVMValueRef) -> LLVMValueRef {
+        // SAFETY: integer arithmetic on registers.
+        unsafe {
+            let b = self.b;
+            let k = LLVMBuildSub(b, self.c64(64), n, c"".as_ptr());
+            LLVMBuildAShr(b, LLVMBuildShl(b, x, k, c"".as_ptr()), k, c"".as_ptr())
         }
     }
 
