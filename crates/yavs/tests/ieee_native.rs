@@ -787,6 +787,72 @@ fn diff_run(tag: &str, src: &str, ent: &str, std: &str, min: usize) {
     assert_eq!(n.status.code(), v.status.code(), "{tag}");
 }
 
+/// `*` around the limit of its fast path (products of 64 and 65 elements) and off it: extreme
+/// values, weak bits, metavalues, null and ascending operands, and slices that start inside a word.
+#[test]
+fn native_mul_limits_match_bodies() {
+    let pats = |n: usize| -> Vec<String> {
+        let alt: String = (0..n).map(|i| if i % 2 == 0 { '1' } else { '0' }).collect();
+        vec![
+            "0".repeat(n),
+            "1".repeat(n),
+            format!("1{}", "0".repeat(n - 1)),
+            format!("{}1", "0".repeat(n - 1)),
+            alt.clone(),
+            alt.replace('1', "H").replace('0', "L"),
+            format!("X{}", &alt[1..]),
+        ]
+    };
+    let mut body = String::new();
+    for (ty, f) in [("unsigned", "uv"), ("signed", "gv")] {
+        for (a, b) in [
+            (1, 1),
+            (1, 63),
+            (63, 1),
+            (32, 32),
+            (33, 31),
+            (1, 64),
+            (64, 1),
+            (32, 33),
+            (40, 40),
+        ] {
+            for x in pats(a) {
+                for y in pats(b) {
+                    let _ = writeln!(
+                        body,
+                        "    report img({f}(\"{x}\", {}, true) * {f}(\"{y}\", {}, false));",
+                        a - 1,
+                        b - 1
+                    );
+                }
+            }
+        }
+        let _ = writeln!(
+            body,
+            "    report img({f}(\"\", -1, true) * {f}(\"101\", 2, true));"
+        );
+        let _ = writeln!(
+            body,
+            "    report img({f}(\"101\", 2, true) * {f}(\"\", -1, true));"
+        );
+        let wide: String = (0..72)
+            .map(|i| if i % 3 == 0 { '1' } else { '0' })
+            .collect();
+        for (hi, lo, hj, lj) in [
+            (40, 9, 70, 39),
+            (70, 40, 5, 4),
+            (66, 33, 63, 34),
+            (63, 0, 0, 0),
+        ] {
+            let _ = writeln!(
+                body,
+                "    report img({ty}'({f}(\"{wide}\", 71, false)({hi} downto {lo})) * {ty}'({f}(\"{wide}\", 71, false)({hj} downto {lj})));"
+            );
+        }
+    }
+    diff_run("mul_limits", &tb(&body), "t", "2008", 880);
+}
+
 /// Wrap generated statements into the shared header (entity `t`).
 fn tb(body: &str) -> String {
     format!("{HEAD}{body}    wait;\n  end process;\nend architecture;\n")

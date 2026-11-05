@@ -1299,6 +1299,9 @@ fn add<const SUB: bool, const SIGNED: bool, const FORM: u8>(
 }
 
 fn mul<const SIGNED: bool>(m: &mut Machine, _: Cx<'_, '_, '_>, _: Option<TyId>, a: &[u64]) -> Ret {
+    if let Some(r) = fast_mul::<SIGNED>(m, a) {
+        return Ok(Some(r));
+    }
     let (l, r) = (vh(m, a, 0)?.v, vh(m, a, A1)?.v);
     if l.is_empty() || r.is_empty() {
         return put(m, &Vh::null());
@@ -1736,6 +1739,20 @@ fn fast_add<const SUB: bool, const SIGNED: bool, const FORM: u8>(
         x.wrapping_add(y)
     };
     put_down(m, n, s).ok()
+}
+
+/// `*` on two operands of at most 64 elements together, without a metavalue: the product of
+/// `l + r` elements is the low `l + r` bits of the 64-bit product of the operands extended to
+/// that length. Anything else (longer, a metavalue, a null array) takes the general path.
+fn fast_mul<const SIGNED: bool>(m: &mut Machine, a: &[u64]) -> Option<u64> {
+    let (l, r) = (small(m, a, 0)?, small(m, a, A1)?);
+    let n = l.n + r.n;
+    if n > 64 {
+        return None;
+    }
+    let x = extend_bits(l.bits, l.n, n, SIGNED);
+    let y = extend_bits(r.bits, r.n, n, SIGNED);
+    put_down(m, n, x.wrapping_mul(y)).ok()
 }
 
 fn fast_compare<const C: u8, const SIGNED: bool, const FORM: u8>(
@@ -2234,6 +2251,8 @@ pub(crate) fn lookup_fast(symbol: &str) -> Option<FastFn> {
             }
             cs!(0, 1, 2, 3, 4, 5)
         }
+        Op::Mul { signed: false } => fast_mul::<false>,
+        Op::Mul { signed: true } => fast_mul::<true>,
         Op::ToInteger { signed: false } => fast_to_integer::<false>,
         Op::ToInteger { signed: true } => fast_to_integer::<true>,
         Op::ToUnsigned => fast_to_unsigned::<false>,
