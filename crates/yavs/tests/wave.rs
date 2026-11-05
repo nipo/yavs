@@ -29,11 +29,16 @@ fn analyze(dir: &Path, file: &Path, std: &str) -> bool {
 }
 
 fn run(dir: &Path, args: &[&str]) -> Output {
+    run_env(dir, args, &[])
+}
+
+fn run_env(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> Output {
     let work = format!("--work=work:{}", dir.join("lib").display());
     yavs()
         .current_dir(dir)
         .args(["run", &work])
         .args(args)
+        .envs(env.iter().copied())
         .output()
         .expect("yavs")
 }
@@ -568,7 +573,9 @@ fn corpus_wave(f: &Path) -> bool {
     }
     args.push(top.to_string());
     let mut args: Vec<&str> = args.iter().map(String::as_str).collect();
-    let out = run(&d, &args);
+    // `spin=` bounds a testbench that never suspends, as in tools/difftest (#1025).
+    let spin = field("spin").unwrap_or("1000000000");
+    let out = run_env(&d, &args, &[("YAVS_SPIN_LIMIT", spin)]);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         !stderr.contains("E0801") && !stderr.contains("internal compiler error"),
