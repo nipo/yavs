@@ -1336,11 +1336,33 @@ fn add<const SUB: bool, const SIGNED: bool, const FORM: u8>(
     put(m, &out)
 }
 
-fn mul<const SIGNED: bool>(m: &mut Machine, _: Cx<'_, '_, '_>, _: Option<TyId>, a: &[u64]) -> Ret {
-    if let Some(r) = fast_mul::<SIGNED>(m, a) {
+fn mul<const SIGNED: bool, const FORM: u8>(
+    m: &mut Machine,
+    ctx: Cx<'_, '_, '_>,
+    t: Option<TyId>,
+    a: &[u64],
+) -> Ret {
+    if let Some(r) = fast_mul::<SIGNED, FORM>(m, a) {
         return Ok(Some(r));
     }
-    let (l, r) = (vh(m, a, 0)?.v, vh(m, a, A1)?.v);
+    // An integer operand is `TO_UNSIGNED`/`TO_SIGNED` of the vector's length, as the body does.
+    let (l, r) = match FORM {
+        0 => (vh(m, a, 0)?.v, vh(m, a, A1)?.v),
+        1 => {
+            let l = vh(m, a, 0)?.v;
+            let i = int(a, A1)?;
+            let i = if SIGNED { i } else { natural(m, i)? };
+            let r = from_int(m, ctx, i, l.len() as i64, SIGNED, t.is_some())?.v;
+            (l, r)
+        }
+        _ => {
+            let r = vh(m, a, 1)?.v;
+            let i = int(a, 0)?;
+            let i = if SIGNED { i } else { natural(m, i)? };
+            let l = from_int(m, ctx, i, r.len() as i64, SIGNED, t.is_some())?.v;
+            (l, r)
+        }
+    };
     if l.is_empty() || r.is_empty() {
         return put(m, &Vh::null());
     }
@@ -1781,15 +1803,32 @@ fn fast_add<const SUB: bool, const SIGNED: bool, const FORM: u8>(
 
 /// `*` on two operands of at most 64 elements together, without a metavalue: the product of
 /// `l + r` elements is the low `l + r` bits of the 64-bit product of the operands extended to
-/// that length. Anything else (longer, a metavalue, a null array) takes the general path.
-fn fast_mul<const SIGNED: bool>(m: &mut Machine, a: &[u64]) -> Option<u64> {
-    let (l, r) = (small(m, a, 0)?, small(m, a, A1)?);
-    let n = l.n + r.n;
+/// that length. An integer operand is converted at the vector's length and must fit it (else the
+/// body's warning comes from the general path). Anything else (longer, a metavalue, a null array)
+/// takes the general path.
+fn fast_mul<const SIGNED: bool, const FORM: u8>(m: &mut Machine, a: &[u64]) -> Option<u64> {
+    let ((ln, lb), (rn, rb)) = match FORM {
+        0 => {
+            let (l, r) = (small(m, a, 0)?, small(m, a, A1)?);
+            ((l.n, l.bits), (r.n, r.bits))
+        }
+        1 => {
+            let l = small(m, a, 0)?;
+            let i = nat_or_int(cell(a, A1)?, SIGNED)?;
+            ((l.n, l.bits), (l.n, fit_bits(i, l.n, SIGNED)?))
+        }
+        _ => {
+            let r = small(m, a, 1)?;
+            let i = nat_or_int(cell(a, 0)?, SIGNED)?;
+            ((r.n, fit_bits(i, r.n, SIGNED)?), (r.n, r.bits))
+        }
+    };
+    let n = ln + rn;
     if n > 64 {
         return None;
     }
-    let x = extend_bits(l.bits, l.n, n, SIGNED);
-    let y = extend_bits(r.bits, r.n, n, SIGNED);
+    let x = extend_bits(lb, ln, n, SIGNED);
+    let y = extend_bits(rb, rn, n, SIGNED);
     put_down(m, n, x.wrapping_mul(y)).ok()
 }
 
@@ -2132,8 +2171,14 @@ pub(crate) fn lookup(symbol: &str) -> Option<NativeFn> {
             (_, false) => divide::<2, false>,
             (_, true) => divide::<2, true>,
         },
-        Op::Mul { signed: false } => mul::<false>,
-        Op::Mul { signed: true } => mul::<true>,
+        Op::Mul { signed, form: f } => match (signed, form(f)) {
+            (false, 0) => mul::<false, 0>,
+            (false, 1) => mul::<false, 1>,
+            (false, _) => mul::<false, 2>,
+            (true, 0) => mul::<true, 0>,
+            (true, 1) => mul::<true, 1>,
+            (true, _) => mul::<true, 2>,
+        },
         Op::Compare {
             cmp,
             signed,
@@ -2316,8 +2361,14 @@ pub(crate) fn lookup_fast(symbol: &str) -> Option<FastFn> {
             cs!(0, 1, 2, 3, 4, 5)
         }
         Op::To01 => fast_to_01,
-        Op::Mul { signed: false } => fast_mul::<false>,
-        Op::Mul { signed: true } => fast_mul::<true>,
+        Op::Mul { signed, form: f } => match (signed, form(f)) {
+            (false, 0) => fast_mul::<false, 0>,
+            (false, 1) => fast_mul::<false, 1>,
+            (false, _) => fast_mul::<false, 2>,
+            (true, 0) => fast_mul::<true, 0>,
+            (true, 1) => fast_mul::<true, 1>,
+            (true, _) => fast_mul::<true, 2>,
+        },
         Op::ToInteger { signed: false } => fast_to_integer::<false>,
         Op::ToInteger { signed: true } => fast_to_integer::<true>,
         Op::ToUnsigned => fast_to_unsigned::<false>,

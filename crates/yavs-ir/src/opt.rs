@@ -4269,8 +4269,12 @@ impl<'a> Opt<'a> {
                 Form::Vi => alen(0),
                 Form::Iv => alen(1),
             },
-            Op::Mul { .. } => {
-                let (a, b) = (alen(0)?, alen(1)?);
+            Op::Mul { form, .. } => {
+                let (a, b) = match form {
+                    Form::Vv => (alen(0)?, alen(1)?),
+                    Form::Vi => (alen(0)?, alen(0)?),
+                    Form::Iv => (alen(1)?, alen(1)?),
+                };
                 Some(if a == 0 || b == 0 {
                     0
                 } else {

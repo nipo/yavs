@@ -449,8 +449,7 @@ pub fn ieee_layout(op: yavs_ir::ieee::Op) -> Option<&'static [Arg]> {
     use yavs_ir::ieee::{Form, Op};
     Some(match op {
         Op::ToInteger { .. } | Op::NumNot | Op::VecNot | Op::Neg | Op::Abs => &[Arg::Arr],
-        Op::Mul { .. } => &[Arg::Arr, Arg::Arr],
-        Op::Add { form, .. } | Op::Compare { form, .. } => match form {
+        Op::Add { form, .. } | Op::Compare { form, .. } | Op::Mul { form, .. } => match form {
             Form::Vv => &[Arg::Arr, Arg::Arr],
             Form::Vi => &[Arg::Arr, Arg::Int],
             Form::Iv => &[Arg::Int, Arg::Arr],

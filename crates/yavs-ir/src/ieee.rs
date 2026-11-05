@@ -147,6 +147,7 @@ pub enum Op {
     },
     Mul {
         signed: bool,
+        form: Form,
     },
     /// `/` (0), `rem` (1) or `mod` (2) of two vectors; a zero divisor is handed back to the
     /// body (its error report and what follows).
@@ -272,12 +273,9 @@ pub fn parse(key: &str) -> Option<Op> {
                 form,
             })
         }
-        ("numeric_std", "*", [a, b], r)
-            if a == b && a == &r && (r == "unsigned" || r == "signed") =>
-        {
-            Some(Op::Mul {
-                signed: r == "signed",
-            })
+        ("numeric_std", "*", ps, r) => {
+            let (signed, form, t) = num_form(ps)?;
+            (r == t).then_some(Op::Mul { signed, form })
         }
         ("numeric_std", n @ ("/" | "rem" | "mod"), [a, b], r)
             if a == b && a == &r && (r == "unsigned" || r == "signed") =>

@@ -600,3 +600,124 @@ end;
 fn mul_in_compiled_code_matches_the_interpreter() {
     all_tiers_match("compiled_mul", MUL);
 }
+
+/// `*` of a vector and an integer, both orders, `unsigned` (`natural`) and `signed`: the integer
+/// is converted at the vector's length, so it fits, just fits or just does not (the truncation
+/// warning comes from the callback), zero, the most negative value, lengths around 32 (the product
+/// is `2 n` elements), metavalues, weak bits, null, non-zero lower bounds in both directions, in
+/// functions, in a process and in a counted loop.
+const MULINT: &str = r#"library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+entity y is end;
+architecture a of y is
+  function img(v : unsigned) return string is
+  begin
+    return integer'image(v'left) & "," & integer'image(v'right) & "," &
+           boolean'image(v'ascending) & ":" & to_string(std_logic_vector(v));
+  end function;
+  function img(v : signed) return string is
+  begin
+    return img(unsigned(v));
+  end function;
+  function pick(i : natural; meta : boolean) return std_logic is
+  begin
+    if meta and i mod 7 = 3 then return std_logic'val(i mod 9); end if;
+    case (i * 5 + i / 3) mod 4 is
+      when 0 => return '0';
+      when 1 => return '1';
+      when 2 => return 'L';
+      when others => return 'H';
+    end case;
+  end function;
+  function down(n : natural; k : natural; meta : boolean) return unsigned is
+    variable r : unsigned(n + 4 downto 5);
+  begin
+    for i in r'range loop r(i) := pick(i * k, meta); end loop;
+    return r;
+  end function;
+  function up(n : natural; k : natural; meta : boolean) return unsigned is
+    variable r : unsigned(3 to n + 2);
+  begin
+    for i in r'range loop r(i) := pick(i * k + 1, meta); end loop;
+    return r;
+  end function;
+  -- Operands for a vector of n elements: they fit, just fit or just do not.
+  function ui(n : natural; k : natural) return natural is
+  begin
+    case k mod 8 is
+      when 0 => return 0;
+      when 1 => return 1;
+      when 2 => return 255;
+      when 3 => return integer'high;
+      when 4 => if n < 31 then return 2 ** n - 1; else return 12345; end if;
+      when 5 => if n < 31 then return 2 ** n; else return 99; end if;
+      when 6 => if n < 31 then return 2 ** n + 1; else return 7; end if;
+      when others => return 65535;
+    end case;
+  end function;
+  function si(n : natural; k : natural) return integer is
+  begin
+    case k mod 10 is
+      when 0 => return 0;
+      when 1 => return -1;
+      when 2 => return integer'low;
+      when 3 => return integer'high;
+      when 4 => if n < 32 and n > 0 then return 2 ** (n - 1) - 1; else return 77; end if;
+      when 5 => if n < 32 and n > 0 then return 2 ** (n - 1); else return 78; end if;
+      when 6 => if n < 32 and n > 0 then return -(2 ** (n - 1)); else return -79; end if;
+      when 7 => if n < 32 and n > 0 then return -(2 ** (n - 1)) - 1; else return -80; end if;
+      when 8 => return -1000;
+      when others => return 1000;
+    end case;
+  end function;
+  function ux(x : unsigned; i : natural) return unsigned is begin return x * i; end function;
+  function xu(i : natural; x : unsigned) return unsigned is begin return i * x; end function;
+  function sx(x : signed; i : integer) return signed is begin return x * i; end function;
+  function xs(i : integer; x : signed) return signed is begin return i * x; end function;
+begin
+  process
+    constant la : integer_vector := (1, 2, 31, 32, 33, 64, 0, 5, 16, 30, 3);
+    variable n : integer := 0;
+    variable w : signed(15 downto 0) := x"8001";
+    variable u : unsigned(11 downto 0) := x"801";
+    variable p : signed(15 downto 0);
+    variable q : unsigned(15 downto 0);
+    variable z : unsigned(7 downto 0);
+  begin
+    for i in la'range loop
+      for k in 0 to 9 loop
+        for meta in boolean'range loop
+          report integer'image(la(i)) & "/" & integer'image(k) & "/" & boolean'image(meta) & ": " &
+                 img(ux(down(la(i), k, meta), ui(la(i), k))) & " " &
+                 img(xu(ui(la(i), k), up(la(i), k + 1, meta))) & " " &
+                 img(sx(signed(down(la(i), k + 2, meta)), si(la(i), k))) & " " &
+                 img(xs(si(la(i), k), signed(up(la(i), k + 3, meta)))) & " " &
+                 img(down(la(i), k, meta) * ui(la(i), k + 1)) & " " &
+                 img(ui(la(i), k + 2) * up(la(i), k, meta)) & " " &
+                 img(signed(up(la(i), k, meta)) * si(la(i), k + 1)) & " " &
+                 img(si(la(i), k + 2) * signed(down(la(i), k, meta)));
+        end loop;
+      end loop;
+    end loop;
+    for k in 0 to 300 loop
+      p := w(7 downto 0) * (k mod 100 - 50);
+      q := u(7 downto 0) * (k mod 200);
+      z := u(3 downto 0) * (k mod 40);
+      n := n + to_integer(p) + to_integer(q) + to_integer(z) + to_integer((k - 150) * w(14 downto 8));
+      w := p + k;
+      u := q(11 downto 0) + k;
+      if k mod 60 = 0 then
+        report integer'image(n) & " " & img(p) & " " & img(q) & " " & img(z) & " " & img(w(5 downto 2) * 3);
+      end if;
+    end loop;
+    report "done " & integer'image(n);
+    wait;
+  end process;
+end;
+"#;
+
+#[test]
+fn mul_integer_in_compiled_code_matches_the_interpreter() {
+    all_tiers_match("compiled_mul_integer", MULINT);
+}

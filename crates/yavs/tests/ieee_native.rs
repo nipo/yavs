@@ -872,6 +872,124 @@ fn native_mul_limits_match_bodies() {
     diff_run("mul_limits", &tb(&body), "t", "2008", 880);
 }
 
+/// `vector * integer` and `integer * vector`: the integer is converted at the vector's length,
+/// so the lengths 1, 2, 31, 32, 33 and 64 (products of up to 64 elements and over), an integer that
+/// fits, just fits and just does not (the body's truncation warning), zero, the most negative
+/// value, weak bits, metavalues, null, both directions with a lower bound other than zero.
+fn mul_integer_body(wide_int: bool, lens: &[usize], bit: bool) -> String {
+    let mut body = String::new();
+    for (ty, f, signed) in [("unsigned", "uv", false), ("signed", "gv", true)] {
+        let _ = ty;
+        for &n in lens {
+            let alt: String = (0..n).map(|i| if i % 2 == 0 { '1' } else { '0' }).collect();
+            let pats = [
+                "0".repeat(n),
+                "1".repeat(n),
+                format!("1{}", "0".repeat(n - 1)),
+                alt.clone(),
+                alt.replace('1', "H").replace('0', "L"),
+                format!("X{}", &alt[1..]),
+                format!("{}U", &alt[..n - 1]),
+            ];
+            let top: i128 = if wide_int { 1 << 63 } else { 1 << 31 };
+            let mut ints: Vec<i128> = vec![0, 1, 2, 3, 255, 65535, top - 1];
+            if signed {
+                ints.extend([-1, -2, -255, -top]);
+            }
+            for k in [n as u32, (n as u32).saturating_sub(1)] {
+                if (1..64).contains(&k) {
+                    let w: i128 = 1i128 << k;
+                    // Unsigned: 2^n - 1 fits, 2^n does not; signed: 2^(n-1) - 1 fits, 2^(n-1) not.
+                    let w = if signed { w >> 1 } else { w };
+                    ints.extend([w - 1, w, w + 1]);
+                    if signed {
+                        ints.extend([-w, -w - 1, -w + 1]);
+                    }
+                }
+            }
+            if wide_int && n < 64 {
+                ints.extend([1 << 40, top - 2]);
+            }
+            ints.retain(|v| *v < top && *v >= if signed { -top } else { 0 });
+            ints.sort();
+            ints.dedup();
+            let lit = |v: i128| {
+                if v == -(1i128 << 63) {
+                    "(-9223372036854775807 - 1)".to_string()
+                } else if v == -(1i128 << 31) && !wide_int {
+                    "(-2147483647 - 1)".to_string()
+                } else if v < 0 {
+                    format!("(-{})", -v)
+                } else {
+                    v.to_string()
+                }
+            };
+            // `bit` has no weak bits and no metavalues.
+            for x in pats.iter().take(if bit { 4 } else { pats.len() }) {
+                for (l, asc) in [(n - 1, false), (n + 6, true)] {
+                    let vec = format!("{f}(\"{x}\", {l}, {asc})");
+                    for v in &ints {
+                        let _ = writeln!(body, "    report img({vec} * {});", lit(*v));
+                        let _ = writeln!(body, "    report img({} * {vec});", lit(*v));
+                    }
+                }
+            }
+        }
+        let _ = writeln!(body, "    report img({f}(\"\", -1, true) * 5);");
+        let _ = writeln!(body, "    report img(5 * {f}(\"\", -1, false));");
+        let _ = writeln!(body, "    report img({f}(\"\", 4, true) * 0);");
+        if signed {
+            let _ = writeln!(body, "    report img({f}(\"\", -1, true) * (-5));");
+            let _ = writeln!(body, "    report img((-5) * {f}(\"\", -1, false));");
+        }
+    }
+    body
+}
+
+#[test]
+fn native_mul_integer_forms_match_bodies() {
+    // 2008 has the full lengths; 2019 (64-bit integers) and 1993 (same bodies) fewer, to stay short.
+    for (std, lens) in [
+        ("2008", vec![1, 2, 31, 32, 33, 64]),
+        ("2019", vec![1, 32, 33, 64]),
+        ("1993", vec![2, 31, 33]),
+    ] {
+        diff_run(
+            "mul_integer",
+            &tb(&mul_integer_body(std == "2019", &lens, false)),
+            "t",
+            std,
+            1000,
+        );
+    }
+}
+
+/// The same for `numeric_bit`, whose warning text names its own package.
+#[test]
+fn native_mul_integer_numeric_bit_matches_bodies() {
+    let src = format!(
+        "{BIT_HEAD}{}    wait;\n  end process;\nend architecture;\n",
+        mul_integer_body(false, &[1, 2, 31, 32, 33], true)
+    );
+    diff_run("mul_integer_bit", &src, "t", "2008", 500);
+}
+
+/// A negative `NATURAL` operand is the body's subtype error, also when the vector is null; each
+/// case is its own run since the error ends it.
+#[test]
+fn native_mul_negative_natural_matches_bodies() {
+    for stmt in [
+        "img(uv(\"101\", 2, true) * (-1))",
+        "img((-1) * uv(\"101\", 2, true))",
+        "img(uv(\"\", -1, true) * (-1))",
+        "img((-3) * uv(\"\", -1, false))",
+        "img(uv(\"X1\", 1, true) * (-2147483647 - 1))",
+    ] {
+        let body = format!("    report \"before\";\n    report {stmt};\n    report \"after\";\n");
+        diff_run("mul_natural", &tb(&body), "t", "2008", 1);
+    }
+}
+
 /// `to_01` around the limit of its fast path (1, 63 to 65, 70 and 128 elements), null operands,
 /// ascending and descending bounds, slices that start inside a word, every metavalue at the
 /// first, a middle and the last element, and every `xmap`.

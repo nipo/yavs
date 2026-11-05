@@ -7171,9 +7171,23 @@ impl Gen {
                     };
                     Out::Vector(n, if is_sub { sub(x, y) } else { add(x, y) }, false)
                 }
-                // `l + r` elements: the low bits of the product of the operands extended to 64.
-                Op::Mul { signed } => {
-                    let ((n1, b1, _), (n2, b2, _)) = (arrs[0], arrs[1]);
+                // `l + r` elements: the low bits of the product of the operands extended to 64. An
+                // integer is `to_unsigned`/`to_signed` at the vector's length, so `2 n` elements.
+                Op::Mul { signed, form } => {
+                    let ((n1, b1), (n2, b2)) = match form {
+                        Form::Vv => ((arrs[0].0, arrs[0].1), (arrs[1].0, arrs[1].1)),
+                        _ => {
+                            let (n, bits, mask) = arrs[0];
+                            let v = ints[0];
+                            ok(fits(v, n, mask, signed));
+                            let iv = and(v, mask);
+                            if form == Form::Vi {
+                                ((n, bits), (n, iv))
+                            } else {
+                                ((n, iv), (n, bits))
+                            }
+                        }
+                    };
                     let n = add(n1, n2);
                     ok(cmp(LLVMIntULE, n, self.c64(64)));
                     let (x, y) = if signed {
