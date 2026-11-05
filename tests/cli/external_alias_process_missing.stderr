@@ -1,0 +1,11 @@
+error[E2117]: external name `external_alias_process_missing.nope` cannot be bound: external_alias_process_missing has no signal `nope` (yet)
+ --> $DIR/external_alias_process_missing.vhd:7:16
+  |
+7 |     alias a is << signal .external_alias_process_missing.nope : bit >>;
+  |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ external name
+  |
+  = note: external names are bound in elaboration order: the target must be elaborated before the external name (LRM 14.4.1)
+  = note: in instance external_alias_process_missing
+
+error: aborting due to 1 previous error
+

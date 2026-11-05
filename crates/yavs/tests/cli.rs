@@ -2274,6 +2274,30 @@ fn same_names_print_full_paths() {
     );
 }
 
+/// External names in generate branches not elaborated: every use form, and an architecture
+/// whose instances differ in the branch they take.
+#[test]
+fn external_untaken_branch() {
+    run_snapshot("external_untaken_branch", 0);
+}
+
+/// A slice of a null array as a static name, used to divide by zero in elaboration.
+#[test]
+fn null_slice_of_null() {
+    run_snapshot("null_slice_of_null", 0);
+}
+
+/// An alias of an external name in a process before the instance it names.
+#[test]
+fn external_alias_process_before_instance() {
+    run_snapshot("external_alias_process_before_instance", 0);
+}
+
+#[test]
+fn external_alias_process_missing() {
+    run_snapshot("external_alias_process_missing", 2);
+}
+
 /// E2121 with two types of one name (#1026), and with two different names.
 #[test]
 fn external_same_type_name() {

@@ -5,6 +5,7 @@ error[E2121]: external name does not match signal `s`: its type is `work.p.rc`, 
    |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ external name
    |
    = note: the object has the type and the array lengths of the name's subtype indication (LRM 8.7)
+   = note: in instance external_same_type_name
    = help: give the name the object's subtype or length, or leave out the constraint
 
 error: aborting due to 1 previous error

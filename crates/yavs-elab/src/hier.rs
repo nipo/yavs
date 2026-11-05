@@ -763,7 +763,8 @@ impl NetGraph {
                 continue;
             }
             let n = u64::from(leaf.ty.len);
-            let k = n / outer;
+            // A slice of a null array: no instances are selected, and `outer` is 0.
+            let k = n.checked_div(outer).unwrap_or(0);
             let (mut a, len) = (offset * k, count * k);
             if leaf.ty.elem == Elem::Logic {
                 a = n - a - len;

@@ -159,6 +159,9 @@ pub(crate) struct Elab<'d> {
     /// Implicit aliases of external names used in processes, by region: bound once the
     /// whole hierarchy is elaborated (#93).
     pending: Vec<(ScopeId, DeclId)>,
+    /// Bodies of generates elaborated with no iteration, or alternatives not chosen. Lowering
+    /// is per architecture and still reads them, so their external names need aliases too.
+    untaken: Vec<(yavs_sem::ScopeId, Box<[StmtId]>)>,
     /// `idle_reads` of a process statement (the same for every instance of it): the signals
     /// read, or `None` where the process is not pure.
     idle_cache: HashMap<StmtId, Option<Vec<PureRead>>>,
@@ -528,6 +531,7 @@ pub(crate) fn elaborate(
         cfg: cfg.clone(),
         stmt: None,
         pending: Vec::new(),
+        untaken: Vec::new(),
         idle_cache: HashMap::new(),
         idle_dead: false,
         deferred: Vec::new(),
@@ -661,6 +665,7 @@ pub(crate) fn elaborate(
     {
         e.errors.push(*x);
     }
+    e.alias_untaken();
     if e.errors.is_empty() {
         e.check_sources();
     }
@@ -1262,17 +1267,27 @@ impl Elab<'_> {
             }
             if let DeclKind::Alias(Alias::Object { target, .. }) = self.db.decls[d].kind {
                 // An alias of an external name, or of a part of one, binds here, in
-                // elaboration order (LRM 8.7, 14.4.1).
+                // elaboration order (LRM 8.7, 14.4.1); one in a process once the hierarchy
+                // is complete, as the names of its statements (lrm-checks L71).
+                let late = self.db.scopes[region].kind == yavs_sem::scope::ScopeKind::Process;
                 if let Some(x) = self.db.external_alias(d) {
-                    self.m.bind(self.db, s, d, x)?;
+                    if late {
+                        self.pending.push((s, d));
+                    } else {
+                        self.m.bind(self.db, s, d, x)?;
+                    }
                 } else if !matches!(self.db.exprs[target].kind, ExprKind::Obj(_)) {
                     let hs = self
                         .db
                         .alias_external_uses(ExtOwner::Alias(d), region)
                         .to_vec();
                     for h in hs {
-                        let x = self.db.implicit_external(h).expect("an external alias");
-                        self.m.bind(self.db, s, h, x)?;
+                        if late {
+                            self.pending.push((s, h));
+                        } else {
+                            let x = self.db.implicit_external(h).expect("an external alias");
+                            self.m.bind(self.db, s, h, x)?;
+                        }
                     }
                 }
                 continue;
@@ -2099,6 +2114,9 @@ impl Elab<'_> {
                 let b = self.m.range(db, range, Some(s), span)?;
                 let label = named(db)?;
                 let n = b.len();
+                if n == 0 {
+                    self.untaken.push((gscope, body.clone().into()));
+                }
                 for i in 0..n {
                     let v = match b.dir {
                         yavs_sem::hir::Direction::To => b.left + i as i64,
@@ -2141,6 +2159,7 @@ impl Elab<'_> {
                     .iter()
                     .map(|a| (a.cond, a.scope, a.body.to_vec(), a.label))
                     .collect();
+                let rest = alts.clone();
                 for (cond, gscope, body, alabel) in alts {
                     let take = match cond {
                         None => true,
@@ -2150,10 +2169,15 @@ impl Elab<'_> {
                         }
                     };
                     if take {
+                        let others = rest.iter().filter(|a| a.1 != gscope);
+                        self.untaken
+                            .extend(others.map(|a| (a.1, a.2.clone().into_boxed_slice())));
                         let alt = alabel;
                         return self.gen_alt(s, st, label, gscope, &body, cfg, alt, depth);
                     }
                 }
+                self.untaken
+                    .extend(rest.iter().map(|a| (a.1, a.2.clone().into_boxed_slice())));
                 Ok(())
             }
             StmtKind::CaseGenerate { expr, alts } => {
@@ -2179,6 +2203,13 @@ impl Elab<'_> {
                         }
                     }
                 }
+                let chosen = pick.as_ref().map(|p| p.0);
+                let others = alts
+                    .iter()
+                    .map(|(_, a)| a)
+                    .filter(|a| Some(a.scope) != chosen);
+                self.untaken
+                    .extend(others.map(|a| (a.scope, a.body.clone())));
                 match pick {
                     Some((gscope, body, alt)) => {
                         self.gen_alt(s, st, label, gscope, &body, cfg, alt, depth)
@@ -4417,6 +4448,59 @@ impl Elab<'_> {
         }
     }
 
+    /// Give the external names of [`Elab::untaken`] their aliases, so that lowering can read
+    /// those statements. Nothing binds them: no region of them exists here (`m.regions` of
+    /// another instance that does elaborate them holds its own binding).
+    fn alias_untaken(&mut self) {
+        for (scope, body) in std::mem::take(&mut self.untaken) {
+            if !self.db.externals.is_empty() {
+                self.alias_untaken_region(scope, &body);
+            }
+        }
+    }
+
+    fn alias_untaken_subs(&mut self, scope: yavs_sem::ScopeId) {
+        for d in self.db.decls_with_instances(scope) {
+            for m in self.db.decl_subprograms(d) {
+                if let Some(sc) = self.db.sub_scope(m) {
+                    self.db.alias_external_uses(ExtOwner::Sub(m), sc);
+                }
+            }
+        }
+    }
+
+    fn alias_untaken_region(&mut self, scope: yavs_sem::ScopeId, body: &[StmtId]) {
+        self.alias_untaken_subs(scope);
+        for &st in body {
+            let mut nested: Vec<(yavs_sem::ScopeId, Box<[StmtId]>)> = Vec::new();
+            match &self.db.stmts[st].kind {
+                StmtKind::Process { scope: p, .. } => {
+                    let p = *p;
+                    self.alias_untaken_subs(p);
+                    self.db.alias_external_uses(ExtOwner::Stmt(st), p);
+                }
+                StmtKind::ConcSignalAssign { .. }
+                | StmtKind::ConcAssert { .. }
+                | StmtKind::ConcProcCall { .. } => {
+                    self.db.alias_external_uses(ExtOwner::Stmt(st), scope);
+                }
+                StmtKind::Block { scope, body, .. } | StmtKind::ForGenerate { scope, body, .. } => {
+                    nested.push((*scope, body.clone()));
+                }
+                StmtKind::IfGenerate { alts } => {
+                    nested.extend(alts.iter().map(|a| (a.scope, a.body.clone())));
+                }
+                StmtKind::CaseGenerate { alts, .. } => {
+                    nested.extend(alts.iter().map(|(_, a)| (a.scope, a.body.clone())));
+                }
+                _ => {}
+            }
+            for (s, b) in nested {
+                self.alias_untaken_region(s, &b);
+            }
+        }
+    }
+
     /// Bind what [`Elab::pending`] and [`Elab::deferred`] hold, in elaboration order.
     fn bind_late(&mut self) -> R<()> {
         for (s, h) in std::mem::take(&mut self.pending) {
@@ -4424,7 +4508,9 @@ impl Elab<'_> {
             let x = db
                 .external_alias(h)
                 .ok_or_else(|| Box::new(ice(db.decls[h].span, "not an external alias")))?;
-            self.m.bind(db, s, h, x)?;
+            if let Err(d) = self.m.bind(db, s, h, x) {
+                return Err(self.ctx(s, d));
+            }
         }
         // Those of package subprograms: one that cannot be bound is an error when the
         // subprogram is called (LRM 8.7: evaluated when the call evaluates it), not here.
