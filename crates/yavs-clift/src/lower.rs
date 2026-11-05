@@ -7365,6 +7365,22 @@ impl Gen<'_> {
                 };
                 Out::Vector(n, r, false)
             }
+            // `l + r` elements: the low bits of the product of the operands extended to 64.
+            Op::Mul { signed } => {
+                let ((n1, b1, _), (n2, b2, _)) = (arrs[0], arrs[1]);
+                let n = self.b.ins().iadd(n1, n2);
+                let fit = self
+                    .b
+                    .ins()
+                    .icmp_imm_s(IntCC::UnsignedLessThanOrEqual, n, 64);
+                self.guard(fit, fb);
+                let (x, y) = if signed {
+                    (self.sext_bits(b1, n1), self.sext_bits(b2, n2))
+                } else {
+                    (b1, b2)
+                };
+                Out::Vector(n, self.b.ins().imul(x, y), false)
+            }
             Op::Compare {
                 cmp: k,
                 signed,

@@ -831,6 +831,21 @@ fn native_mul_limits_match_bodies() {
                 }
             }
         }
+        // Non-zero lower bounds, both directions for each operand.
+        for (a, b) in [(3, 5), (32, 32), (33, 31), (1, 64), (64, 1)] {
+            for x in pats(a) {
+                for y in pats(b) {
+                    for (da, db) in [("false", "true"), ("true", "false")] {
+                        let _ = writeln!(
+                            body,
+                            "    report img({f}(\"{x}\", {}, {da}) * {f}(\"{y}\", {}, {db}));",
+                            a + 6,
+                            b + 2
+                        );
+                    }
+                }
+            }
+        }
         let _ = writeln!(
             body,
             "    report img({f}(\"\", -1, true) * {f}(\"101\", 2, true));"

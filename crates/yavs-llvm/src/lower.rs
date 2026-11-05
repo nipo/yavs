@@ -7068,6 +7068,7 @@ impl Gen {
             let (c0, c1) = (self.c64(0), self.c64(1));
             let add = |x, y| LLVMBuildAdd(b, x, y, c"".as_ptr());
             let sub = |x, y| LLVMBuildSub(b, x, y, c"".as_ptr());
+            let mul = |x, y| LLVMBuildMul(b, x, y, c"".as_ptr());
             let and = |x, y| LLVMBuildAnd(b, x, y, c"".as_ptr());
             let or = |x, y| LLVMBuildOr(b, x, y, c"".as_ptr());
             let xor = |x, y| LLVMBuildXor(b, x, y, c"".as_ptr());
@@ -7169,6 +7170,18 @@ impl Gen {
                         }
                     };
                     Out::Vector(n, if is_sub { sub(x, y) } else { add(x, y) }, false)
+                }
+                // `l + r` elements: the low bits of the product of the operands extended to 64.
+                Op::Mul { signed } => {
+                    let ((n1, b1, _), (n2, b2, _)) = (arrs[0], arrs[1]);
+                    let n = add(n1, n2);
+                    ok(cmp(LLVMIntULE, n, self.c64(64)));
+                    let (x, y) = if signed {
+                        (sext(b1, n1), sext(b2, n2))
+                    } else {
+                        (b1, b2)
+                    };
+                    Out::Vector(n, mul(x, y), false)
                 }
                 Op::Compare {
                     cmp: k,

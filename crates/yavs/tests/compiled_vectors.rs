@@ -506,3 +506,97 @@ end;
 fn abs_in_compiled_code_matches_the_interpreter() {
     all_tiers_match("compiled_abs", ABS);
 }
+
+/// `*` of two vectors, `unsigned` and `signed`, around the 64 element limit of the product
+/// (`l + r`): in a function and in a process, ascending and descending operands with non-zero
+/// lower bounds, extreme values, metavalues, null operands and a counted loop.
+const MUL: &str = r#"library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+entity y is end;
+architecture a of y is
+  function img(v : unsigned) return string is
+  begin
+    return integer'image(v'left) & "," & integer'image(v'right) & "," &
+           boolean'image(v'ascending) & ":" & to_string(std_logic_vector(v));
+  end function;
+  function img(v : signed) return string is
+  begin
+    return img(unsigned(v));
+  end function;
+  function pick(i : natural; meta : boolean) return std_logic is
+  begin
+    if meta and i mod 7 = 3 then return std_logic'val(i mod 9); end if;
+    case (i * 5 + i / 3) mod 4 is
+      when 0 => return '0';
+      when 1 => return '1';
+      when 2 => return 'L';
+      when others => return 'H';
+    end case;
+  end function;
+  function down(n : natural; k : natural; meta : boolean) return unsigned is
+    variable r : unsigned(n + 4 downto 5);
+  begin
+    for i in r'range loop r(i) := pick(i * k, meta); end loop;
+    return r;
+  end function;
+  function up(n : natural; k : natural; meta : boolean) return unsigned is
+    variable r : unsigned(3 to n + 2);
+  begin
+    for i in r'range loop r(i) := pick(i * k + 1, meta); end loop;
+    return r;
+  end function;
+  function ext(n : natural; top : std_logic; rest : std_logic) return unsigned is
+    variable r : unsigned(n - 1 downto 0) := (others => rest);
+  begin
+    if n > 0 then r(n - 1) := top; end if;
+    return r;
+  end function;
+  function mu(x, y : unsigned) return unsigned is begin return x * y; end function;
+  function ms(x, y : signed) return signed is begin return x * y; end function;
+begin
+  process
+    constant la : integer_vector := (1, 1, 2, 7, 8, 32, 33, 31, 32, 63, 64, 1, 0, 5, 3, 40, 9);
+    constant lb : integer_vector := (1, 63, 2, 8, 9, 32, 31, 33, 33, 1, 1, 64, 5, 0, 4, 40, 70);
+    variable n : integer := 0;
+    variable w : signed(15 downto 0) := x"8001";
+    variable u : unsigned(11 downto 0) := x"801";
+    variable p : signed(15 downto 0);
+    variable q : unsigned(15 downto 0);
+  begin
+    for i in la'range loop
+      for k in 1 to 3 loop
+        for meta in boolean'range loop
+          report integer'image(la(i)) & "*" & integer'image(lb(i)) & "/" & integer'image(k) & "/" &
+                 boolean'image(meta) & ": " &
+                 img(mu(down(la(i), k, meta), up(lb(i), k + 1, meta))) & " " &
+                 img(mu(up(la(i), k, meta), down(lb(i), k + 1, meta))) & " " &
+                 img(ms(signed(down(la(i), k, meta)), signed(up(lb(i), k + 1, meta)))) & " " &
+                 img(ms(signed(up(la(i), k, meta)), signed(down(lb(i), k + 1, meta)))) & " " &
+                 img(ms(signed(ext(la(i), '1', '0')), signed(ext(lb(i), '1', '1')))) & " " &
+                 img(ms(signed(ext(la(i), '1', '0')), signed(ext(lb(i), '1', '0')))) & " " &
+                 img(ms(signed(ext(la(i), '1', '1')), signed(ext(lb(i), '1', '1')))) & " " &
+                 img(mu(ext(la(i), '1', '1'), ext(lb(i), '1', '1')));
+        end loop;
+      end loop;
+    end loop;
+    for k in 0 to 300 loop
+      p := w(7 downto 0) * to_signed(k mod 100 - 50, 8);
+      q := u(7 downto 0) * to_unsigned(k mod 200, 8);
+      n := n + to_integer(p) + to_integer(q);
+      w := p + k;
+      u := q(11 downto 0) + k;
+      if k mod 60 = 0 then
+        report integer'image(n) & " " & img(p) & " " & img(q) & " " & img(w(5 downto 2) * w(11 downto 8));
+      end if;
+    end loop;
+    report "done " & integer'image(n);
+    wait;
+  end process;
+end;
+"#;
+
+#[test]
+fn mul_in_compiled_code_matches_the_interpreter() {
+    all_tiers_match("compiled_mul", MUL);
+}
