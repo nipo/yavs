@@ -305,6 +305,8 @@ fn testbench(seed: u64, per_op: usize) -> String {
                 g.case(&format!("{f}({a}, {c})"), "img");
             }
         }
+        let a = g.operand("gv");
+        g.case(&format!("- {a}"), "img");
         // to_integer: operands that fit the result, as the body would raise a range error.
         let (s, b) = g.vec();
         let s: String = s.chars().take(31).collect();
@@ -932,6 +934,67 @@ fn native_to_01_limits_match_bodies() {
         );
     }
     diff_run("to_01_limits", &tb(&body), "t", "2008", 3500);
+}
+
+/// Unary `-` of a `signed` around the limit of its fast path (1, 63 to 65, 70 and 128 elements),
+/// null operands, ascending and descending bounds with a lower bound other than zero, the most
+/// negative value, all ones, weak bits, every metavalue at the first, a middle and the last
+/// element, slices that start inside a word, and `abs` (its body negates through the native).
+#[test]
+fn native_neg_limits_match_bodies() {
+    let pats = |n: usize| -> Vec<String> {
+        let alt: String = (0..n).map(|i| if i % 2 == 0 { '1' } else { '0' }).collect();
+        vec![
+            "0".repeat(n),
+            "1".repeat(n),
+            format!("1{}", "0".repeat(n - 1)),
+            format!("{}1", "0".repeat(n - 1)),
+            format!("0{}", "1".repeat(n - 1)),
+            alt.clone(),
+            alt.replace('1', "H").replace('0', "L"),
+        ]
+    };
+    let mut body = String::new();
+    for n in [1, 2, 7, 8, 63, 64, 65, 70, 128] {
+        for (l, asc) in [(n - 1, "false"), (n + 3, "true")] {
+            for x in pats(n) {
+                let _ = writeln!(body, "    report img(-gv(\"{x}\", {l}, {asc}));");
+                let _ = writeln!(body, "    report img(-(-gv(\"{x}\", {l}, {asc})));");
+                let _ = writeln!(body, "    report img(abs gv(\"{x}\", {l}, {asc}));");
+            }
+            for m in "UXZW-".chars() {
+                for at in [0, n / 2, n - 1] {
+                    let mut s: Vec<char> = pats(n)[5].chars().collect();
+                    s[at] = m;
+                    let x: String = s.into_iter().collect();
+                    let _ = writeln!(body, "    report img(-gv(\"{x}\", {l}, {asc}));");
+                }
+            }
+        }
+    }
+    for asc in ["true", "false"] {
+        let _ = writeln!(body, "    report img(-gv(\"\", -1, {asc}));");
+    }
+    let wide: String = (0..72)
+        .map(|i| if i % 3 == 0 { '1' } else { 'H' })
+        .collect();
+    for (hi, lo) in [
+        (40, 9),
+        (70, 7),
+        (63, 0),
+        (64, 0),
+        (65, 1),
+        (71, 6),
+        (62, 62),
+    ] {
+        let _ = writeln!(
+            body,
+            "    report img(-gv(\"{wide}\", 71, false)({hi} downto {lo}));"
+        );
+    }
+    for std in ["2008", "2019"] {
+        diff_run("neg_limits", &tb(&body), "t", std, 400);
+    }
 }
 
 /// Wrap generated statements into the shared header (entity `t`).

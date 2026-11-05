@@ -2,9 +2,9 @@
 //!
 //! The vendored `ieee` packages stay ordinary VHDL: a call of a listed subprogram is lowered
 //! to a native call instead of a call of its body when the subprogram's mangled name (library,
-//! package, designator, parameter and result base types) is exactly one of [`SUPPORTED`].
+//! package, designator, parameter and result base types) is one that [`parse`] accepts.
 //! Nothing is keyed by the designator alone, so a user subprogram of the same name never
-//! matches. `yavs-interp` implements every key; its `ieee` tests check both lists agree.
+//! matches. `yavs-interp` implements every [`Op`] that `parse` returns.
 
 /// The packages whose subprograms are listed.
 const PACKAGES: [&str; 7] = [
@@ -121,6 +121,8 @@ pub enum Op {
     /// A gate over all elements of one vector: the unary `std_logic_1164` and `numeric_std`
     /// operators and the `std_logic_misc` `*_reduce` functions.
     Reduce(Gate),
+    /// Unary `-` of a `numeric_std` `signed`.
+    Neg,
     /// `numeric_std` gate on two `unsigned` or two `signed`; unequal lengths are handed back to
     /// the body (its failure report).
     NumGate(Gate),
@@ -258,6 +260,7 @@ pub fn parse(key: &str) -> Option<Op> {
         ("numeric_std", "not", [a], r) if !bit && a == &r && (r == "unsigned" || r == "signed") => {
             Some(Op::NumNot)
         }
+        ("numeric_std", "-", ["signed"], "signed") if !bit => Some(Op::Neg),
         ("numeric_std", n @ ("+" | "-"), ps, r) => {
             let (signed, form, t) = num_form(ps)?;
             (r == t).then_some(Op::Add {

@@ -488,6 +488,23 @@ fn num_not(m: &mut Machine, _: Cx<'_, '_, '_>, _: Option<TyId>, a: &[u64]) -> Re
     put(m, &Vh::down(l.v.not()))
 }
 
+/// Unary `-` of a `signed`: null is `NAS`, a metavalue gives all `X` (the body's `to_01 (arg, 'X')`),
+/// neither warns; the most negative value wraps onto itself.
+fn neg_signed(m: &mut Machine, _: Cx<'_, '_, '_>, _: Option<TyId>, a: &[u64]) -> Ret {
+    if let Some(r) = fast_neg(m, a) {
+        return Ok(Some(r));
+    }
+    let l = vh(m, a, 0)?;
+    if l.v.is_empty() {
+        return put(m, &Vh::null());
+    }
+    let v = match l.v.to_bitvec() {
+        Some(b) => LogicVec::from_bitvec(&neg(&b)),
+        None => x_vec(l.v.len()),
+    };
+    put(m, &Vh::down(v))
+}
+
 fn not(_: &mut Machine, _: Cx<'_, '_, '_>, _: Option<TyId>, a: &[u64]) -> Ret {
     Ok(Some(sul(a, 0)?.not() as u64))
 }
@@ -1860,6 +1877,13 @@ fn fast_num_not(m: &mut Machine, a: &[u64]) -> Option<u64> {
     put_down(m, l.n, !l.bits).ok()
 }
 
+fn fast_neg(m: &mut Machine, a: &[u64]) -> Option<u64> {
+    let Some(l) = small(m, a, 0) else {
+        return wide::neg(m, a);
+    };
+    put_down(m, l.n, l.bits.wrapping_neg()).ok()
+}
+
 fn fast_vec_not(m: &mut Machine, a: &[u64]) -> Option<u64> {
     let Some(l) = small(m, a, 0) else {
         return wide::gate(m, a, None, Bounds::Up1);
@@ -2052,6 +2076,7 @@ pub(crate) fn lookup(symbol: &str) -> Option<NativeFn> {
             reduce::<5>,
         ][GATES.iter().position(|x| *x == g)?],
         Op::NumNot => num_not,
+        Op::Neg => neg_signed,
         Op::Not => not,
         Op::VecNot => vec_not,
         Op::Conv(0, false) => conv::<0, false>,
@@ -2213,6 +2238,7 @@ pub(crate) fn lookup_fast(symbol: &str) -> Option<FastFn> {
             fast_num_gate::<5>,
         ][GATES.iter().position(|x| *x == g)?],
         Op::NumNot => fast_num_not,
+        Op::Neg => fast_neg,
         Op::VecNot => fast_vec_not,
         Op::Reduce(g) => [
             fast_reduce::<0> as FastFn,

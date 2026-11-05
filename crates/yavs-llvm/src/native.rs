@@ -448,7 +448,7 @@ pub enum Arg {
 pub fn ieee_layout(op: yavs_ir::ieee::Op) -> Option<&'static [Arg]> {
     use yavs_ir::ieee::{Form, Op};
     Some(match op {
-        Op::ToInteger { .. } | Op::NumNot | Op::VecNot => &[Arg::Arr],
+        Op::ToInteger { .. } | Op::NumNot | Op::VecNot | Op::Neg => &[Arg::Arr],
         Op::Add { form, .. } | Op::Compare { form, .. } => match form {
             Form::Vv => &[Arg::Arr, Arg::Arr],
             Form::Vi => &[Arg::Arr, Arg::Int],

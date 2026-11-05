@@ -334,6 +334,13 @@ pub(crate) fn shift(m: &mut Machine, a: &[u64], k: u8) -> Option<u64> {
     emit(m, &out, n, Bounds::Down)
 }
 
+/// Unary `-` of a `signed` over 64 elements: `0 - x`, carries across the words.
+pub(crate) fn neg(m: &mut Machine, a: &[u64]) -> Option<u64> {
+    let x = wide_of(m, a, 0, false)?;
+    let out = add_words(&[0; WORDS], &x.w, x.n, true);
+    emit(m, &out, x.n, Bounds::Down)
+}
+
 /// The gate `g` of two vectors of one length (`bounds` as the native writes them), or of one
 /// vector for `not` (`y` is `None`), where an operand is longer than 64 elements.
 pub(crate) fn gate(m: &mut Machine, a: &[u64], g: Option<Gate>, bounds: Bounds) -> Option<u64> {

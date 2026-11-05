@@ -7283,6 +7283,11 @@ impl Gen {
                     let (n, bits, _) = arrs[0];
                     Out::Vector(n, not(bits), op == Op::VecNot)
                 }
+                // Two's complement in the low `n` bits (the most negative value wraps onto itself).
+                Op::Neg => {
+                    let (n, bits, _) = arrs[0];
+                    Out::Vector(n, sub(self.c64(0), bits), false)
+                }
                 // Only `0 1 L H` got here: the bits as `(n-1 downto 0)`, `xmap` unused.
                 Op::To01 => {
                     let (n, bits, _) = arrs[0];

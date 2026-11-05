@@ -312,3 +312,113 @@ fn to_01_in_compiled_code_matches_the_interpreter() {
         assert_eq!(run_z(&dir, &flags), want, "{flags:?}");
     }
 }
+
+/// Unary `-` of a `signed` of every length class (null, 1, 63 to 65, 70 elements), ascending and
+/// descending with a lower bound other than zero, with and without metavalues, the most negative
+/// value, in a function (native frame) and in a process (frame mode).
+const NEG: &str = r#"library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+entity y is end;
+architecture a of y is
+  function img(v : signed) return string is
+  begin
+    return integer'image(v'left) & "," & integer'image(v'right) & "," &
+           boolean'image(v'ascending) & ":" & to_string(std_logic_vector(v));
+  end function;
+  function pick(i : natural; meta : boolean) return std_logic is
+  begin
+    if meta and i mod 7 = 3 then return std_logic'val(i mod 9); end if;
+    case (i * 5 + i / 3) mod 4 is
+      when 0 => return '0';
+      when 1 => return '1';
+      when 2 => return 'L';
+      when others => return 'H';
+    end case;
+  end function;
+  function down(n : natural; k : natural; meta : boolean) return signed is
+    variable r : signed(n + 4 downto 5);
+  begin
+    for i in r'range loop r(i) := pick(i * k, meta); end loop;
+    return r;
+  end function;
+  function up(n : natural; k : natural; meta : boolean) return signed is
+    variable r : signed(3 to n + 2);
+  begin
+    for i in r'range loop r(i) := pick(i * k + 1, meta); end loop;
+    return r;
+  end function;
+  function minv(n : natural) return signed is
+    variable r : signed(n - 1 downto 0) := (others => '0');
+  begin
+    if n > 0 then r(n - 1) := '1'; end if;
+    return r;
+  end function;
+  function neg(v : signed) return signed is begin return -v; end function;
+begin
+  process
+    constant lens : integer_vector := (0, 1, 2, 7, 8, 9, 31, 32, 33, 63, 64, 65, 70);
+    variable n : integer := 0;
+    variable w : signed(15 downto 0) := x"8001";
+    variable m : signed(3 downto 0) := "10X1";
+  begin
+    for i in lens'range loop
+      for k in 1 to 3 loop
+        for meta in boolean'range loop
+          report integer'image(lens(i)) & "/" & integer'image(k) & "/" & boolean'image(meta) &
+                 ": " & img(neg(down(lens(i), k, meta))) & " " & img(neg(up(lens(i), k, meta))) &
+                 " " & img(neg(neg(down(lens(i), k, meta)))) & " " & img(neg(minv(lens(i)))) &
+                 " " & img(-minv(lens(i)));
+        end loop;
+      end loop;
+    end loop;
+    for k in 0 to 300 loop
+      w := -w + k;
+      n := n + to_integer(-w);
+      if k mod 60 = 0 then
+        report integer'image(n) & " " & img(-w) & " " & img(-m) & " " & img(-w(5 downto 2));
+      end if;
+    end loop;
+    report "done " & integer'image(n);
+    wait;
+  end process;
+end;
+"#;
+
+#[test]
+fn unary_minus_in_compiled_code_matches_the_interpreter() {
+    let dir = tempdir("compiled_neg");
+    std::fs::write(dir.join("y.vhd"), NEG).expect("write");
+    let a = yavs(
+        &dir,
+        &["analyze", "--std=2008", "--work=work:work", "y.vhd"],
+    );
+    assert!(a.status.success(), "{a:?}");
+    let go = |flags: &[&str]| {
+        let mut args = vec!["run", "--std=2008", "--work=work:work"];
+        args.extend_from_slice(flags);
+        args.push("y");
+        let o = yavs(&dir, &args);
+        (
+            o.status.code(),
+            String::from_utf8_lossy(&o.stdout).into_owned(),
+        )
+    };
+    let want = go(&["--tier=interp"]);
+    assert_eq!(want.0, Some(0), "{want:?}");
+    assert!(want.1.lines().count() >= 70, "{}", want.1);
+    for flags in [
+        #[cfg(feature = "llvm")]
+        vec!["--tier=llvm"],
+        #[cfg(feature = "llvm")]
+        vec!["--tier=auto", "--tier-heat=1,0,0"],
+        #[cfg(feature = "clift")]
+        vec!["--tier=clift"],
+        #[cfg(feature = "clift")]
+        vec!["--tier=clift-auto", "--tier-heat=1,0,0"],
+        #[cfg(all(feature = "llvm", feature = "clift"))]
+        vec!["--tier=auto3", "--tier-heat=1,0,0"],
+    ] {
+        assert_eq!(go(&flags), want, "{flags:?}");
+    }
+}
