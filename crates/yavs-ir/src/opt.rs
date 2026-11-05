@@ -4283,7 +4283,7 @@ impl<'a> Opt<'a> {
                 let (a, b) = (alen(0)?, alen(1)?);
                 (a == b).then_some(a)
             }
-            Op::VecNot | Op::NumNot | Op::Neg | Op::Conv(_, true) => alen(0),
+            Op::VecNot | Op::NumNot | Op::Neg | Op::Abs | Op::Conv(_, true) => alen(0),
             _ => None,
         }
     }

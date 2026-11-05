@@ -7288,6 +7288,12 @@ impl Gen {
                     let (n, bits, _) = arrs[0];
                     Out::Vector(n, sub(self.c64(0), bits), false)
                 }
+                // Negated when the top bit is set: xor with the sign mask and subtract it.
+                Op::Abs => {
+                    let (n, bits, _) = arrs[0];
+                    let m = sub(c0, and(lshr(bits, sub(n, c1)), c1));
+                    Out::Vector(n, sub(xor(bits, m), m), false)
+                }
                 // Only `0 1 L H` got here: the bits as `(n-1 downto 0)`, `xmap` unused.
                 Op::To01 => {
                     let (n, bits, _) = arrs[0];

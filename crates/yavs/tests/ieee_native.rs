@@ -307,6 +307,8 @@ fn testbench(seed: u64, per_op: usize) -> String {
         }
         let a = g.operand("gv");
         g.case(&format!("- {a}"), "img");
+        let a = g.operand("gv");
+        g.case(&format!("abs {a}"), "img");
         // to_integer: operands that fit the result, as the body would raise a range error.
         let (s, b) = g.vec();
         let s: String = s.chars().take(31).collect();
@@ -994,6 +996,71 @@ fn native_neg_limits_match_bodies() {
     }
     for std in ["2008", "2019"] {
         diff_run("neg_limits", &tb(&body), "t", std, 400);
+    }
+}
+
+/// `abs` of a `signed` around the limit of its fast path (1, 2, 63 to 65, 70 and 128 elements):
+/// null operands, both directions with a lower bound other than zero, non-negative and negative
+/// operands of every pattern, the most negative value, weak bits, every metavalue at the first, a
+/// middle and the last element, and slices that start inside a word.
+#[test]
+fn native_abs_limits_match_bodies() {
+    let pats = |n: usize| -> Vec<String> {
+        let alt: String = (0..n).map(|i| if i % 2 == 0 { '1' } else { '0' }).collect();
+        vec![
+            "0".repeat(n),
+            "1".repeat(n),
+            format!("1{}", "0".repeat(n - 1)),
+            format!("{}1", "0".repeat(n - 1)),
+            format!("0{}", "1".repeat(n - 1)),
+            alt.clone(),
+            alt.replace('1', "H").replace('0', "L"),
+            format!("H{}", "L".repeat(n - 1)),
+            format!("L{}", "H".repeat(n - 1)),
+        ]
+    };
+    let mut body = String::new();
+    for n in [1, 2, 7, 8, 63, 64, 65, 70, 128] {
+        for (l, asc) in [(n - 1, "false"), (n + 3, "true")] {
+            for x in pats(n) {
+                let _ = writeln!(body, "    report img(abs gv(\"{x}\", {l}, {asc}));");
+                let _ = writeln!(body, "    report img(abs (abs gv(\"{x}\", {l}, {asc})));");
+            }
+            for m in "UXZW-".chars() {
+                for at in [0, n / 2, n - 1] {
+                    for base in [5, 6] {
+                        let mut s: Vec<char> = pats(n)[base].chars().collect();
+                        s[at] = m;
+                        let x: String = s.into_iter().collect();
+                        let _ = writeln!(body, "    report img(abs gv(\"{x}\", {l}, {asc}));");
+                    }
+                }
+            }
+        }
+    }
+    for asc in ["true", "false"] {
+        let _ = writeln!(body, "    report img(abs gv(\"\", -1, {asc}));");
+    }
+    let wide: String = (0..72)
+        .map(|i| if i % 3 == 0 { '1' } else { 'H' })
+        .collect();
+    for (hi, lo) in [
+        (40, 9),
+        (70, 7),
+        (63, 0),
+        (64, 0),
+        (65, 1),
+        (71, 6),
+        (62, 62),
+        (0, 0),
+    ] {
+        let _ = writeln!(
+            body,
+            "    report img(abs gv(\"{wide}\", 71, false)({hi} downto {lo}));"
+        );
+    }
+    for std in ["2008", "2019"] {
+        diff_run("abs_limits", &tb(&body), "t", std, 800);
     }
 }
 

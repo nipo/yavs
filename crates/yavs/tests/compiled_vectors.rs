@@ -385,10 +385,10 @@ begin
 end;
 "#;
 
-#[test]
-fn unary_minus_in_compiled_code_matches_the_interpreter() {
-    let dir = tempdir("compiled_neg");
-    std::fs::write(dir.join("y.vhd"), NEG).expect("write");
+/// Runs `src` (entity `y`) on every compiled tier of this build and compares with `--tier=interp`.
+fn all_tiers_match(name: &str, src: &str) {
+    let dir = tempdir(name);
+    std::fs::write(dir.join("y.vhd"), src).expect("write");
     let a = yavs(
         &dir,
         &["analyze", "--std=2008", "--work=work:work", "y.vhd"],
@@ -421,4 +421,88 @@ fn unary_minus_in_compiled_code_matches_the_interpreter() {
     ] {
         assert_eq!(go(&flags), want, "{flags:?}");
     }
+}
+
+#[test]
+fn unary_minus_in_compiled_code_matches_the_interpreter() {
+    all_tiers_match("compiled_neg", NEG);
+}
+
+/// `abs` of a `signed`: the same operands as [`NEG`], in a function and in a process, with a
+/// non-negative, a negative and the most negative operand at every length class.
+const ABS: &str = r#"library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+entity y is end;
+architecture a of y is
+  function img(v : signed) return string is
+  begin
+    return integer'image(v'left) & "," & integer'image(v'right) & "," &
+           boolean'image(v'ascending) & ":" & to_string(std_logic_vector(v));
+  end function;
+  function pick(i : natural; meta : boolean) return std_logic is
+  begin
+    if meta and i mod 7 = 3 then return std_logic'val(i mod 9); end if;
+    case (i * 5 + i / 3) mod 4 is
+      when 0 => return '0';
+      when 1 => return '1';
+      when 2 => return 'L';
+      when others => return 'H';
+    end case;
+  end function;
+  function down(n : natural; k : natural; meta : boolean; top : std_logic) return signed is
+    variable r : signed(n + 4 downto 5);
+  begin
+    for i in r'range loop r(i) := pick(i * k, meta); end loop;
+    if n > 0 and not meta then r(n + 4) := top; end if;
+    return r;
+  end function;
+  function up(n : natural; k : natural; meta : boolean; top : std_logic) return signed is
+    variable r : signed(3 to n + 2);
+  begin
+    for i in r'range loop r(i) := pick(i * k + 1, meta); end loop;
+    if n > 0 and not meta then r(3) := top; end if;
+    return r;
+  end function;
+  function minv(n : natural) return signed is
+    variable r : signed(n - 1 downto 0) := (others => '0');
+  begin
+    if n > 0 then r(n - 1) := '1'; end if;
+    return r;
+  end function;
+  function ab(v : signed) return signed is begin return abs v; end function;
+begin
+  process
+    constant lens : integer_vector := (0, 1, 2, 7, 8, 9, 31, 32, 33, 63, 64, 65, 70);
+    variable n : integer := 0;
+    variable w : signed(15 downto 0) := x"8001";
+    variable m : signed(3 downto 0) := "10X1";
+  begin
+    for i in lens'range loop
+      for k in 1 to 3 loop
+        for meta in boolean'range loop
+          report integer'image(lens(i)) & "/" & integer'image(k) & "/" & boolean'image(meta) &
+                 ": " & img(ab(down(lens(i), k, meta, '0'))) & " " & img(ab(down(lens(i), k, meta, '1'))) &
+                 " " & img(ab(up(lens(i), k, meta, '0'))) & " " & img(ab(up(lens(i), k, meta, '1'))) &
+                 " " & img(ab(ab(down(lens(i), k, meta, '1')))) & " " & img(ab(minv(lens(i)))) &
+                 " " & img(abs minv(lens(i)));
+        end loop;
+      end loop;
+    end loop;
+    for k in 0 to 300 loop
+      w := -w + k;
+      n := n + to_integer(abs w);
+      if k mod 60 = 0 then
+        report integer'image(n) & " " & img(abs w) & " " & img(abs m) & " " & img(abs w(5 downto 2));
+      end if;
+    end loop;
+    report "done " & integer'image(n);
+    wait;
+  end process;
+end;
+"#;
+
+#[test]
+fn abs_in_compiled_code_matches_the_interpreter() {
+    all_tiers_match("compiled_abs", ABS);
 }

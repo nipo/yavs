@@ -3225,7 +3225,7 @@ user's performance priority:
   designator, parameter and result base types) reduces to a key `yavs_ir::ieee::parse` knows;
   the VHDL body stays in the library and is the reference. Implemented in `yavs-interp`
   `src/ieee.rs` on bit-plane vectors: `std_logic_1164` gates, `not`, `to_x01`/`to_x01z`/`to_ux01`,
-  `to_01`, `??`, `rising_edge`/`falling_edge` of `std_ulogic`; `numeric_std` `+ - *`, unary `-` of `signed`, the six
+  `to_01`, `??`, `rising_edge`/`falling_edge` of `std_ulogic`; `numeric_std` `+ - *`, unary `-` and `abs` of `signed`, the six
   relational operators (vector/vector, vector/integer, integer/vector), `to_integer`,
   `to_unsigned`, `to_signed`, `resize` and the local `xsll`..`xror` the shift and rotate
   functions call. Everything else (division, `?=`, string conversions, `numeric_bit`,

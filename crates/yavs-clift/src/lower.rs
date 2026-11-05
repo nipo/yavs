@@ -7538,6 +7538,16 @@ impl Gen<'_> {
                 let (n, bits, _) = arrs[0];
                 Out::Vector(n, self.b.ins().ineg(bits), false)
             }
+            // Negated when the top bit is set: xor with the sign mask and subtract it.
+            Op::Abs => {
+                let (n, bits, _) = arrs[0];
+                let nm1 = self.b.ins().isub(n, c1);
+                let top = self.b.ins().ushr(bits, nm1);
+                let sign = self.b.ins().band(top, c1);
+                let m = self.b.ins().ineg(sign);
+                let x = self.b.ins().bxor(bits, m);
+                Out::Vector(n, self.b.ins().isub(x, m), false)
+            }
             // Only `0 1 L H` got here: the bits as `(n-1 downto 0)`, `xmap` unused.
             Op::To01 => {
                 let (n, bits, _) = arrs[0];

@@ -123,6 +123,8 @@ pub enum Op {
     Reduce(Gate),
     /// Unary `-` of a `numeric_std` `signed`.
     Neg,
+    /// `abs` of a `numeric_std` `signed`.
+    Abs,
     /// `numeric_std` gate on two `unsigned` or two `signed`; unequal lengths are handed back to
     /// the body (its failure report).
     NumGate(Gate),
@@ -261,6 +263,7 @@ pub fn parse(key: &str) -> Option<Op> {
             Some(Op::NumNot)
         }
         ("numeric_std", "-", ["signed"], "signed") if !bit => Some(Op::Neg),
+        ("numeric_std", "abs", ["signed"], "signed") if !bit => Some(Op::Abs),
         ("numeric_std", n @ ("+" | "-"), ps, r) => {
             let (signed, form, t) = num_form(ps)?;
             (r == t).then_some(Op::Add {
