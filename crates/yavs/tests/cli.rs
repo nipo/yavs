@@ -1617,10 +1617,7 @@ fn threads_words() {
         String::from_utf8_lossy(&o.stderr).into_owned()
     };
     let auto = run("--threads=auto");
-    assert!(
-        auto.contains("`auto` is not implemented yet (#901)"),
-        "{auto}"
-    );
+    assert!(auto.contains("`auto` is not implemented yet"), "{auto}");
     assert!(auto.contains("`--threads=4`"), "{auto}");
     assert!(!auto.contains("invalid digit"), "{auto}");
     let word = run("--threads=many");

@@ -41,7 +41,7 @@ pub(crate) const ROOT: NodeId = NodeId(0);
 #[derive(Clone, Debug)]
 #[expect(
     dead_code,
-    reason = "the elaborated ids are for value puts and value-change callbacks (#271, #272)"
+    reason = "the elaborated ids are for value puts and value-change callbacks"
 )]
 pub(crate) enum Origin {
     /// A region: an instance, block, generate iteration or process.

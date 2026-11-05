@@ -81,6 +81,11 @@ fn messages_name_no_other_tool_and_no_internal_document() {
             let text = text.split("#[cfg(test)]").next().expect("split");
             for l in literals(text) {
                 let low = l.to_lowercase();
+                let issue = l
+                    .split("(#")
+                    .skip(1)
+                    .any(|r| r.starts_with(|c: char| c.is_ascii_digit()));
+                assert!(!issue, "{}: an issue number in \"{l}\"", f.display());
                 // `include_str!` paths name a file, and are not read by a user.
                 if let Some(w) = bad.iter().find(|w| low.contains(&w.to_lowercase()))
                     && !l.starts_with("../")
