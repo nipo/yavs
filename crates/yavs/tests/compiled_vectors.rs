@@ -891,3 +891,156 @@ end;
 fn matching_operators_in_compiled_code_match_the_interpreter() {
     all_tiers_match("compiled_match", MATCHES);
 }
+
+/// `*` of two vectors with 65 to 1025 result elements, `unsigned` and `signed` (the word-wise
+/// native, reached through the callback of compiled code), over the limit of 1024, extremes, weak
+/// bits, metavalues, null, non-zero lower bounds in both directions, and a counted loop.
+#[test]
+fn wide_mul_in_compiled_code_matches_the_interpreter() {
+    let head = MUL.split_once("begin\n  process").expect("head").0;
+    let src = format!(
+        "{head}{}",
+        r#"begin
+  process
+    constant la : integer_vector := (33, 33, 32, 64, 65, 1, 100, 129, 512, 513, 2, 0, 5);
+    constant lb : integer_vector := (32, 33, 33, 64, 1, 65, 28, 5, 512, 512, 1025, 70, 0);
+    variable n : integer := 0;
+    variable w : signed(39 downto 0) := x"8000000001";
+    variable u : unsigned(39 downto 0) := x"8000000001";
+    variable p : signed(79 downto 0);
+    variable q : unsigned(79 downto 0);
+  begin
+    for i in la'range loop
+      for k in 1 to 3 loop
+        for meta in boolean'range loop
+          report integer'image(la(i)) & "*" & integer'image(lb(i)) & "/" & integer'image(k) & "/" &
+                 boolean'image(meta) & ": " &
+                 img(mu(down(la(i), k, meta), up(lb(i), k + 1, meta))) & " " &
+                 img(mu(up(la(i), k, meta), down(lb(i), k + 1, meta))) & " " &
+                 img(ms(signed(down(la(i), k, meta)), signed(up(lb(i), k + 1, meta)))) & " " &
+                 img(ms(signed(ext(la(i), '1', '0')), signed(ext(lb(i), '1', '1')))) & " " &
+                 img(ms(signed(ext(la(i), '1', '1')), signed(ext(lb(i), '1', '1')))) & " " &
+                 img(ms(signed(ext(la(i), '1', '0')), signed(ext(lb(i), '1', '0')))) & " " &
+                 img(mu(ext(la(i), '1', '1'), ext(lb(i), '1', '1')));
+        end loop;
+      end loop;
+    end loop;
+    for k in 0 to 300 loop
+      p := w * to_signed(k - 150, 40);
+      q := u * to_unsigned(k * 1000003, 40);
+      n := (n + to_integer(p(20 downto 0)) + to_integer(q(20 downto 0))) mod 1000003;
+      w := p(60 downto 21) + k;
+      u := q(70 downto 31) + k;
+      if k mod 60 = 0 then
+        report integer'image(n) & " " & img(p) & " " & img(q);
+      end if;
+    end loop;
+    report "done " & integer'image(n);
+    wait;
+  end process;
+end;
+"#
+    );
+    all_tiers_match("compiled_wide_mul", &src);
+}
+
+/// `vector * integer` and `integer * vector` where the product has over 64 elements: the integer
+/// fits, just fits or just does not (the truncation warning), lengths 33 to 64 (the integer is
+/// converted at the vector's length) and over 64.
+#[test]
+fn wide_mul_integer_in_compiled_code_matches_the_interpreter() {
+    let (head, tail) = MULINT.split_once("begin\n  process").expect("head");
+    let body = tail
+        .split_once("    for k in 0 to 300 loop")
+        .expect("loop")
+        .0;
+    let body = body.replace(
+        "(1, 2, 31, 32, 33, 64, 0, 5, 16, 30, 3)",
+        "(33, 34, 40, 64, 65, 66, 100, 128, 513, 3)",
+    );
+    let src = format!(
+        "{head}begin\n  process{body}{}",
+        r#"    for k in 0 to 300 loop
+      q := u * (k mod 200);
+      p := w * (k mod 100 - 50);
+      n := (n + to_integer(q(20 downto 0)) + to_integer(p(20 downto 0)) + to_integer(w(14 downto 8) * (k mod 50))) mod 1000003;
+      u := q(39 downto 0) + k;
+      w := p(39 downto 0) + k;
+      if k mod 60 = 0 then
+        report integer'image(n) & " " & img(q) & " " & img(p);
+      end if;
+    end loop;
+    report "done " & integer'image(n);
+    wait;
+  end process;
+end;
+"#
+    );
+    let src = src
+        .replace(
+            "signed(15 downto 0) := x\"8001\"",
+            "signed(39 downto 0) := x\"0000008001\"",
+        )
+        .replace(
+            "unsigned(11 downto 0) := x\"801\"",
+            "unsigned(39 downto 0) := x\"0000000801\"",
+        )
+        .replace(
+            "variable p : signed(15 downto 0)",
+            "variable p : signed(79 downto 0)",
+        )
+        .replace(
+            "variable q : unsigned(15 downto 0)",
+            "variable q : unsigned(79 downto 0)",
+        );
+    all_tiers_match("compiled_wide_mul_integer", &src);
+}
+
+/// `rotate_left`, `rotate_right`, `rol` and `ror` of 65 to 1025 elements by 0, 1, a word, `n - 1`,
+/// `n`, more than `n`, the largest NATURAL and (for the operators) negative counts, weak bits,
+/// metavalues, non-zero lower bounds in both directions, and a counted loop.
+#[test]
+fn wide_rotate_in_compiled_code_matches_the_interpreter() {
+    let head = MUL.split_once("begin\n  process").expect("head").0;
+    let src = format!(
+        "{head}{}",
+        r#"begin
+  process
+    constant la : integer_vector := (65, 66, 100, 128, 129, 192, 513, 1024, 1025, 64, 3);
+    constant cs : integer_vector := (0, 1, 2, 63, 64, 65, 127, 1000, 2147483647);
+    variable n : integer := 0;
+    variable r : unsigned(99 downto 0) := (0 => '1', 70 => '1', others => '0');
+    variable g : signed(129 downto 0) := (0 => '1', 129 => '1', others => '0');
+  begin
+    for i in la'range loop
+      for j in cs'range loop
+        for meta in boolean'range loop
+          report integer'image(la(i)) & "/" & integer'image(cs(j)) & "/" & boolean'image(meta) & ": " &
+                 img(rotate_left(down(la(i), j, meta), cs(j))) & " " &
+                 img(rotate_right(up(la(i), j + 1, meta), cs(j))) & " " &
+                 img(rotate_left(signed(down(la(i), j, false)), la(i) - 1)) & " " &
+                 img(rotate_right(signed(up(la(i), j, false)), la(i))) & " " &
+                 img(rotate_left(down(la(i), j + 2, false), la(i) + 1)) & " " &
+                 img(down(la(i), j, false) rol (-cs(j))) & " " &
+                 img(up(la(i), j, false) ror cs(j)) & " " &
+                 img(signed(up(la(i), j, false)) rol (-cs(j))) & " " &
+                 img(signed(down(la(i), j, false)) ror (-cs(j)));
+        end loop;
+      end loop;
+    end loop;
+    for k in 0 to 300 loop
+      r := rotate_left(r, k mod 7 + 1) + k;
+      g := rotate_right(g, k mod 70) - k;
+      n := (n + to_integer(r(20 downto 0)) + to_integer(g(20 downto 0))) mod 1000003;
+      if k mod 60 = 0 then
+        report integer'image(n) & " " & img(r) & " " & img(g);
+      end if;
+    end loop;
+    report "done " & integer'image(n);
+    wait;
+  end process;
+end;
+"#
+    );
+    all_tiers_match("compiled_wide_rotate", &src);
+}

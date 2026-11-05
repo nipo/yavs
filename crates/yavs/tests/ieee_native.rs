@@ -1010,6 +1010,232 @@ fn native_mul_negative_natural_matches_bodies() {
     }
 }
 
+/// Operand patterns of `n` elements: extremes, alternating, weak bits, a metavalue in the middle
+/// and at the end (`full`), else only the extremes and the alternating one.
+fn wide_pats(n: usize, full: bool, bit: bool) -> Vec<String> {
+    let alt: String = (0..n).map(|i| if i % 2 == 0 { '1' } else { '0' }).collect();
+    let mut v = vec![
+        "1".repeat(n),
+        format!("1{}", "0".repeat(n - 1)),
+        alt.clone(),
+    ];
+    if full {
+        v.extend(["0".repeat(n), format!("0{}", "1".repeat(n - 1))]);
+        if !bit {
+            v.push(alt.replace('1', "H").replace('0', "L"));
+            v.push(format!("{}X{}", &alt[..n / 2], &alt[n / 2 + 1..]));
+        }
+    }
+    v
+}
+
+/// `*` of two vectors with 65 to 1025 result elements (the limit of the word-wise path is 1024):
+/// products just over 64, equal and unequal lengths, extremes, weak bits, metavalues, both
+/// directions with other index ranges. `full` is the whole set of patterns and index ranges,
+/// else a few (the bodies are slow on long vectors).
+fn wide_mul_body(pairs: &[(usize, usize)], full: bool, bit: bool) -> String {
+    let mut body = String::new();
+    for f in ["uv", "gv"] {
+        for &(a, b) in pairs {
+            for x in wide_pats(a, full, bit) {
+                for y in wide_pats(b, full, bit) {
+                    for (la, da, lb, db) in [
+                        (a - 1, false, b - 1, false),
+                        (a + 6, true, b + 2, false),
+                        (a - 1, false, b + 5, true),
+                    ]
+                    .iter()
+                    .take(if full { 2 } else { 1 })
+                    {
+                        let _ = writeln!(
+                            body,
+                            "    report img({f}(\"{x}\", {la}, {da}) * {f}(\"{y}\", {lb}, {db}));"
+                        );
+                    }
+                }
+            }
+        }
+    }
+    body
+}
+
+const WIDE_PAIRS: [(usize, usize); 12] = [
+    (33, 32),
+    (33, 33),
+    (1, 64),
+    (64, 1),
+    (64, 2),
+    (40, 26),
+    (64, 64),
+    (100, 28),
+    (65, 1),
+    (3, 100),
+    (130, 62),
+    (200, 200),
+];
+
+#[test]
+fn native_wide_mul_matches_bodies() {
+    // Up to 1024 result elements, then 1025 (the general path).
+    let big = [(512, 512), (513, 512), (1000, 24), (1, 1024), (2, 1025)];
+    for (std, n, with_big) in [
+        ("2008", WIDE_PAIRS.len(), true),
+        ("2019", 8, false),
+        ("1993", 4, false),
+    ] {
+        let mut body = wide_mul_body(&WIDE_PAIRS[..n], true, false);
+        if with_big {
+            body.push_str(&wide_mul_body(&big, false, false));
+        }
+        let ones = "1".repeat(99);
+        let _ = writeln!(
+            body,
+            "    report img(uv(\"\", -1, true) * uv(\"{ones}\", 99, false));"
+        );
+        let _ = writeln!(
+            body,
+            "    report img(gv(\"{ones}\", 99, false) * gv(\"\", -1, true));"
+        );
+        diff_run("wide_mul", &tb(&body), "t", std, 500);
+    }
+}
+
+#[test]
+fn native_wide_mul_numeric_bit_matches_bodies() {
+    let mut body = wide_mul_body(&WIDE_PAIRS[..10], true, true);
+    body.push_str(&wide_mul_body(&[(513, 512)], false, true));
+    let src = format!(
+        "{BIT_HEAD}{}    wait;\n  end process;\nend architecture;\n",
+        body
+    );
+    diff_run("wide_mul_bit", &src, "t", "2008", 500);
+}
+
+/// `vector * integer` and `integer * vector` where the vector (so the integer, converted at its
+/// length) makes the product longer than 64 elements, with the integers that fit, just fit and
+/// do not (the truncation warning) for vectors of 33 to 64 elements.
+#[test]
+fn native_wide_mul_integer_forms_match_bodies() {
+    for (std, lens) in [
+        ("2008", vec![33, 34, 40, 63, 64, 65, 66, 100, 128]),
+        ("2019", vec![33, 64, 65, 129]),
+        ("1993", vec![33, 65]),
+    ] {
+        diff_run(
+            "wide_mul_integer",
+            &tb(&mul_integer_body(std == "2019", &lens, false)),
+            "t",
+            std,
+            1000,
+        );
+    }
+    let src = format!(
+        "{BIT_HEAD}{}    wait;\n  end process;\nend architecture;\n",
+        mul_integer_body(false, &[33, 64, 65, 128], true)
+    );
+    diff_run("wide_mul_integer_bit", &src, "t", "2008", 500);
+    // 512 and 513 elements (products of 1024 and 1026): a few operands, the bodies are slow.
+    let mut body = String::new();
+    for f in ["uv", "gv"] {
+        for n in [512usize, 513] {
+            for x in wide_pats(n, false, false) {
+                for i in ["0", "1", "65535", "2147483647", "(-1)", "(-2147483647 - 1)"] {
+                    if f == "uv" && i.starts_with('(') {
+                        continue;
+                    }
+                    let _ = writeln!(
+                        body,
+                        "    report img({f}(\"{x}\", {}, false) * {i});",
+                        n + 1
+                    );
+                    let _ = writeln!(body, "    report img({i} * {f}(\"{x}\", {}, true));", n + 1);
+                }
+            }
+        }
+    }
+    diff_run("wide_mul_integer_big", &tb(&body), "t", "2008", 50);
+}
+
+/// Rotations of vectors of 65 to 1025 elements (the word-wise path takes up to 1024) by 0, 1, a
+/// word, `n - 1`, `n`, more than `n` and the largest NATURAL, `rol` and `ror` with negative counts,
+/// weak bits and metavalues (the general path), other index ranges.
+#[test]
+fn native_wide_rotate_matches_bodies() {
+    for (std, sizes) in [
+        ("2008", vec![65usize, 66, 127, 128, 129, 192, 1024, 1025]),
+        ("2019", vec![65, 129, 1025]),
+        ("1993", vec![66, 128]),
+    ] {
+        let mut body = String::new();
+        for f in ["uv", "gv"] {
+            for &n in &sizes {
+                let pats = wide_pats(n, n < 200, false);
+                let pats = if n < 200 { pats } else { pats[..2].to_vec() };
+                for (pi, x) in pats.iter().enumerate() {
+                    // Both directions of the index range, alternating over the patterns.
+                    let (l, asc) = if pi % 2 == 0 {
+                        (n - 1, false)
+                    } else {
+                        (n + 6, true)
+                    };
+                    let v = format!("{f}(\"{x}\", {l}, {asc})");
+                    let nn = n as u64;
+                    let counts = [0, 1, 63, 64, 65, nn - 1, nn, nn + 1, 2 * nn + 3, 2147483647];
+                    for c in counts {
+                        for r in ["rotate_left", "rotate_right"] {
+                            let _ = writeln!(body, "    report img({r}({v}, {c}));");
+                        }
+                        if std != "1993" {
+                            for (r, sign) in [("rol", ""), ("ror", "-")] {
+                                let _ = writeln!(body, "    report img({v} {r} ({sign}{c}));");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        diff_run("wide_rotate", &tb(&body), "t", std, 300);
+    }
+}
+
+/// `numeric_bit` rotations of wide vectors.
+#[test]
+fn native_wide_rotate_numeric_bit_matches_bodies() {
+    let mut body = String::new();
+    for f in ["uv", "gv"] {
+        for n in [65usize, 128, 1025] {
+            for x in wide_pats(n, n < 200, true) {
+                let v = format!("{f}(\"{x}\", {}, false)", n + 3);
+                for c in [0, 1, 64, n - 1, n, n + 7] {
+                    let _ = writeln!(body, "    report img(rotate_left({v}, {c}));");
+                    let _ = writeln!(body, "    report img(rotate_right({v}, {c}));");
+                    let _ = writeln!(body, "    report img({v} rol ({c}));");
+                    let _ = writeln!(body, "    report img({v} ror (-{c}));");
+                }
+            }
+        }
+    }
+    let src = format!(
+        "{BIT_HEAD}{}    wait;\n  end process;\nend architecture;\n",
+        body
+    );
+    diff_run("wide_rotate_bit", &src, "t", "2008", 500);
+}
+
+/// A negative count is the NATURAL subtype error of `rotate_*` also for a wide vector; each case
+/// is its own run since the error ends it.
+#[test]
+fn native_wide_rotate_negative_count_matches_bodies() {
+    let ones = "1".repeat(100);
+    for stmt in [
+        format!("img(rotate_left(uv(\"{ones}\", 99, false), -1))"),
+        format!("img(rotate_right(gv(\"{ones}\", 99, false), -70))"),
+    ] {
+        let body = format!("    report \"before\";\n    report {stmt};\n    report \"after\";\n");
+        diff_run("wide_rotate_neg", &tb(&body), "t", "2008", 1);
+    }
+}
+
 /// `to_01` around the limit of its fast path (1, 63 to 65, 70 and 128 elements), null operands,
 /// ascending and descending bounds, slices that start inside a word, every metavalue at the
 /// first, a middle and the last element, and every `xmap`.

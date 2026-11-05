@@ -33,15 +33,21 @@ impl Wide {
     }
 }
 
-/// The array operand at cell `i`, `1` to [`MAX_BITS`] elements, every one `0 1 L H`; with `pure`
-/// none an `L` or `H` (operations that keep the elements). `None` for any other operand.
-pub(crate) fn wide_of(m: &Machine, a: &[u64], i: usize, pure: bool) -> Option<Wide> {
+/// The data address and the element count of the array operand at cell `i` (not read yet).
+fn dims(a: &[u64], i: usize) -> Option<(u64, usize)> {
     let &[data, left, right, d] = a.get(i..i + ARRAY_REGS)? else {
         return None;
     };
     let (left, right) = (left as i64, right as i64);
     let (lo, hi) = if d == 1 { (right, left) } else { (left, right) };
     let n = usize::try_from(hi.checked_sub(lo)?).ok()?.checked_add(1)?;
+    Some((data, n))
+}
+
+/// The array operand at cell `i`, `1` to [`MAX_BITS`] elements, every one `0 1 L H`; with `pure`
+/// none an `L` or `H` (operations that keep the elements). `None` for any other operand.
+pub(crate) fn wide_of(m: &Machine, a: &[u64], i: usize, pure: bool) -> Option<Wide> {
+    let (data, n) = dims(a, i)?;
     if n > MAX_BITS {
         return None;
     }
@@ -474,39 +480,113 @@ pub(crate) fn resize(m: &mut Machine, a: &[u64], signed: bool) -> Option<u64> {
     emit(m, &w, new, Bounds::Down)
 }
 
-/// `sll`/`srl` (`K` 0, 1) of a vector longer than 64 elements.
-pub(crate) fn shift(m: &mut Machine, a: &[u64], k: u8) -> Option<u64> {
-    let x = wide_of(m, a, 0, true).filter(|x| x.n > 64)?;
-    let count = usize::try_from(*a.get(A1)? as i64).ok()?;
-    let n = x.n;
+/// `w` of `n` elements shifted left by `count` (zeros for `count >= n`).
+fn shl(w: &W, n: usize, count: usize) -> W {
     let mut out = [0u64; WORDS];
     if count < n {
         let (ws, bs) = (count / 64, count % 64);
-        let at = |i: usize| x.w.get(i).copied().unwrap_or(0);
+        for (i, o) in out.iter_mut().enumerate().take(n.div_ceil(64)).skip(ws) {
+            // Word `i - ws`, with the top bits of the word below it.
+            let below = (i - ws).checked_sub(1).map_or(0, |j| w[j]);
+            *o = w[i - ws] << bs | if bs > 0 { below >> (64 - bs) } else { 0 };
+        }
+        trim(&mut out, n);
+    }
+    out
+}
+
+/// `w` of `n` elements shifted right by `count` (zeros for `count >= n`).
+fn shr(w: &W, n: usize, count: usize) -> W {
+    let mut out = [0u64; WORDS];
+    if count < n {
+        let (ws, bs) = (count / 64, count % 64);
+        let at = |i: usize| w.get(i).copied().unwrap_or(0);
         for (i, o) in out.iter_mut().enumerate().take(n.div_ceil(64)) {
-            *o = if k == 0 {
-                // Left: word `i - ws`, with the top bits of the word below it.
-                let lo = i.checked_sub(ws);
-                let v = lo.map_or(0, |j| at(j) << bs);
-                let c = if bs > 0 {
-                    lo.and_then(|j| j.checked_sub(1))
-                        .map_or(0, |j| at(j) >> (64 - bs))
-                } else {
-                    0
-                };
-                v | c
-            } else {
-                let v = at(i + ws) >> bs;
-                let c = if bs > 0 {
+            *o = at(i + ws) >> bs
+                | if bs > 0 {
                     at(i + ws + 1) << (64 - bs)
                 } else {
                     0
                 };
-                v | c
-            };
         }
-        trim(&mut out, n);
     }
+    out
+}
+
+/// `sll`/`srl`/`rol`/`ror` (`K` 0, 1, 3, 4) of a vector longer than 64 elements without a weak
+/// bit (a rotation keeps the elements as they are).
+pub(crate) fn shift(m: &mut Machine, a: &[u64], k: u8) -> Option<u64> {
+    let x = wide_of(m, a, 0, true).filter(|x| x.n > 64)?;
+    let count = usize::try_from(*a.get(A1)? as i64).ok()?;
+    let n = x.n;
+    let out = match k {
+        0 => shl(&x.w, n, count),
+        1 => shr(&x.w, n, count),
+        _ => {
+            let c = count % n;
+            if c == 0 {
+                x.w
+            } else {
+                let (p, q) = if k == 3 {
+                    (shl(&x.w, n, c), shr(&x.w, n, n - c))
+                } else {
+                    (shr(&x.w, n, c), shl(&x.w, n, n - c))
+                };
+                std::array::from_fn(|i| p[i] | q[i])
+            }
+        }
+    };
+    emit(m, &out, n, Bounds::Down)
+}
+
+/// `*` of `numeric_std` (`form` as in [`add`]) where the product has 65 to [`MAX_BITS`] elements:
+/// the low `n` bits of the product of both operands extended to `n` (sign extended for `signed`).
+/// An integer is converted at the vector's length and must fit it, else the general path warns.
+pub(crate) fn mul(m: &mut Machine, a: &[u64], signed: bool, form: u8) -> Option<u64> {
+    let int_wide = |i: u64, n: usize| -> Option<Wide> {
+        let i = int_operand(i, signed)?;
+        let mut w = [0u64; WORDS];
+        w[0] = fit_bits(i, n.min(64), signed)?;
+        if signed && i < 0 && n > 64 {
+            set_range(&mut w, 64, n);
+        }
+        Some(Wide { n, w })
+    };
+    // The product's length first: a product over the limit reads no planes.
+    let n = match form {
+        0 => dims(a, 0)?.1.saturating_add(dims(a, A1)?.1),
+        1 => dims(a, 0)?.1.saturating_mul(2),
+        _ => dims(a, 1)?.1.saturating_mul(2),
+    };
+    if !(65..=MAX_BITS).contains(&n) {
+        return None;
+    }
+    let (l, r) = match form {
+        0 => (wide_of(m, a, 0, false)?, wide_of(m, a, A1, false)?),
+        1 => {
+            let l = wide_of(m, a, 0, false)?;
+            let r = int_wide(*a.get(A1)?, l.n)?;
+            (l, r)
+        }
+        _ => {
+            let r = wide_of(m, a, 1, false)?;
+            let l = int_wide(*a.first()?, r.n)?;
+            (l, r)
+        }
+    };
+    let (x, y) = (extend(&l, n, signed), extend(&r, n, signed));
+    // Schoolbook over the words, the product cut off at the top word of `n`.
+    let nb = n.div_ceil(64);
+    let mut out = [0u64; WORDS];
+    for i in 0..nb {
+        let mut carry = 0u128;
+        for j in 0..nb - i {
+            let t = u128::from(x[i]) * u128::from(y[j]) + u128::from(out[i + j]) + carry;
+            out[i + j] = t as u64;
+            carry = t >> 64;
+        }
+    }
+    trim(&mut out, n);
     emit(m, &out, n, Bounds::Down)
 }
 

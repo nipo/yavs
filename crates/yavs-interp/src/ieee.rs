@@ -1971,28 +1971,34 @@ fn fast_add<const SUB: bool, const SIGNED: bool, const FORM: u8>(
 /// `*` on two operands of at most 64 elements together, without a metavalue: the product of
 /// `l + r` elements is the low `l + r` bits of the 64-bit product of the operands extended to
 /// that length. An integer operand is converted at the vector's length and must fit it (else the
-/// body's warning comes from the general path). Anything else (longer, a metavalue, a null array)
-/// takes the general path.
+/// body's warning comes from the general path). A product over 64 elements is the word-wise
+/// path's; anything else (a metavalue, a null array, over `ieee_wide::MAX_BITS`) the general path.
 fn fast_mul<const SIGNED: bool, const FORM: u8>(m: &mut Machine, a: &[u64]) -> Option<u64> {
     let ((ln, lb), (rn, rb)) = match FORM {
         0 => {
-            let (l, r) = (small(m, a, 0)?, small(m, a, A1)?);
+            let (Some(l), Some(r)) = (small(m, a, 0), small(m, a, A1)) else {
+                return wide::mul(m, a, SIGNED, 0);
+            };
             ((l.n, l.bits), (r.n, r.bits))
         }
         1 => {
-            let l = small(m, a, 0)?;
+            let Some(l) = small(m, a, 0) else {
+                return wide::mul(m, a, SIGNED, 1);
+            };
             let i = nat_or_int(cell(a, A1)?, SIGNED)?;
             ((l.n, l.bits), (l.n, fit_bits(i, l.n, SIGNED)?))
         }
         _ => {
-            let r = small(m, a, 1)?;
+            let Some(r) = small(m, a, 1) else {
+                return wide::mul(m, a, SIGNED, 2);
+            };
             let i = nat_or_int(cell(a, 0)?, SIGNED)?;
             ((r.n, fit_bits(i, r.n, SIGNED)?), (r.n, r.bits))
         }
     };
     let n = ln + rn;
     if n > 64 {
-        return None;
+        return wide::mul(m, a, SIGNED, FORM);
     }
     let x = extend_bits(lb, ln, n, SIGNED);
     let y = extend_bits(rb, rn, n, SIGNED);
@@ -2265,7 +2271,7 @@ fn fast_shift<const K: u8>(m: &mut Machine, a: &[u64]) -> Option<u64> {
     match small(m, a, 0) {
         Some(v) if v.pure => shift_small::<K>(m, &v, count).ok().flatten(),
         Some(_) => None,
-        None if K < 2 => wide::shift(m, a, K),
+        None if K != 2 => wide::shift(m, a, K),
         None => None,
     }
 }

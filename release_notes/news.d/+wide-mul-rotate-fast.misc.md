@@ -1,0 +1,1 @@
+The `*` of `numeric_std` vectors with a product of more than 64 elements, and `rotate_left`, `rotate_right`, `rol` and `ror` of vectors longer than 64 elements, run much faster, in compiled code as well as in the interpreter.
