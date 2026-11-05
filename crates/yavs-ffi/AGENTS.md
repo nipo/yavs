@@ -40,7 +40,7 @@ Read the root `AGENTS.md` first. This file is for an agent about to change `crat
 | More than 64 arguments is an error, never a crash | Fail early | `MAX_ARGS` |
 | Typed Rust callees bind without `unsafe` (`ForeignFn::from_fn`); real symbols are bound by the elaborator, the one unsafe step | Safe tests and natives | `docs/decisions.md` "IR and interpreter" (Foreign calls) |
 | All three platforms tier 1: test aarch64 under qemu-user, Windows under wine | Plan platforms | `docs/plan.md` "Platforms"; docs/STATUS.md "ffi" |
-| Apple arm64 shares the AAPCS64 trampoline; only classification differs (stack arguments packed at natural size and alignment, so `Loc::Stack` is a byte offset for every ABI). Tested natively on a Mac, not in CI | macOS is outside the plan's platforms, but builds from source should not stop at this crate | user, 2026-11-05 |
+| Apple arm64 shares the AAPCS64 trampoline; only classification differs (stack arguments packed at natural size and alignment, so `Loc::Stack` is a byte offset for every ABI). Tested natively on a Mac, not in CI | macOS is outside the plan's platforms, but builds from source should not stop at this crate | nipo, #1112 |
 
 Module-local decisions go in this section in the same commit (root `AGENTS.md` rule 24).
 

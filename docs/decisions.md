@@ -590,7 +590,7 @@ are rare on a bus.
   `src/exports.txt` symbols with the Mach-O leading `_`, so it exports exactly that list.
   Plugins are linked with `-undefined dynamic_lookup` and bind to the executable at load
   (`RTLD_NOW`, as on Linux). `crates/yavs/tests/vhpi_exports.rs` reads the exports with
-  `nm -gU`, which comes with the C compiler the plugin tests need anyway (user, 2026-11-05).
+  `nm -gU`, which comes with the C compiler the plugin tests need anyway (nipo, #1112).
 - **Export, Windows:** no VHPI DLL. The executable is linked with a generated `.def`
   (`/DEF:` for MSVC, the `.def` as linker input for MinGW). `yavs`'s `build.rs` passes it; no `yavs.lib` is built.
   `yavs-vhpi`'s `build.rs` writes only the test import library `yavs-vhpi-host.lib` with `lib.exe` (MSVC), else

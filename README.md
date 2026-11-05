@@ -76,6 +76,7 @@ Pull requests and bug reports are welcome: see [`CONTRIBUTING.md`](CONTRIBUTING.
 Thanks to everyone who has contributed so far:
 
 - [malles030](https://github.com/malles030)
+- [nipo](https://github.com/nipo)
 - [Paebbels](https://github.com/Paebbels)
 
 ## License
