@@ -8,7 +8,7 @@ use yavs_sem::scope::ScopeKind;
 
 /// `name[type,type return type]` (LRM 16.2.5, lower case): a subprogram's path element. The type
 /// marks are the declared subtypes (`std_logic`, `natural`), not their base types, separated by a
-/// comma and a space as in sim1 (sim2 writes no space; user decision, #784).
+/// comma and a space (user decision, #784).
 pub fn subprogram_element(db: &Db, d: yavs_sem::DeclId) -> String {
     let decl = &db.decls[d];
     let sub = decl.kind.subprogram().expect("a subprogram declaration");

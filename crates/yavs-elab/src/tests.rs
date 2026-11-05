@@ -536,7 +536,7 @@ impl yavs_kernel::Process for Idle {
     }
 }
 
-/// Rule 4 (sim2 #1184): elaborating twice in one process, and building twice from one
+/// Rule 4: elaborating twice in one process, and building twice from one
 /// elaboration, give identical results.
 #[test]
 fn restart_is_identical() {
@@ -1056,7 +1056,7 @@ fn package_signals() {
     assert_eq!(b[0], 7);
 }
 
-/// External names bind against the elaborated hierarchy (#76, sim2 #548). Sem does not
+/// External names bind against the elaborated hierarchy (#76). Sem does not
 /// analyze them in port maps yet, so the test binds HIR externals directly.
 #[test]
 fn external_names() {

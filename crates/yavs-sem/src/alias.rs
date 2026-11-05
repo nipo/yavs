@@ -1018,7 +1018,7 @@ mod tests {
                 .is_err()
         );
         assert_eq!(codes(&db), [diag::ALIAS_SIGNATURE]);
-        // Not overloaded: no signature needed (2008 6.6.3, sim1 agrees).
+        // Not overloaded: no signature needed (2008 6.6.3).
         let g = db
             .nonobject_alias(s, &alias_ast(id("g"), None), &[f1], None)
             .unwrap();

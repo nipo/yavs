@@ -1298,7 +1298,7 @@ impl Db {
         }
         // The body's own declaration (not declared when it completes a spec) gets the
         // body too, so no subprogram is left pending (validate, 7.3). A `'FOREIGN` spec keeps
-        // its foreign body: the VHDL body is a placeholder, as in other simulators.
+        // its foreign body: the VHDL body is a placeholder.
         for d in [target, new] {
             if let DeclKind::Subprogram(s) = &mut self.decls[d].kind
                 && !matches!(s.body, Body::Foreign(_))
@@ -1650,7 +1650,7 @@ impl Db {
             self.check_not_access_or_file("protected method result", r, n.span)?;
         }
         // 4.2.1 (2008, 2019): the result of a pure function is not of an access type and
-        // has no access subelement (clear; sim2 and sim4 reject, sim1 and sim3 accept).
+        // has no access subelement (clear).
         // `--relaxed` makes it warning W1830. Vendored VITAL packages are exempt, and a 1993
         // file is: the rule is not in the 1993 text (a vests 1993 test returns an access type).
         if let (SubprogramKind::Function { pure: true }, Some(r), Some(n)) =
@@ -2172,7 +2172,7 @@ impl Db {
         };
         // Only library `std` is exempt: its sources declare constant parameters of DIRECTORY
         // and CALL_PATH_VECTOR_PTR (#198). User code gets `E1223` in 2008 and 2019
-        // (majority of the reference simulators, user 2026-10-19).
+        // (user decision 2026-10-19).
         let in_std = self.in_std_library(pscope);
         let first = o.names.first().map_or(o.span, |n| n.span);
         match class {

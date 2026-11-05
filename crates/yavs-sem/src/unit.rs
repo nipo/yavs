@@ -532,7 +532,7 @@ impl Db {
     /// 12.4: a use clause naming a type also makes its enumeration literals, its
     /// units and its operations potentially visible, the implicitly declared ones and the
     /// operators of the same region that take or return the type (#452). Other subprograms
-    /// of the region stay hidden: all four reference simulators reject their use (#514).
+    /// of the region stay hidden: their use is rejected (#514).
     fn with_type_associates(&self, region: ScopeId, mut ds: Vec<DeclId>) -> Vec<DeclId> {
         let types: Vec<crate::ids::TypeId> = ds
             .iter()

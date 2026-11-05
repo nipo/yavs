@@ -3248,7 +3248,7 @@ impl SimControl {
 
     /// The resumption of `cycle` for signal `s` done at once when one element of it changed and
     /// one resident process without an edge trigger waits for that element (a stage of a
-    /// chain), as the reference simulator wakes the waiters of a value when it changes. False
+    /// chain), so the waiters of a value wake when it changes. False
     /// (nothing done) otherwise: `cycle` looks at the signal. Only with no observer of value
     /// changes, which must see the change before any process is resumed.
     #[inline(always)]

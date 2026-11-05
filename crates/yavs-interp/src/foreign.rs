@@ -127,7 +127,7 @@ fn csize(ct: CType) -> usize {
     }
 }
 
-/// The C type of a scalar VHDL type (the sim1 mapping of `yavs_ffi::vhdl`).
+/// The C type of a scalar VHDL type (the mapping of `yavs_ffi::vhdl`).
 fn ctype_of(t: &Ty) -> Option<CType> {
     use yavs_ffi::vhdl::{Mode, VhdlType, lower_param};
     let v = match t {

@@ -1024,7 +1024,7 @@ fn matching_case_std_ulogic_dont_care() {
     let mut fx = Fx::new();
     let mut m = Mock::new(&fx);
     let st = fx.sul_st;
-    // '-' matches everything (as sim1); '1' and 'H' are different values.
+    // '-' matches everything; '1' and 'H' are different values.
     assert!(case(&mut fx, &mut m, "('1' => 0, '0' => 0, '-' => 0)", st, true).is_ok());
     assert!(
         case(

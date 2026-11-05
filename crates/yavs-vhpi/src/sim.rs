@@ -39,8 +39,7 @@ impl VhpiObserver {
     /// Runs the callbacks `due` picks at the hook's time, then makes the kernel requests
     /// they left. One lock when nothing is due. In a `read_only` phase `vhpi_put_value` is
     /// refused. Before the update (`early`: after-delay, next time step, start of cycle) puts
-    /// wait for the next call after it, so they make a new delta as in the references with
-    /// VHPI (#319).
+    /// wait for the next call after it, so they make a new delta (#319).
     fn dispatch(
         hook: &mut Hook<'_>,
         read_only: bool,

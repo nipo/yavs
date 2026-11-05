@@ -2161,7 +2161,7 @@ fn dependency_order(db: &Db, packages: Vec<UnitId>) -> Vec<UnitId> {
 
 /// The path elements between a region and an object declared in `scope` inside a process or
 /// subprogram, outermost first, each with its colon: `main:pr[integer]:`. An unlabeled
-/// process contributes an empty element (`::`), as the reference simulators print it.
+/// process contributes an empty element (`::`).
 fn local_prefix(db: &Db, scope: yavs_sem::ScopeId) -> String {
     use yavs_sem::scope::ScopeKind as S;
     let mut parts = Vec::new();

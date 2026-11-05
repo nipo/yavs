@@ -14,7 +14,7 @@
 //!   instance's clones;
 //! - the implicit operations of a formal type become the same family's
 //!   predefined operation of the actual type (Q9, U-6: also for `=` on a 2008
-//!   `type T`, with `W1506` when sim1 would pick a visible user `"="`);
+//!   `type T`, with `W1506` when a different visible user `"="` exists);
 //! - subtypes and expressions that mention none of the above keep their ids;
 //!   changed expressions lose their folded value and are folded again.
 
@@ -1853,7 +1853,7 @@ impl Db {
 
     /// The formals named `key` whose profile is signature `sig` (2019 `f [t return t] =>`,
     /// LCS-2016-I03), as indices into `formals`. A type mark of the signature may name a
-    /// generic type of the same list (the references agree). Empty when no formal is named
+    /// generic type of the same list. Empty when no formal is named
     /// `key` (the caller reports it); `E1630` when none of them fits.
     pub(crate) fn formals_with_signature(
         &mut self,
@@ -3457,7 +3457,7 @@ impl Db {
     /// Where a cloned object's bounds come from, from its substituted subtype: a
     /// generic type counts as fully constrained in the generic unit, the actual may
     /// not be (rule 1: decided again here, never inherited). A signal or variable
-    /// whose subtype is no longer fully constrained is `E1212`, as in sim1 and sim3.
+    /// whose subtype is no longer fully constrained is `E1212`.
     fn r_bounds(&mut self, r: &mut Remap, new: DeclId, o: &Object, st: SubtypeId) -> BoundsFrom {
         if o.bounds != BoundsFrom::Subtype || self.constrainedness(st) == Constrainedness::Full {
             return o.bounds;

@@ -2,7 +2,7 @@
 -- expect: E1100 22:52 `to_i` is not declared
 -- LRM 12.4
 -- A use clause naming a type makes the type, its literals and its implicit operations visible,
--- not the other subprograms declared next to it (all four reference simulators agree).
+-- not the other subprograms declared next to it.
 package p is
   type t is (a, b);
   function to_i(x : t) return integer;

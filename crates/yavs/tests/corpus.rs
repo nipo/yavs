@@ -23,7 +23,7 @@ use yavs_diag::Severity;
 use yavs_diag::SourceMap;
 use yavs_syntax::{Encoding, Options, Std, load_source, parse_file};
 
-/// The lists name the reference corpora by label; the fetched checkouts keep the
+/// The lists name the corpora by label; the fetched checkouts keep the
 /// upstream directory names (`tools/fetch-corpus.sh`).
 const LABELS: &[(&str, &str)] = &[("sim1/", "nvc/"), ("sim2/", "ghdl/")];
 

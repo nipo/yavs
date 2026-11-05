@@ -168,8 +168,7 @@ impl Db {
     }
 
     /// `E1221`: a 2008 access type designating a file or protected type
-    /// (5.4.1). 2019 allows both (sim1 and sim2 accept them; sim3 2026.1
-    /// still rejects a file type).
+    /// (5.4.1). 2019 allows both.
     pub(crate) fn check_designated_type(
         &mut self,
         st: SubtypeId,

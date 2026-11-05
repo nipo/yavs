@@ -128,8 +128,7 @@ pub(crate) fn with_part(v: &mut Val, sels: &[Sel], part: &Val) -> Option<()> {
 }
 
 /// Whether an aggregate's expression runs once per associated element, not once per association:
-/// a composite value with an impure call (#907, LRM 9.3.3). A scalar keeps one call, on which the
-/// reference simulators differ.
+/// a composite value with an impure call (#907, LRM 9.3.3). A scalar keeps one call.
 fn each_element(db: &Db, value: ExprId) -> bool {
     !db.types[db.base(db.exprs[value].subtype)].kind.is_scalar()
         && crate::eval::calls_impure(db, value)

@@ -1157,8 +1157,7 @@ pub(super) fn seq_checker(
             overlap,
             rhs,
         } => {
-            // ponytail: an obligation that is a star from zero, `{b[*]}`, holds at once (as in the
-            // reference simulators); any other empty match is ignored. The LRM text on a
+            // ponytail: an obligation that is a star from zero, `{b[*]}`, holds at once; any other empty match is ignored. The LRM text on a
             // sequence that matches the empty word was not at hand.
             let vacuous = is_star0(&rhs);
             let rf = nfa.trimmed(&rhs)?;

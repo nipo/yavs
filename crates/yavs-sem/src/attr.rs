@@ -307,14 +307,14 @@ const BOUNDS: &[PrefixRule] = &[
     p(F::Object, C::Scalar, V19),
     p(F::Range, C::Scalar, V19),
 ];
-/// `'length`: arrays; 2019 discrete types (lrm-checks, sim1 2019).
+/// `'length`: arrays; 2019 discrete types (lrm-checks).
 const LENGTH: &[PrefixRule] = &[
     p(F::TypeMark, C::ConstrainedArray, V93),
     p(F::Object, C::Array, V93),
     p(F::TypeMark, C::Discrete, V19),
 ];
 /// `'range`, `'reverse_range`: arrays; scalar type marks are accepted in
-/// both revisions, as sim1 does (the 2008 text is silent, user policy).
+/// both revisions (the 2008 text is silent, user policy).
 const RANGES: &[PrefixRule] = &[
     p(F::TypeMark, C::ConstrainedArray, V93),
     p(F::Object, C::Array, V93),
@@ -1236,8 +1236,8 @@ pub fn specify(
                     found.push(owner);
                 }
                 // A port or generic in the architecture: the entity and its
-                // architectures are one declarative region (12.1); sim1, sim2
-                // and sim3 accept it.
+                // architectures are one declarative region (12.1),
+                // so it is accepted.
                 if found.is_empty()
                     && let Some(ent) = arch_entity(db, scope)
                 {

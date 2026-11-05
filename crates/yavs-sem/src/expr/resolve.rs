@@ -1537,8 +1537,8 @@ impl Db {
 
     /// Calls that are ambiguous only between implicit operations and explicit
     /// subprograms (a 2019 composite `TO_STRING` and a user `to_string(A; sep := " ")`,
-    /// in the same package or made visible by a use clause): the explicit ones win, as
-    /// in sim1, sim2 and sim3 (decisions.md). In a 1993 file an implicit and an explicit
+    /// in the same package or made visible by a use clause): the explicit ones win
+    /// (decisions.md). In a 1993 file an implicit and an explicit
     /// homograph made visible by use clauses stay ambiguous (1993 10.4, 10.5): `E1302`, or
     /// `W1302` and the explicit one under `--relaxed` (R7, lrm-checks L134).
     fn prefer_explicit(

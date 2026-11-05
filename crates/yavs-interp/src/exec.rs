@@ -1077,12 +1077,12 @@ fn op_symbol(op: IntOp) -> &'static str {
     }
 }
 
-/// A real as check messages show it: `real'image` (`%.15g`, sim1's form: `30000000000`).
+/// A real as check messages show it: `real'image` (`%.15g`: `30000000000`).
 fn real_text(x: f64) -> String {
     String::from_utf8_lossy(&yavs_std::image::real_image(x)).into_owned()
 }
 
-/// `<kind> <v> outside of [<subtype> ]range <bounds>[ for <what>]` (sim1's wording).
+/// `<kind> <v> outside of [<subtype> ]range <bounds>[ for <what>]`.
 fn outside(kind: &str, v: &str, b: &str, m: &yavs_ir::CheckMsg) -> String {
     let mut s = format!("{kind} {v} outside of ");
     if !m.subtype.is_empty() {
@@ -4640,7 +4640,7 @@ impl Machine {
     #[inline(always)]
     pub(crate) fn deref(&mut self, h: u64, what: yavs_ir::CheckMsgId) -> R<u64> {
         if h == 0 {
-            // sim1's wording; the statement span names the place.
+            // The statement span names the place.
             return rt_err_s!("null access dereference");
         }
         // The heaps as they are, without `heap_of`'s creation of an absent shared heap.
@@ -11419,7 +11419,7 @@ impl Machine {
                 match ctx.as_deref_mut() {
                     Some(c) => {
                         // A severity disabled by SetVhdlAssertEnable is neither shown nor
-                        // counted (as sim1).
+                        // counted.
                         let Some(text) = self.rt.asserts.report(c, s, text) else {
                             return Ok(Flow::Next);
                         };
@@ -11439,7 +11439,7 @@ impl Machine {
                         }
                     }
                     // No kernel (elaboration, or a function run by a thunk): the message goes
-                    // to stderr at once, ahead of the first cycle, as the reference does. Severity failure stops
+                    // to stderr at once, ahead of the first cycle. Severity failure stops
                     // elaboration as it stops a run.
                     None => {
                         if self.rt.replay.load(std::sync::atomic::Ordering::Relaxed)

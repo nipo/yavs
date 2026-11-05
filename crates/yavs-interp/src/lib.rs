@@ -3202,8 +3202,7 @@ pub fn call_native(
 }
 
 /// The dope of the array of `n` driving values passed to a resolution function: from the
-/// left bound of the parameter's index subtype, in its direction (`down`), as most
-/// reference simulators do (lrm-checks L101). `None` when the bounds overflow.
+/// left bound of the parameter's index subtype, in its direction (`down`) (lrm-checks L101). `None` when the bounds overflow.
 pub fn res_dope(left: i64, down: bool, n: u64) -> Option<[u8; 24]> {
     let last = i64::try_from(n).ok()?.checked_sub(1)?;
     let right = if down {

@@ -19,9 +19,9 @@ use crate::expr::V;
 use crate::func::Fx;
 use crate::{NOT_IMPLEMENTED, R};
 
-/// The symbol of a `'FOREIGN` attribute value: `VHPIDIRECT [library] symbol`. As in the reference simulator, the
+/// The symbol of a `'FOREIGN` attribute value: `VHPIDIRECT [library] symbol`. The
 /// last word is the symbol and a library word is ignored (symbols come from `--load`
-/// libraries); without one the subprogram's name is used, as other simulators do. `None` for any other
+/// libraries); without one the subprogram's name is used. `None` for any other
 /// foreign kind.
 pub fn vhpidirect_symbol(attr: &str, name: &str) -> Option<String> {
     let mut w = attr.split_whitespace();
@@ -32,8 +32,8 @@ pub fn vhpidirect_symbol(attr: &str, name: &str) -> Option<String> {
 }
 
 /// The library and model of a `'FOREIGN "VHPI library model"` attribute value (the keyword,
-/// case-insensitive, then the two names, separated by blanks or a `;` as another simulator
-/// writes them, `"VHPI library;model"`); `None` for any other form.
+/// case-insensitive, then the two names, separated by blanks or a `;`,
+/// `"VHPI library;model"`); `None` for any other form.
 pub fn vhpi_model(attr: &str) -> Option<(String, String)> {
     let mut w = attr.split_whitespace();
     if !w.next()?.eq_ignore_ascii_case("vhpi") {
@@ -346,8 +346,7 @@ impl Fx<'_, '_> {
     }
 
     /// The index range of a VHPI model's array result `st`: its own when constrained, else
-    /// ascending from 1 (from the index subtype's left bound when 1 is not in it), as the
-    /// reference simulators index it, with the length left to the model.
+    /// ascending from 1 (from the index subtype's left bound when 1 is not in it), with the length left to the model.
     fn ret_index(&mut self, st: SubtypeId, name: &str, span: Span) -> R<VhpiIndex> {
         let db = self.db;
         let unsupported = |fx: &mut Self, what: &str| {

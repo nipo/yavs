@@ -1,6 +1,6 @@
 -- yavs-test: std=2008
 -- expect: none
--- LRM 12.3 (an architecture named like a port: the port wins; sim1 accepts)
+-- LRM 12.3 (an architecture named like a port: the port wins)
 entity and2 is
   port (a, b : in bit; y : out bit);
 end entity;

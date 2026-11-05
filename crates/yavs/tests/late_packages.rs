@@ -3,7 +3,7 @@
 //! every later initialisation of the packages (a rebuild of the session, the build's replay with
 //! coverage counters, a warm run from the compilation cache, each tier) keeps that order: the
 //! calls return what they returned, so the session never ends in an internal error, and the
-//! values are those of the reference simulators.
+//! values are those asserted below.
 
 mod common;
 use common::tempdir;
@@ -156,7 +156,7 @@ fn run(dir: &Path, more: &[&str]) -> String {
     out
 }
 
-/// The reference simulators' values: `top`'s two calls first, then `late_pkg`'s initialiser
+/// The expected values: `top`'s two calls first, then `late_pkg`'s initialiser
 /// (its report once), then the process's call.
 fn check(out: &str) {
     check_values(out);

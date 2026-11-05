@@ -72,7 +72,7 @@ pub(super) enum Pt {
 }
 
 /// `abort` and `async_abort` run like `sync_abort`: the condition is checked at the clock tick
-/// only (user decision; the LRM and the references abort between ticks, #636).
+/// only (user decision; the LRM aborts between ticks, #636).
 fn is_abort(w: &str) -> bool {
     matches!(w, "abort" | "async_abort" | "sync_abort")
 }
@@ -264,7 +264,7 @@ impl Parser<'_> {
             let is_and = op.kind == Tok::Kw(Kw::And);
             let rhs = self.nested(|s| s.tp_unary(lv))?;
             // Simple subset (IEEE 1850 4.4.4): the left operand of `or` is a Boolean. Only
-            // both operands non-Boolean is rejected, as the references do (user, 2026-11-02).
+            // both operands non-Boolean is rejected (user, 2026-11-02).
             let boolean = |p: &Pt| matches!(p, Pt::Leaf(_) | Pt::NotLeaf(_));
             if !is_and && !boolean(&p) && !boolean(&rhs) && self.psl_reject.is_none() {
                 self.psl_reject = Some(

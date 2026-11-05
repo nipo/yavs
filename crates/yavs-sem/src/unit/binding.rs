@@ -1253,7 +1253,7 @@ impl Db {
             ));
         }
         // An `inout` port converted on the actual side only would send the formal's value
-        // back unconverted (2 of 3 reference simulators reject it, L72). A formal conversion
+        // back unconverted (rejected, L72). A formal conversion
         // alone is legal: copy-out converts, copy-in passes the actual unchanged, so the
         // actual's type must also be the formal's.
         if mode == Some(Mode::Inout) && actual_conv.is_some() && formal_conv.is_none() {

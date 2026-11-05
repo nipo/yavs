@@ -658,8 +658,8 @@ pub(crate) fn elaborate(
             }
         }
     }
-    // External names in processes refer to anything in the design (the reference
-    // simulators bind them once the hierarchy exists, #93).
+    // External names in processes refer to anything in the design (they are bound
+    // once the hierarchy exists, #93).
     if e.errors.is_empty()
         && let Err(x) = e.bind_late()
     {
@@ -2537,7 +2537,7 @@ impl Elab<'_> {
                 }
             }
         };
-        // Incremental binding: its associations replace the primary's (sim1's permissive
+        // Incremental binding: its associations replace the primary's (a permissive
         // reading; the LRM allows only formals the primary left open).
         for (g, p) in incremental {
             for (dst, src) in [(&mut bound.gmap, g), (&mut bound.pmap, p)] {
@@ -5193,7 +5193,7 @@ impl Model {
     }
 
     /// Bind external signal name `x` (LRM 8.7) against the hierarchy elaborated so far
-    /// (sim2 #548: a target that is not elaborated yet is an error, never a guess).
+    /// (a target that is not elaborated yet is an error, never a guess).
     pub(crate) fn external(
         &mut self,
         db: &Db,
@@ -5659,8 +5659,7 @@ impl Model {
     /// individually; `parts` are the paths of the formal parts below it, with their actuals
     /// (LRM 6.5.7.1): a subelement associated as a whole takes its actual's bounds, a record
     /// shapes each element from the parts naming it, and an array runs per dimension from the
-    /// lowest to the highest index named, in the direction of the index subtype (as the
-    /// reference simulators do).
+    /// lowest to the highest index named, in the direction of the index subtype.
     #[allow(clippy::too_many_arguments)]
     fn parts_shape(
         &mut self,

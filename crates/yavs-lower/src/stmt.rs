@@ -798,7 +798,7 @@ impl Fx<'_, '_> {
             return self.drive_actual_leaves(e, dope, span);
         }
         let tid = self.ty(db.base(st), span)?;
-        // A whole formal is named in the check messages, as the reference simulator does; a
+        // A whole formal is named in the check messages; a
         // part of one (individual association) is not.
         let whole = matches!(&db.decls[port].kind,
             yavs_sem::decl::DeclKind::Object(o) if formal == Some(o.subtype));
@@ -1983,7 +1983,7 @@ impl Fx<'_, '_> {
             let x = self.expr(v)?;
             let (data, vd) = self.arr(x, span)?;
             // The lengths of the value are those of the target, also in the fields of a record
-            // (the reference simulators name the object a value is, else the target, for a record).
+            // (for a record the check names the object a value is, else the target).
             if Ty::needs_desc(self.fb.program().types(), p.tid) {
                 let name = match (dims, &db.exprs[v].kind) {
                     (None, ExprKind::Obj(o)) => ty::obj_desc(db, *o),

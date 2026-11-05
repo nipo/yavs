@@ -2495,7 +2495,7 @@ fn run_design(
     view_end(&view, format, color);
     // A report of severity error or failure fails the run even below `--exit-severity`, unless
     // ClearVhdlAssert cleared the counts since: the status follows the VHDL assert counts of
-    // std.env (as the reference simulator; test runners only look at zero or non-zero).
+    // std.env (test runners only look at zero or non-zero).
     // Reports made while elaborating (#349) count too.
     use yavs_kernel::Severity::{Error, Failure};
     // Given explicitly, the level is the whole threshold: a run that ends normally after
@@ -2845,7 +2845,7 @@ fn observers(
     Ok(recorder)
 }
 
-/// Prints reports and `OUTPUT` text in sim1's format on stdout (cli-contract section 5;
+/// Prints reports and `OUTPUT` text on stdout in the documented format (cli-contract section 5;
 /// tools/difftest parses it).
 struct Printer;
 

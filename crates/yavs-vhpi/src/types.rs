@@ -22,8 +22,7 @@ pub(crate) struct TyId(pub(crate) u32);
 pub(crate) struct Ty {
     /// `vhpiEnumTypeDeclK` .. `vhpiRecordTypeDeclK` for a type, `vhpiSubtypeDeclK`.
     pub(crate) kind: vhpiClassKindT,
-    /// Original spelling; an anonymous subtype has its type's name, as the reference
-    /// simulator with VHPI reports it.
+    /// Original spelling; an anonymous subtype has its type's name.
     pub(crate) name: String,
     pub(crate) anonymous: bool,
     /// The type declaration; `None` for one itself.

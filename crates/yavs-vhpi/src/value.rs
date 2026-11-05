@@ -271,7 +271,7 @@ impl Read {
             vhpiLogicVal => Encoded::Scalar(vhpiValueU {
                 enumv: scalar(enum_lits.is_some())? as u32,
             }),
-            // Both reference simulators also read an integer with vhpiEnumVal (#318).
+            // An integer is also read with vhpiEnumVal (#318).
             vhpiEnumVal => {
                 let v = scalar(is_int || enum_lits.is_some())?;
                 Encoded::Scalar(vhpiValueU {
@@ -771,7 +771,7 @@ impl Read {
                 }
             }
             // Text for an array fills it from the left: longer text is cut, shorter text is
-            // padded with NUL where the element type has it (two of three references, #345).
+            // padded with NUL where the element type has it (#345).
             (vhpiStrVal, Given::Text(t)) => match n {
                 Some(n) => {
                     let mut v = t

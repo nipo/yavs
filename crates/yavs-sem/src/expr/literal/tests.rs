@@ -230,7 +230,7 @@ fn integer_errors() {
     }
 }
 
-/// Based reals are correctly rounded, also below the normal range (#105; sim1 flushes this one).
+/// Based reals are correctly rounded, also below the normal range (#105).
 #[test]
 fn based_reals_are_correctly_rounded() {
     assert_eq!(abstract_literal("3#0.1#"), Ok(Abs::Real(1.0 / 3.0)));
@@ -517,7 +517,7 @@ fn bits_length_truncate_unsigned() {
 
 #[test]
 fn bits_length_truncate_signed() {
-    // Dropped characters must equal the leftmost kept one (LRM; sim2; sim1 is laxer).
+    // Dropped characters must equal the leftmost kept one (LRM).
     assert_eq!(expand("3SX\"F\""), "111");
     assert_eq!(expand("2SB\"001\""), "01");
     assert_eq!(expand("1SB\"11\""), "1");
@@ -812,10 +812,9 @@ fn literal_exprs() {
     assert_eq!(e.db.error_count(), n);
 }
 
-/// Black-box cross-check against sim1 (`cargo test -p yavs-sem -- --ignored sim1_cross_check`).
-/// Valid literals are compared in one run; invalid ones must be rejected by sim1 too. sim1 only
-/// requires dropped characters of a signed literal to equal each other, so signed truncation
-/// errors (which follow the LRM and sim2) are not asserted against it.
+/// Black-box cross-check through YAVS_SIM1_CMD (`cargo test -p yavs-sem -- --ignored sim1_cross_check`).
+/// Valid literals are compared in one run; invalid ones must be rejected too. Signed truncation
+/// errors (which follow the LRM) are not asserted against it.
 #[test]
 #[ignore = "needs sim1 (YAVS_SIM1_CMD) and systemd-run"]
 fn sim1_cross_check() {
@@ -870,7 +869,7 @@ fn sim1_cross_check() {
     ];
     let tmp = tempfile::tempdir().unwrap();
     let dir = tmp.path().to_path_buf();
-    // The reference command (analyse, elaborate and run t.vhd in the current directory) is not tracked.
+    // The command in YAVS_SIM1_CMD (analyse, elaborate and run t.vhd in the current directory) is not tracked.
     let cmd =
         std::env::var("YAVS_SIM1_CMD").expect("YAVS_SIM1_CMD: command line running t.vhd on sim1");
     let sim1 = |dir: &std::path::Path, src: &str| -> (bool, String) {

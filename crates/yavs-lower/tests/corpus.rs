@@ -1,5 +1,5 @@
 //! The differential corpus through sem, lowering, the IR verifier, the interpreter and the
-//! kernel, compared with the sim1 reference outputs (`tests/corpus/**/*.expected`, canonical
+//! kernel, compared with the reference outputs (`tests/corpus/**/*.expected`, canonical
 //! form of `tools/difftest/README.md`).
 //!
 //! Each file is elaborated with yavs-elab (which lowers through this crate) and run on the
@@ -16,7 +16,7 @@ use yavs_lower::{LowerOptions, Lowerer};
 use yavs_sem::hir::UnitHir;
 use yavs_sem::{Db, LangRev, Options};
 
-/// Corpus files whose output matches sim1's exactly.
+/// Corpus files whose output matches its `.expected` exactly.
 const PASS: &[&str] = &[
     "composite/null_record_field",
     "composite/null_slice",
@@ -723,7 +723,7 @@ fn simulate(file: &Path) -> Result<String, String> {
                 yavs_kernel::ErrorKind::Runtime(m) => m.clone(),
                 k => k.to_string(),
             };
-            // The reference names the process only for an error inside a subprogram (#506).
+            // The path names the process only for an error inside a subprogram (#506).
             let path = match (&e.process, e.trace.len() > 1) {
                 (Some((p, _)), true) => names
                     .get(p.0 as usize)
@@ -827,7 +827,7 @@ fn corpus_groups() {
     let mut failed = Vec::new();
     for g in GROUPS {
         let dir = match *g {
-            // This crate's own runnable tests (`.expected` blessed from sim1 with
+            // This crate's own runnable tests (`.expected` blessed with
             // `tools/difftest/difftest.py --corpus crates/yavs-lower/tests/vhdl/run --bless`).
             "run" => PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/vhdl/run")),
             g => corpus().join(g),

@@ -807,7 +807,7 @@ impl State {
                 )));
             }
         }
-        // Two of the three references with VHPI refuse them on signals (user, 2026-10-19).
+        // Refused on signals (user, 2026-10-19).
         if matches!(mode, vhpiDeposit | vhpiForce) {
             return Err(misuse(format!(
                 "the non-propagating mode {} does not apply to a signal; use {}",

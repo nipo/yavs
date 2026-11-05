@@ -1,8 +1,6 @@
 //! VHDL to C type mapping for VHPIDIRECT subprograms.
 //!
-//! Follows sim1's convention so C code written for sim1 works unchanged
-//! (reference: the sim1 user manual, `sim1(1)`, section "VHPIDIRECT" under
-//! foreign subprograms, as shipped with sim1 1.x):
+//! Follows the VHPIDIRECT C convention so existing C code works unchanged:
 //!
 //! - integers: the smallest signed C integer type holding the VHDL range
 //!   (`integer` is `int32_t`, `integer range 1 to 5` is `int8_t`);
@@ -15,7 +13,7 @@
 //!   passed; the VHDL side passes them explicitly if needed);
 //! - scalar `out`/`inout` parameters: a pointer to the C-typed value.
 //!
-//! yavs additions beyond sim1: records and access values are passed as a
+//! yavs additions: records and access values are passed as a
 //! pointer (records to a C struct with natural alignment).
 
 use crate::{CType, FfiError, Signature};

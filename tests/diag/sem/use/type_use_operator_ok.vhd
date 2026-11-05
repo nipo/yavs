@@ -2,7 +2,7 @@
 -- expect: none
 -- LRM 12.4
 -- An explicitly declared operator next to the type is visible through a use clause naming the
--- type (the reference simulators call it, catalogue use-type-operations).
+-- type (catalogue use-type-operations).
 package p is
   type t is (a, b);
   function "=" (x, y : t) return boolean;

@@ -5028,7 +5028,7 @@ impl<'a> Fx<'a, '_> {
                 };
                 let Some(slot) = slot else {
                     // A signal this process does not drive at all (LRM 16.2.4: an error when
-                    // evaluated, so at run time, as the reference simulators do).
+                    // evaluated, so at run time).
                     if let ExprKind::Obj(d) = db.exprs[e].kind {
                         let root = yavs_sem::hir::ObjRoot::Decl(d);
                         if !self.drivers.iter().any(|l| l.root == root)
@@ -6165,7 +6165,7 @@ pub(crate) fn index_subtypes(db: &Db, t: yavs_sem::TypeId) -> Option<Vec<Subtype
 
 /// `e`'s value is fixed once the design is elaborated: locally static, or built from generics
 /// and constants whose own values are (#872). A parameter, or a constant computed from one, is
-/// globally static too but varies per call; a generate parameter fails in both references.
+/// globally static too but varies per call; a generate parameter is excluded too.
 fn elab_known(db: &Db, e: ExprId) -> bool {
     let x = &db.exprs[e];
     if x.value.is_some() || x.stat == Staticness::Locally {

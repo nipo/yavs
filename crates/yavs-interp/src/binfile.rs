@@ -1,7 +1,7 @@
 //! READ and WRITE on files of non-text types (LRM 5.5.2): `file of T` with `T` a scalar type,
 //! an array of scalars, a record or an array of composites. The on-disk format is documented in
 //! `docs/decisions.md` "Binary files": a scalar is little-endian in the fewest whole bytes its
-//! range needs (as the reference simulators do), an array of scalars is a `u32` element count and
+//! range needs, an array of scalars is a `u32` element count and
 //! then its elements, any other composite is its descriptor and memory image.
 
 use yavs_ir::{Ty, TyId, Width};

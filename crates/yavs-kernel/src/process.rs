@@ -3226,8 +3226,7 @@ impl Ctx<'_> {
         delay: Time,
         value: Option<Buf>,
     ) -> Result<(), SimError> {
-        // A transaction past TIME'HIGH can never mature: dropped, as most reference
-        // simulators do (lrm-checks.md).
+        // A transaction past TIME'HIGH can never mature: dropped (lrm-checks.md).
         let Ok(time) = self.after(delay) else {
             return Ok(());
         };

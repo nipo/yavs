@@ -1,7 +1,7 @@
 -- yavs-test: std=1993
 -- expect: E1326 14:11 a null range choice must be the only choice
 -- expect: E1326 15:20 a null range choice must be the only choice
--- LRM 1993 7.3.2.2: a null range choice only as the single choice of the single association (#812; later revisions are permissive, as sim1 and sim2)
+-- LRM 1993 7.3.2.2: a null range choice only as the single choice of the single association (#812; later revisions are permissive)
 entity e is
 end entity;
 architecture a of e is

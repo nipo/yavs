@@ -1004,7 +1004,7 @@ fn bad_matching(db: &mut Db, ty: TypeId, span: Span) -> Reported {
 }
 
 /// `case?` on `std_ulogic` (10.9): a `'-'` choice matches every value;
-/// otherwise choices are compared by value. As sim1, choices overlapping only
+/// otherwise choices are compared by value. Choices overlapping only
 /// through `'-'` are accepted.
 fn std_ulogic_matching(
     db: &mut Db,
@@ -1720,8 +1720,8 @@ fn array_agg(
                 _ => Staticness::Locally,
             };
             stat = stat.min(s);
-            // A null range choice, too, only as the single choice (1993 7.3.2.2, #812); in later
-            // revisions sim1 and sim2 accept it, so yavs does too.
+            // A null range choice, too, only as the single choice (1993 7.3.2.2, #812); later
+            // revisions accept it.
             let null = db.file_rev() == crate::LangRev::Vhdl1993
                 && matches!(c, Choice::Range(rc) if range_value(db, rc).is_some_and(|r| r.is_null()));
             if null && !single {
@@ -1843,8 +1843,7 @@ fn array_agg(
         }
     };
     // 2008 pieces under range choices: without a constrained context the
-    // aggregate takes their direction, and they must agree (the reference
-    // simulators; lrm-checks L84).
+    // aggregate takes their direction, and they must agree (lrm-checks L84).
     let mut piece_dir: Option<(Direction, Span)> = None;
     for (v, cs) in vals.iter().zip(&choices) {
         if let (Val::Piece(_), [c @ Choice::Range(rc)]) = (v, cs.as_slice()) {
@@ -2223,7 +2222,7 @@ fn resolve_value(
             .with_note("LRM 1993 7.3.2.2: each element association gives one element; slices and array values as parts of an aggregate are VHDL-2008 (LRM 2008 9.3.3.3)"),
         )),
         (false, true) => r.resolve(db, value, Expected::Type(cx.ty)).map(Val::Piece),
-        // No LRM tie-break (lrm-checks L8): the element type wins, as in sim1.
+        // No LRM tie-break (lrm-checks L8): the element type wins.
         (true, true) => elem_value(db, r, cx, value).map(Val::Elem),
         (false, false) => {
             // `others` gives an element value, never a piece (9.3.3.3).

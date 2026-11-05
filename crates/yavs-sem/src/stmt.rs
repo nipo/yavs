@@ -1088,7 +1088,7 @@ impl Db {
     }
 
     /// 11.6: the target of a concurrent signal assignment is all guarded signals or none,
-    /// and a guarded one needs a guarded assignment (#812; sim1 and sim2 agree).
+    /// and a guarded one needs a guarded assignment (#812).
     fn check_guarded_target(&mut self, t: &Target, guarded: bool) -> Result<(), Reported> {
         let kinds: Vec<bool> = t
             .lsps
@@ -1318,7 +1318,7 @@ impl Db {
     /// An aggregate target identifies each variable or signal once (LRM 10.5.2.1, 10.6.2.1;
     /// E1335): no association has several choices (null ranges aside), and no two elements
     /// are the same static name. Elements that only overlap (`(v(0 to 1), v(1 to 2))`,
-    /// `(v(1), v)`) are accepted: two of three reference simulators accept them.
+    /// `(v(1), v)`) are accepted.
     fn check_agg_distinct(&mut self, e: ExprId) -> Result<(), Reported> {
         use crate::expr::aggregate::range_value;
         use crate::hir::{Choice, LspStep};

@@ -131,7 +131,7 @@ fn init() {
     });
 }
 
-/// The portable CPU baseline the JIT targets (design rule 5, sim1 #887/#1311).
+/// The portable CPU baseline the JIT targets (design rule 5).
 /// Never the host CPU, so code behaves the same on every machine.
 pub fn portable_cpu() -> &'static CStr {
     if cfg!(target_arch = "x86_64") {

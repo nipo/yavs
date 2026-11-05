@@ -347,7 +347,7 @@ impl Db {
             }
             ast::TypeDef::File(n) => {
                 let elem = self.type_mark(scope, n)?;
-                // 5.5.1: not a multidimensional array (#813; sim1 and sim2 agree in 2008).
+                // 5.5.1: not a multidimensional array (#813).
                 if let TypeKind::Array { indexes, .. } = &self.types[self.base(elem)].kind
                     && indexes.len() > 1
                 {

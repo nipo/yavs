@@ -1152,7 +1152,7 @@ fn elab_and_run() {
     // A design without processes runs to event starvation.
     let (code, err, _) = yavs(&["run", &lib, "--exit-severity=error", "top"]);
     assert_eq!(code, 0, "{err}");
-    // Reports in sim1's format on stdout. By default an error report does not stop the run,
+    // Reports on stdout in the cli-contract format. By default an error report does not stop the run,
     // which still exits 1 (user decision, cli-contract section 5).
     let (code, err, out) = yavs(&["run", &lib, "busy"]);
     assert_eq!(code, 1, "{err}");
@@ -2776,8 +2776,8 @@ fn run_package_initialisation_follows_dependencies() {
     assert!(String::from_utf8_lossy(&o.stdout).contains("g=4"));
 }
 
-/// A 2019 `T'VALUE` of an array type elaborates and evaluates (the first reference
-/// suite's `value4`, #609).
+/// A 2019 `T'VALUE` of an array type elaborates and evaluates (case `value4`,
+/// #609).
 #[test]
 fn composite_value_attribute() {
     let dir = tempdir("composite_value");
@@ -2804,8 +2804,8 @@ fn composite_value_attribute() {
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
 }
 
-/// An aggregate target made of fields of a signal parameter elaborates (the second reference
-/// suite's `issue3030`, #610).
+/// An aggregate target made of fields of a signal parameter elaborates (case `issue3030`,
+/// #610).
 #[test]
 fn aggregate_target_of_signal_parameter_elaborates() {
     let dir = tempdir("agg_target_param");

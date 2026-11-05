@@ -865,10 +865,10 @@ impl Db {
     }
 
     /// Attributes (16.2 predefined through the `attr::TABLE`, 6.7 user-defined).
-    /// `p'range'left` (or `p'range(n)'left`): a range attribute is not a name, but sim1 and sim2
-    /// read `'left`, `'right`, `'low`, `'high` and `'ascending` of it as the same attribute of
+    /// `p'range'left` (or `p'range(n)'left`): a range attribute is not a name, but
+    /// `'left`, `'right`, `'low`, `'high` and `'ascending` of it are the same attribute of
     /// `p`. Returns `p`, that attribute and the dimension argument (#818). Not of
-    /// `'reverse_range`, where the two references give different values.
+    /// `'reverse_range`.
     fn range_attr_alias(
         prefix: &ast::Name,
         attr: Ident,
@@ -1705,7 +1705,7 @@ impl Db {
                             },
                         )
                     }
-                    // Loop parameters are not static; generate parameters are globally static (8.1, sim1 #856).
+                    // Loop parameters are not static; generate parameters are globally static (8.1).
                     (_, crate::decl::ObjRole::LoopParam, _) => (Staticness::None, None),
                     (crate::decl::ObjClass::Constant, _, _) => (Staticness::Globally, None),
                     _ => (Staticness::None, None),
@@ -2317,7 +2317,7 @@ impl Db {
                 && let Some((_, _, s, cut)) = self.lsp_parts(e)
                 && (cut || s == Staticness::None)
             {
-                // `--relaxed` (R6): accepted with a warning, as by sim1's relaxed switch.
+                // `--relaxed` (R6): accepted with a warning.
                 if self.relaxed() {
                     self.report(
                         Diagnostic::warning(
@@ -2604,7 +2604,7 @@ impl Db {
                 }
                 // 4.2.2.2: of a formal signal parameter these attributes are not allowed;
                 // of another signal they are, and the implicit signal lives outside the
-                // subprogram (sim2, sim3).
+                // subprogram.
                 if matches!(
                     a,
                     PredefAttr::Delayed
@@ -2645,8 +2645,8 @@ impl Db {
                         } else if self.constrainedness(st) == crate::types::Constrainedness::Full
                             || self.is_port_or_generic(p)
                         {
-                            // A port or generic gets its bounds once, at elaboration: like sim1,
-                            // sim2 and sim3, its array attributes are globally static (9.4.3).
+                            // A port or generic gets its bounds once, at elaboration, so its
+                            // array attributes are globally static (9.4.3).
                             Staticness::Globally
                         } else {
                             Staticness::None

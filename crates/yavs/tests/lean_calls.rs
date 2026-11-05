@@ -1,7 +1,7 @@
 //! Calls that pass their parameters in registers (`Pre::lean`, #730): `out` and `inout` scalars,
 //! nested functions and procedures reading and writing the variables of the enclosing process,
 //! recursion through the static link, a callee that allocates and one that deallocates. The
-//! values are those of the calls with their slots written (the reference simulator agrees).
+//! values are those of the calls with their slots written.
 
 mod common;
 use common::tempdir;

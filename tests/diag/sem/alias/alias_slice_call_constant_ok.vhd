@@ -1,7 +1,7 @@
 -- yavs-test: std=2008
 -- expect: none
 -- LRM 6.6.2, 8.1, 9.4.3: a constant is a globally static primary whatever its initial value, so
--- an alias slice bounded by one is a static name (sim1, sim2, sim3 and sim4 accept)
+-- an alias slice bounded by one is a static name
 entity e is
   generic (g : natural := 8);
 end entity;

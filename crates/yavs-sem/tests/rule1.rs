@@ -481,7 +481,7 @@ end architecture;
 
 // -- case 5: the tracker reproducers (written fresh) ----------------------------
 
-/// sim2 #641: `'subtype` and `'range` of an element of a record port (the alias of the
+/// `'subtype` and `'range` of an element of a record port (the alias of the
 /// element is finding F6, `SIM2_641_ALIAS`).
 const SIM2_641: &str = "
 library ieee; use ieee.std_logic_1164.all;
@@ -503,7 +503,7 @@ begin
 end architecture;
 ";
 
-/// sim2 #1224: array of unconstrained vectors, element bounds from the initial value.
+/// Array of unconstrained vectors, element bounds from the initial value.
 const SIM2_1224: &str = "
 library ieee; use ieee.std_logic_1164.all;
 entity e1224 is
@@ -525,7 +525,7 @@ begin
 end architecture;
 ";
 
-/// sim2 #2422: a type conversion on an unconstrained `out` formal.
+/// A type conversion on an unconstrained `out` formal.
 const SIM2_2422: &str = "
 library ieee; use ieee.std_logic_1164.all; use ieee.numeric_std.all;
 entity comp2422 is
@@ -545,7 +545,7 @@ begin
 end architecture;
 ";
 
-/// sim2 #2179: `others` in an aggregate for an element of a record port whose element
+/// `others` in an aggregate for an element of a record port whose element
 /// is unconstrained, and for a record signal declared with `'subtype`.
 const SIM2_2179: &str = "
 package p2179 is
@@ -573,7 +573,7 @@ begin
 end architecture;
 ";
 
-/// sim1 #1589: `others` in a record aggregate covering vectors of different widths, after
+/// `others` in a record aggregate covering vectors of different widths, after
 /// a named nested record element.
 const SIM1_1589: &str = "
 library ieee; use ieee.std_logic_1164.all;
@@ -598,7 +598,7 @@ begin
 end architecture;
 ";
 
-/// sim1 #1543: an external name alias with an unconstrained subtype; `'element'length`.
+/// An external name alias with an unconstrained subtype; `'element'length`.
 const SIM1_1543: &str = "
 library ieee; use ieee.std_logic_1164.all;
 package p1543 is
@@ -631,7 +631,7 @@ begin
 end architecture;
 ";
 
-/// sim1 #1576: an allocator of a record whose element is an array of unconstrained arrays.
+/// An allocator of a record whose element is an array of unconstrained arrays.
 const SIM1_1576: &str = "
 library ieee; use ieee.std_logic_1164.all;
 entity e1576 is
@@ -655,7 +655,7 @@ begin
 end architecture;
 ";
 
-/// sim1 #1463: an array of records whose element is constrained in the port.
+/// An array of records whose element is constrained in the port.
 const SIM1_1463: &str = "
 package p1463 is
   type int_arr_t is array (integer range <>) of integer;
@@ -716,7 +716,7 @@ fn value_shape(v: &yavs_sem::stat::ConstValue) -> String {
 // -- sources for the findings ---------------------------------------------------
 
 /// F2: `others` for record aggregate elements whose bounds the context's record
-/// constraint gives (all three reference simulators accept it).
+/// constraint gives.
 const RECORD_AGG_CONTEXT: &str = "
 library ieee; use ieee.std_logic_1164.all;
 use work.rec_pkg.all;
@@ -766,7 +766,7 @@ begin
 end architecture;
 ";
 
-/// F6: an alias of a record element (the sim2 #641 alias).
+/// F6: an alias of a record element (see `SIM2_641`).
 const SIM2_641_ALIAS: &str = "
 library ieee; use ieee.std_logic_1164.all;
 use work.bus641_pkg.all;
@@ -780,8 +780,7 @@ begin
 end architecture;
 ";
 
-/// Unconstrained `out` parameter assigned an `others` aggregate (LRM: an error; all three
-/// reference simulators reject it).
+/// Unconstrained `out` parameter assigned an `others` aggregate (LRM: an error).
 const OUT_PARAM_OTHERS: &str = "
 library ieee; use ieee.std_logic_1164.all;
 package out_pkg is
@@ -1082,7 +1081,7 @@ fn subtype_attributes_and_generic_types() {
     );
 }
 
-/// sim2 #641: `'subtype` of an element of an unconstrained record port is `FromObject`;
+/// `'subtype` of an element of an unconstrained record port is `FromObject`;
 /// `'range` of it is an attribute range. Both are fully constrained at run time.
 #[test]
 fn sim2_641_subtype_of_record_port_element() {
@@ -1106,7 +1105,7 @@ fn sim2_641_subtype_of_record_port_element() {
     );
 }
 
-/// sim2 #1224: a constant of an array of unconstrained vectors with only the outer range
+/// A constant of an array of unconstrained vectors with only the outer range
 /// given: element bounds come from the initial value; loops range over attributes.
 #[test]
 fn sim2_1224_element_bounds_from_initial_value() {
@@ -1126,18 +1125,18 @@ fn sim2_1224_element_bounds_from_initial_value() {
     );
 }
 
-/// sim2 #2422: a type conversion on an unconstrained `out` formal is `E1312`
+/// A type conversion on an unconstrained `out` formal is `E1312`
 /// (finding F8, #111).
 #[test]
 fn sim2_2422_formal_conversion_on_unconstrained_port() {
-    // F8 (#111), decided: rejected like sim2 and sim3; no bounds flow back through
+    // F8 (#111), decided: rejected; no bounds flow back through
     // a conversion on the formal side.
     let errs = errors("g2422", &[("work", SIM2_2422)]);
     assert_eq!(errs, [("E1312".into(), 16)], "{errs:?}");
 }
 
-/// sim2 #2179: `others` for an element of an unconstrained record port is an error (all
-/// three reference simulators agree); `s2 : s1'subtype` of a static subtype is that subtype.
+/// `others` for an element of an unconstrained record port is an error;
+/// `s2 : s1'subtype` of a static subtype is that subtype.
 #[test]
 fn sim2_2179_others_for_record_port_element() {
     assert_eq!(
@@ -1165,7 +1164,7 @@ fn sim2_2179_others_for_record_port_element() {
     );
 }
 
-/// sim1 #1543: aliases of external names take the external name's subtype (6.6.2: no subtype
+/// Aliases of external names take the external name's subtype (6.6.2: no subtype
 /// indication of their own); an unconstrained one gets its bounds from the target at
 /// elaboration, never guessed at analysis.
 #[test]
@@ -1190,7 +1189,7 @@ fn sim1_1543_external_name_alias_subtypes() {
     );
 }
 
-/// sim1 #1576: `new` of a record subtype whose element is an array of unconstrained arrays,
+/// `new` of a record subtype whose element is an array of unconstrained arrays,
 /// constrained in a local subtype with a dynamic bound folded from a constant.
 #[test]
 fn sim1_1576_allocator_of_constrained_record() {
@@ -1216,7 +1215,7 @@ fn sim1_1576_allocator_of_constrained_record() {
     assert_eq!(news, ["container_t(data(0 to 3)(7 downto 0)) [Full]"]);
 }
 
-/// sim1 #1463: an array of records constrained in the port, `(0 to 1)(data(0 to 1))`: the
+/// An array of records constrained in the port, `(0 to 1)(data(0 to 1))`: the
 /// element constraint is a record constraint, and indexing keeps it.
 #[test]
 fn sim1_1463_array_of_records_constrained_in_port() {
@@ -1238,7 +1237,7 @@ fn sim1_1463_array_of_records_constrained_in_port() {
     assert_eq!(idx, ["my_rec_t(data(0 to 1)) [Full]"]);
 }
 
-/// The unconstrained `out` parameter with `others` is an error, as in sim1, sim2, sim3.
+/// The unconstrained `out` parameter with `others` is an error.
 #[test]
 fn out_parameter_others_is_an_error() {
     assert_eq!(
@@ -1249,7 +1248,7 @@ fn out_parameter_others_is_an_error() {
 
 // -- findings: the correct shape, ignored until fixed (docs/design/rule1-review.md) -----
 
-/// F1 (sim1 #1589): one `others` value shared by elements of different widths is resolved
+/// F1: one `others` value shared by elements of different widths is resolved
 /// and folded once, for the first element: `b` and `c` get 6 bits.
 #[test]
 fn f1_record_others_resolved_per_element() {
@@ -1317,7 +1316,7 @@ fn f5_constrained_generic_type_actual() {
     assert_eq!(map, ["STD_ULOGIC_VECTOR(7 downto 0) [Full]"]);
 }
 
-/// F6 (fixed by 260729c): an alias of a record element (sim2 #641's `alias AxiData is
+/// F6 (fixed by 260729c): an alias of a record element (`alias AxiData is
 /// Axi.Data`); `'subtype` of it reads the bounds from the alias at run time.
 #[test]
 fn f6_alias_of_record_element() {

@@ -1,7 +1,7 @@
 -- yavs-test: std=2008
 -- expect: none
--- LRM 7.2, 4.3.3 (an attribute of an object applies to every alias of the whole object; #642;
--- the second reference simulator rejects)
+-- LRM 7.2, 4.3.3 (an attribute of an object applies to every alias of the whole object;
+-- #642)
 entity e is
   port (s : in integer);
   attribute a : integer;

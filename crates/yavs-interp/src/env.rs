@@ -88,8 +88,8 @@ impl Sources {
     }
 }
 
-/// One element of a call path: the subprogram or process name (upper case, as sim1), the file
-/// name, the absolute directory and the line. `to_string` gives sim1's form
+/// One element of a call path: the subprogram or process name (upper case), the file
+/// name, the absolute directory and the line. `to_string` gives the form
 /// `<path>/<file>:<line>:<NAME>` (`Machine::element_text`).
 struct Element {
     name: String,
@@ -323,7 +323,7 @@ struct AssertState {
 
 impl Default for AssertState {
     fn default() -> AssertState {
-        // The read severity starts at ERROR, as sim1 (the LRM gives no initial value).
+        // The read severity starts at ERROR (the LRM gives no initial value).
         AssertState {
             counts: [0; 4],
             enabled: [true; 4],
@@ -529,7 +529,7 @@ impl Asserts {
     }
 
     /// A report or assertion violation of severity `s` with message `text`: `None` when that
-    /// severity is disabled (not shown, not counted, as sim1), else the text to show (`text`
+    /// severity is disabled (not shown, not counted), else the text to show (`text`
     /// through the severity's `SetVhdlAssertFormat` format).
     pub(crate) fn report(&self, ctx: &Ctx<'_>, s: Severity, text: String) -> Option<String> {
         let (on, fmt) = self.with(ctx, None, |st| {
@@ -586,7 +586,7 @@ fn assert_native(
     rt.asserts.with(c, op, |st| f(st, a))
 }
 
-/// Warning, error and failure: what the no-argument forms count (as sim1).
+/// Warning, error and failure: what the no-argument forms count.
 const VIOLATIONS: [usize; 3] = [1, 2, 3];
 
 macro_rules! assert_natives {
@@ -666,7 +666,7 @@ fn get_format_string(
 }
 
 /// `SetVhdlAssertFormat`; `valid` is the position of the `Valid` argument. An invalid format
-/// leaves the old one and is `Valid => false`, or a run-time error without `Valid` (as sim1).
+/// leaves the old one and is `Valid => false`, or a run-time error without `Valid`.
 fn set_format(
     m: &mut Machine,
     ctx: &mut Option<&mut Ctx<'_>>,
@@ -851,8 +851,8 @@ impl Format {
                     None => format!("{now_fs} fs"),
                     Some((fs, name)) => format!("{} {name}", fmt_g15(now_fs as f64 / *fs as f64)),
                 },
-                // The instance, as `'instance_name` of the region around the process (#982), as
-                // sim1. No process around the report: nothing but its name to go by.
+                // The instance, as `'instance_name` of the region around the process (#982).
+                // No process around the report: nothing but its name to go by.
                 _ => match instances.get(proc) {
                     Some(name) => name.clone(),
                     None => yavs_diag::colons(yavs_diag::parent(proc)),

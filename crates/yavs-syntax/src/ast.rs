@@ -103,8 +103,8 @@ pub struct EntityDecl {
 #[derive(Debug)]
 pub struct ArchitectureBody {
     pub name: Ident,
-    /// `lib` in `architecture a of lib.e` (LRM 3.3.1: `entity_name` is a name;
-    /// sim1, sim2 and sim3 accept a selected name).
+    /// `lib` in `architecture a of lib.e` (LRM 3.3.1: `entity_name` is a name, so a
+    /// selected name is accepted).
     pub entity_lib: Option<Ident>,
     pub entity: Ident,
     pub decls: Vec<Decl>,

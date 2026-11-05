@@ -396,7 +396,7 @@ fn minmax(m: &mut Machine, t: Option<TyId>, a: &[u64], max: bool) -> R<Option<u6
 }
 
 /// `MINIMUM(L)` / `MAXIMUM(L)` of an array; a null array gives the element type's
-/// `'HIGH` / `'LOW` (sim1 agrees).
+/// `'HIGH` / `'LOW`.
 fn reduce_minmax(m: &mut Machine, t: Option<TyId>, a: &[u64], max: bool) -> R<Option<u64>> {
     let (t, _) = ty_of(m, t)?;
     let (_, sc, _) = array_ty(m, t)?;
@@ -663,8 +663,7 @@ enum Sh {
     Ror,
 }
 
-/// LRM 9.2.4, a negative count shifts the other way (`sla -1` is `sra 1`). sim1 fills
-/// `sla`/`sra` with the wrong end for negative counts; sim2 follows the LRM.
+/// LRM 9.2.4, a negative count shifts the other way (`sla -1` is `sra 1`).
 fn shift(m: &mut Machine, t: Option<TyId>, a: &[u64], op: Sh) -> R<Option<u64>> {
     let (t, _) = ty_of(m, t)?;
     let mut p = read_arr(m, t, arg(a, 0)?)?;
@@ -704,8 +703,7 @@ fn shift(m: &mut Machine, t: Option<TyId>, a: &[u64], op: Sh) -> R<Option<u64>> 
 // ---- concatenation ----
 
 /// `&` (LRM 2008 9.2.5): two null arrays give the right operand; otherwise the result runs
-/// from `S'LEFT` in the direction of `S`, and both bounds must belong to `S`. sim1 deviates for
-/// two null operands and for downto index subtypes; sim2 follows the LRM.
+/// from `S'LEFT` in the direction of `S`, and both bounds must belong to `S`.
 fn cat(m: &mut Machine, t: Option<TyId>, a: &[u64], ls: bool, rs: bool) -> R<Option<u64>> {
     let (t, _) = ty_of(m, t)?;
     let (x, y) = (arg(a, 0)?, arg(a, 1)?);
@@ -1036,8 +1034,7 @@ mod tests {
 
     #[test]
     fn shifts_follow_the_lrm() {
-        // (op, count, result) for "10110010"(7 downto 0); sim2's output, sim1 differs for
-        // negative arithmetic shifts.
+        // (op, count, result) for "10110010"(7 downto 0), LRM 9.2.4.
         let cases = [
             ("sll", 1, "01100100"),
             ("srl", 1, "01011001"),
@@ -1072,8 +1069,7 @@ mod tests {
         let mut t = setup();
         let sym = "yavs.implicit.cat.std.standard.bit_vector";
         let nat = [0, 2147483647, 0];
-        // (left, right, S) -> result; LRM 9.2.5 (sim2's output, sim1 differs for null & null
-        // and downto index subtypes).
+        // (left, right, S) -> result; LRM 9.2.5.
         let a = arr(&mut t, BV, "1010", 7, true);
         let b = arr(&mut t, BV, "11", 1, false);
         let r = call(&mut t, sym, BV, &[a, b, nat[0], nat[1], nat[2]]).unwrap();
@@ -1113,7 +1109,7 @@ mod tests {
         let mut t = setup();
         let e = write_arr(&mut t.m, BV, &Arr::one(1, 0, false, vec![])).unwrap();
         let v = arr(&mut t, BV, "10110010", 7, true);
-        // Empty: and 1, or 0, xor 0, nand 0, nor 1, xnor 1 (sim1 agrees).
+        // Empty: and 1, or 0, xor 0, nand 0, nor 1, xnor 1.
         for (op, empty, full) in [
             ("and", 1, 0),
             ("or", 0, 1),
@@ -1169,7 +1165,7 @@ mod tests {
 
     #[test]
     fn matching_tables() {
-        // Rows of `?<` from sim1, columns U X 0 1 Z W L H.
+        // Rows of `?<`, columns U X 0 1 Z W L H.
         let lt = [
             "UUUUUUUU", "UXXXXXXX", "UX01XX01", "UX00XX00", "UXXXXXXX", "UXXXXXXX", "UX01XX01",
             "UX00XX00",

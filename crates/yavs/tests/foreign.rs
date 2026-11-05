@@ -54,7 +54,7 @@ package c is
   attribute foreign of missing : function is "VHPIDIRECT no_such_symbol";
 end;
 package body c is
-  -- Placeholder bodies, as other simulators require; the foreign attribute wins.
+  -- Placeholder bodies; the foreign attribute wins.
   function add1(x : integer) return integer is begin return 0; end;
   function twice(x : integer range 0 to 50) return integer is begin return 0; end;
   function half(x : real) return real is begin return 0.0; end;
