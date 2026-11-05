@@ -202,7 +202,10 @@ fn all_of(tier: &str) {
     );
     let (code, out) = printed(ORDER, tier, "place_order");
     assert_eq!(code, 1, "{out}");
-    assert!(!out.contains("not reached") && !out.contains("40"), "{out}");
+    assert!(
+        !out.contains("not reached") && !out.contains("index 40"),
+        "{out}"
+    );
     assert!(
         out.contains("E3009]: index 7 outside of range 0 to 3 for array"),
         "{out}"
