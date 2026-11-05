@@ -1,0 +1,3 @@
+exit	0
+diag	note	1000000	0	:tb_null_slice:dut:_p1	dut ok
+diag	note	2000000	0	:tb_null_slice:_p6	done
