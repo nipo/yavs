@@ -359,7 +359,8 @@ impl Db {
                                 self.type_name(self.base(elem))
                             ),
                         )
-                        .with_primary(n.span, "not a valid file element type"),
+                        .with_primary(n.span, "not a valid file element type")
+                        .with_note("LRM 5.5.1: an array type of a file is one-dimensional"),
                     ));
                 }
                 if let Some((what, bad)) = self.bad_elem(self.base(elem), true) {
@@ -371,7 +372,10 @@ impl Db {
                                 self.type_name(bad)
                             ),
                         )
-                        .with_primary(n.span, "not a valid file element type"),
+                        .with_primary(n.span, "not a valid file element type")
+                        .with_note(
+                            "LRM 5.5.1: the type of a file's values is no file, access or protected type, and has no access subelement",
+                        ),
                     ));
                 }
                 self.new_type(
@@ -582,7 +586,10 @@ impl Db {
                         diag::NOT_A_TYPE,
                         format!("`{}` is not a protected type", name.text),
                     )
-                    .with_primary(name.span, "expected a protected type declaration"),
+                    .with_primary(name.span, "expected a protected type declaration")
+                    .with_note(
+                        "LRM 5.6.1: a protected type body has a corresponding protected type declaration in the same declarative region",
+                    ),
                 ));
             }
         };
@@ -660,7 +667,10 @@ impl Db {
                             format!("record element `{}` is declared twice", n.text),
                         )
                         .with_primary(n.span, "redeclared here")
-                        .with_secondary(prev, "first declared here"),
+                        .with_secondary(prev, "first declared here")
+                        .with_note(
+                            "LRM 5.3.3: the identifiers of all elements of a record type are distinct",
+                        ),
                     );
                     failed = true;
                     continue;
@@ -750,7 +760,10 @@ impl Db {
                         diag::REDECLARED,
                         format!("enumeration literal {n} appears twice"),
                     )
-                    .with_primary(sp, "repeated here"),
+                    .with_primary(sp, "repeated here")
+                    .with_note(
+                        "LRM 5.2.2.1: the identifiers and character literals of an enumeration type definition are distinct",
+                    ),
                 );
             }
             ids.push(self.new_decl(
@@ -800,7 +813,10 @@ impl Db {
                                         diag::NOT_STATIC,
                                         "the bound of a type definition must be locally static",
                                     )
-                                    .with_primary(ast.span, "not locally static"),
+                                    .with_primary(ast.span, "not locally static")
+                                    .with_note(
+                                        "LRM 5.2.3.1, 5.2.4.1, 5.2.5.1: each bound of the range of a type definition is locally static",
+                                    ),
                                 );
                             }
                         }
@@ -820,7 +836,10 @@ impl Db {
                             "the range of a type definition must be `left to right` or a range attribute",
                         )
                         .with_primary(n.span, "not a range")
-                        .with_help("write the bounds, e.g. `range t'low to t'high`, or `range t'range`"),
+                        .with_help("write the bounds, e.g. `range t'low to t'high`, or `range t'range`")
+                        .with_note(
+                            "LRM 5.2.1: a range is a range attribute name or two bounds with a direction",
+                        ),
                     ));
                 };
                 let (rc, t) = res?;
@@ -830,7 +849,10 @@ impl Db {
                             diag::NOT_STATIC,
                             "the bound of a type definition must be locally static",
                         )
-                        .with_primary(n.span, "not locally static"),
+                        .with_primary(n.span, "not locally static")
+                        .with_note(
+                            "LRM 5.2.3.1, 5.2.4.1, 5.2.5.1: each bound of the range of a type definition is locally static",
+                        ),
                     ));
                 };
                 if !matches!(
@@ -843,7 +865,10 @@ impl Db {
                             diag::BAD_TYPE_DECL,
                             "the range of an integer type definition must be of an integer type",
                         )
-                        .with_primary(n.span, "not an integer range"),
+                        .with_primary(n.span, "not an integer range")
+                        .with_note(
+                            "LRM 5.2.3.1: each bound of the range of an integer type definition is of some integer type",
+                        ),
                     ));
                 }
                 let uint = self.well_known.universal_integer.unwrap_or(self.poison.ty);
@@ -878,7 +903,10 @@ impl Db {
                         "physical type bounds are integers"
                     } else {
                         "write both bounds as integer literals or both as real literals"
-                    }),
+                    })
+                    .with_note(
+                        "LRM 5.2.3.1, 5.2.4.1, 5.2.5.1: both bounds are of some integer type, or both of some floating-point type",
+                    ),
                 ));
             }
         };
@@ -985,7 +1013,10 @@ impl Db {
                             diag::BAD_TYPE_DECL,
                             "a secondary unit must be defined by a physical literal",
                         )
-                        .with_primary(e.span, "expected `<integer> <unit>`"),
+                        .with_primary(e.span, "expected `<integer> <unit>`")
+                        .with_note(
+                            "LRM 5.2.4.1: a secondary unit declaration is `identifier = physical_literal`",
+                        ),
                     ));
                 }
             };
@@ -995,7 +1026,10 @@ impl Db {
                         diag::NOT_DECLARED,
                         format!("`{}` is not a unit of this type", unit.text),
                     )
-                    .with_primary(unit.span, "not declared before this unit"),
+                    .with_primary(unit.span, "not declared before this unit")
+                    .with_note(
+                        "LRM 5.2.4.1: a secondary unit is defined in terms of the primary unit, directly or indirectly",
+                    ),
                 ));
             };
             let scale = match value {
@@ -1014,7 +1048,10 @@ impl Db {
                                 diag::BAD_TYPE_DECL,
                                 "a secondary unit must be an integer multiple of another unit",
                             )
-                            .with_primary(e.span, "real value"),
+                            .with_primary(e.span, "real value")
+                            .with_note(
+                                "LRM 5.2.4.1: a secondary unit is an integral multiple of the primary unit, with an integer literal",
+                            ),
                         ));
                     }
                 },
@@ -1198,7 +1235,10 @@ impl Db {
         if !k.is_discrete() && !matches!(k, TypeKind::Error | TypeKind::Generic { .. }) {
             return Err(self.error(
                 Diagnostic::error(diag::NOT_A_TYPE, "an index subtype must be discrete")
-                    .with_primary(n.span, "not an integer or enumeration type"),
+                    .with_primary(n.span, "not an integer or enumeration type")
+                    .with_note(
+                        "LRM 5.3.2.1: the index values of an array belong to discrete types",
+                    ),
             ));
         }
         Ok(st)
@@ -1218,7 +1258,10 @@ impl Db {
                 names[0], names[1]
             ),
         )
-        .with_primary(at, "wrong type");
+        .with_primary(at, "wrong type")
+        .with_note(
+            "LRM 5.3.2.2: the type of each discrete range of an index constraint is that of its index",
+        );
         let d = self.same_name_note(d, &[want, t]);
         Err(self.error(d))
     }
@@ -1406,7 +1449,10 @@ impl Db {
                     "the type of this range cannot be determined",
                 )
                 .with_primary(l.span.to(r.span), "bounds of no single discrete type")
-                .with_help("use a type mark: `t range l to r`"),
+                .with_help("use a type mark: `t range l to r`")
+                .with_note(
+                    "LRM 5.3.2.2: the type of a range is determined as a complete context, by the rules of 12.5",
+                ),
             )),
         }
     }
@@ -1503,6 +1549,9 @@ impl Db {
                         .with_primary(
                             n.span,
                             "expected a function of one parameter returning the resolved type",
+                        )
+                        .with_note(
+                            "LRM 4.6, 6.3: the named function must meet the requirements of a resolution function for this type",
                         ),
                     )),
                     _ => Err(self.error(
@@ -1510,7 +1559,10 @@ impl Db {
                             diag::BAD_RESOLUTION,
                             "the resolution function name is ambiguous",
                         )
-                        .with_primary(n.span, "several functions fit"),
+                        .with_primary(n.span, "several functions fit")
+                        .with_note(
+                            "LRM 6.3: the meaning of an overloaded resolution function name is determined by context",
+                        ),
                     )),
                 }
             }
@@ -1521,7 +1573,8 @@ impl Db {
                             diag::BAD_RESOLUTION,
                             "an element resolution `(f)` needs an array type",
                         )
-                        .with_primary(resolution_span(r), "the subtype is not an array"),
+                        .with_primary(resolution_span(r), "the subtype is not an array")
+                        .with_note("LRM 6.3: an array element resolution needs an array subtype"),
                     ));
                 };
                 let eb = self.base(*elem);
@@ -1542,7 +1595,10 @@ impl Db {
                                     self.type_name(base)
                                 ),
                             )
-                            .with_primary(name.span, "no such element"),
+                            .with_primary(name.span, "no such element")
+                            .with_note(
+                                "LRM 6.3: a record element resolution names an element of the record subtype",
+                            ),
                         ));
                     };
                     let eb = match &self.types[base].kind {
@@ -1594,7 +1650,7 @@ impl Db {
                 format!("the range is not inside {what} `{name}`"),
             )
             .with_primary(span, format!("{} to {} is outside {} to {}", r.low(), r.high(), o.low(), o.high()))
-            .with_note("5.2.1, 5.3.2.2: every bound of a non-null range constraint must belong to the subtype it constrains"),
+            .with_note("LRM 5.2.1, 5.3.2.2: every bound of a non-null range constraint must belong to the subtype it constrains"),
         ))
     }
 
@@ -1608,16 +1664,22 @@ impl Db {
         t: TypeId,
         existing: &Constraint,
     ) -> Result<Constraint, Reported> {
-        let kind_err =
-            |db: &mut Db, span: Span, msg: &str, label: &str| -> Result<Constraint, Reported> {
-                if matches!(db.types[t].kind, TypeKind::Error) {
-                    return Err(Reported);
-                }
-                Err(db.error(
+        let kind_err = |db: &mut Db,
+                        span: Span,
+                        msg: &str,
+                        label: &str|
+         -> Result<Constraint, Reported> {
+            if matches!(db.types[t].kind, TypeKind::Error) {
+                return Err(Reported);
+            }
+            Err(db.error(
                     Diagnostic::error(diag::BAD_CONSTRAINT, msg.to_string())
-                        .with_primary(span, label.to_string()),
+                        .with_primary(span, label.to_string())
+                        .with_note(
+                            "LRM 5.2.1, 5.3.2.2, 5.3.3: a range applies to a scalar type, an index constraint to an array type, a record constraint to a record type",
+                        ),
                 ))
-            };
+        };
         match c {
             ast::Constraint::Range(r) => {
                 if !self.types[t].kind.is_scalar() {
@@ -1675,7 +1737,10 @@ impl Db {
                                 diag::CONSTRAINED_TWICE,
                                 "the index ranges of this array subtype are already constrained",
                             )
-                            .with_primary(at, "second index constraint"),
+                            .with_primary(at, "second index constraint")
+                            .with_note(
+                                "LRM 5.3.2.2: an index constraint applies only to an array type with no index constraint applying yet",
+                            ),
                         ));
                     }
                     Some(rs) => {
@@ -1689,7 +1754,10 @@ impl Db {
                                         rs.len()
                                     ),
                                 )
-                                .with_primary(*span, "wrong number of index ranges"),
+                                .with_primary(*span, "wrong number of index ranges")
+                                .with_note(
+                                    "LRM 5.3.2.2: an index constraint gives a discrete range for each index of the array type",
+                                ),
                             ));
                         }
                         let mut dims = Vec::new();
@@ -1745,7 +1813,10 @@ impl Db {
                                     self.type_name(t)
                                 ),
                             )
-                            .with_primary(name.span, "no such element"),
+                            .with_primary(name.span, "no such element")
+                            .with_note(
+                                "LRM 5.3.3: the record type has an element with the name given in each record element constraint",
+                            ),
                         ));
                     };
                     if seen.contains(&i) {
@@ -1773,7 +1844,10 @@ impl Db {
                                     name.text
                                 ),
                             )
-                            .with_primary(name.span, "not a composite element"),
+                            .with_primary(name.span, "not a composite element")
+                            .with_note(
+                                "LRM 5.3.3: an element constraint is an array constraint or a record constraint",
+                            ),
                         ));
                     }
                     let merged = self.merge_constraint(scope, ec, et, &current)?;
@@ -1970,7 +2044,10 @@ impl Db {
                     _ if self.is_poison_expr(e) => return Err(Reported),
                     _ => return Err(self.error(
                         Diagnostic::error(diag::NOT_STATIC, "the dimension of a range attribute must be a locally static positive integer")
-                            .with_primary(x.span, "not a static dimension"),
+                            .with_primary(x.span, "not a static dimension")
+                            .with_note(
+                                "LRM 16.2.3: the parameter of an array attribute is locally static and does not exceed the dimensionality",
+                            ),
                     )),
                 }
             }
@@ -2008,7 +2085,10 @@ impl Db {
                             diag::ATTR_DIMENSION,
                             format!("the array has {} dimension(s), not {dim}", indexes.len()),
                         )
-                        .with_primary(span, "no such dimension"),
+                        .with_primary(span, "no such dimension")
+                        .with_note(
+                            "LRM 16.2.3: the parameter of an array attribute is locally static and does not exceed the dimensionality",
+                        ),
                     ));
                 }
             },
@@ -2088,7 +2168,8 @@ impl Db {
                     format!("`{}` is not a type or subtype", self.decls[d].name),
                 )
                 .with_primary(n.span, "expected a type mark")
-                .with_secondary(self.decls[d].span, "declared here"),
+                .with_secondary(self.decls[d].span, "declared here")
+                .with_note("LRM 6.3: a type mark names a type or a subtype"),
             )),
         }
     }
@@ -2173,7 +2254,10 @@ impl Db {
                         diag::NOT_AN_OBJECT,
                         format!("the prefix of `'{}` must denote an object", attr.text),
                     )
-                    .with_primary(prefix.span, "not an object of one type"),
+                    .with_primary(prefix.span, "not an object of one type")
+                    .with_note(
+                        "LRM 16.2.2, 16.2.3: the prefix of `'SUBTYPE` is appropriate for an object, of `'ELEMENT` for an array object or an array subtype",
+                    ),
                 ));
             };
             let e = self.subtype_attr_prefix(scope, prefix, *t);
@@ -2185,7 +2269,8 @@ impl Db {
                     diag::NOT_A_TYPE,
                     format!("`'{}` does not denote a subtype", attr.text),
                 )
-                .with_primary(attr.span, "not a type mark"),
+                .with_primary(attr.span, "not a type mark")
+                .with_note("LRM 6.3: a type mark names a type or a subtype"),
             ));
         };
         match what {
@@ -2225,7 +2310,10 @@ impl Db {
                 },
                 None => Err(self.error(
                     Diagnostic::error(diag::NOT_A_TYPE, "`'element` needs an array prefix")
-                        .with_primary(prefix.span, "not an array"),
+                        .with_primary(prefix.span, "not an array")
+                        .with_note(
+                            "LRM 16.2.3: the prefix of `'ELEMENT` is appropriate for an array object, or denotes an array subtype",
+                        ),
                 )),
             },
             _ => Err(self.error(
@@ -2233,7 +2321,8 @@ impl Db {
                     diag::NOT_A_TYPE,
                     format!("`'{}` does not denote a subtype", attr.text),
                 )
-                .with_primary(attr.span, "not a type mark"),
+                .with_primary(attr.span, "not a type mark")
+                .with_note("LRM 6.3: a type mark names a type or a subtype"),
             )),
         }
     }
@@ -2313,7 +2402,10 @@ impl Db {
                         diag::CONSTRAINED_TWICE,
                         "the index ranges of this array subtype are already constrained",
                     )
-                    .with_primary(n.span, "second index constraint"),
+                    .with_primary(n.span, "second index constraint")
+                    .with_note(
+                        "LRM 5.3.2.2: an index constraint applies only to an array type with no index constraint applying yet",
+                    ),
                 ));
             }
             if args.len() != indexes.len() {
@@ -2326,7 +2418,10 @@ impl Db {
                             args.len()
                         ),
                     )
-                    .with_primary(n.span, "wrong number of index ranges"),
+                    .with_primary(n.span, "wrong number of index ranges")
+                    .with_note(
+                        "LRM 5.3.2.2: an index constraint gives a discrete range for each index of the array type",
+                    ),
                 ));
             }
             let mut dims = Vec::with_capacity(args.len());
@@ -2354,7 +2449,10 @@ impl Db {
                                 diag::BAD_CONSTRAINT,
                                 "an index constraint needs a range",
                             )
-                            .with_primary(a.span, "not a range"),
+                            .with_primary(a.span, "not a range")
+                            .with_note(
+                                "LRM 5.3.2.1: an index constraint is a list of discrete ranges",
+                            ),
                         ));
                     }
                 });

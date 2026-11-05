@@ -4,6 +4,7 @@ error[E3009]: object c2 length 39 does not match external name subtype indicatio
 10 |     assert << constant b1.c2 : string(1 to 2) >> = "ab" severity note;
    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
    |
+   = note: LRM 8.7: the view given by an external name's subtype includes a matching element for each element of the object
    = note: at 0 fs, delta 0
    = help: make both sides the same length, or change the target's constraint
 

@@ -256,7 +256,10 @@ impl Db {
                     format!("length mismatch: {target} has {want} elements, the value {got}"),
                 )
                 .with_primary(span, format!("{got} elements"))
-                .with_help("give the value the target's length, or change the target's constraint"),
+                .with_help("give the value the target's length, or change the target's constraint")
+                .with_note(
+                    "LRM 4.2.2.2, 9.3.6, 14.3.5: a subtype conversion, or an association with a formal, needs a matching element for each element of the target or formal",
+                ),
             );
             return;
         }
@@ -457,6 +460,7 @@ impl Db {
         self.top_context = saved_top;
         for (o, why, _) in std::mem::replace(&mut self.overflow, saved_overflow) {
             let span = self.exprs[o].span;
+            let arith = why.is_none();
             let msg = match why {
                 Some(w) => format!("{w} in a static expression"),
                 None => format!(
@@ -471,7 +475,13 @@ impl Db {
                     .with_primary(span, "no static value")
                     .with_note("the value is not needed during analysis; the run-time check stays")
             };
-            self.report(d);
+            self.report(if arith {
+                d.with_note(
+                    "LRM 5.2.3.1, 5.2.4.1, 5.2.5.1: a predefined arithmetic operation delivers the correct result",
+                )
+            } else {
+                d
+            });
         }
         let mut used = std::mem::replace(&mut self.memo, saved);
         let mut used_names = std::mem::replace(&mut self.name_memo, saved_names);
@@ -538,7 +548,10 @@ impl Db {
                     self.report(
                         Diagnostic::error(code, msg)
                             .with_primary(e.span, "type not determined")
-                            .with_help("qualify it with a type mark, as in `t'(...)`"),
+                            .with_help("qualify it with a type mark, as in `t'(...)`")
+                            .with_note(
+                                "LRM 9.3.2, 9.3.3.1, 12.5: the type of a string literal or an aggregate comes solely from its context, and every occurrence has exactly one interpretation",
+                            ),
                     );
                     self.poison_expr()
                 }
@@ -558,6 +571,9 @@ impl Db {
                     .with_primary(
                         e.span,
                         format!("an allocator of `{dn}` cannot be of type `{tn}`"),
+                    )
+                    .with_note(
+                        "LRM 9.3.7: an allocator returns an access type with the named designated type",
                     );
                     let diag = self.same_name_note(diag, &[t, d]);
                     self.report(diag);
@@ -570,7 +586,10 @@ impl Db {
                             "the access type of this allocator cannot be determined from its context",
                         )
                         .with_primary(e.span, "type not determined")
-                        .with_help("qualify it with a type mark, as in `t'(...)`"),
+                        .with_help("qualify it with a type mark, as in `t'(...)`")
+                        .with_note(
+                            "LRM 9.3.7: the type of the access value of an allocator is determinable solely from the context",
+                        ),
                     );
                     self.poison_expr()
                 }
@@ -1147,6 +1166,9 @@ impl Db {
                             Some(t) => format!("this is of type `{t}`"),
                             None => "not a BOOLEAN expression".into(),
                         },
+                    )
+                    .with_note(
+                        "LRM 9.2.9: a condition is of type BOOLEAN, or the condition operator is implicitly applied to it",
                     );
                 if let Some(t) = found {
                     d = d.with_help(format!(
@@ -1161,7 +1183,10 @@ impl Db {
                     diag::AMBIGUOUS_CONDITION,
                     "several `??` operators apply to this condition",
                 )
-                .with_primary(e.span, "ambiguous condition");
+                .with_primary(e.span, "ambiguous condition")
+                .with_note(
+                    "LRM 9.2.9, 12.5: the operator implicitly applied to a condition is determined by overload resolution",
+                );
                 let ops: Vec<DeclId> = found.iter().map(|f| f.0).collect();
                 for (&op, sig) in ops.iter().zip(self.signatures(&ops, &[])) {
                     d = d.with_secondary(self.decls[op].span, sig);
@@ -1309,7 +1334,10 @@ impl Db {
                     diag::NO_OVERLOAD,
                     format!("no visible `\"{sym}\"` accepts these operands"),
                 )
-                .with_primary(e.span, format!("no matching {what}"));
+                .with_primary(e.span, format!("no matching {what}"))
+                .with_note(
+                    "LRM 12.5: the occurrence is legal only with exactly one interpretation in its complete context",
+                );
                 if let Some(h) = self.vector_integer_hint(scope, e) {
                     d = d.with_help(h);
                 }
@@ -1357,7 +1385,10 @@ impl Db {
                                 format!("`{pname}` has type `{tn}` and cannot be indexed"),
                             )
                             .with_primary(first.span, "index of a value that is not an array")
-                            .with_secondary(prefix.span, format!("of type `{tn}`")),
+                            .with_secondary(prefix.span, format!("of type `{tn}`"))
+                            .with_note(
+                                "LRM 8.4: the prefix of an indexed name is appropriate for an array type",
+                            ),
                         );
                         return;
                     }
@@ -1373,7 +1404,10 @@ impl Db {
                                     args.len()
                                 ),
                             )
-                            .with_primary(first.span, format!("{} indexes", args.len())),
+                            .with_primary(first.span, format!("{} indexes", args.len()))
+                            .with_note(
+                                "LRM 8.4: an indexed name has one expression for each index position of the array",
+                            ),
                         );
                         return;
                     }
@@ -1387,7 +1421,10 @@ impl Db {
                         diag::NO_OVERLOAD,
                         "no visible subprogram accepts these arguments",
                     )
-                    .with_primary(prefix.span, "no matching subprogram"),
+                    .with_primary(prefix.span, "no matching subprogram")
+                    .with_note(
+                        "LRM 12.5: the occurrence is legal only with exactly one interpretation in its complete context",
+                    ),
                 );
                 return;
             }
@@ -1416,7 +1453,10 @@ impl Db {
                                 diag::NO_OVERLOAD,
                                 "no visible subprogram accepts these arguments",
                             )
-                            .with_primary(prefix.span, "no matching subprogram"),
+                            .with_primary(prefix.span, "no matching subprogram")
+                            .with_note(
+                                "LRM 12.5: the occurrence is legal only with exactly one interpretation in its complete context",
+                            ),
                         );
                     }
                     return;
@@ -1449,7 +1489,10 @@ impl Db {
                 diag::NO_OVERLOAD,
                 format!("no function `{}` returns `{tn}`", self.decls[calls[0]].name),
             )
-            .with_primary(e.span, format!("expected `{tn}`"));
+            .with_primary(e.span, format!("expected `{tn}`"))
+            .with_note(
+                "LRM 12.5: the occurrence is legal only with exactly one interpretation in its complete context",
+            );
             d = self.candidate_labels(d, &calls[..calls.len().min(MAX_CANDIDATE_LABELS)], &[t]);
             d = self.same_name_note(d, &ts);
             self.report(d);
@@ -1475,7 +1518,10 @@ impl Db {
             diag::TYPE_MISMATCH,
             format!("expected {want}, found {}", found.join(" or ")),
         )
-        .with_primary(e.span, format!("expected {want}"));
+        .with_primary(e.span, format!("expected {want}"))
+        .with_note(
+            "LRM 12.5: the occurrence is legal only with exactly one interpretation in its complete context, given the type it requires",
+        );
         if let ([i], Expected::Type(t)) = (is, exp)
             && let Some(h) = self.conversion_hint(i.ty, t)
         {
@@ -1612,7 +1658,10 @@ impl Db {
             .as_ref()
             .map_or("this expression is ambiguous".into(), |w| w.0.clone());
         let mut d = Diagnostic::error(diag::AMBIGUOUS, msg)
-            .with_primary(e.span, "several interpretations fit");
+            .with_primary(e.span, "several interpretations fit")
+            .with_note(
+                "LRM 12.5: the occurrence is legal only with exactly one interpretation in its complete context",
+            );
         let callables: Vec<DeclId> = best
             .iter()
             .filter_map(|i| match i.via {
@@ -2026,7 +2075,8 @@ impl Db {
                     )
                     .with_primary(prefix.span, "a function call is an expression")
                     .with_secondary(self.decls[self.entity(f)].span, "declared here")
-                    .with_help("assign or use its result, or call a procedure"),
+                    .with_help("assign or use its result, or call a procedure")
+                    .with_note("LRM 10.7: a procedure call names a procedure"),
                 ));
             }
             if procs.is_empty() {
@@ -2036,7 +2086,8 @@ impl Db {
                         format!("`{}` is not a procedure", self.decls[ds[0]].name),
                     )
                     .with_primary(prefix.span, "expected a procedure name")
-                    .with_secondary(self.decls[ds[0]].span, "declared here"),
+                    .with_secondary(self.decls[ds[0]].span, "declared here")
+                    .with_note("LRM 10.7: a procedure call names a procedure"),
                 ));
             }
             let mut best: Vec<(crate::ids::DeclId, u32)> = Vec::new();
@@ -2126,7 +2177,10 @@ impl Db {
                         self.decls[procs[0]].name
                     ),
                 )
-                .with_primary(callee_span, "no matching procedure");
+                .with_primary(callee_span, "no matching procedure")
+                .with_note(
+                    "LRM 12.5: the occurrence is legal only with exactly one interpretation in its complete context",
+                );
                 d = self.candidate_labels(d, &procs[..procs.len().min(MAX_CANDIDATE_LABELS)], &[]);
                 return Err(self.error(d));
             };
@@ -2147,8 +2201,9 @@ impl Db {
                     Some(d) => d,
                     None => Diagnostic::error(diag::AMBIGUOUS, "this procedure call is ambiguous")
                         .with_primary(prefix.span, "several procedures fit")
-                        .with_help(
-                            "use a selected name such as `pkg.proc`, or qualify an argument",
+                        .with_help("use a selected name such as `pkg.proc`, or qualify an argument")
+                        .with_note(
+                            "LRM 12.5: the occurrence is legal only with exactly one interpretation in its complete context",
                         ),
                 };
                 for (&c, sig) in cands.iter().zip(self.signatures(&cands, &[])) {
@@ -2218,13 +2273,15 @@ impl Db {
                 }
                 Ok(_) => self.error(
                     Diagnostic::error(diag::NOT_AN_OBJECT, "this name is not a procedure")
-                        .with_primary(span, "expected a procedure name"),
+                        .with_primary(span, "expected a procedure name")
+                        .with_note("LRM 10.7: a procedure call names a procedure"),
                 ),
             },
             _ => self.error(
                 Diagnostic::error(diag::NOT_AN_OBJECT, "this name is not a procedure")
                     .with_primary(span, "expected a procedure name")
-                    .with_secondary(obj.span, "this prefix is not a protected object"),
+                    .with_secondary(obj.span, "this prefix is not a protected object")
+                    .with_note("LRM 10.7: a procedure call names a procedure"),
             ),
         }
     }
@@ -2263,7 +2320,8 @@ impl Db {
                 format!("procedure `{}` does not return a value", self.decls[e].name),
             )
             .with_primary(callee.span, "a procedure call is a statement")
-            .with_secondary(self.decls[e].span, "declared here");
+            .with_secondary(self.decls[e].span, "declared here")
+            .with_note("LRM 9.3.4: a function call names a function");
             self.report(d);
         }
         procs
@@ -2306,7 +2364,10 @@ impl Db {
             diag::NO_OVERLOAD,
             format!("no function `{name}` matches the call"),
         )
-        .with_primary(prefix.span, "no matching function");
+        .with_primary(prefix.span, "no matching function")
+        .with_note(
+            "LRM 12.5: the occurrence is legal only with exactly one interpretation in its complete context",
+        );
         d = self.candidate_labels(d, &fns[..fns.len().min(MAX_CANDIDATE_LABELS)], &[]);
         if !fns.is_empty() && fns.len() <= MAX_CANDIDATE_LABELS {
             // As the declarations wrote them, unless that reads alike for different ones.
@@ -2403,6 +2464,9 @@ impl Db {
                     ),
                 )
                 .with_primary(callee, format!("no actual for `{}`", p.name.text))
+                .with_note(
+                    "LRM 6.5.7.1: only a formal with a default may be left out of the association list",
+                )
             }
             Err(AssocErr::TooMany(k)) => {
                 let n = s.params.len();
@@ -2415,6 +2479,9 @@ impl Db {
                     ),
                 )
                 .with_primary(args[k].span, "extra argument")
+                .with_note(
+                    "LRM 6.5.7.1: a positional actual corresponds to the interface element at the same position",
+                )
             }
             Err(AssocErr::Unknown(k)) => {
                 let (i, sp) = formal(k)?;
@@ -2423,6 +2490,7 @@ impl Db {
                     format!("{what} `{name}` has no parameter `{}`", i.text),
                 )
                 .with_primary(sp, "no such parameter")
+                .with_note("LRM 6.5.7.1: a formal designator names a formal of this interface list")
             }
             Err(AssocErr::Twice(k)) => {
                 let (i, sp) = formal(k)?;
@@ -2437,6 +2505,9 @@ impl Db {
                 )
                 .with_primary(sp, "associated again here")
                 .with_secondary(args[first].span, "first associated here")
+                .with_note(
+                    "LRM 6.5.7.1: every scalar subelement of a formal is associated exactly once",
+                )
             }
             Err(AssocErr::Other) => return None,
         };
@@ -2524,7 +2595,10 @@ impl Db {
         Some(
             Diagnostic::error(diag::AMBIGUOUS, msg)
                 .with_primary(x.span, "fits several procedures")
-                .with_help(format!("qualify the {what}: `{q}`")),
+                .with_help(format!("qualify the {what}: `{q}`"))
+                .with_note(
+                    "LRM 12.5: the occurrence is legal only with exactly one interpretation in its complete context",
+                ),
         )
     }
 

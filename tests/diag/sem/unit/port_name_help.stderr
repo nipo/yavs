@@ -7,5 +7,6 @@ error[E1100]: entity `leaf` has no port `clck`
 15 |   u : entity work.leaf port map (clck => c);
    |                                  ^^^^ not a port of entity `leaf`
    |
+   = note: LRM 6.5.7.1: a formal designator names a formal of this interface list
    = help: a port with a similar name exists: `clk`
 

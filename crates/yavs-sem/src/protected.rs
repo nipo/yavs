@@ -145,7 +145,10 @@ impl Db {
                 Diagnostic::warning(diag::W_SHARED_NOT_PROTECTED, msg)
                     .with_primary(span, "accepted by `--relaxed`")
                     .with_note("processes using it run serially")
-                    .with_help("--relaxed accepts a shared variable of a non-protected type (VHDL-93 style); a protected type is portable"),
+                    .with_help("--relaxed accepts a shared variable of a non-protected type (VHDL-93 style); a protected type is portable")
+                    .with_note(
+                        "LRM 6.4.2.4: the base type of a shared variable is a protected type",
+                    ),
             );
             return Ok(());
         }
@@ -391,7 +394,10 @@ impl Db {
                         format!("`{}` is not a protected type", name.text),
                     )
                     .with_primary(name.span, "protected body for this name")
-                    .with_secondary(self.decls[ty_decl].span, "declared here"),
+                    .with_secondary(self.decls[ty_decl].span, "declared here")
+                    .with_note(
+                        "LRM 5.6.1: a protected type body has a corresponding protected type declaration in the same declarative region",
+                    ),
                 ));
             }
         };
@@ -408,7 +414,7 @@ impl Db {
                 )
                 .with_primary(name.span, "body here")
                 .with_secondary(self.decls[ty_decl].span, "declared here")
-                .with_note("LRM 5.6.3: in the same declarative region, or in the package body of its package"),
+                .with_note("LRM 5.6.1: in the same declarative region, or in the package body of its package"),
             ));
         }
         let TypeKind::Protected {
@@ -426,7 +432,10 @@ impl Db {
                     diag::REDECLARED,
                     format!("protected type `{}` already has a body", name.text),
                 )
-                .with_primary(name.span, "second body"),
+                .with_primary(name.span, "second body")
+                .with_note(
+                    "LRM 5.6.1: a protected type declaration has exactly one corresponding body",
+                ),
             ));
         }
         *slot = Some(body);
@@ -460,7 +469,10 @@ impl Db {
                     ),
                 )
                 .with_primary(self.decls[d].name_span(), "declared here")
-                .with_secondary(end, "the protected body ends here"),
+                .with_secondary(end, "the protected body ends here")
+                .with_note(
+                    "LRM 5.6.3: each method declared in a protected type declaration has a body in the protected type body",
+                ),
             ));
         }
         res
@@ -485,7 +497,10 @@ impl Db {
                     format!("protected type `{}` has no body", self.type_name(t)),
                 )
                 .with_primary(self.decls[self.types[t].decl].span, "declared here")
-                .with_secondary(end, "the region ends here"),
+                .with_secondary(end, "the region ends here")
+                .with_note(
+                    "LRM 5.6.1: a protected type declaration has exactly one corresponding body",
+                ),
             ));
         }
         res
@@ -540,7 +555,10 @@ impl Db {
                     ),
                 )
                 .with_primary(name.span, "not a method of this type")
-                .with_secondary(self.decls[self.types[t].decl].span, "type declared here"),
+                .with_secondary(self.decls[self.types[t].decl].span, "type declared here")
+                .with_note(
+                    "LRM 8.3: the suffix of a selected name of a protected object is a method declared immediately within the protected type declaration",
+                ),
             ));
         }
         let inside = body.is_some_and(|b| self.is_within(from, b));

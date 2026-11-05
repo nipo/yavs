@@ -232,6 +232,66 @@ pub struct Built {
     pub objects: HashMap<(Option<ScopeId>, yavs_sem::DeclId), u64>,
 }
 
+/// The clause a run-time error breaks.
+// ponytail: reads the message's words, as the length hint below does; a kind of its own if this
+// list grows much.
+fn language_rule(kind: &ErrorKind) -> Option<&'static str> {
+    let m = match kind {
+        ErrorKind::PostponedDelta => {
+            return Some(
+                "LRM 14.7.5.3: it is an error if a postponed process causes a delta cycle right after the current simulation cycle",
+            );
+        }
+        ErrorKind::Runtime(m) | ErrorKind::InvalidAssign(m) => m.as_str(),
+        ErrorKind::Resolution { message, .. } => message.as_str(),
+        _ => return None,
+    };
+    let outside = m.contains(" outside of ");
+    Some(if m.starts_with("index ") && outside {
+        "LRM 8.4, 8.5: an index value, or a bound of a non-null slice, belongs to the index range of the array"
+    } else if m.starts_with("value ") && outside && m.contains(" for parameter ") {
+        "LRM 4.2.2.2: the value of an actual belongs to the subtype of the formal"
+    } else if m.starts_with("value ") && outside && m.ends_with(" for target") {
+        "LRM 10.5.2.2, 10.6.2.1: the value of an assignment belongs to the subtype of its target"
+    } else if m.starts_with("value ") && outside && m.contains(" for the result of ") {
+        "LRM 10.13: the value of a return statement is converted to the result subtype"
+    } else if m.starts_with("value ") && outside && m.ends_with(" for timeout of a wait statement")
+    {
+        "LRM 10.2: it is an error if the time expression of a timeout clause is negative"
+    } else if m.starts_with("value ") && outside && m.ends_with(" for delay of a waveform element")
+    {
+        "LRM 10.5.2.2: it is an error if the time expression of a waveform element is negative"
+    } else if m.contains("external name subtype indication") {
+        "LRM 8.7: the view given by an external name's subtype includes a matching element for each element of the object"
+    } else if m.contains(" does not match right operand length ") {
+        "LRM 9.2.2, 9.2.3: the operands are arrays of the same length"
+    } else if m.starts_with("expression length ") && m.contains(" does not match case choice ") {
+        "LRM 10.9: the value of the case expression has the length of the choices"
+    } else if m.contains(" length ") && m.contains(" does not match ") {
+        "LRM 4.2.2.2, 9.3.6, 14.3.5: a subtype conversion, or an association with a formal, needs a matching element for each element of the target or formal"
+    } else if m.contains(" have different lengths ") {
+        "LRM 9.2.2, 9.2.3: the operands are arrays of the same length"
+    } else if m.starts_with("result of ") && m.contains(" cannot be represented") {
+        "LRM 5.2.3.1, 5.2.4.1: a predefined arithmetic operation delivers the correct result"
+    } else if m.starts_with("real ") && m.contains(" is out of range") {
+        "LRM 5.2.5.1: a design is erroneous if a floating-point operation cannot deliver the correct result"
+    } else if m.starts_with("negative exponent") {
+        "LRM 9.2.8: a negative exponent is only allowed for a left operand of a floating-point type"
+    } else if m.starts_with("null access") {
+        "LRM 8.1: it is an error if the value of a prefix of an access type is null"
+    } else if m.starts_with("negative time value") {
+        "LRM 10.2, 10.5.2.1, 10.5.2.2: a timeout, a pulse rejection limit or the time of a waveform element is not negative"
+    } else if m.starts_with("wait statement in a procedure") {
+        "LRM 10.2, 11.3: a wait statement cannot appear in a procedure whose parent is a process with a sensitivity list"
+    } else if m.starts_with("null transaction on unguarded") {
+        "LRM 10.5.2.2: the target of a null waveform element is a guarded signal"
+    } else if m.starts_with("too many drivers") || m.contains(" has several sources") {
+        "LRM 4.6, 6.4.2.3: a resolved signal has no more sources than the index type allows, and an unresolved one has one"
+    } else {
+        return None;
+    })
+}
+
 fn sim_err(m: String) -> SimError {
     SimError::new(ErrorKind::Usage(m))
 }
@@ -269,6 +329,9 @@ impl Elaborated {
             && m.contains(" does not match ")
         {
             d = d.with_help("make both sides the same length, or change the target's constraint");
+        }
+        if let Some(rule) = language_rule(&e.kind) {
+            d = d.with_note(rule);
         }
         d.with_note(at)
     }

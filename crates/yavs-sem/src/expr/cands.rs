@@ -256,7 +256,8 @@ impl Db {
                 crate::diag::BAD_LITERAL,
                 format!("`{}` is not a physical unit", unit.text),
             )
-            .with_primary(unit.span, "not a unit"),
+            .with_primary(unit.span, "not a unit")
+            .with_note("LRM 5.2.4.1: a physical literal ends in a unit name of the type"),
         );
         self.poison_cands()
     }

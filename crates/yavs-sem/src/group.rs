@@ -214,7 +214,10 @@ impl Db {
                             diag::NOT_DECLARED,
                             format!("character literal '{c}' is not declared"),
                         )
-                        .with_primary(n.span, "not visible here"),
+                        .with_primary(n.span, "not visible here")
+                        .with_note(
+                            "LRM 12.3: without a visible declaration of this identifier, the occurrence is not legal here",
+                        ),
                     ));
                 }
             },

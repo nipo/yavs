@@ -147,7 +147,10 @@ impl Db {
                         ),
                     )
                     .with_primary(pname.span, format!("no {what} with this name"))
-                    .with_help(format!("analyze the {what} before its secondary units")),
+                    .with_help(format!("analyze the {what} before its secondary units"))
+                    .with_note(
+                        "LRM 13.5: a primary unit is analyzed before any corresponding secondary unit",
+                    ),
                 ));
             }
             let p = self.load_unit(lib, pk, Some(pname.span))?;
@@ -451,7 +454,10 @@ impl Db {
                         format!("`{}` is not a context declaration", self.decls[d].name),
                     )
                     .with_primary(crate::generic::last_span(n), "not a context declaration")
-                    .with_secondary(self.decls[d].span, "declared here"),
+                    .with_secondary(self.decls[d].span, "declared here")
+                    .with_note(
+                        "LRM 13.4: it is an error if a selected name in a context reference does not denote a context declaration",
+                    ),
                 ));
             }
         };
@@ -483,7 +489,8 @@ impl Db {
             let ast::NameKind::Selected { prefix, suffix } = &n.kind else {
                 self.report(
                     Diagnostic::error(diag::NOT_A_PACKAGE, "a use clause needs a selected name")
-                        .with_primary(n.span, "expected `library.package.all` or `package.name`"),
+                        .with_primary(n.span, "expected `library.package.all` or `package.name`")
+                        .with_note("LRM 12.4: a use clause is a list of selected names"),
                 );
                 continue;
             };
@@ -603,7 +610,10 @@ impl Db {
                 .with_secondary(self.decls[d].span, "declared here")
                 .with_help(format!(
                     "`{name}` is declared in {what} `{owner}` and is only visible inside it"
-                )),
+                ))
+                .with_note(
+                    "LRM 12.3: a declaration is visible only within a certain part of its scope",
+                ),
             );
         }
         if self.scopes[s].kind == ScopeKind::Package
@@ -623,14 +633,20 @@ impl Db {
                     format!("`{key}` is not in the visible part of `{owner}`"),
                 )
                 .with_primary(span, "declared in the package body")
-                .with_secondary(self.decls[d].span, "declared here"),
+                .with_secondary(self.decls[d].span, "declared here")
+                .with_note(
+                    "LRM 4.7: items declared immediately within a package declaration become visible by selection",
+                ),
             );
         }
         let d = Diagnostic::error(
             diag::NOT_DECLARED,
             format!("`{key}` is not declared in `{owner}`"),
         )
-        .with_primary(span, "not found");
+        .with_primary(span, "not found")
+        .with_note(
+            "LRM 8.3: the suffix of an expanded name is declared immediately within the package, or is a primary unit of the library, its prefix denotes",
+        );
         let found = crate::suggest::similar(
             key.as_str(),
             self.scopes[s]
@@ -705,7 +721,10 @@ impl Db {
                     crate::generic::last_span(n),
                     "expected a library or a package",
                 )
-                .with_secondary(self.decls[d].span, "declared here"),
+                .with_secondary(self.decls[d].span, "declared here")
+                .with_note(
+                    "LRM 12.4: a selected name in a use clause identifies declarations within the package or library its prefix denotes",
+                ),
             )),
         }
     }

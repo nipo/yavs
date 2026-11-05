@@ -129,7 +129,10 @@ impl Db {
                     format!("package `{}` is not declared in this region", b.name.text),
                 )
                 .with_primary(b.name.span, "no package with this name")
-                .with_help("declare the package earlier in the same declarative part"),
+                .with_help("declare the package earlier in the same declarative part")
+                .with_note(
+                    "LRM 4.8: a package body in a declarative part comes after the package declaration, immediately within the same region",
+                ),
             ));
         };
         let DeclKind::Package {
@@ -227,7 +230,10 @@ impl Db {
             format!("a {what} declares no signals or shared variables"),
         )
         .with_primary(span, format!("declared inside a {what}"))
-        .with_help("declare it in the enclosing architecture, block or package");
+        .with_help("declare it in the enclosing architecture, block or package")
+        .with_note(
+            "LRM 4.3, 4.7, 6.4.2.4, 11.3: a process, a subprogram, or a package in one declares no signals or shared variables",
+        );
         if let Some(o) = inst_obj {
             let name = self.decls[o].name;
             d = d.with_secondary(

@@ -326,7 +326,10 @@ pub fn no_context(db: &mut Db, span: Span) -> Reported {
             "the type of this aggregate cannot be determined",
         )
         .with_primary(span, "the context does not give a type")
-        .with_help("qualify it with its type: `t'(...)`"),
+        .with_help("qualify it with its type: `t'(...)`")
+        .with_note(
+            "LRM 9.3.3.1: the type of an aggregate is determinable solely from its context, excluding the aggregate itself",
+        ),
     )
 }
 
@@ -520,7 +523,10 @@ pub fn resolve_choices(
                                         quoted(db, ty, &n[0]),
                                         quoted(db, base, &n[1])
                                     )
-                                }),
+                                })
+                                    .with_note(
+                                        "LRM 9.3.3.3, 10.9: a choice specifies values of the index type, or of the type of the case expression",
+                                    ),
                         ))
                     } else {
                         Ok(Choice::Range(RangeC::Attr {
@@ -699,7 +705,10 @@ fn check_items(
                                 show_interval(db, ty, w.low(), w.high())
                             ),
                         )
-                        .with_primary(i.span, "out of range"),
+                        .with_primary(i.span, "out of range")
+                        .with_note(
+                            "LRM 9.3.3.3, 10.9: aggregate choices belong to the index subtype, and no other value than the case expression's is allowed as a choice",
+                        ),
                     ),
                 );
             }
@@ -719,7 +728,10 @@ fn check_items(
                             format!("{} is already covered", show_interval(db, ty, i.lo, dup_hi)),
                         )
                         .with_primary(i.span, "covered again here")
-                        .with_secondary(sp, "first covered here"),
+                        .with_secondary(sp, "first covered here")
+                        .with_note(
+                            "LRM 9.3.3.1, 10.9: each element of an aggregate, and each value of a case expression, is represented once and only once",
+                        ),
                     ),
                 );
             }
@@ -774,7 +786,10 @@ fn check_items(
                 ctx.uncovered(),
                 format!("missing choices for {}{more}", shown.join(", ")),
             )
-            .with_primary(span, "not every value is covered");
+            .with_primary(span, "not every value is covered")
+            .with_note(
+                "LRM 9.3.3.1, 10.9: each element of an aggregate, and each value of a case expression, is represented once and only once",
+            );
             d = match (ctx, cov) {
                 (Ctx::Aggregate, _) => d.with_note(
                     "the choices of a named array aggregate must form a contiguous range (LRM 9.3.3.3)",
@@ -816,7 +831,10 @@ fn check_others_last(
                 };
                 return Err(db.error(
                     Diagnostic::error(code, "`others` must be the last choice and stand alone")
-                        .with_primary(span, "misplaced `others`"),
+                        .with_primary(span, "misplaced `others`")
+                        .with_note(
+                            "LRM 9.3.3.1, 10.9: the choice `others` is allowed only last and as its only choice",
+                        ),
                 ));
             }
         }
@@ -924,7 +942,10 @@ fn case_core(
                 return Err(db.error(
                     Diagnostic::error(diag::CASE_COVERAGE, "case needs `when others`")
                         .with_primary(span, "the range of this expression's type is not known")
-                        .with_help("add `when others =>`"),
+                        .with_help("add `when others =>`")
+                        .with_note(
+                            "LRM 10.9: each value of the subtype is represented once and only once in the choices",
+                        ),
                 ));
             }
         };
@@ -965,7 +986,10 @@ pub fn check_case_subject(db: &mut Db, st: SubtypeId, span: Span) -> Result<(), 
                 type_name(db, ty)
             ),
         )
-        .with_primary(span, "not discrete"),
+        .with_primary(span, "not discrete")
+        .with_note(
+            "LRM 10.9: the case expression is of a discrete type or a one-dimensional array of a character type",
+        ),
     ))
 }
 
@@ -982,7 +1006,10 @@ pub fn check_case_others(db: &mut Db, alts: &[&[ast::Choice]]) -> Result<(), Rep
                         diag::CASE_COVERAGE,
                         "`others` must be the last alternative and stand alone",
                     )
-                    .with_primary(*sp, "misplaced `others`"),
+                    .with_primary(*sp, "misplaced `others`")
+                    .with_note(
+                        "LRM 10.9: the choice `others` is allowed only for the last alternative and as its only choice",
+                    ),
                 ));
             }
         }
@@ -999,7 +1026,10 @@ fn bad_matching(db: &mut Db, ty: TypeId, span: Span) -> Reported {
                 type_name(db, ty)
             ),
         )
-        .with_primary(span, "in this matching case statement"),
+        .with_primary(span, "in this matching case statement")
+        .with_note(
+            "LRM 10.9: a matching case expression is BIT, STD_ULOGIC or a one-dimensional array of them",
+        ),
     )
 }
 
@@ -1073,7 +1103,10 @@ fn array_case(
                                 diag::CASE_COVERAGE,
                                 "a range is not a choice of a case on an array",
                             )
-                            .with_primary(sp, "range choice"),
+                            .with_primary(sp, "range choice")
+                            .with_note(
+                                "LRM 10.9: each choice is of the same type as the case expression",
+                            ),
                         ),
                     );
                     continue;
@@ -1110,7 +1143,10 @@ fn array_case(
                             diag::LENGTH_MISMATCH,
                             format!("case choice has {n} elements, the expression has {want}"),
                         )
-                        .with_primary(sp, "wrong length"),
+                        .with_primary(sp, "wrong length")
+                        .with_note(
+                            "LRM 10.9: the value of the case expression has the length of the choices",
+                        ),
                     ),
                 );
                 continue;
@@ -1124,7 +1160,10 @@ fn array_case(
                                 format!("case choice has {n} elements, an earlier one has {m}"),
                             )
                             .with_primary(sp, "different length")
-                            .with_secondary(first, "this one"),
+                            .with_secondary(first, "this one")
+                            .with_note(
+                                "LRM 10.9: the choices of a case on an array value have the same length",
+                            ),
                         ),
                     );
                     continue;
@@ -1137,7 +1176,10 @@ fn array_case(
                     db.error(
                         Diagnostic::error(diag::CASE_COVERAGE, "duplicate case choice")
                             .with_primary(sp, "covered again here")
-                            .with_secondary(first, "first covered here"),
+                            .with_secondary(first, "first covered here")
+                            .with_note(
+                                "LRM 10.9: each value is represented once and only once in the choices",
+                            ),
                     ),
                 );
                 continue;
@@ -1203,7 +1245,10 @@ fn uncovered_array(db: &mut Db, span: Span) -> Reported {
             "case choices do not cover every value of the expression",
         )
         .with_primary(span, "not every value is covered")
-        .with_help("add `when others =>`"),
+        .with_help("add `when others =>`")
+        .with_note(
+            "LRM 10.9: each value of the base type is represented once and only once in the choices",
+        ),
     )
 }
 
@@ -1271,7 +1316,8 @@ pub fn resolve_aggregate(
                 diag::AGG_NO_TYPE,
                 format!("an aggregate cannot have type {}", type_name(db, ty)),
             )
-            .with_primary(span, "aggregates are only of array and record types"),
+            .with_primary(span, "aggregates are only of array and record types")
+            .with_note("LRM 9.3.3.1: the type of an aggregate is a composite type"),
         )),
     }
 }
@@ -1322,7 +1368,10 @@ fn record_agg(
                                 elems.len()
                             ),
                         )
-                        .with_primary(a.span, "no element left for this value"),
+                        .with_primary(a.span, "no element left for this value")
+                        .with_note(
+                            "LRM 9.3.3.1: each element of the value is represented once and only once in the aggregate",
+                        ),
                     ),
                 );
                 continue;
@@ -1343,7 +1392,10 @@ fn record_agg(
                                     diag::AGG_OTHERS,
                                     "`others` must be the last choice and stand alone",
                                 )
-                                .with_primary(*sp, "misplaced `others`"),
+                                .with_primary(*sp, "misplaced `others`")
+                                .with_note(
+                                    "LRM 9.3.3.1: the choice `others` is allowed only last and as its only choice",
+                                ),
                             ),
                         );
                         continue;
@@ -1386,7 +1438,10 @@ fn record_agg(
                                         format!("element `{}` is given twice", elems[i].0.text),
                                     )
                                     .with_primary(*sp, "given again here")
-                                    .with_secondary(first, "first given here"),
+                                    .with_secondary(first, "first given here")
+                                    .with_note(
+                                        "LRM 9.3.3.1: each element of the value is represented once and only once in the aggregate",
+                                    ),
                                 ),
                             );
                         } else {
@@ -1399,7 +1454,10 @@ fn record_agg(
                             diag::NOT_DECLARED,
                             format!("{} has no element `{}`", type_name(db, ty), id.text),
                         )
-                        .with_primary(*sp, "unknown element");
+                        .with_primary(*sp, "unknown element")
+                        .with_note(
+                            "LRM 9.3.3.2: the element names given as choices denote elements of the record type",
+                        );
                         if let Some(h) = crate::suggest::suggest(
                             id.key.as_str(),
                             "element",
@@ -1417,7 +1475,10 @@ fn record_agg(
                                 diag::AGG_RECORD_CHOICE,
                                 "a record aggregate choice must be an element name",
                             )
-                            .with_primary(e.span, "not an element name"),
+                            .with_primary(e.span, "not an element name")
+                            .with_note(
+                                "LRM 9.3.3.1: a choice that is a simple expression or a discrete range is only allowed in an array aggregate",
+                            ),
                         ),
                     );
                 }
@@ -1428,7 +1489,10 @@ fn record_agg(
                                 diag::AGG_RECORD_CHOICE,
                                 "a record aggregate choice must be an element name",
                             )
-                            .with_primary(a.span, "a range is not an element name"),
+                            .with_primary(a.span, "a range is not an element name")
+                            .with_note(
+                                "LRM 9.3.3.1: a choice that is a simple expression or a discrete range is only allowed in an array aggregate",
+                            ),
                         ),
                     );
                 }
@@ -1448,7 +1512,10 @@ fn record_agg(
                     diag::AGG_MISSING,
                     format!("missing value for {}", missing.join(", ")),
                 )
-                .with_primary(span, format!("in this aggregate of {}", type_name(db, ty))),
+                .with_primary(span, format!("in this aggregate of {}", type_name(db, ty)))
+                .with_note(
+                    "LRM 9.3.3.1: each element of the value is represented once and only once in the aggregate",
+                ),
             ),
         );
     }
@@ -1466,7 +1533,10 @@ fn record_agg(
                                 elems[first as usize].0.text, elems[bad as usize].0.text
                             ),
                         )
-                        .with_primary(assocs[ai].span, "one value for both"),
+                        .with_primary(assocs[ai].span, "one value for both")
+                        .with_note(
+                            "LRM 9.3.3.2: an association with several choices or `others` needs elements of the same type",
+                        ),
                     ),
                 );
             }
@@ -1596,7 +1666,10 @@ fn array_agg(
                     diag::AGG_OTHERS,
                     "`others` must be the last choice and stand alone",
                 )
-                .with_primary(sp, "misplaced `others`"),
+                .with_primary(sp, "misplaced `others`")
+                .with_note(
+                    "LRM 9.3.3.1: the choice `others` is allowed only last and as its only choice",
+                ),
             ));
         }
         if a.choices.is_empty() {
@@ -1627,7 +1700,10 @@ fn array_agg(
             .with_help(format!(
                 "qualify the aggregate with a constrained subtype of {}",
                 type_name(db, cx.ty)
-            )),
+            ))
+            .with_note(
+                "LRM 9.3.3.3: the index range of an array aggregate with `others` is determinable from the context",
+            ),
         ));
     }
 
@@ -1703,7 +1779,10 @@ fn array_agg(
                         type_name(db, elem_ty)
                     ),
                 )
-                .with_primary(db.exprs[*e].span, "an array value needs a range choice"),
+                .with_primary(db.exprs[*e].span, "an array value needs a range choice")
+                .with_note(
+                    "LRM 9.3.3.3: an expression of the aggregate's type needs a positional association or a discrete range choice",
+                ),
             ));
         }
     }
@@ -1776,7 +1855,10 @@ fn array_agg(
                                     rr.len()
                                 ),
                             )
-                            .with_primary(sp, "length differs from the choice"),
+                            .with_primary(sp, "length differs from the choice")
+                            .with_note(
+                                "LRM 9.3.3.3: it is an error if the length of the discrete range differs from the length of the value",
+                            ),
                         ));
                     }
                 }
@@ -1819,7 +1901,10 @@ fn array_agg(
                                 "the sub-aggregates of a multidimensional aggregate differ in length",
                             )
                             .with_primary(sp, format!("{} elements", lens[0]))
-                            .with_secondary(fsp, format!("{} elements", flens[0])),
+                            .with_secondary(fsp, format!("{} elements", flens[0]))
+                            .with_note(
+                                "LRM 9.3.3.3: all subaggregates of a multidimensional aggregate have the same bounds",
+                            ),
                         ));
                     }
                 }
@@ -1860,6 +1945,9 @@ fn array_agg(
                         .with_secondary(fsp, "first range choice with an array value")
                         .with_note(
                             "without a constrained context the aggregate takes the direction of these choices",
+                        )
+                        .with_note(
+                            "LRM 9.3.3.3: discrete range choices of an aggregate with array values have the same direction",
                         ),
                     ));
                 }
@@ -1928,7 +2016,10 @@ fn array_agg(
                             r.len()
                         ),
                     )
-                    .with_primary(span, format!("{n} elements")),
+                    .with_primary(span, format!("{n} elements"))
+                    .with_note(
+                        "LRM 4.2.2.2, 9.3.6, 14.3.5: a subtype conversion, or an association with a formal, needs a matching element for each element of the target or formal",
+                    ),
                 ));
             }
             (AggBounds::Context, r)
@@ -1957,7 +2048,10 @@ fn array_agg(
                                 .with_note(format!(
                                     "the index subtype is {}",
                                     show_interval(db, index_ty, ir.low(), ir.high())
-                                )),
+                                ))
+                                .with_note(
+                                    "LRM 9.3.3.3: the index values defined by the choices belong to the index subtype",
+                                ),
                             ));
                         }
                         _ => None,
@@ -2255,6 +2349,9 @@ fn resolve_value(
                 .with_primary(
                     value.span,
                     "neither the element type nor the aggregate type",
+                )
+                .with_note(
+                    "LRM 9.3.3.3: each association gives the element type, or the aggregate type if positional or under a discrete range",
                 ),
             ))
         }
@@ -2333,7 +2430,10 @@ fn string_row(db: &mut Db, cx: &ArrCx, s: &str, span: Span) -> Result<Built, Rep
                     type_name(db, elem_ty)
                 ),
             )
-            .with_primary(span, "string literal"),
+            .with_primary(span, "string literal")
+            .with_note(
+                "LRM 9.3.2: the type of a string literal is a one-dimensional array of a character type",
+            ),
         ));
     };
     let mut runs = Vec::new();
@@ -2349,7 +2449,10 @@ fn string_row(db: &mut Db, cx: &ArrCx, s: &str, span: Span) -> Result<Built, Rep
                         diag::CHAR_NOT_IN_TYPE,
                         format!("'{ch}' is not a literal of {}", type_name(db, elem_ty)),
                     )
-                    .with_primary(span, "in this string literal"),
+                    .with_primary(span, "in this string literal")
+                    .with_note(
+                        "LRM 9.3.2: the character literals in a string literal are visible at its place",
+                    ),
                 ));
             }
         }
@@ -2374,7 +2477,10 @@ fn string_row(db: &mut Db, cx: &ArrCx, s: &str, span: Span) -> Result<Built, Rep
                 diag::LENGTH_MISMATCH,
                 format!("the string has {n} elements, the dimension has {}", r.len()),
             )
-            .with_primary(span, format!("{n} elements")),
+            .with_primary(span, format!("{n} elements"))
+            .with_note(
+                "LRM 9.3.3.3: all subaggregates of a multidimensional aggregate have the same bounds",
+            ),
         ));
     }
     let value = r.map(|r| ConstValue::Array(array_const(db, elem_ty, vec![r], runs.clone())));

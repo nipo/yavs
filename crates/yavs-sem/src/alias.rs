@@ -149,7 +149,10 @@ impl Db {
                         self.display_profile(&sig.params, sig.ret, &self.profile_types(sig, cands))
                     ),
                 )
-                .with_primary(sig.span, "no declaration has this profile");
+                .with_primary(sig.span, "no declaration has this profile")
+                .with_note(
+                    "LRM 4.5.3, 6.6.3: a signature matches the parameter and result type profile of exactly one subprogram or literal",
+                );
                 d = self.label_candidates(d, cands, Some(sig));
                 Err(self.error(d))
             }
@@ -161,7 +164,10 @@ impl Db {
                         self.display_profile(&sig.params, sig.ret, &self.profile_types(sig, &hits))
                     ),
                 )
-                .with_primary(sig.span, "ambiguous signature");
+                .with_primary(sig.span, "ambiguous signature")
+                .with_note(
+                    "LRM 4.5.3, 6.6.3: a signature matches the parameter and result type profile of exactly one subprogram or literal",
+                );
                 let d = self.label_candidates(d, &hits, Some(sig));
                 Err(self.error(d))
             }
@@ -254,7 +260,10 @@ impl Db {
                         ),
                     )
                     .with_primary(ast.name.span, "names several declarations")
-                    .with_help("add a signature, e.g. `alias a is f [integer return bit];`");
+                    .with_help("add a signature, e.g. `alias a is f [integer return bit];`")
+                    .with_note(
+                        "LRM 6.6.3: a signature is required when the name denotes a subprogram or enumeration literal",
+                    );
                     let d = self.label_candidates(d, &distinct, None);
                     return Err(self.error(d));
                 }
@@ -444,6 +453,9 @@ impl Db {
                         "alias subtype is of type `{}`, but the aliased object is of type `{}`",
                         n[0], n[1]
                     ),
+                )
+                .with_note(
+                    "LRM 6.6.2: the base type of the name is the same as the base type of the subtype indication",
                 )
                 // The written indication: a bare type mark's subtype span is its declaration.
                 .with_primary(

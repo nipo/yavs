@@ -283,6 +283,9 @@ fn no_generic_actual(db: &Db, d: DeclId, at: Span) -> Box<Diagnostic> {
         .with_secondary(d.span, "generic type, subprogram or package declared here")
         .with_help(
             "associate it in the generic map of an instance; `-g` gives only generic constants",
+        )
+        .with_note(
+            "LRM 6.5.6.2: it is an error if no actual is given for a formal generic without a default",
         ),
     )
 }
@@ -466,7 +469,10 @@ pub fn load_bodies_in(
                 .with_help(format!(
                     "analyze the file with `package body {} is ... end;` into library `{}`",
                     name.text, db.libs[lib].name.text
-                )),
+                ))
+                .with_note(
+                    "LRM 4.3, 4.8: a subprogram declared in a package has its body, and a deferred constant its full declaration, in the package body",
+                ),
             );
         }
     }
@@ -753,7 +759,10 @@ impl Elab<'_> {
                         ),
                     )
                     .with_primary(at, "instantiated here")
-                    .with_secondary(self.db.units[entity].name.span, "entity declared here"),
+                    .with_secondary(self.db.units[entity].name.span, "entity declared here")
+                    .with_note(
+                        "LRM 7.3.3: it is an error if no architecture body is associated with the entity",
+                    ),
                 ));
             }
         };
@@ -1016,7 +1025,10 @@ impl Elab<'_> {
                             format!("give it one with `-g{}=VALUE`", decl.name)
                         } else {
                             "associate it in the generic map".to_string()
-                        }),
+                        })
+                        .with_note(
+                            "LRM 6.5.6.2: it is an error if no actual is given for a formal generic without a default",
+                        ),
                     ));
                 }
             },
@@ -1045,7 +1057,10 @@ impl Elab<'_> {
                                 codes::EVAL_FAILED,
                                 format!("actual does not fit a part of generic `{}`", decl.name),
                             )
-                            .with_primary(espan, "here"),
+                            .with_primary(espan, "here")
+                            .with_note(
+                                "LRM 14.3.3.2: the value of the actual belongs to the subtype of the formal generic",
+                            ),
                         )
                     })?;
                 }
@@ -1071,7 +1086,10 @@ impl Elab<'_> {
                     ),
                 )
                 .with_primary(at, "instantiated here")
-                .with_secondary(decl.span, "generic declared here"),
+                .with_secondary(decl.span, "generic declared here")
+                .with_note(
+                    "LRM 14.3.3.2: the value of the actual belongs to the subtype of the formal generic",
+                ),
             ));
         }
         // Scalar generic values must lie in the generic's subtype (LRM 6.5.6.2).
@@ -1097,7 +1115,10 @@ impl Elab<'_> {
                         ),
                     )
                     .with_primary(at, "instantiated here")
-                    .with_secondary(decl.span, "generic declared here"),
+                    .with_secondary(decl.span, "generic declared here")
+                    .with_note(
+                        "LRM 14.3.3.2: the value of the actual belongs to the subtype of the formal generic",
+                    ),
                 ));
             }
         }
@@ -1147,13 +1168,19 @@ impl Elab<'_> {
                             codes::EVAL_FAILED,
                             format!("the time of `'{}` is negative", attr.name()),
                         )
-                        .with_primary(self.db.exprs[a].span, "negative"),
+                        .with_primary(self.db.exprs[a].span, "negative")
+                        .with_note(
+                            "LRM 16.2.4: the parameter of this attribute evaluates to a nonnegative TIME",
+                        ),
                     ));
                 }
                 yavs_kernel::Time::from_vhdl(fs).map_err(|_| {
                     Box::new(
                         Diagnostic::error(codes::EVAL_FAILED, "time out of range")
-                            .with_primary(span, "here"),
+                            .with_primary(span, "here")
+                            .with_note(
+                                "LRM 16.2.4: the parameter of this attribute evaluates to a nonnegative TIME",
+                            ),
                     )
                 })?
             }
@@ -1258,7 +1285,10 @@ impl Elab<'_> {
                         codes::EVAL_FAILED,
                         "disconnection time is negative or out of range",
                     )
-                    .with_primary(db.exprs[e].span, "here"),
+                    .with_primary(db.exprs[e].span, "here")
+                    .with_note(
+                        "LRM 7.4: the time expression of a disconnection specification evaluates to a non-negative value",
+                    ),
                 )
             })?;
         }
@@ -1897,7 +1927,10 @@ impl Elab<'_> {
                     )
                     .with_primary(at, "instantiated here")
                     .with_secondary(span, "port declared here")
-                    .with_help("associate it with a signal, or give it a constrained subtype"),
+                    .with_help("associate it with a signal, or give it a constrained subtype")
+                    .with_note(
+                        "LRM 6.5.6.3: an unassociated port of mode `in` needs a default, and one of another mode a constrained type",
+                    ),
                 ));
             };
             self.m
@@ -4813,7 +4846,10 @@ impl Elab<'_> {
                             .with_primary(span, "declared here with an unresolved subtype")
                             .with_note(describe(v[i].1))
                             .with_note(describe(v[j].1))
-                            .with_help("drive it from one process, or use a resolved subtype such as `std_logic`"),
+                            .with_help("drive it from one process, or use a resolved subtype such as `std_logic`")
+                            .with_note(
+                                "LRM 6.4.2.3: it is an error if a signal has multiple sources and is not resolved",
+                            ),
                         );
                         return;
                     }
@@ -4927,7 +4963,10 @@ impl Model {
         let vals = leaf_values(db, shape, Some(v)).map_err(|m| {
             Box::new(
                 Diagnostic::error(codes::EVAL_FAILED, format!("actual does not fit: {m}"))
-                    .with_primary(at, "here"),
+                    .with_primary(at, "here")
+                    .with_note(
+                        "LRM 14.3.5: the value of the actual belongs to the subtype of the formal port, a composite one with a matching element for each element",
+                    ),
             )
         })?;
         for (&(l, r), part) in parts.iter().zip(vals) {
@@ -4975,7 +5014,10 @@ impl Model {
                         db.decls[decl].name
                     ),
                 )
-                .with_primary(at, "here"),
+                .with_primary(at, "here")
+                .with_note(
+                    "LRM 14.4.2.5: the initial value belongs to the subtype of the object, a composite one after an implicit subtype conversion",
+                ),
             )
         })?;
         // Composites resolved as a whole, the signal or its outermost resolved subelements:
@@ -5968,7 +6010,10 @@ impl Model {
                     codes::PORT_MISMATCH,
                     format!("the actual has {} elements, the formal {}", n(al), n(fl)),
                 )
-                .with_primary(span, "associated here"),
+                .with_primary(span, "associated here")
+                .with_note(
+                    "LRM 14.3.5: the actual contains a matching element for each element of the formal",
+                ),
             ));
         }
         Ok(())

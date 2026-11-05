@@ -4,5 +4,6 @@ error[E1100]: `rec` has no element `valu`
 10 |   constant c : rec := (valu => 1, valid => true);
    |                        ^^^^ unknown element
    |
+   = note: LRM 9.3.3.2: the element names given as choices denote elements of the record type
    = help: an element with a similar name exists: `value`
 

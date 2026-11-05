@@ -182,7 +182,8 @@ impl Db {
                     diag::NOT_AN_INSTANCE,
                     "a configuration declaration needs a block configuration",
                 )
-                .with_primary(c.name.span, "no `for <architecture> ... end for;`"),
+                .with_primary(c.name.span, "no `for <architecture> ... end for;`")
+                .with_note("LRM 3.4.1: a configuration declaration contains a block configuration"),
             ));
         };
         let config_regions = [self.units[unit].context, scope];
@@ -238,7 +239,10 @@ impl Db {
                     ),
                 )
                 .with_primary(n.span, "cannot be instantiated")
-                .with_secondary(self.decls[d].span, "declared here");
+                .with_secondary(self.decls[d].span, "declared here")
+                .with_note(
+                    "LRM 11.7.1: the instantiated unit names a component, an entity or a configuration",
+                );
                 if help {
                     diag = diag.with_help(
                                 "instantiate an entity with `entity lib.name` and a configuration with `configuration lib.name`",
@@ -277,7 +281,8 @@ impl Db {
                     diag::NOT_INSTANTIABLE,
                     format!("`{}` is not an entity", self.decls[d].name),
                 )
-                .with_primary(n.span, "expected an entity"),
+                .with_primary(n.span, "expected an entity")
+                .with_note("LRM 11.7.1: after `entity` comes the name of an entity declaration"),
             )),
         }
     }
@@ -293,7 +298,10 @@ impl Db {
                     diag::NOT_INSTANTIABLE,
                     format!("`{}` is not a configuration", self.decls[d].name),
                 )
-                .with_primary(n.span, "expected a configuration"),
+                .with_primary(n.span, "expected a configuration")
+                .with_note(
+                    "LRM 11.7.1: after `configuration` comes the name of a configuration declaration",
+                ),
             )),
         }
     }
@@ -578,7 +586,10 @@ impl Db {
                             diag::FORMAL_TWICE,
                             "positional association after named association",
                         )
-                        .with_primary(a.span, "positional actual"),
+                        .with_primary(a.span, "positional actual")
+                        .with_note(
+                            "LRM 6.5.7.1: all positional associations come first, then only named ones",
+                        ),
                     )));
                     continue;
                 }
@@ -625,7 +636,10 @@ impl Db {
                             self.decls[formals[pos]].name
                         ),
                     )
-                    .with_primary(f.span, "associated again here"),
+                    .with_primary(f.span, "associated again here")
+                    .with_note(
+                        "LRM 6.5.7.1: every scalar subelement of a formal is associated exactly once",
+                    ),
                 )));
             }
         }
@@ -686,7 +700,10 @@ impl Db {
                     formals.iter().filter(|&&f| !self.hidden_type(f)).count()
                 ),
             )
-            .with_primary(span, "no formal for this actual"),
+            .with_primary(span, "no formal for this actual")
+            .with_note(
+                "LRM 6.5.7.1: a positional actual corresponds to the interface element at the same position",
+            ),
         )
     }
 
@@ -770,7 +787,8 @@ impl Db {
             diag::NOT_DECLARED,
             format!("{owner} has no {what} `{name}`"),
         )
-        .with_primary(span, format!("not a {what} of {owner}"));
+        .with_primary(span, format!("not a {what} of {owner}"))
+        .with_note("LRM 6.5.7.1: a formal designator names a formal of this interface list");
         let found = root.map_or_else(Vec::new, |r| {
             crate::suggest::similar(
                 r.key.as_str(),
@@ -824,6 +842,9 @@ impl Db {
                 .with_primary(
                     conv.span,
                     "expected a function of one parameter of the formal's type",
+                )
+                .with_note(
+                    "LRM 6.5.7.1: the function name in a formal part denotes a function from the formal's type to the actual's type",
                 ),
             )),
         }
@@ -867,7 +888,7 @@ impl Db {
             format!("cannot convert `{}` to `{}`", n[0], n[1]),
         )
         .with_primary(span, "these types are not closely related")
-        .with_note("9.3.6: a type mark as formal part is a type conversion of the formal");
+        .with_note("LRM 9.3.6: a type mark as formal part is a type conversion of the formal");
         let d = self.same_name_note(d, &[from, to]);
         Err(self.error(d))
     }
@@ -995,7 +1016,10 @@ impl Db {
                     )
                     .with_primary(at, format!("`{name}` is not associated"))
                     .with_secondary(self.decls[f].span, "declared here")
-                    .with_help(format!("add `generic map ({name} => ...)`")),
+                    .with_help(format!("add `generic map ({name} => ...)`"))
+                    .with_note(
+                        "LRM 6.5.6.2: it is an error if no actual is given for a formal generic without a default",
+                    ),
                 ));
             }
         };
@@ -1013,7 +1037,10 @@ impl Db {
                 .with_secondary(self.decls[f].span, "declared here without a default")
                 .with_help(format!(
                     "associate it (`{name} => ...`) or give the port a default"
-                )),
+                ))
+                .with_note(
+                    "LRM 6.5.6.3: a port of mode `in` needs an actual or a default expression",
+                ),
             )),
             (ObjRole::Port, _) if o.class == ObjClass::Variable => {
                 Err(self.variable_port_open(f, at, "is not associated"))
@@ -1026,7 +1053,10 @@ impl Db {
                 )
                 .with_primary(at, format!("`{name}` is not associated"))
                 .with_secondary(self.decls[f].span, "declared here without a default")
-                .with_help(format!("add `generic map ({name} => ...)`")),
+                .with_help(format!("add `generic map ({name} => ...)`"))
+                .with_note(
+                    "LRM 6.5.6.2: it is an error if no actual is given for a formal generic without a default",
+                ),
             )),
         }
     }
@@ -1062,7 +1092,10 @@ impl Db {
                 format!("{what} is not an expression and cannot be the actual of an object"),
             )
             .with_primary(span, "not an expression")
-            .with_secondary(at, "associated with this formal"),
+            .with_secondary(at, "associated with this formal")
+            .with_note(
+                "LRM 6.5.7.2: only a formal generic type takes a subtype indication as its actual",
+            ),
         )
     }
 
@@ -1122,7 +1155,10 @@ impl Db {
                                 "port `{name}` of mode `in` without a default cannot be `open`"
                             ),
                         )
-                        .with_primary(*sp, "left open here"),
+                        .with_primary(*sp, "left open here")
+                        .with_note(
+                            "LRM 6.5.6.3: a port of mode `in` needs an actual or a default expression",
+                        ),
                     ));
                 }
                 if role != ObjRole::Port && !has_default {
@@ -1132,7 +1168,10 @@ impl Db {
                             diag::MISSING_GENERIC,
                             format!("generic `{name}` has no default, so it cannot be `open`"),
                         )
-                        .with_primary(*sp, "left open here"),
+                        .with_primary(*sp, "left open here")
+                        .with_note(
+                            "LRM 6.5.6.2: it is an error if no actual is given for a formal generic without a default",
+                        ),
                     ));
                 }
                 return Ok(if role == ObjRole::Port {
@@ -1169,7 +1208,10 @@ impl Db {
                     format!("a conversion of formal `{name}` needs a fully constrained formal or conversion"),
                 )
                 .with_primary(fspan, format!("`{name}` is of the unconstrained subtype `{}`", self.subtype_name(st)))
-                .with_help("use a constrained subtype as the type mark or as the function's parameter, or constrain the port"),
+                .with_help("use a constrained subtype as the type mark or as the function's parameter, or constrain the port")
+                .with_note(
+                    "LRM 5.3.2.2: the conversion in the formal part defines a constraint for the index range of an unconstrained formal",
+                ),
             ));
         }
         // With a formal conversion the actual has the conversion's result type, unless the
@@ -1249,7 +1291,10 @@ impl Db {
                     format!("the conversion of the actual of unconstrained formal `{name}` must give its bounds"),
                 )
                 .with_primary(self.exprs[id].span, format!("of the unconstrained subtype `{}`", self.subtype_name(self.exprs[id].subtype)))
-                .with_help("use a constrained subtype as the type mark, or a function with a constrained result subtype"),
+                .with_help("use a constrained subtype as the type mark, or a function with a constrained result subtype")
+                .with_note(
+                    "LRM 5.3.2.2: the conversion in the actual part defines a constraint for the index range of an unconstrained formal",
+                ),
             ));
         }
         // An `inout` port converted on the actual side only would send the formal's value
@@ -1269,6 +1314,9 @@ impl Db {
                 )
                 .with_help(
                     "convert both ways, `conv(formal) => conv(actual)`, or convert the formal only",
+                )
+                .with_note(
+                    "LRM 6.5.7.1: for `inout`, the formal after its conversion and the actual after its conversion each have the other's type",
                 ),
             ));
         }
@@ -1283,7 +1331,10 @@ impl Db {
                     format!("`inout` port `{name}` of type `{ftn}` is converted the way out only, but the actual is of type `{atn}`"),
                 )
                 .with_primary(self.exprs[id].span, format!("expected type `{ftn}` to pass in unchanged"))
-                .with_help("convert the actual too, `conv(formal) => conv(actual)`");
+                .with_help("convert the actual too, `conv(formal) => conv(actual)`")
+                .with_note(
+                    "LRM 6.5.7.1: for `inout`, the formal after its conversion and the actual after its conversion each have the other's type",
+                );
                 let d = self.same_name_note(d, &[ft, at]);
                 return Err(self.error(d));
             }
@@ -1302,7 +1353,10 @@ impl Db {
                         format!("no conversion of formal `{name}` gives the actual's type `{tn}`"),
                     )
                     .with_primary(fspan, format!("expected a conversion to `{tn}`"))
-                    .with_help("use a function of one parameter of the formal's type, or a type conversion"),
+                    .with_help("use a function of one parameter of the formal's type, or a type conversion")
+                    .with_note(
+                        "LRM 6.5.7.1: the formal after its conversion has the type of the actual",
+                    ),
                 ));
             }
             return Ok(Actual::Converted {
@@ -1319,7 +1373,10 @@ impl Db {
                     diag::CLASS_MISUSE,
                     "an `inertial` actual (an expression) is only allowed for an `in` port",
                 )
-                .with_primary(self.exprs[id].span, "not allowed here"),
+                .with_primary(self.exprs[id].span, "not allowed here")
+                .with_note(
+                    "LRM 6.5.6.3: only a port of mode `in` may be associated with an expression",
+                ),
             ));
         }
         self.check_written_actual(f, mode, id)?;
@@ -1502,7 +1559,10 @@ impl Db {
                 .with_primary(self.exprs[id].span, "not a signal")
                 .with_help(format!(
                     "a port of mode `{m}` needs a signal (or `open`) as its actual"
-                )),
+                ))
+                .with_note(
+                    "LRM 6.5.6.3: only a port of mode `in` may be associated with an expression",
+                ),
             ));
         }
         Ok(())
@@ -1530,7 +1590,10 @@ impl Db {
                         diag::NOT_A_TYPE,
                         "the actual of a generic type must be a subtype",
                     )
-                    .with_primary(at, "not a subtype indication"),
+                    .with_primary(at, "not a subtype indication")
+                    .with_note(
+                        "LRM 6.5.7.2: the actual of a formal generic type is a subtype indication",
+                    ),
                 ));
             }
         };
@@ -1562,7 +1625,10 @@ impl Db {
                     )
                     .with_primary(at, format!("`{name}` is not associated"))
                     .with_secondary(self.decls[f].span, "declared here without a default")
-                    .with_help(format!("add `generic map ({name} => ...)`")),
+                    .with_help(format!("add `generic map ({name} => ...)`"))
+                    .with_note(
+                        "LRM 6.5.6.2: it is an error if no actual is given for a formal generic without a default",
+                    ),
                 ));
             }
         };
@@ -1588,7 +1654,10 @@ impl Db {
                     diag::TYPE_MISMATCH,
                     "the actual of a generic subprogram must be a subprogram name",
                 )
-                .with_primary(at, "not a subprogram name"),
+                .with_primary(at, "not a subprogram name")
+                .with_note(
+                    "LRM 6.5.7.2: the actual of a formal generic subprogram names a subprogram whose profile conforms to the formal's",
+                ),
             ));
         };
         let cands = match self.classify(scope, n) {
@@ -1659,6 +1728,9 @@ impl Db {
                             "no single visible `{text}` matches generic subprogram `{}`",
                             self.decls[f].name
                         ),
+                    )
+                    .with_note(
+                        "LRM 6.5.7.2: the actual of a formal generic subprogram names a subprogram whose profile conforms to the formal's",
                     ),
                     None => Diagnostic::error(
                         diag::GENERIC_DEFAULT,
@@ -1666,6 +1738,9 @@ impl Db {
                             "no single visible subprogram for the default of generic subprogram `{}`",
                             self.decls[f].name
                         ),
+                    )
+                    .with_note(
+                        "LRM 6.5.6.2: a box default needs a directly visible subprogram of the same designator with a conforming profile",
                     ),
                 }
                 .with_primary(
@@ -1744,6 +1819,9 @@ impl Db {
                         .with_primary(
                             span,
                             "expected `formal(index)`, `formal(range)` or `formal.element`",
+                        )
+                        .with_note(
+                            "LRM 6.5.7.1: a formal is an explicitly declared interface object or a member of one",
                         ),
                 )));
                 continue;
@@ -1761,7 +1839,10 @@ impl Db {
                         diag::NOT_STATIC,
                         "a formal sub-element must be a locally static name",
                     )
-                    .with_primary(span, "not locally static"),
+                    .with_primary(span, "not locally static")
+                    .with_note(
+                        "LRM 6.5.7.1: an association of a slice or subelement identifies the formal with a locally static name",
+                    ),
                 )));
                 continue;
             }
@@ -1796,7 +1877,10 @@ impl Db {
                         diag::CLASS_MISUSE,
                         "an `inertial` actual (an expression) is only allowed for an `in` port",
                     )
-                    .with_primary(e.span, "not allowed here"),
+                    .with_primary(e.span, "not allowed here")
+                    .with_note(
+                        "LRM 6.5.6.3: only a port of mode `in` may be associated with an expression",
+                    ),
                 )));
                 continue;
             }
@@ -1863,7 +1947,10 @@ impl Db {
                             format!("this conversion of a part of an `inout` formal does not fit the actual's type `{tn}`"),
                         )
                         .with_primary(span, format!("expected type `{tn}`"))
-                        .with_help("convert both ways: `conv(formal(part)) => conv(actual)`"),
+                        .with_help("convert both ways: `conv(formal(part)) => conv(actual)`")
+                        .with_note(
+                            "LRM 6.5.7.1: for `inout`, the formal after its conversion and the actual after its conversion each have the other's type",
+                        ),
                     )));
                     continue;
                 }
@@ -1984,7 +2071,10 @@ impl Db {
                             "gap in the individually associated formal",
                         )
                         .with_primary(sp, "elements of the formal are skipped before this one")
-                        .with_note(what),
+                        .with_note(what)
+                        .with_note(
+                            "LRM 6.5.7.1: every scalar subelement of a formal is associated exactly once, in a contiguous sequence",
+                        ),
                     ));
                 }
                 if lo < n && whole {
@@ -1996,7 +2086,10 @@ impl Db {
                         .with_primary(sp, "overlaps an earlier association")
                         .with_note(format!(
                             "index {lo} of the formal is associated more than once"
-                        )),
+                        ))
+                        .with_note(
+                            "LRM 6.5.7.1: every scalar subelement of a formal is associated exactly once, in a contiguous sequence",
+                        ),
                     ));
                 }
             }
@@ -2055,7 +2148,8 @@ impl Db {
                     diag::NOT_INSTANTIABLE,
                     format!("`{}` is not a component", self.decls[d].name),
                 )
-                .with_primary(s.component.span, "expected a component name"),
+                .with_primary(s.component.span, "expected a component name")
+                .with_note("LRM 7.3.1: a component specification names a component"),
             )),
         }
     }
@@ -2132,7 +2226,10 @@ impl Db {
                                 ),
                             )
                             .with_primary(l.span, format!("an instance of `{cn}`"))
-                            .with_secondary(self.stmts[s].span, "instantiated here"),
+                            .with_secondary(self.stmts[s].span, "instantiated here")
+                            .with_note(
+                                "LRM 3.4.3, 7.3.1: the labeled instances are instances of the component named in the component specification",
+                            ),
                         )));
                     }
                 }
@@ -2142,7 +2239,10 @@ impl Db {
                             diag::NOT_AN_INSTANCE,
                             format!("`{}` is not a component instance in `{region}`", l.text),
                         )
-                        .with_primary(l.span, "no component instance with this label"),
+                        .with_primary(l.span, "no component instance with this label")
+                        .with_note(
+                            "LRM 3.4.3, 7.3.1: the labels are of component instances immediately within the corresponding block or declarative part",
+                        ),
                     )));
                 }
             }
@@ -2205,7 +2305,10 @@ impl Db {
                             diag::BINDING_MISMATCH,
                             "`use open` takes no generic or port map",
                         )
-                        .with_primary(b.span, "maps given here"),
+                        .with_primary(b.span, "maps given here")
+                        .with_note(
+                            "LRM 7.3.2.2: a binding indication with the entity aspect `open` has no generic map or port map aspect",
+                        ),
                     ));
                 }
                 return Err(self.error(
@@ -2325,7 +2428,10 @@ impl Db {
                     Diagnostic::error(diag::BINDING_MISMATCH, msg)
                         .with_primary(at, "bound here")
                         .with_secondary(self.decls[l].span, format!("component {what}"))
-                        .with_help(format!("map it explicitly with a `{what} map`")),
+                        .with_help(format!("map it explicitly with a `{what} map`"))
+                        .with_note(
+                            "LRM 7.3.3: a default binding associates each local generic or port with a formal of the same name and an appropriate type",
+                        ),
                 )));
             }
         }
@@ -2347,7 +2453,10 @@ impl Db {
                     )
                     .with_primary(at, "bound here")
                     .with_secondary(self.decls[f].span, "entity port of mode `in` without a default")
-                    .with_help("map it explicitly with a `port map`"),
+                    .with_help("map it explicitly with a `port map`")
+                    .with_note(
+                        "LRM 6.5.6.3, 7.3.3: remaining formals are associated with `open`, which a port of mode `in` without a default does not allow",
+                    ),
                 )));
             }
         }
@@ -2438,7 +2547,8 @@ impl Db {
                     diag::NOT_AN_INSTANCE,
                     "expected the name of an architecture",
                 )
-                .with_primary(b.spec.span, "not an architecture name"),
+                .with_primary(b.spec.span, "not an architecture name")
+                .with_note("LRM 3.4.2: the block specification here is an architecture name"),
             ));
         };
         let lib = self.units[entity].lib;
@@ -2453,7 +2563,10 @@ impl Db {
                         a.text, self.units[entity].name.text
                     ),
                 )
-                .with_primary(a.span, "no architecture with this name"),
+                .with_primary(a.span, "no architecture with this name")
+                .with_note(
+                    "LRM 3.4.2: the block specification denotes an architecture of the configured entity",
+                ),
             ));
         }
         let arch = self.load_dep(lib, key, Some(a.span))?;
@@ -2598,7 +2711,10 @@ impl Db {
                                 diag::TYPE_MISMATCH,
                                 format!("expected a range of `{}`, found one of `{}`", n[0], n[1]),
                             )
-                            .with_primary(si.span, "wrong type for this generate parameter");
+                            .with_primary(si.span, "wrong type for this generate parameter")
+                            .with_note(
+                                "LRM 3.4.2: the discrete range of a generate specification has the type of the generate parameter's discrete range",
+                            );
                             let d = self.same_name_note(d, &[w, t]);
                             return Err(self.error(d));
                         }
@@ -2694,7 +2810,10 @@ impl Db {
                 diag::NOT_AN_INSTANCE,
                 format!("not a block or generate statement in `{region}`"),
             )
-            .with_primary(span, "expected the label of a block or generate statement"),
+            .with_primary(span, "expected the label of a block or generate statement")
+            .with_note(
+                "LRM 3.4.2: the label denotes a block or generate statement immediately within the enclosing block",
+            ),
         )
     }
 
@@ -2751,7 +2870,10 @@ impl Db {
                                 format!("{what} is already bound by a configuration specification"),
                             )
                             .with_primary(b.span, "bound to a different entity aspect here")
-                            .with_help("an incremental binding may repeat the entity aspect of the primary binding or add generic and port maps: drop the entity aspect or make it the same"),
+                            .with_help("an incremental binding may repeat the entity aspect of the primary binding or add generic and port maps: drop the entity aspect or make it the same")
+                            .with_note(
+                                "LRM 7.3.1: an already bound label takes only an incremental binding indication",
+                            ),
                         ));
                     }
                 }
@@ -2783,7 +2905,10 @@ impl Db {
                             format!("no entity is bound to component `{cn}`, so it has no architecture to configure"),
                         )
                         .with_primary(bc.span, "block configuration of an unbound instance")
-                        .with_help(format!("bind it with `use entity lib.{cn}` or analyze an entity `{cn}`")),
+                        .with_help(format!("bind it with `use entity lib.{cn}` or analyze an entity `{cn}`"))
+                        .with_note(
+                            "LRM 3.4.2: a block configuration in a component configuration needs the components fully bound",
+                        ),
                     ));
                 };
                 Some(self.arch_block_config(&[scope], e, bc)?)

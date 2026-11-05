@@ -4,6 +4,7 @@ error[E0009]: character `→` (U+2192) is not in ISO-8859-1
 4 |   constant bad : string := "a → b";
   |                               ^ in this string literal
   |
+  = note: LRM 15.2: the text holds only graphic characters and format effectors of the ISO eight-bit character set
   = help: VHDL characters are ISO-8859-1 and have no escapes: use only Latin-1 characters here, or pass `--encoding=latin1` to read each byte as one character
 
 error: aborting due to 1 previous error

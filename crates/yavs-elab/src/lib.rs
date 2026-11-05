@@ -124,6 +124,9 @@ pub fn check_time_resolution(db: &Db, limit: yavs_kernel::Unit) -> Option<Diagno
     .with_primary(
         first.span,
         format!("unit `{}` is below the resolution limit", first.unit),
+    )
+    .with_note(
+        "LRM 5.2.4.2: it is an error if a unit of type TIME below the resolution limit appears in the design hierarchy",
     );
     for u in &uses[1..uses.len().min(LISTED)] {
         d = d.with_secondary(u.span, format!("unit `{}`", u.unit));

@@ -7,5 +7,6 @@ error[E1100]: entity `leaf` has no generic `dpth`
 14 |   u : entity work.leaf generic map (dpth => 3);
    |                                     ^^^^ not a generic of entity `leaf`
    |
+   = note: LRM 6.5.7.1: a formal designator names a formal of this interface list
    = help: a generic with a similar name exists: `depth`
 

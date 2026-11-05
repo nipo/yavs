@@ -1988,7 +1988,10 @@ impl Db {
                 "the driven part has the unresolved type `{}`, so only one process may drive it",
                 ty.name.text
             ))
-            .with_help("drive it from one process, or use a resolved subtype such as `std_logic`");
+            .with_help("drive it from one process, or use a resolved subtype such as `std_logic`")
+            .with_note(
+                "LRM 6.4.2.3: it is an error if a signal has multiple sources and is not resolved",
+            );
             self.report(d);
         }
         reported

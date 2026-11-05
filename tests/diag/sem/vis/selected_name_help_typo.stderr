@@ -7,5 +7,6 @@ error[E1100]: `widht` is not declared in `pkg`
 9 |   constant w : integer := work.pkg.widht;
   |                                    ^^^^^ not found
   |
+  = note: LRM 8.3: the suffix of an expanded name is declared immediately within the package, or is a primary unit of the library, its prefix denotes
   = help: a constant with a similar name exists: `width`
 

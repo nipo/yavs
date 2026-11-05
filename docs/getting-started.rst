@@ -275,6 +275,7 @@ An error in the VHDL
     7 |   count <= cnt + 1;
       |            ^^^ not found in this scope
       |
+      = note: LRM 12.3: without a visible declaration of this identifier, the occurrence is not legal here
       = help: a signal with a similar name exists: `count`
 
     error: aborting due to 1 previous error

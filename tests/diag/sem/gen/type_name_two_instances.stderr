@@ -3,4 +3,6 @@ error[E1300]: expected `work.i2.rec`, found `work.i1.rec`
    |
 13 |   constant c2 : i2.rec := c1;
    |                           ^^ expected `work.i2.rec`
+   |
+   = note: LRM 12.5: the occurrence is legal only with exactly one interpretation in its complete context, given the type it requires
 

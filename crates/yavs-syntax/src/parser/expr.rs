@@ -202,7 +202,10 @@ impl Parser<'_> {
                 self.report(
                     Diagnostic::error(codes::SYNTAX, "mixed logical operators need parentheses")
                         .with_primary(op_span, "")
-                        .with_help("add parentheses to show the order of evaluation"),
+                        .with_help("add parentheses to show the order of evaluation")
+                        .with_note(
+                            "LRM 9.1: a logical expression repeats one operator, and `nand` and `nor` take two relations only",
+                        ),
                 );
             }
             first = Some(op);

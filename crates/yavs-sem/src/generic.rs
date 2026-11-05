@@ -408,7 +408,10 @@ impl Db {
             .with_secondary(self.decls[d].span, "declared here")
             .with_help(format!(
                 "declare an instance: `{what} i is new {name} generic map (...);`"
-            )),
+            ))
+            .with_note(
+                "LRM 4.2.1, 4.7: an uninstantiated subprogram is not called, and the items of an uninstantiated package are not visible outside it",
+            ),
         )
     }
 
@@ -568,7 +571,10 @@ impl Db {
                             "a formal generic subprogram has no generic list or generic map",
                         )
                         .with_primary(s.spec.span, "generic header not allowed here")
-                        .with_help("write only the profile: `function f (x : t) return t`"),
+                        .with_help("write only the profile: `function f (x : t) return t`")
+                        .with_note(
+                            "LRM 6.5.4: an interface subprogram specification has only a designator, parameters and, for a function, a return type",
+                        ),
                     ));
                 }
                 let d = self.subprogram_spec(scope, &s.spec)?;
@@ -994,7 +1000,10 @@ impl Db {
                         format!("`{name}` is not a generic package"),
                     )
                     .with_primary(last_span(n), "expected an uninstantiated generic package")
-                    .with_secondary(self.decls[d].span, "declared here"),
+                    .with_secondary(self.decls[d].span, "declared here")
+                    .with_note(
+                        "LRM 4.9: the name in a package instantiation denotes an uninstantiated package",
+                    ),
                 ))
             }
         }
@@ -1165,7 +1174,10 @@ impl Db {
                             last_name(name)
                         ),
                     )
-                    .with_primary(x.subprogram.span, "expected an uninstantiated subprogram"),
+                    .with_primary(x.subprogram.span, "expected an uninstantiated subprogram")
+                    .with_note(
+                        "LRM 4.4: the name in a subprogram instantiation denotes an uninstantiated subprogram of the same kind",
+                    ),
                 ));
             }
             many => {
@@ -1174,7 +1186,10 @@ impl Db {
                     "several generic subprograms match the instantiated name",
                 )
                 .with_primary(x.subprogram.span, "ambiguous")
-                .with_help("add a signature: `is new g [t return t]`");
+                .with_help("add a signature: `is new g [t return t]`")
+                .with_note(
+                    "LRM 4.4: a signature matches the profile of exactly one subprogram denoted by the name",
+                );
                 for &c in many {
                     d = d.with_secondary(self.decls[c].span, "candidate");
                 }
@@ -1772,7 +1787,10 @@ impl Db {
                                 diag::FORMAL_TWICE,
                                 format!("{what} has only {} generics", formals.len()),
                             )
-                            .with_primary(a.span, "no generic left for this actual"),
+                            .with_primary(a.span, "no generic left for this actual")
+                            .with_note(
+                                "LRM 6.5.7.1: a positional actual corresponds to the interface element at the same position",
+                            ),
                         );
                         continue;
                     }
@@ -1820,7 +1838,10 @@ impl Db {
                             diag::NOT_DECLARED,
                             format!("{what} has no generic `{key}`"),
                         )
-                        .with_primary(span, "no such generic");
+                        .with_primary(span, "no such generic")
+                        .with_note(
+                            "LRM 6.5.7.1: a formal designator names a formal of this interface list",
+                        );
                         let found = crate::suggest::similar(
                             key.as_str(),
                             formals.iter().filter_map(|&f| self.candidate(f)),
@@ -1842,7 +1863,10 @@ impl Db {
                         format!("generic `{name}` is associated twice"),
                     )
                     .with_primary(span, "associated again here")
-                    .with_secondary(out[i].map_or(a.span, |p| p.span), "first associated here"),
+                    .with_secondary(out[i].map_or(a.span, |p| p.span), "first associated here")
+                    .with_note(
+                        "LRM 6.5.7.2: a formal generic is not associated with more than one actual",
+                    ),
                 );
                 continue;
             }
@@ -1972,7 +1996,10 @@ impl Db {
                 format!("add `{name} => ...` to the generic map, naming an instance of the package (6.5.7.2; a generic map on the formal gives no default)")
             } else {
                 format!("add `{name} => ...` to the generic map")
-            }),
+            })
+                .with_note(
+                    "LRM 6.5.6.2: it is an error if no actual is given for a formal generic without a default",
+                ),
         )
     }
 
@@ -2036,7 +2063,10 @@ impl Db {
                         diag::TYPE_MISMATCH,
                         "the actual of a generic constant must be an expression",
                     )
-                    .with_primary(actual_span(other), "not an expression"),
+                    .with_primary(actual_span(other), "not an expression")
+                    .with_note(
+                        "LRM 6.5.7.2: the actual of a formal generic constant is an expression or `open`",
+                    ),
                 ));
             }
         };
@@ -2099,7 +2129,10 @@ impl Db {
                         diag::NOT_A_TYPE,
                         "the actual of a generic type must be a subtype",
                     )
-                    .with_primary(e.span, "not a type mark"),
+                    .with_primary(e.span, "not a type mark")
+                    .with_note(
+                        "LRM 6.5.7.2: the actual of a formal generic type is a subtype indication",
+                    ),
                 ));
             }
             other => {
@@ -2108,7 +2141,10 @@ impl Db {
                         diag::NOT_A_TYPE,
                         "the actual of a generic type must be a subtype",
                     )
-                    .with_primary(actual_span(other), "not a subtype indication"),
+                    .with_primary(actual_span(other), "not a subtype indication")
+                    .with_note(
+                        "LRM 6.5.7.2: the actual of a formal generic type is a subtype indication",
+                    ),
                 ));
             }
         };
@@ -2549,7 +2585,10 @@ impl Db {
                             diag::TYPE_MISMATCH,
                             "the actual of a generic subprogram must be a subprogram name",
                         )
-                        .with_primary(e.span, "not a subprogram name"),
+                        .with_primary(e.span, "not a subprogram name")
+                        .with_note(
+                            "LRM 6.5.7.2: the actual of a formal generic subprogram names a subprogram whose profile conforms to the formal's",
+                        ),
                     ));
                 };
                 let (n, sig) = match &n.kind {
@@ -2594,7 +2633,10 @@ impl Db {
                             ),
                         )
                         .with_primary(e.span, "profile does not conform")
-                        .with_secondary(self.decls[f].span, "generic subprogram declared here");
+                        .with_secondary(self.decls[f].span, "generic subprogram declared here")
+                        .with_note(
+                            "LRM 6.5.7.2: the actual of a formal generic subprogram names a subprogram whose profile conforms to the formal's",
+                        );
                         if let Some(&c) = cands.first()
                             && self.profile(c).is_some()
                         {
@@ -2608,7 +2650,10 @@ impl Db {
                             format!("several subprograms match generic subprogram `{fname}`"),
                         )
                         .with_primary(e.span, "ambiguous")
-                        .with_help("add a signature to the actual");
+                        .with_help("add a signature to the actual")
+                        .with_note(
+                            "LRM 6.5.7.2: the actual of a formal generic subprogram names a subprogram whose profile conforms to the formal's",
+                        );
                         for &c in many {
                             d = d.with_secondary(self.decls[c].span, "candidate");
                         }
@@ -2670,7 +2715,10 @@ impl Db {
                                 format!("the {what} default needs a matching subprogram"),
                             )
                             .with_secondary(self.decls[f].span, "generic subprogram declared here")
-                            .with_help(format!("associate it explicitly: `{fname} => ...`"));
+                            .with_help(format!("associate it explicitly: `{fname} => ...`"))
+                            .with_note(
+                                "LRM 6.5.6.2: a box default needs a directly visible subprogram of the same designator with a conforming profile",
+                            );
                         for &c in found {
                             d = d.with_secondary(self.decls[c].span, "candidate");
                         }
@@ -2684,7 +2732,10 @@ impl Db {
                         diag::TYPE_MISMATCH,
                         "the actual of a generic subprogram must be a subprogram name",
                     )
-                    .with_primary(actual_span(other), "not a subprogram name"),
+                    .with_primary(actual_span(other), "not a subprogram name")
+                    .with_note(
+                        "LRM 6.5.7.2: the actual of a formal generic subprogram names a subprogram whose profile conforms to the formal's",
+                    ),
                 ));
             }
         };
@@ -2749,7 +2800,10 @@ impl Db {
                         diag::GENERIC_CLASS,
                         "the actual of a generic package must name a package instance",
                     )
-                    .with_primary(actual_span(other), "not a package instance"),
+                    .with_primary(actual_span(other), "not a package instance")
+                    .with_note(
+                        "LRM 6.5.7.2: the actual of a formal generic package names an instance of the formal's uninstantiated package",
+                    ),
                 ));
             }
             None => return Err(self.missing_generic(f, site, "package ")),
@@ -2775,7 +2829,10 @@ impl Db {
                     format!("`{an}` is not an instance of `{gn}`"),
                 )
                 .with_primary(n.span, format!("expected an instance of `{gn}`"))
-                .with_secondary(self.decls[f].span, "generic package declared here"),
+                .with_secondary(self.decls[f].span, "generic package declared here")
+                .with_note(
+                    "LRM 6.5.7.2: the actual of a formal generic package names an instance of the formal's uninstantiated package",
+                ),
             ));
         };
         self.check_wants(r, fi, i, n.span)?;
@@ -2936,7 +2993,10 @@ impl Db {
                             format!("generic subprogram `{}` has no body", self.decls[g].name),
                         )
                         .with_primary(span, "instantiated here")
-                        .with_secondary(self.decls[g].span, "declared here"),
+                        .with_secondary(self.decls[g].span, "declared here")
+                        .with_note(
+                            "LRM 4.3: for each subprogram declaration there is a corresponding body",
+                        ),
                     ));
                 };
                 let (bscope, stmts) = (*scope, stmts.clone());
@@ -3482,7 +3542,10 @@ impl Db {
                     .with_note(format!(
                         "in this instance its subtype is `{}`, which is not fully constrained",
                         self.subtype_name(st)
-                    )),
+                    ))
+                    .with_note(
+                        "LRM 5.3.2.2: the subtype indication of a declared signal or variable defines a fully constrained subtype",
+                    ),
                 );
                 r.failed = true;
                 o.bounds

@@ -162,7 +162,10 @@ impl Fx<'_, '_> {
                             ),
                         )
                         .with_primary(c.span, "called here")
-                        .with_secondary(w, "the `wait`"),
+                        .with_secondary(w, "the `wait`")
+                        .with_note(
+                            "LRM 10.2, 11.3: a wait statement cannot appear in a procedure whose parent is a function or a process with a sensitivity list",
+                        ),
                     );
                     return Err(Failed);
                 }

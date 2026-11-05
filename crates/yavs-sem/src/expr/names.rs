@@ -620,7 +620,10 @@ impl Db {
                 id.text
             ),
         )
-        .with_primary(id.span, "unknown element");
+        .with_primary(id.span, "unknown element")
+        .with_note(
+            "LRM 8.3: the suffix of a selected name of a record is a simple name denoting one of its elements",
+        );
         if let Some(h) = crate::suggest::suggest(
             id.key.as_str(),
             "element",
@@ -1389,7 +1392,10 @@ impl Db {
                             n.span,
                             "several interpretations of this name have the same type",
                         )
-                        .with_help("use a selected name or qualify the value"),
+                        .with_help("use a selected name or qualify the value")
+                        .with_note(
+                            "LRM 12.5: the occurrence is legal only with exactly one interpretation in its complete context",
+                        ),
                 );
                 return self.poison_expr();
             }
@@ -2024,7 +2030,10 @@ impl Db {
                 ),
             )
             .with_primary(span, "conversion of the actual")
-            .with_help(help),
+            .with_help(help)
+            .with_note(
+                "LRM 4.2.2.3, 6.5.7.1: an actual conversion needs mode `in` or `inout`, is paired with a formal conversion for `inout`, and a signal parameter takes none",
+            ),
         );
         false
     }
@@ -2054,7 +2063,10 @@ impl Db {
             db.report(
                 Diagnostic::error(diag::CONV_MISUSE, msg)
                     .with_primary(span, "conversion of the formal")
-                    .with_help(help.to_string()),
+                    .with_help(help.to_string())
+                    .with_note(
+                        "LRM 4.2.2.3, 4.2.2.4, 6.5.7.1: a conversion in the formal part needs a variable parameter of mode `out` or `inout`, and an actual",
+                    ),
             );
             None
         };
@@ -2115,7 +2127,10 @@ impl Db {
                             ),
                         )
                         .with_primary(x.span, "not a conversion of a variable")
-                        .with_help("add the conversion for the way in: `conv(formal) => conv(actual)`"),
+                        .with_help("add the conversion for the way in: `conv(formal) => conv(actual)`")
+                        .with_note(
+                            "LRM 6.5.7.1: for `inout`, the formal after its conversion and the actual after its conversion each have the other's type",
+                        ),
                     );
                     return None;
                 }
@@ -2177,7 +2192,10 @@ impl Db {
                         ),
                     )
                     .with_primary(fname.span, "several conversions fit the formal")
-                    .with_help("qualify the conversion or give the overloads different parameter types"),
+                    .with_help("qualify the conversion or give the overloads different parameter types")
+                    .with_note(
+                        "LRM 12.5: the occurrence is legal only with exactly one interpretation in its complete context",
+                    ),
                 );
                 return Err(true);
             }
@@ -2211,7 +2229,10 @@ impl Db {
                         ),
                     )
                     .with_primary(fname.span, format!("expected a conversion to `{tn}`"))
-                    .with_help("use a function of one parameter of the formal's type, or a type conversion"),
+                    .with_help("use a function of one parameter of the formal's type, or a type conversion")
+                    .with_note(
+                        "LRM 6.5.7.1: the formal after its conversion has the type of the actual",
+                    ),
                 );
                 return None;
             }
@@ -2253,7 +2274,10 @@ impl Db {
                             self.subtype_name(st)
                         ),
                     )
-                    .with_help("use a constrained subtype as the type mark, or a function with a constrained parameter subtype"),
+                    .with_help("use a constrained subtype as the type mark, or a function with a constrained parameter subtype")
+                    .with_note(
+                        "LRM 5.3.2.2: the conversion in the formal part defines a constraint for the index range of an unconstrained formal",
+                    ),
                 );
                 return None;
             }
@@ -2371,7 +2395,10 @@ impl Db {
                 format!("{what} cannot be the actual for {target} `{}`", formal.text),
             )
             .with_primary(span, format!("not a {}", word(class)))
-            .with_help(format!("pass the name of a {}", word(class))),
+            .with_help(format!("pass the name of a {}", word(class)))
+            .with_note(
+                "LRM 4.2.2.1: the actual of a signal or variable formal is a name of that class, of a file formal a file name, of a constant formal an expression",
+            ),
         );
         false
     }
@@ -2404,7 +2431,7 @@ impl Db {
             )
             .with_primary(span, "these types are not closely related")
             .with_note(
-                "9.3.6: only abstract numeric types, array types with the same \
+                "LRM 9.3.6: only abstract numeric types, array types with the same \
                  dimensionality and closely related element types, and (2019) records with \
                  the same element names convert to each other",
             );
@@ -3062,7 +3089,10 @@ impl Db {
                     diag::NOT_STATIC,
                     "the dimension of an array attribute must be a locally static expression",
                 )
-                .with_primary(span, "not locally static"),
+                .with_primary(span, "not locally static")
+                .with_note(
+                    "LRM 16.2.3: the parameter of an array attribute is locally static and does not exceed the dimensionality",
+                ),
             ));
         };
         let n = match &self.types[t].kind {
@@ -3075,7 +3105,10 @@ impl Db {
                     diag::ATTR_DIMENSION,
                     format!("dimension {d} does not exist for a {n}-dimensional array"),
                 )
-                .with_primary(span, "no such dimension"),
+                .with_primary(span, "no such dimension")
+                .with_note(
+                    "LRM 16.2.3: the parameter of an array attribute is locally static and does not exceed the dimensionality",
+                ),
             ));
         }
         Ok(())
@@ -3242,7 +3275,9 @@ impl Expr {
 
     fn poison_of(db: &mut Db, span: Span, msg: &str) -> ExprId {
         db.report(
-            Diagnostic::error(diag::BAD_CONVERSION, msg.to_string()).with_primary(span, "here"),
+            Diagnostic::error(diag::BAD_CONVERSION, msg.to_string())
+                .with_primary(span, "here")
+                .with_note("LRM 9.3.6: a type conversion is a type mark with one expression"),
         );
         db.poison.expr
     }

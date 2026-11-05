@@ -3,4 +3,6 @@ error[E1100]: `nothing_like_it` is not declared
   |
 7 |   constant other : integer := nothing_like_it;
   |                               ^^^^^^^^^^^^^^^ not found in this scope
+  |
+  = note: LRM 12.3: without a visible declaration of this identifier, the occurrence is not legal here
 

@@ -8,6 +8,7 @@ error[E2115]: value of generic `g` has a part of 0 elements where its subtype ha
 13 | |   end block;
    | |____________^ instantiated here
    |
+   = note: LRM 14.3.3.2: the value of the actual belongs to the subtype of the formal generic
    = note: in instance generic_part_wrong_length
 
 error: aborting due to 1 previous error

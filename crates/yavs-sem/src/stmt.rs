@@ -585,7 +585,11 @@ impl Db {
             },
             _ => return Ok(()),
         };
-        let mut d = Diagnostic::error(diag::BAD_WAIT, msg).with_primary(span, "");
+        let mut d = Diagnostic::error(diag::BAD_WAIT, msg)
+            .with_primary(span, "")
+            .with_note(
+                "LRM 10.2, 11.3: a wait statement cannot appear in a function, in a process with a sensitivity list, or in a procedure with either as a parent",
+            );
         if let Some((sp, m)) = sec {
             d = d.with_secondary(sp, m);
         }
@@ -621,7 +625,10 @@ impl Db {
             )
             .with_primary(call.1, "called here")
             .with_secondary(wait, "the `wait`")
-            .with_secondary(sens, what);
+            .with_secondary(sens, what)
+            .with_note(
+                "LRM 10.2, 11.3: a wait statement cannot appear in a procedure whose parent is a function or a process with a sensitivity list",
+            );
             self.error(d);
         }
         if failed { Err(Reported) } else { Ok(()) }
@@ -701,7 +708,10 @@ impl Db {
                         diag::NEXT_OUTSIDE_LOOP,
                         format!("`{what}` is not inside a loop"),
                     )
-                    .with_primary(span, ""),
+                    .with_primary(span, "")
+                    .with_note(
+                        "LRM 10.11, 10.12: `next` and `exit` are only allowed within a loop",
+                    ),
                 )),
             },
             Some(l) => match cx.loops.iter().rev().find(|(k, _)| *k == Some(l.key)) {
@@ -714,7 +724,10 @@ impl Db {
                     .with_primary(l.span, "")
                     .with_note(format!(
                         "`{what}` can only leave or continue a loop it is inside"
-                    )),
+                    ))
+                    .with_note(
+                        "LRM 10.11, 10.12: with a loop label, `next` and `exit` are only allowed within the labeled loop",
+                    ),
                 )),
             },
         }
@@ -727,7 +740,13 @@ impl Db {
         span: Span,
     ) -> Result<Option<ExprId>, Reported> {
         let bad = |db: &mut Db, msg: &str| {
-            Err(db.error(Diagnostic::error(diag::BAD_RETURN, msg).with_primary(span, "")))
+            Err(db.error(
+                Diagnostic::error(diag::BAD_RETURN, msg)
+                    .with_primary(span, "")
+                    .with_note(
+                        "LRM 10.13: a return statement is only allowed in a subprogram; a procedure's has no expression, a function's has one",
+                    ),
+            ))
         };
         match (cx.owner, v) {
             (Owner::Process { .. }, _) => bad(self, "`return` is only allowed in a subprogram"),
@@ -882,7 +901,10 @@ impl Db {
                         format!("force mode `out` is not allowed on `{name}` of mode `in`"),
                     )
                     .with_primary(l.span, "")
-                    .with_help("use `force in` to force the effective value"),
+                    .with_help("use `force in` to force the effective value")
+                    .with_note(
+                        "LRM 10.5.2.1: a force mode of `out` is an error on a port of mode `in`",
+                    ),
                 ));
             }
         }
@@ -911,7 +933,10 @@ impl Db {
                             )
                             .with_primary(self.exprs[t.expr].span, "")
                             .with_secondary(self.exprs[p].span, "resolved as a whole")
-                            .with_help("force or release the whole composite signal"),
+                            .with_help("force or release the whole composite signal")
+                            .with_note(
+                                "LRM 10.5.2.2: the target of a force or release is not a member of a resolved composite signal",
+                            ),
                         ));
                     }
                     Some(_) => break,
@@ -947,6 +972,9 @@ impl Db {
                     )
                     .with_help(
                         "pass the signal as a `signal ... : out` parameter, or use `<= force` and `<= release`",
+                    )
+                    .with_note(
+                        "LRM 10.5.2.2: in a procedure declared outside a process, the target is a formal parameter of it or of a parent of it",
                     ),
                 ));
             }
@@ -965,7 +993,10 @@ impl Db {
                     .with_note(
                         "a subprogram that is not declared inside a process may drive only its signal parameters",
                     )
-                    .with_help("pass the signal as a `signal ... : out` parameter"),
+                    .with_help("pass the signal as a `signal ... : out` parameter")
+                    .with_note(
+                        "LRM 10.5.2.2: in a procedure declared outside a process, the target is a formal parameter of it or of a parent of it",
+                    ),
                 ));
             }
         }
@@ -1033,7 +1064,10 @@ impl Db {
                         "the type of this aggregate target is not determined",
                     )
                     .with_primary(target.span, "")
-                    .with_help("qualify the right-hand side (`t'(...)`) so it has one type"),
+                    .with_help("qualify the right-hand side (`t'(...)`) so it has one type")
+                    .with_note(
+                        "LRM 10.5.2.1, 10.6.2.1: the type of an aggregate target comes from the context, excluding the aggregate itself",
+                    ),
                 ));
             };
             let e = self.st_target(scope, target, Expected::Type(ty))?;
@@ -1136,7 +1170,8 @@ impl Db {
                 "a `null` waveform element needs a guarded signal target",
             )
             .with_primary(span, "")
-            .with_note("only signals declared `bus` or `register` can be disconnected"),
+            .with_note("only signals declared `bus` or `register` can be disconnected")
+            .with_note("LRM 10.5.2.2: the target of a null waveform element is a guarded signal"),
         ))
     }
 
@@ -1441,7 +1476,10 @@ impl Db {
                             "this aggregate target element is identified more than once",
                         )
                         .with_primary(span, "named again here")
-                        .with_secondary(self.exprs[x].span, "first named here"),
+                        .with_secondary(self.exprs[x].span, "first named here")
+                        .with_note(
+                            "LRM 10.5.2.1, 10.6.2.1: no target is identified by more than one element association of an aggregate",
+                        ),
                     ));
                 }
             }
@@ -1465,7 +1503,22 @@ impl Db {
         }
         let span = self.exprs[e].span;
         let fail = |db: &mut Db, msg: String| {
-            Err(db.error(Diagnostic::error(diag::CLASS_MISUSE, msg).with_primary(span, "")))
+            Err(db.error(
+                Diagnostic::error(diag::CLASS_MISUSE, msg)
+                    .with_primary(span, "")
+                    .with_note(
+                        "LRM 6.5.2, 10.5.2.1, 10.6.2.1: the target of a signal assignment denotes a signal, of a variable assignment a variable, and an `in` object is not updated",
+                    ),
+            ))
+        };
+        let implicit = |db: &mut Db, name: String| {
+            Err(db.error(
+                Diagnostic::error(
+                    diag::CLASS_MISUSE,
+                    format!("cannot assign to the implicit signal `{name}`"),
+                )
+                .with_primary(span, ""),
+            ))
         };
         let wants_signal = kind.wants_signal();
         let root = match self.name_root(e) {
@@ -1503,10 +1556,7 @@ impl Db {
             }
             NameRoot::Obj(ObjRoot::ImplicitSignal(d)) => {
                 let name = self.decl_name(d);
-                return fail(
-                    self,
-                    format!("cannot assign to the implicit signal `{name}`"),
-                );
+                return implicit(self, name);
             }
             NameRoot::Obj(ObjRoot::Decl(d)) => {
                 let name = self.decl_name(d);
@@ -1535,9 +1585,7 @@ impl Db {
                     ObjClass::Variable | ObjClass::SharedVariable if wants_signal => {
                         return not_signal(self, name);
                     }
-                    _ if role == ObjRole::Guard => {
-                        Some(format!("cannot assign to the implicit signal `{name}`"))
-                    }
+                    _ if role == ObjRole::Guard => return implicit(self, name),
                     _ => match mode {
                         Some(m @ (Mode::In | Mode::Linkage))
                             if kind != TargetKind::Force && kind != TargetKind::Release
@@ -1596,7 +1644,10 @@ impl Db {
                     diag::CLASS_MISUSE,
                     format!("a name in {list} must be a signal"),
                 )
-                .with_primary(span, ""),
+                .with_primary(span, "")
+                .with_note(
+                    "LRM 10.2, 11.3: each name in a sensitivity list is a static signal name for which reading is permitted",
+                ),
             ));
         };
         if let ObjRoot::Decl(d) = root
@@ -1617,7 +1668,10 @@ impl Db {
                     diag::CLASS_MISUSE,
                     format!("`{name}` in {list} must be a signal"),
                 )
-                .with_primary(span, ""),
+                .with_primary(span, "")
+                .with_note(
+                    "LRM 10.2, 11.3: each name in a sensitivity list is a static signal name for which reading is permitted",
+                ),
             ));
         }
         if cut {
@@ -1627,7 +1681,10 @@ impl Db {
                     format!("the name in {list} is not a static name"),
                 )
                 .with_primary(span, "an index or slice here is not static")
-                .with_help(format!("name the whole signal `{name}`")),
+                .with_help(format!("name the whole signal `{name}`"))
+                .with_note(
+                    "LRM 10.2, 11.3: each name in a sensitivity list is a static signal name for which reading is permitted",
+                ),
             ));
         }
         if let ObjRoot::Decl(d) = root
@@ -1639,7 +1696,10 @@ impl Db {
                     diag::CLASS_MISUSE,
                     format!("cannot read port `{name}` of mode `linkage`"),
                 )
-                .with_primary(span, ""),
+                .with_primary(span, "")
+                .with_note(
+                    "LRM 10.2, 11.3: each name in a sensitivity list is a static signal name for which reading is permitted",
+                ),
             ));
         }
         Ok(self.lsp(e).expect("a name with a root has a prefix"))
@@ -1713,9 +1773,15 @@ impl Db {
         for (span, msg) in found {
             let d = if self.relaxed() {
                 Diagnostic::warning(diag::W_PURE_IMPURE, msg)
+                    .with_note(
+                        "LRM 4.3: a pure function refers to no signal, variable or file declared outside it, and is not the parent of an impure function",
+                    )
             } else {
                 Diagnostic::error(diag::PURE_SIDE_EFFECT, msg)
                     .with_help("declare the function `impure`")
+                    .with_note(
+                        "LRM 4.3: a pure function refers to no signal, variable or file declared outside it, and is not the parent of an impure function",
+                    )
             };
             self.report(d.with_primary(span, ""));
         }
@@ -1865,7 +1931,10 @@ impl Db {
                             "`force` and `release` are sequential statements",
                         )
                         .with_primary(s.span, "")
-                        .with_help("put it in a process"),
+                        .with_help("put it in a process")
+                        .with_note(
+                            "LRM 11.6: a concurrent signal assignment has only the waveform forms, no `force` or `release`",
+                        ),
                     ));
                 };
                 let guard = if sa.guarded {
@@ -2259,7 +2328,10 @@ impl Db {
             }
             _ => Err(self.error(
                 Diagnostic::error(diag::CLASS_MISUSE, "this name does not denote a signal")
-                    .with_primary(n.span, "a signal name is required here"),
+                    .with_primary(n.span, "a signal name is required here")
+                    .with_note(
+                        "LRM 10.2, 11.3: each name in a sensitivity list is a static signal name for which reading is permitted",
+                    ),
             )),
         };
         self.memo = saved;
@@ -2388,7 +2460,10 @@ impl Db {
                     "a guarded assignment needs a visible `GUARD` signal",
                 )
                 .with_primary(span, "")
-                .with_help("put it in a block with a guard condition: `b: block (cond) is ...`"),
+                .with_help("put it in a block with a guard condition: `b: block (cond) is ...`")
+                .with_note(
+                    "LRM 11.6: the signal GUARD is an implicit one of a guarded block, or an explicit BOOLEAN signal visible at the assignment",
+                ),
             )),
         }
     }

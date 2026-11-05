@@ -133,7 +133,10 @@ impl Db {
                     ),
                 )
                 .with_primary(span, "external name in a pure function")
-                .with_help("declare the function `impure`"),
+                .with_help("declare the function `impure`")
+                .with_note(
+                    "LRM 4.3: a pure function refers to no signal or variable declared outside it",
+                ),
             ));
         }
         if ast.class != ExternalClass::Variable {
@@ -202,6 +205,9 @@ impl Db {
             .with_secondary(
                 self.externals[e].span,
                 format!("declared with class `{}`", class_str(class)),
+            )
+            .with_note(
+                "LRM 10.5.2.1, 10.6.2.1: the target of a signal assignment denotes a signal, of a variable assignment a variable",
             ),
         ))
     }

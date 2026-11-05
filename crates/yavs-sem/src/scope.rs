@@ -370,7 +370,10 @@ impl Db {
                 format!("`{name}` is declared twice in this region"),
             )
             .with_primary(span, "redeclared here")
-            .with_secondary(old_span, "first declared here");
+            .with_secondary(old_span, "first declared here")
+            .with_note(
+                "LRM 12.3: declarations immediately within one declarative region shall not be homographs",
+            );
             if label {
                 e = e
                     .with_note(
@@ -724,7 +727,10 @@ impl Db {
             diag::NOT_DECLARED,
             format!("`{}` is not declared", name.text),
         )
-        .with_primary(name.span, "not found in this scope");
+        .with_primary(name.span, "not found in this scope")
+        .with_note(
+            "LRM 12.3: without a visible declaration of this identifier, the occurrence is not legal here",
+        );
         // A package that declares exactly this name beats a near miss.
         let pkgs = self.packages_declaring(scope, name.key);
         if pkgs.is_empty() {
@@ -794,7 +800,10 @@ impl Db {
                 name.text
             ),
         )
-        .with_primary(name.span, "used here");
+        .with_primary(name.span, "used here")
+        .with_note(
+            "LRM 12.4: potentially visible declarations of one designator stay hidden unless each is an enumeration literal or a subprogram",
+        );
         let owners: Vec<_> = c
             .decls
             .iter()

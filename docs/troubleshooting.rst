@@ -21,6 +21,7 @@ Reading a diagnostic
     7 |   count <= cnt + 1;
       |            ^^^ not found in this scope
       |
+      = note: LRM 12.3: without a visible declaration of this identifier, the occurrence is not legal here
       = help: a signal with a similar name exists: `count`
 
 The first line gives the severity, a stable code and the message; then the file, line and column,

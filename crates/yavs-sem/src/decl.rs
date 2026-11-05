@@ -436,7 +436,10 @@ impl Db {
                     format!("{what} `{name}` has no body"),
                 )
                 .with_primary(self.decls[d].name_span(), "declared here")
-                .with_secondary(end, "the region ends here without its body"),
+                .with_secondary(end, "the region ends here without its body")
+                .with_note(
+                    "LRM 4.3: for each subprogram declaration there is a corresponding body",
+                ),
             );
         }
     }
@@ -466,7 +469,10 @@ impl Db {
                     ),
                 )
                 .with_primary(self.decls[d].name_span(), "declared here")
-                .with_secondary(end, "the package body ends here without it"),
+                .with_secondary(end, "the package body ends here without it")
+                .with_note(
+                    "LRM 4.8: a deferred constant has a full declaration with the same identifier in the package body",
+                ),
             );
         }
     }
@@ -608,7 +614,10 @@ impl Db {
                     self.decls[d].name_span(),
                     "declared here without a full declaration",
                 )
-                .with_help("declare the full type later in the same declarative part"),
+                .with_help("declare the full type later in the same declarative part")
+                .with_note(
+                    "LRM 5.4.2: the full type declaration comes later, immediately within the same declarative part",
+                ),
             );
         }
     }
@@ -688,7 +697,10 @@ impl Db {
                 format!("{what} is not allowed in {owner}"),
             )
             .with_primary(decl_span(d), format!("inside {owner}"))
-            .with_help(help),
+            .with_help(help)
+            .with_note(
+                "LRM 3.2.3, 4.7, 4.8: the declarative part of an entity, package declaration or package body does not list this item",
+            ),
         ))
     }
 
@@ -737,7 +749,10 @@ impl Db {
                         format!("{what} is not allowed in a {owner}"),
                     )
                     .with_primary(decl_span(d), format!("inside a {owner}"))
-                    .with_help("move it to the enclosing architecture, block or package"),
+                    .with_help("move it to the enclosing architecture, block or package")
+                    .with_note(
+                        "LRM 4.3, 11.3: the declarative part of a subprogram or process does not list this item",
+                    ),
                 ))
             }
             D::Component(c) => self.component_decl(scope, c),
@@ -791,7 +806,10 @@ impl Db {
                     "a variable declared here must be a shared variable",
                 )
                 .with_primary(first, "not in a process, subprogram or protected type body")
-                .with_help("write `shared variable`, or declare the variable in a process"),
+                .with_help("write `shared variable`, or declare the variable in a process")
+                .with_note(
+                    "LRM 6.4.2.4: a variable declared immediately within an entity, architecture, block or generate statement is a shared variable",
+                ),
             ));
         }
         match class {
@@ -868,7 +886,10 @@ impl Db {
                 .with_secondary(o.subtype.span, "not fully constrained")
                 .with_help(format!(
                     "give the {what} a constrained subtype, e.g. `bit_vector(7 downto 0)`"
-                )),
+                ))
+                .with_note(
+                    "LRM 5.3.2.2: the subtype indication of a declared signal or variable defines a fully constrained subtype",
+                ),
             );
         }
         let role = match (class, &default) {
@@ -1099,7 +1120,8 @@ impl Db {
                     crate::diag::NOT_AN_OBJECT,
                     "the aliased name does not denote an object",
                 )
-                .with_primary(n.span, "not an object"),
+                .with_primary(n.span, "not an object")
+                .with_note("LRM 6.6.2: the name of an object alias denotes an object"),
             )),
         };
         self.memo = saved;
@@ -1149,7 +1171,8 @@ impl Db {
                     .with_primary(
                         sp.attr.span,
                         "expected the name of an attribute declaration",
-                    ),
+                    )
+                    .with_note("LRM 7.2: the attribute designator denotes an attribute"),
                 ));
             }
         };
@@ -1184,7 +1207,10 @@ impl Db {
                     crate::diag::NOT_A_TYPE,
                     "a file declaration needs a file type",
                 )
-                .with_primary(f.subtype.span, "not a file type"),
+                .with_primary(f.subtype.span, "not a file type")
+                .with_note(
+                    "LRM 6.4.2.5: the subtype indication of a file declaration defines a file subtype",
+                ),
             ));
         }
         let kind_t = self.well_known.file_open_kind.unwrap_or(self.poison.ty);
@@ -1609,7 +1635,10 @@ impl Db {
                     crate::diag::CLASS_MISUSE,
                     format!("function `{name}` has a parameter that is not of mode `in`"),
                 )
-                .with_primary(name_span, "function parameters must have mode `in`"),
+                .with_primary(name_span, "function parameters must have mode `in`")
+                .with_note(
+                    "LRM 4.2.2.1: the only mode allowed for a formal parameter of a function is `in`",
+                ),
             ));
         }
         if let SubprogramKind::Function { pure } = kind
@@ -1666,9 +1695,15 @@ impl Db {
             );
             let d = if self.relaxed() {
                 yavs_diag::Diagnostic::warning(crate::diag::W_PURE_IMPURE, msg)
+                    .with_note(
+                        "LRM 4.2.1: the result subtype of a pure function is no access type and has no access subelement",
+                    )
             } else {
                 yavs_diag::Diagnostic::error(crate::diag::PURE_SIDE_EFFECT, msg)
                     .with_help("declare the function `impure`")
+                    .with_note(
+                        "LRM 4.2.1: the result subtype of a pure function is no access type and has no access subelement",
+                    )
             };
             self.report(d.with_primary(n.span, "access type in the result of a pure function"));
         }
@@ -1715,7 +1750,10 @@ impl Db {
             .with_primary(at, "not a constant, signal, variable or file")
             .with_help(format!(
                 "declare the {what} in the subprogram's generic list: `generic (...) parameter (...)`"
-            )),
+            ))
+            .with_note(
+                "LRM 4.2.2.1: formal parameters of subprograms may be constants, variables, signals or files",
+            ),
         )
     }
 
@@ -1800,7 +1838,8 @@ impl Db {
                         .with_primary(sp, "not a signal")
                         .with_help(format!(
                             "declare the {what} in a generic list: `generic (...)`"
-                        )),
+                        ))
+                        .with_note("LRM 6.5.6.3: a port is itself a signal"),
                     ),
                 );
                 continue;
@@ -1922,7 +1961,10 @@ impl Db {
                         "a port is a signal"
                     },
                 )
-                .with_primary(o.span, format!("not allowed for a {what}")),
+                .with_primary(o.span, format!("not allowed for a {what}"))
+                .with_note(
+                    "LRM 6.5.2, 6.5.6.3: a generic object is an interface constant, of mode `in`; a port is a signal",
+                ),
             ));
         }
         let subtype = match &o.subtype {
@@ -2060,7 +2102,10 @@ impl Db {
                         crate::diag::BAD_OPERATOR_DECL,
                         format!("`\"{op}\"` is not a VHDL operator"),
                     )
-                    .with_primary(span, "not an operator symbol"),
+                    .with_primary(span, "not an operator symbol")
+                    .with_note(
+                        "LRM 4.5.2: the operator symbol is one of the operators defined in 9.2",
+                    ),
                 ));
             }
         };
@@ -2080,7 +2125,8 @@ impl Db {
                     if n == 1 { "" } else { "s" }
                 ),
             )
-            .with_primary(span, format!("takes {want}")),
+            .with_primary(span, format!("takes {want}"))
+            .with_note("LRM 4.5.2: a unary operator has one parameter, a binary operator two"),
         ))
     }
 
@@ -2122,7 +2168,10 @@ impl Db {
                         format!("a subprogram parameter cannot have mode `{m}`"),
                     )
                     .with_primary(o.span, "this parameter")
-                    .with_help("use `in`, `out` or `inout`"),
+                    .with_help("use `in`, `out` or `inout`")
+                    .with_note(
+                        "LRM 4.2.2.1: the modes of a procedure parameter are `in`, `inout` and `out`, of a function parameter `in`",
+                    ),
                 ));
             }
             Some(ast::Mode::View { name, array }) => {

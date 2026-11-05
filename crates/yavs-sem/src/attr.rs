@@ -904,7 +904,8 @@ pub fn select(
         diag::UNKNOWN_ATTRIBUTE,
         format!("attribute `'{}` does not apply to {what}", attr.text),
     )
-    .with_primary(span, "this prefix");
+    .with_primary(span, "this prefix")
+    .with_note("LRM 16.2: a predefined attribute takes only the prefixes it defines");
     if a == PredefAttr::Reflect {
         d = d.with_note(
             "the prefix of `'reflect` must be an object or a fully constrained subtype (LRM 2019 16.2)",
@@ -1016,7 +1017,8 @@ pub fn implicit_signal(
                     attr.name()
                 ),
             )
-            .with_primary(sp, "not static"),
+            .with_primary(sp, "not static")
+            .with_note("LRM 16.2.4: the parameter of this attribute is a static expression"),
         ));
     }
     let def = db.add_expr(Expr {
@@ -1313,7 +1315,10 @@ pub fn specify(
                         db.error(
                             Diagnostic::error(diag::ENTITY_CLASS, msg)
                                 .with_primary(spec.class_span, label)
-                                .with_secondary(sp, "named here"),
+                                .with_secondary(sp, "named here")
+                                .with_note(
+                                    "LRM 7.2: an entity designator denotes a named entity of the specified class",
+                                ),
                         ),
                     );
                     continue;
@@ -1376,7 +1381,10 @@ fn attach(
                 ),
             )
             .with_primary(sp, "given again here")
-            .with_secondary(old_span, "first given here"),
+            .with_secondary(old_span, "first given here")
+            .with_note(
+                "LRM 7.2: a given attribute is associated at most once with a given named entity",
+            ),
         ));
     }
     let id = db.attr_values.push(AttrValue {

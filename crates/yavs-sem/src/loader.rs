@@ -670,6 +670,9 @@ impl Db {
         let mut d = Diagnostic::error(
             diag::DEPENDENCY_CYCLE,
             format!("design unit `{}` depends on itself", name.text),
+        )
+        .with_note(
+            "LRM 13.5: a unit is analyzed after the primary units it names, which a cycle makes impossible",
         );
         if let Some(at) = at {
             d = d.with_primary(at, "needed here, while it is being analyzed");

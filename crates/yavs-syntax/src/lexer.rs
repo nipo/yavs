@@ -139,11 +139,21 @@ impl Lexer<'_> {
                     .with_help(
                         "VHDL characters are ISO-8859-1 and have no escapes: use only Latin-1 characters \
                          here, or pass `--encoding=latin1` to read each byte as one character",
+                    )
+                    .with_note(
+                        "LRM 15.2: the text holds only graphic characters and format effectors of the ISO eight-bit character set",
                     ),
                 );
                 return;
             }
             p += len;
+        }
+    }
+
+    fn error_rule(&mut self, start: usize, end: usize, msg: &str, label: &str, rule: &str) {
+        self.error(start, end, msg, label);
+        if let Some(d) = self.diags.last_mut() {
+            d.notes.push(rule.to_string());
         }
     }
 
@@ -180,7 +190,13 @@ impl Lexer<'_> {
                 "two letters or digits"
             };
             let msg = format!("an underline in {what} must stand between {between}");
-            self.error(start + i, start + i + 1, &msg, "misplaced underline");
+            self.error_rule(
+                start + i,
+                start + i + 1,
+                &msg,
+                "misplaced underline",
+                "LRM 15.4.2, 15.5, 15.8: an underline stands between adjacent letters or digits",
+            );
         }
     }
 
@@ -387,11 +403,12 @@ impl Lexer<'_> {
             }
             self.pos += 1;
         }
-        self.error(
+        self.error_rule(
             start,
             start + 2,
             "unterminated block comment",
             "comment starts here",
+            "LRM 15.9: a delimited comment extends up to the first `*/`",
         );
     }
 
@@ -485,11 +502,12 @@ impl Lexer<'_> {
                     }
                 }
                 None | Some(b'\n') | Some(b'\r') => {
-                    self.error(
+                    self.error_rule(
                         start,
                         start + 1,
                         "unterminated string literal",
                         "string starts here",
+                        "LRM 15.3, 15.7: a string literal ends on the line it starts on",
                     );
                     return;
                 }
@@ -509,11 +527,12 @@ impl Lexer<'_> {
                     break;
                 }
                 None | Some(b'\n') | Some(b'\r') => {
-                    self.error(
+                    self.error_rule(
                         start,
                         start + 1,
                         "unterminated extended identifier",
                         "identifier starts here",
+                        "LRM 15.3, 15.4.3: an extended identifier ends in a backslash on its line",
                     );
                     break;
                 }
@@ -704,7 +723,10 @@ impl Lexer<'_> {
                         "missing space between a number and an identifier",
                     )
                     .with_primary(Span::new(self.file, start as u32, end as u32), "")
-                    .with_help("write a space before the unit, as in `10 ns`"),
+                    .with_help("write a space before the unit, as in `10 ns`")
+                    .with_note(
+                        "LRM 15.3: at least one separator is required between an abstract literal and an adjacent identifier",
+                    ),
                 );
             } else {
                 self.pos = end;

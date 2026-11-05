@@ -97,7 +97,10 @@ fn abs_error(db: &mut Db, e: AbsError, span: Span) -> Reported {
         AbsError::Malformed(m) => db.error(
             Diagnostic::error(diag::BAD_LITERAL, "malformed literal")
                 .with_primary(span, m)
-                .with_note("based literals use bases 2 to 16 and digits of that base"),
+                .with_note("based literals use bases 2 to 16 and digits of that base")
+                .with_note(
+                    "LRM 15.5.3: the base is 2 to 16 and each extended digit is less than the base",
+                ),
         ),
         AbsError::TooLarge(what) => db.error(
             Diagnostic::error(diag::LITERAL_RANGE, format!("{what} is too large"))
@@ -328,7 +331,10 @@ fn bad_char(db: &mut Db, span: Span, c: char, ty: TypeId) -> Reported {
         diag::CHAR_NOT_IN_TYPE,
         format!("character '{c}' is not a literal of type `{name}`"),
     )
-    .with_primary(span, format!("'{c}' is not in `{name}`"));
+    .with_primary(span, format!("'{c}' is not in `{name}`"))
+    .with_note(
+        "LRM 5.2.2.1, 9.3.2: a character literal is an enumeration literal of a type that lists it",
+    );
     if u32::from(c) > 255 {
         d = d.with_note("characters are Latin-1; this character is above U+00FF");
     }
@@ -409,7 +415,10 @@ fn array_of_chars(
                 span,
                 format!("a string literal of type `{}`", type_name(db, ty)),
             )
-            .with_note("a string literal needs an array type whose elements are characters"),
+            .with_note("a string literal needs an array type whose elements are characters")
+            .with_note(
+                "LRM 9.3.2: the type of a string literal is a one-dimensional array of a character type",
+            ),
         ));
     };
     let mut table: [Option<u8>; 256] = [None; 256];
@@ -466,7 +475,10 @@ fn array_of_chars(
                     format!("string literal of length {n} does not fit the index of `{name}`"),
                 )
                 .with_primary(span, format!("needs index {left} to {right}"))
-                .with_note(format!("the index subtype runs {il} to {ir}")),
+                .with_note(format!("the index subtype runs {il} to {ir}"))
+                .with_note(
+                    "LRM 9.3.2: the bounds of a string literal follow the rules for positional array aggregates",
+                ),
             ));
         }
     }
@@ -524,7 +536,10 @@ fn bit_string_error(db: &mut Db, e: BitStringError, span: Span) -> Reported {
     match e {
         BitStringError::Malformed(m) => db.error(
             Diagnostic::error(diag::BAD_LITERAL, "malformed bit string literal")
-                .with_primary(span, m),
+                .with_primary(span, m)
+                .with_note(
+                    "LRM 15.8: a bit string literal is an optional length, a base specifier and a quoted bit value",
+                ),
         ),
         BitStringError::BadDecimalDigit { offset, ch } => db.error(
             Diagnostic::error(
@@ -532,14 +547,20 @@ fn bit_string_error(db: &mut Db, e: BitStringError, span: Span) -> Reported {
                 format!("invalid digit '{ch}' in a decimal bit string"),
             )
             .with_primary(at(offset), "not a decimal digit")
-            .with_note("a `D` bit string holds decimal digits and underscores only"),
+            .with_note("a `D` bit string holds decimal digits and underscores only")
+            .with_note(
+                "LRM 15.8: with the base specifier D, all graphic characters in the bit value are digits",
+            ),
         ),
         BitStringError::NotLatin1 { offset, ch } => db.error(
             Diagnostic::error(
                 diag::CHAR_NOT_IN_TYPE,
                 format!("character '{ch}' is not in the Latin-1 character set"),
             )
-            .with_primary(at(offset), "above U+00FF"),
+            .with_primary(at(offset), "above U+00FF")
+            .with_note(
+                "LRM 15.2, 15.8: a bit value holds graphic characters of the ISO eight-bit character set",
+            ),
         ),
         BitStringError::TooLong => db.error(
             Diagnostic::error(diag::LITERAL_RANGE, "bit string literal is too long")
@@ -568,7 +589,10 @@ fn bit_string_error(db: &mut Db, e: BitStringError, span: Span) -> Reported {
                     "bit string literal would lose significant digits",
                 )
                 .with_primary(span, format!("the length drops \"{d}\""))
-                .with_note(rule),
+                .with_note(rule)
+                .with_note(
+                    "LRM 15.8: only `0` digits may be deleted to reach the length, or for a signed base copies of the sign",
+                ),
             )
         }
         BitStringError::EmptySigned => db.error(
@@ -576,7 +600,8 @@ fn bit_string_error(db: &mut Db, e: BitStringError, span: Span) -> Reported {
                 diag::BITSTRING_DIGITS,
                 "an empty signed bit string cannot be extended",
             )
-            .with_primary(span, "no sign character to replicate"),
+            .with_primary(span, "no sign character to replicate")
+            .with_note("LRM 15.8: a signed bit string is extended with its leftmost character"),
         ),
     }
 }
@@ -614,7 +639,8 @@ pub fn physical_value(
                 diag::BAD_LITERAL,
                 format!("`{}` is not a unit of `{name}`", unit.text),
             )
-            .with_primary(unit.span, "no such unit"),
+            .with_primary(unit.span, "no such unit")
+            .with_note("LRM 5.2.4.1: a physical literal ends in a unit name of the type"),
         ));
     };
     let zero = lex(value.as_str()).is_ok_and(|a| a.digits.iter().all(|&d| d == 0));
