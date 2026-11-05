@@ -1415,6 +1415,8 @@ fn divide<const KIND: u8, const SIGNED: bool>(
         return put(m, &Vh::down(x_vec(n)));
     };
     let (xneg, yneg) = (SIGNED && x.get(x.len() - 1), SIGNED && y.get(y.len() - 1));
+    // The `mod` body tests the raw dividend's sign (`L(L'left) = '1'`), where `H` is not `1`.
+    let lone = SIGNED && l.get(l.len() - 1) == StdULogic::One;
     let (xm, ym) = (
         if xneg { neg(&x) } else { x },
         if yneg { neg(&y) } else { y },
@@ -1434,11 +1436,11 @@ fn divide<const KIND: u8, const SIGNED: bool>(
         }
         _ => {
             let nonzero = rm.words().iter().any(|w| *w != 0);
-            if yneg && xneg {
+            if yneg && lone {
                 neg(&rm)
             } else if yneg && nonzero {
                 rm.sub(&ym)
-            } else if xneg && nonzero {
+            } else if lone && nonzero {
                 ym.sub(&rm)
             } else {
                 rm

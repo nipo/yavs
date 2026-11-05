@@ -279,7 +279,7 @@ fn testbench(seed: u64, per_op: usize) -> String {
             for op in ["/", "rem", "mod"] {
                 g.case(&format!("{a} {op} {d}"), "img");
             }
-            for op in ["+", "-"] {
+            for op in ["+", "-", "*"] {
                 let i = g.int(nat);
                 g.case(&format!("{a} {op} {i}"), "img");
                 let i = g.int(nat);
@@ -1197,6 +1197,104 @@ fn native_abs_limits_match_bodies() {
     }
 }
 
+/// Every numeric_std operation of two vectors, and of a vector and an integer, on one pair of
+/// operands. The body of signed `mod` reads the raw sign element of the dividend, so the sign
+/// element is `0`, `1`, `L` or `H` in all the patterns.
+const WEAK_PROC: &str = r#"  type ints_t is array (natural range <>) of integer;
+  constant ints : ints_t := (-7, -1, 1, 2, 5, 100);
+  procedure chk (sa, sb : string; asc : boolean) is
+    constant ga : signed := gv(sa, sa'length + 4, asc);
+    constant gb : signed := gv(sb, sb'length + 4, not asc);
+    constant ua : unsigned := uv(sa, sa'length + 4, asc);
+    constant ub : unsigned := uv(sb, sb'length + 4, not asc);
+  begin
+    report img(ga / gb) & img(ga rem gb) & img(ga mod gb);
+    report img(ua / ub) & img(ua rem ub) & img(ua mod ub);
+    report img(ga + gb) & img(ga - gb) & img(ga * gb);
+    report img(ua + ub) & img(ua - ub) & img(ua * ub);
+    report img(ga < gb) & img(ga <= gb) & img(ga = gb) & img(ga > gb) & img(ga >= gb) & img(ga /= gb);
+    report img(ua < ub) & img(ua <= ub) & img(ua = ub) & img(ua > ub) & img(ua >= ub) & img(ua /= ub);
+    report img(resize(ga, sb'length)) & img(resize(ga, sa'length + 3)) & img(resize(ua, sb'length));
+    report img(-ga) & img(abs ga);
+    for k in ints'range loop
+      report img(ga / ints(k)) & img(ga rem ints(k)) & img(ga mod ints(k));
+      report img(ints(k) / gb) & img(ints(k) rem gb) & img(ints(k) mod gb);
+      report img(ua / abs ints(k)) & img(ua rem abs ints(k)) & img(ua mod abs ints(k));
+      report img(abs ints(k) / ub) & img(abs ints(k) mod ub);
+      -- The body of `natural rem unsigned` lacks a RESIZE: its length error is not the natives'.
+      if ub'length > 30 or abs ints(k) < 2 ** ub'length then
+        report img(abs ints(k) rem ub);
+      end if;
+      report img(ga + ints(k)) & img(ints(k) - gb) & img(ga * ints(k)) & img(ints(k) * gb);
+      report img(ga < ints(k)) & img(ints(k) >= gb) & img(ga = ints(k)) & img(ints(k) /= gb);
+    end loop;
+  end procedure;
+"#;
+
+/// Every operation on dividends and divisors whose sign element is `0`, `1`, `L` or `H`, the
+/// dividend narrower, wider and as wide as the divisor, across a plane word.
+#[test]
+fn native_weak_sign_matches_bodies() {
+    let rests = |n: usize| -> Vec<String> {
+        let alt: String = (0..n).map(|i| if i % 2 == 0 { '1' } else { '0' }).collect();
+        let mut v = vec![
+            "0".repeat(n),
+            "1".repeat(n),
+            alt.clone(),
+            alt.replace('1', "H").replace('0', "L"),
+            "H".repeat(n),
+            "L".repeat(n),
+        ];
+        v.dedup();
+        v
+    };
+    let pats = |n: usize| -> Vec<String> {
+        let mut v: Vec<String> = ['0', '1', 'L', 'H']
+            .iter()
+            .flat_map(|s| rests(n - 1).into_iter().map(move |r| format!("{s}{r}")))
+            .collect();
+        v.sort();
+        v.dedup();
+        v
+    };
+    let mut body = String::new();
+    let mut k = 0;
+    for (na, nb) in [
+        (1, 1),
+        (2, 2),
+        (3, 3),
+        (3, 4),
+        (4, 3),
+        (3, 50),
+        (50, 3),
+        (5, 2),
+        (2, 5),
+        (33, 3),
+        (3, 65),
+        (65, 2),
+    ] {
+        for a in pats(na) {
+            for b in pats(nb) {
+                // A zero divisor is the body's error.
+                if !b.contains(['1', 'H']) {
+                    continue;
+                }
+                k += 1;
+                let _ = writeln!(body, "    chk(\"{a}\", \"{b}\", {});", k % 2 == 0);
+            }
+        }
+    }
+    let head = HEAD.replacen(
+        "begin\n  process\n",
+        &format!("{WEAK_PROC}begin\n  process\n"),
+        1,
+    );
+    for std in ["2008", "2019", "1993"] {
+        let src = format!("{head}{body}    wait;\n  end process;\nend architecture;\n");
+        diff_run("weak_sign", &src, "t", std, 20000);
+    }
+}
+
 /// Wrap generated statements into the shared header (entity `t`).
 fn tb(body: &str) -> String {
     format!("{HEAD}{body}    wait;\n  end process;\nend architecture;\n")
@@ -1341,7 +1439,7 @@ fn native_numeric_bit_matches_bodies() {
             for op in ["/", "rem", "mod"] {
                 g.case(&format!("{a} {op} {d}"), "img");
             }
-            for op in ["+", "-"] {
+            for op in ["+", "-", "*"] {
                 let i = g.int(nat);
                 g.case(&format!("{a} {op} {i}"), "img");
                 let i = g.int(nat);
@@ -1560,7 +1658,7 @@ fn native_wide_matches_bodies() {
                 g.case(&format!("{a} {op} {b}"), "img");
                 g.case(&format!("{a} {op} {a}"), "img");
             }
-            for op in ["+", "-"] {
+            for op in ["+", "-", "*"] {
                 let i = small_int(&mut g, nat);
                 g.case(&format!("{a} {op} {i}"), "img");
                 g.case(&format!("{i} {op} {a}"), "img");
