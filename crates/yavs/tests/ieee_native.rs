@@ -236,6 +236,11 @@ fn testbench(seed: u64, per_op: usize) -> String {
             let (u, v) = g.two("gv", n);
             g.case(&format!("{u} {op} {v}"), "img");
         }
+        let n = g.len();
+        let (x, y) = g.two("sv", n);
+        g.case(&format!("std_match({x}, {y})"), "img");
+        let (x, y) = (g.operand("sv"), g.operand("sv"));
+        g.case(&format!("std_match({x}, {y})"), "img");
         let x = g.operand("sv");
         g.case(&format!("not {x}"), "img");
         for ty in ["uv", "gv"] {
@@ -291,6 +296,21 @@ fn testbench(seed: u64, per_op: usize) -> String {
                 let i = g.int(nat);
                 g.case(&format!("{i} {op} {a}"), "img");
             }
+            for op in ["?<", "?<=", "?>", "?>=", "?=", "?/="] {
+                g.case(&format!("{a} {op} {b}"), "img");
+                let i = g.int(nat);
+                g.case(&format!("{a} {op} {i}"), "img");
+                let i = g.int(nat);
+                g.case(&format!("{i} {op} {a}"), "img");
+            }
+            for f in ["maximum", "minimum"] {
+                g.case(&format!("{f}({a}, {b})"), "img");
+                let i = g.int(nat);
+                g.case(&format!("{f}({a}, {i})"), "img");
+                let i = g.int(nat);
+                g.case(&format!("{f}({i}, {a})"), "img");
+            }
+            g.case(&format!("std_match({a}, {b})"), "img");
             let s = g.size();
             g.case(&format!("resize({a}, {s})"), "img");
             let i = g.int(nat);
@@ -1292,6 +1312,347 @@ fn native_weak_sign_matches_bodies() {
     for std in ["2008", "2019", "1993"] {
         let src = format!("{head}{body}    wait;\n  end process;\nend architecture;\n");
         diff_run("weak_sign", &src, "t", std, 20000);
+    }
+}
+
+/// Operand patterns of `n` elements for the matching operators: constants, `L`/`H`, one
+/// non-binary element at the first, a middle and the last position, and `-` fillings.
+fn match_pats(n: usize) -> Vec<String> {
+    let alt: String = (0..n).map(|i| if i % 2 == 0 { '1' } else { '0' }).collect();
+    let rep = |c: &str, k: usize| c.repeat(k);
+    let mut v = vec![
+        rep("0", n),
+        rep("1", n),
+        format!("1{}", rep("0", n - 1)),
+        format!("{}1", rep("0", n - 1)),
+        format!("0{}", rep("1", n - 1)),
+        alt.clone(),
+        alt.replace('1', "H").replace('0', "L"),
+        format!("H{}", rep("L", n - 1)),
+        format!("L{}", rep("H", n - 1)),
+        rep("-", n),
+        alt.replace('1', "-"),
+    ];
+    for m in "UXZW-".chars() {
+        for at in [0, n / 2, n - 1] {
+            let mut s: Vec<char> = alt.chars().collect();
+            s[at] = m;
+            v.push(s.into_iter().collect());
+        }
+    }
+    v
+}
+
+/// Integer operands around the range of an `n`-element vector.
+fn match_ints(n: usize, signed: bool, wide: bool) -> Vec<String> {
+    let top: i128 = if wide { 1 << 63 } else { 1 << 31 };
+    let mut v: Vec<i128> = vec![0, 1, 2, 255, top - 1];
+    if signed {
+        v.extend([-1, -2, -255, -top]);
+    }
+    for k in [n, n - 1] {
+        if (1..63).contains(&k) {
+            let w: i128 = if signed { 1 << (k - 1) } else { 1 << k };
+            v.extend([w - 1, w, w + 1]);
+            if signed {
+                v.extend([-w, -w - 1, -w + 1]);
+            }
+        }
+    }
+    v.retain(|x| *x < top && *x >= if signed { -top } else { 0 });
+    v.sort();
+    v.dedup();
+    v.iter()
+        .map(|x| match *x {
+            x if x == -top && wide => "(-9223372036854775807 - 1)".to_string(),
+            x if x == -top => "(-2147483647 - 1)".to_string(),
+            x if x < 0 => format!("(-{})", -x),
+            x => x.to_string(),
+        })
+        .collect()
+}
+
+const QOPS: [&str; 6] = ["?<", "?<=", "?>", "?>=", "?=", "?/="];
+
+/// The matching operators, `maximum`, `minimum` and `std_match` of vectors of equal and unequal
+/// lengths around the limit of the one-word path, in both directions with a lower bound other
+/// than zero.
+fn match_vectors(lens: &[(usize, usize)], ops: bool) -> String {
+    let mut body = String::new();
+    for &(n, m) in lens {
+        let (px, py) = (match_pats(n), match_pats(m));
+        let np = px.len().min(py.len());
+        // Every pattern for the short equal lengths, every fifth for the rest (test time).
+        let stride = if n <= 8 && n == m { 1 } else { 5 };
+        for i in (0..np).step_by(stride) {
+            for k in [0, 7] {
+                // The same pattern and a far one.
+                let (x, y) = (&px[i], &py[(i + k) % np]);
+                let f = if (i + k) % 2 == 0 { "uv" } else { "gv" };
+                let dirs = if (i + k) % 3 == 0 {
+                    [(n - 1, "false"), (m + 4, "true")]
+                } else {
+                    [(n + 5, "true"), (m - 1, "false")]
+                };
+                let a = format!("{f}(\"{x}\", {}, {})", dirs[0].0, dirs[0].1);
+                let b = format!("{f}(\"{y}\", {}, {})", dirs[1].0, dirs[1].1);
+                let _ = writeln!(body, "    report img(std_match({a}, {b}));");
+                let sa = format!("std_logic_vector({a})");
+                let sb = format!("std_logic_vector({b})");
+                let _ = writeln!(body, "    report img(std_match({sa}, {sb}));");
+                if ops {
+                    for op in QOPS {
+                        let _ = writeln!(body, "    report img({a} {op} {b});");
+                    }
+                    let _ = writeln!(body, "    report img(maximum({a}, {b}));");
+                    let _ = writeln!(body, "    report img(minimum({a}, {b}));");
+                }
+            }
+        }
+    }
+    for (f, e) in [("uv", "uv(\"\", -1, true)"), ("gv", "gv(\"\", -1, false)")] {
+        let v = format!("{f}(\"101\", 2, true)");
+        let _ = writeln!(body, "    report img(std_match({e}, {v}));");
+        let _ = writeln!(body, "    report img(std_match({v}, {e}));");
+        let _ = writeln!(body, "    report img(std_match({e}, {e}));");
+        if ops {
+            for op in QOPS {
+                let _ = writeln!(body, "    report img({e} {op} {v});");
+                let _ = writeln!(body, "    report img({v} {op} {e});");
+                let _ = writeln!(body, "    report img({e} {op} {e});");
+            }
+            for g in ["maximum", "minimum"] {
+                let _ = writeln!(body, "    report img({g}({e}, {v}));");
+                let _ = writeln!(body, "    report img({g}({v}, {e}));");
+                let _ = writeln!(body, "    report img({g}({e}, {e}));");
+            }
+        }
+    }
+    body
+}
+
+/// The integer forms of the matching operators, `maximum` and `minimum`: integers that fit,
+/// just fit and just do not (the body's `to_unsigned` warning), null vectors, weak bits and
+/// metavalues.
+fn match_integers(lens: &[usize], wide: bool) -> String {
+    let mut body = String::new();
+    for (f, signed) in [("uv", false), ("gv", true)] {
+        for &n in lens {
+            let ints = match_ints(n, signed, wide);
+            let pats = match_pats(n);
+            for (j, x) in [0, 2, 5, 6, 14, 25].iter().map(|k| (*k, &pats[*k])) {
+                let (l, asc) = if j % 2 == 0 {
+                    (n - 1, "false")
+                } else {
+                    (n + 6, "true")
+                };
+                let v = format!("{f}(\"{x}\", {l}, {asc})");
+                for (c, i) in ints.iter().enumerate() {
+                    for op in QOPS {
+                        if (c + j) % 2 == 0 {
+                            let _ = writeln!(body, "    report img({v} {op} {i});");
+                        } else {
+                            let _ = writeln!(body, "    report img({i} {op} {v});");
+                        }
+                    }
+                    let _ = writeln!(body, "    report img(maximum({v}, {i}));");
+                    let _ = writeln!(body, "    report img(minimum({i}, {v}));");
+                }
+            }
+        }
+        for i in ["0", "5"] {
+            let e = format!("{f}(\"\", -1, true)");
+            for op in QOPS {
+                let _ = writeln!(body, "    report img({e} {op} {i});");
+                let _ = writeln!(body, "    report img({i} {op} {e});");
+            }
+            let _ = writeln!(body, "    report img(maximum({e}, {i}));");
+            let _ = writeln!(body, "    report img(minimum({i}, {e}));");
+        }
+    }
+    body
+}
+
+const MATCH_LENS: [(usize, usize); 14] = [
+    (1, 1),
+    (2, 2),
+    (8, 8),
+    (63, 63),
+    (64, 64),
+    (65, 65),
+    (128, 128),
+    (1, 2),
+    (7, 8),
+    (63, 64),
+    (64, 63),
+    (64, 65),
+    (3, 70),
+    (128, 63),
+];
+
+/// The matching operators, `maximum`, `minimum` and `std_match` of vectors against their bodies.
+#[test]
+fn native_match_minmax_vectors_match_bodies() {
+    for std in ["2008", "2019"] {
+        diff_run(
+            "match_vectors",
+            &tb(&match_vectors(&MATCH_LENS, true)),
+            "t",
+            std,
+            3000,
+        );
+    }
+    // 1993 has `std_match` only.
+    diff_run(
+        "match_vectors93",
+        &tb(&match_vectors(&MATCH_LENS[..10], false)),
+        "t",
+        "1993",
+        300,
+    );
+}
+
+/// The integer forms around the range of the vector (2008 and 2019 integers).
+#[test]
+fn native_match_minmax_integers_match_bodies() {
+    for (std, lens) in [
+        ("2008", vec![1, 2, 32, 33, 64, 65]),
+        ("2019", vec![1, 33, 64]),
+    ] {
+        diff_run(
+            "match_integers",
+            &tb(&match_integers(&lens, std == "2019")),
+            "t",
+            std,
+            3000,
+        );
+    }
+}
+
+/// `?=` and `?/=` with every pair of element values (the `-` don't care, `U` against `X`, `L`
+/// and `H` against `0` and `1`), one pair or two pairs in a vector, equal and unequal lengths with
+/// every value as the sign element of a `signed` operand, and the constant of `x ?= "10--"`.
+fn qeq_pairs() -> String {
+    let all = "UX01ZWLH-";
+    let mut body = String::new();
+    let mut put = |f: &str, x: &str, y: &str, lx: usize, ly: usize| {
+        for op in ["?=", "?/="] {
+            let _ = writeln!(
+                body,
+                "    report img({f}(\"{x}\", {lx}, false) {op} {f}(\"{y}\", {ly}, true));"
+            );
+        }
+    };
+    for n in [1usize, 3, 65] {
+        for a in all.chars() {
+            for b in all.chars() {
+                let mut ats = vec![0, n / 2, n - 1];
+                ats.dedup();
+                for at in ats {
+                    let (mut x, mut y) = ("1".repeat(n).into_bytes(), "1".repeat(n).into_bytes());
+                    x[at] = a as u8;
+                    y[at] = b as u8;
+                    let (x, y) = (String::from_utf8_lossy(&x), String::from_utf8_lossy(&y));
+                    put("uv", &x, &y, n + 2, n + 3);
+                    put("gv", &x, &y, n - 1, n + 4);
+                }
+            }
+        }
+    }
+    // Two pairs: the fold is U before X before a mismatch wherever they stand.
+    let six = "UX01-";
+    for a in six.chars() {
+        for b in six.chars() {
+            for c in six.chars() {
+                for d in six.chars() {
+                    put("uv", &format!("{a}{c}"), &format!("{b}{d}"), 5, 5);
+                }
+            }
+        }
+    }
+    // Unequal lengths: the shorter is extended with zeros or its sign element.
+    for sgn in all.chars() {
+        for (xn, yn) in [(3usize, 5usize), (5, 3), (64, 70), (3, 65)] {
+            for y in ["0", "1", "-", "H", "L"] {
+                let x = format!("{sgn}{}", "10".repeat(xn).get(..xn - 1).unwrap_or(""));
+                let yv = y.repeat(yn);
+                put("gv", &x, &yv, xn + 1, yn + 7);
+                put("uv", &x, &yv, xn + 1, yn + 7);
+                put("gv", &yv, &x, yn + 7, xn + 1);
+            }
+        }
+    }
+    // Don't care in the constant, in the variable and in both.
+    for n in [8usize, 16, 64, 65, 128] {
+        let alt: String = (0..n).map(|i| if i % 2 == 0 { '1' } else { '0' }).collect();
+        let dc = format!("10{}", "-".repeat(n - 2));
+        let var = format!("{}--", &alt[..n - 2]);
+        for (x, y) in [
+            (&alt, &dc),
+            (&dc, &alt),
+            (&var, &dc),
+            (&dc, &dc),
+            (&alt, &var),
+        ] {
+            put("uv", x, y, n - 1, n - 1);
+            put("gv", x, y, n - 1, n - 1);
+        }
+    }
+    // Over 1024 elements, past every word-wise path.
+    let n = 1030;
+    let mut extra = String::new();
+    let alt: String = (0..n).map(|i| if i % 2 == 0 { '1' } else { '0' }).collect();
+    let dc = format!("10{}", "-".repeat(n - 2));
+    let meta = format!("{}X", &alt[..n - 1]);
+    for (x, y) in [(&alt, &dc), (&meta, &alt), (&dc, &meta)] {
+        put("uv", x, y, n, n);
+        put("gv", x, y, n, n + 1);
+        for (f, a, b) in [("uv", x, y), ("gv", y, x)] {
+            let (a, b) = (
+                format!("{f}(\"{a}\", {n}, false)"),
+                format!("{f}(\"{b}\", {n}, true)"),
+            );
+            for op in ["?<", "?>="] {
+                let _ = writeln!(extra, "    report img({a} {op} {b});");
+            }
+            for g in ["std_match", "maximum", "minimum"] {
+                let _ = writeln!(extra, "    report img({g}({a}, {b}));");
+            }
+        }
+    }
+    body.push_str(&extra);
+    // The integer forms against a vector with don't cares, metavalues and weak bits.
+    for f in ["uv", "gv"] {
+        for x in ["10--", "1X0-", "U010", "LH01", "----", "ZW01", "HLHL"] {
+            for i in ["0", "5", "9", "15", "16", "255"] {
+                for op in ["?=", "?/="] {
+                    let _ = writeln!(body, "    report img({f}(\"{x}\", 3, false) {op} {i});");
+                    let _ = writeln!(body, "    report img({i} {op} {f}(\"{x}\", 3, true));");
+                }
+            }
+        }
+    }
+    body
+}
+
+/// The don't care and metavalue rules of `?=` and `?/=` against the bodies.
+#[test]
+fn native_qeq_dont_care_matches_bodies() {
+    diff_run("qeq_pairs", &tb(&qeq_pairs()), "t", "2008", 3000);
+}
+
+/// A negative `NATURAL` operand is the body's subtype error; each case is its own run.
+#[test]
+fn native_match_negative_natural_matches_bodies() {
+    for stmt in [
+        "img(uv(\"101\", 2, true) ?= (-1))",
+        "img((-1) ?< uv(\"101\", 2, true))",
+        "img(maximum(uv(\"101\", 2, true), (-1)))",
+        "img(minimum((-1), uv(\"\", -1, true)))",
+        "img(uv(\"X1\", 1, true) ?>= (-2147483647 - 1))",
+    ] {
+        let body = format!("    report \"before\";\n    report {stmt};\n    report \"after\";\n");
+        diff_run("match_natural", &tb(&body), "t", "2008", 1);
     }
 }
 

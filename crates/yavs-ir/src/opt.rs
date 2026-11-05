@@ -4261,7 +4261,7 @@ impl<'a> Opt<'a> {
         };
         match op {
             Op::ToUnsigned | Op::ToSigned | Op::Resize { .. } => size(1),
-            Op::Add { form, .. } => match form {
+            Op::Add { form, .. } | Op::MinMax { form, .. } => match form {
                 Form::Vv => {
                     let (a, b) = (alen(0)?, alen(1)?);
                     Some(if a == 0 || b == 0 { 0 } else { a.max(b) })

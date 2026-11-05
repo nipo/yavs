@@ -7090,10 +7090,25 @@ impl Gen {
             };
             let pure = matches!(op, Op::Resize { .. } | Op::Shift(_) | Op::ShiftFn(_));
             // The operands in argument order.
-            let (mut arrs, mut ints) = (Vec::new(), Vec::new());
+            // `std_match` and `?=` / `?/=` take every element value: all four planes.
+            let plane_op = matches!(
+                op,
+                Op::Match
+                    | Op::QCompare {
+                        cmp: Cmp::Eq | Cmp::Ne,
+                        ..
+                    }
+            );
+            let (mut arrs, mut ints, mut planes) = (Vec::new(), Vec::new(), Vec::new());
             let mut at = 0;
             for a in layout {
                 match a {
+                    Arg::Arr if plane_op => {
+                        let (n, mask, w) = self.plane_operand(c, &rs[at..at + ARRAY_REGS], slow);
+                        arrs.push((n, w[0], mask));
+                        planes.push(w);
+                        at += ARRAY_REGS;
+                    }
                     Arg::Arr => {
                         arrs.push(self.small_operand(c, &rs[at..at + ARRAY_REGS], pure, slow));
                         at += ARRAY_REGS;
@@ -7138,11 +7153,7 @@ impl Gen {
                     ok(cmp(LLVMIntULE, mag, self.c64(0x7fff_ffff)));
                     Out::Scalar(pick(neg, not(mag), mag))
                 }
-                Op::Add {
-                    sub: is_sub,
-                    signed,
-                    form,
-                } => {
+                Op::Add { signed, form, .. } | Op::MinMax { signed, form, .. } => {
                     let (n, x, y) = match form {
                         Form::Vv => {
                             let ((n1, b1, _), (n2, b2, _)) = (arrs[0], arrs[1]);
@@ -7169,7 +7180,25 @@ impl Gen {
                             }
                         }
                     };
-                    Out::Vector(n, if is_sub { sub(x, y) } else { add(x, y) }, false)
+                    let r = match op {
+                        Op::Add { sub: true, .. } => sub(x, y),
+                        Op::Add { .. } => add(x, y),
+                        // The larger or smaller of the extended values.
+                        Op::MinMax { max, .. } => {
+                            let less = if signed {
+                                cmp(LLVMIntSLT, sext(x, n), sext(y, n))
+                            } else {
+                                cmp(LLVMIntULT, x, y)
+                            };
+                            if max {
+                                pick(less, y, x)
+                            } else {
+                                pick(less, x, y)
+                            }
+                        }
+                        _ => return Err("not a native computed in place".into()),
+                    };
+                    Out::Vector(n, r, false)
                 }
                 // `l + r` elements: the low bits of the product of the operands extended to 64. An
                 // integer is `to_unsigned`/`to_signed` at the vector's length, so `2 n` elements.
@@ -7197,11 +7226,49 @@ impl Gen {
                     };
                     Out::Vector(n, mul(x, y), false)
                 }
+                // `?=` / `?/=` of operands of one length, any element value: the body's fold as
+                // `U` (a `U` not against `-`), else `X`, else a mismatch (`'0'`, `'1'` for `?/=`).
+                Op::QCompare {
+                    cmp: k @ (Cmp::Eq | Cmp::Ne),
+                    signed,
+                    form,
+                } => {
+                    let (n, _, mask) = arrs[0];
+                    let (p, q) = match form {
+                        Form::Vv => {
+                            ok(cmp(LLVMIntEQ, n, arrs[1].0));
+                            (planes[0], planes[1])
+                        }
+                        _ => {
+                            let v = ints[0];
+                            ok(fits(v, n, mask, signed));
+                            (planes[0], [and(v, mask), mask, c0, c0])
+                        }
+                    };
+                    let live = and(mask, not(or(p[3], q[3])));
+                    let unk = |x: [LLVMValueRef; 4]| not(or(or(x[0], x[1]), or(x[2], x[3])));
+                    let u = or(unk(p), unk(q));
+                    let both = and(and(p[1], not(p[3])), and(q[1], not(q[3])));
+                    let un = and(live, u);
+                    let xx = and(and(live, not(u)), not(both));
+                    let mis = and(and(live, both), xor(p[0], q[0]));
+                    let (m_val, e_val) = if k == Cmp::Ne { (3, 2) } else { (2, 3) };
+                    let r = pick(cmp(LLVMIntNE, mis, c0), self.c64(m_val), self.c64(e_val));
+                    let r = pick(cmp(LLVMIntNE, xx, c0), c1, r);
+                    Out::Scalar(pick(cmp(LLVMIntNE, un, c0), c0, r))
+                }
                 Op::Compare {
                     cmp: k,
                     signed,
                     form,
+                }
+                | Op::QCompare {
+                    cmp: k,
+                    signed,
+                    form,
                 } => {
+                    // `?=` ...: `'0'` or `'1'`, and an integer must fit the vector's length.
+                    let q = matches!(op, Op::QCompare { .. });
                     let (x, y) = match form {
                         Form::Vv => {
                             let ((n1, b1, _), (n2, b2, _)) = (arrs[0], arrs[1]);
@@ -7214,7 +7281,10 @@ impl Gen {
                         _ => {
                             let (n, bits, _) = arrs[0];
                             let v = ints[0];
-                            if !signed {
+                            if q {
+                                let (n, _, mask) = arrs[0];
+                                ok(fits(v, n, mask, signed));
+                            } else if !signed {
                                 ok(nonneg(v));
                             }
                             let e = if signed { sext(bits, n) } else { bits };
@@ -7233,7 +7303,19 @@ impl Gen {
                         (Cmp::Eq, _) => LLVMIntEQ,
                         (Cmp::Ne, _) => LLVMIntNE,
                     };
-                    Out::Scalar(self.zext(cmp(p, x, y)))
+                    let r = self.zext(cmp(p, x, y));
+                    Out::Scalar(if q { add(r, self.c64(2)) } else { r })
+                }
+                // Per element: either side `-`, or both known (`0 1 L H`) with the same value.
+                Op::Match => {
+                    let ((n1, _, mask), (n2, _, _)) = (arrs[0], arrs[1]);
+                    ok(cmp(LLVMIntEQ, n1, n2));
+                    let (p, q) = (planes[0], planes[1]);
+                    let kp = and(p[1], not(p[3]));
+                    let kq = and(q[1], not(q[3]));
+                    let eq = and(and(kp, kq), not(xor(p[0], q[0])));
+                    let okm = or(or(p[3], q[3]), eq);
+                    Out::Scalar(self.zext(cmp(LLVMIntEQ, and(mask, not(okm)), c0)))
                 }
                 Op::ToUnsigned | Op::ToSigned => {
                     let signed = op == Op::ToSigned;
@@ -7370,6 +7452,38 @@ impl Gen {
         pure: bool,
         slow: LLVMBasicBlockRef,
     ) -> (LLVMValueRef, LLVMValueRef, LLVMValueRef) {
+        // SAFETY: integer arithmetic on the planes `plane_operand` read.
+        unsafe {
+            let b = self.b;
+            let (n, mask, [p0, p1, p2, p3]) = self.plane_operand(c, r, slow);
+            let live = LLVMBuildAnd(b, LLVMBuildNot(b, p3, c"".as_ptr()), p1, c"".as_ptr());
+            // `0 L`: plane 1 only; `1 H`: planes 0 and 1.
+            let zero = LLVMBuildAnd(b, live, LLVMBuildNot(b, p0, c"".as_ptr()), c"".as_ptr());
+            let one = LLVMBuildAnd(b, live, p0, c"".as_ptr());
+            let all = LLVMBuildAnd(
+                b,
+                LLVMBuildOr(b, zero, one, c"".as_ptr()),
+                mask,
+                c"".as_ptr(),
+            );
+            self.guard(c, self.icmp(IP::LLVMIntEQ, all, mask), slow);
+            if pure {
+                // Plane 2 is the weak bit of `L` and `H`.
+                let weak = LLVMBuildAnd(b, p2, mask, c"".as_ptr());
+                self.guard(c, self.icmp(IP::LLVMIntEQ, weak, self.c64(0)), slow);
+            }
+            (n, LLVMBuildAnd(b, one, mask, c"".as_ptr()), mask)
+        }
+    }
+
+    /// An array operand of 1 to 64 elements: `(n, mask, planes)`, the four planes of its block
+    /// unmasked; `slow` for any other length.
+    unsafe fn plane_operand(
+        &self,
+        c: &Cur,
+        r: &[Reg],
+        slow: LLVMBasicBlockRef,
+    ) -> (LLVMValueRef, LLVMValueRef, [LLVMValueRef; 4]) {
         // SAFETY: integer arithmetic and a read of four words through `host`.
         unsafe {
             let b = self.b;
@@ -7402,24 +7516,7 @@ impl Gen {
                 slow,
             );
             let w = |k: i64| self.load(self.i64, self.gep(p, self.c64(8 * k)));
-            let (p0, p1, p3) = (w(0), w(1), w(3));
-            let live = LLVMBuildAnd(b, LLVMBuildNot(b, p3, c"".as_ptr()), p1, c"".as_ptr());
-            // `0 L`: plane 1 only; `1 H`: planes 0 and 1.
-            let zero = LLVMBuildAnd(b, live, LLVMBuildNot(b, p0, c"".as_ptr()), c"".as_ptr());
-            let one = LLVMBuildAnd(b, live, p0, c"".as_ptr());
-            let all = LLVMBuildAnd(
-                b,
-                LLVMBuildOr(b, zero, one, c"".as_ptr()),
-                mask,
-                c"".as_ptr(),
-            );
-            self.guard(c, self.icmp(IP::LLVMIntEQ, all, mask), slow);
-            if pure {
-                // Plane 2 is the weak bit of `L` and `H`.
-                let weak = LLVMBuildAnd(b, w(2), mask, c"".as_ptr());
-                self.guard(c, self.icmp(IP::LLVMIntEQ, weak, self.c64(0)), slow);
-            }
-            (n, LLVMBuildAnd(b, one, mask, c"".as_ptr()), mask)
+            (n, mask, [w(0), w(1), w(2), w(3)])
         }
     }
 

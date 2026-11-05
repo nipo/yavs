@@ -10,7 +10,7 @@ use yavs_ir::DOPE_DIM_BYTES;
 use yavs_ir::ieee::{ARRAY_REGS, Cmp, Gate};
 
 use crate::exec::Machine;
-use crate::ieee::{gate_bits, holds, low, put_down, put_small};
+use crate::ieee::{fit_bits, gate_bits, holds, low, put_down, put_small};
 
 /// The words of an operand or a result buffer.
 const WORDS: usize = 16;
@@ -166,10 +166,9 @@ fn int_words(i: i64, n: usize, signed: bool) -> W {
     w
 }
 
-/// `+` and `-` of `numeric_std` (`form` 0: two vectors, 1: vector and integer, 2: integer and
-/// vector), where at least one vector is longer than 64 elements or the result is.
-pub(crate) fn add(m: &mut Machine, a: &[u64], sub: bool, signed: bool, form: u8) -> Option<u64> {
-    let (n, x, y) = match form {
+/// The operands of [`add`] (forms as there) extended to their common length `n`.
+fn operands(m: &Machine, a: &[u64], signed: bool, form: u8) -> Option<(usize, W, W)> {
+    Some(match form {
         0 => {
             let (l, r) = (wide_of(m, a, 0, false)?, wide_of(m, a, A1, false)?);
             let n = l.n.max(r.n);
@@ -185,9 +184,186 @@ pub(crate) fn add(m: &mut Machine, a: &[u64], sub: bool, signed: bool, form: u8)
             let i = int_operand(*a.first()?, signed)?;
             (r.n, int_words(i, r.n, signed), r.w)
         }
-    };
+    })
+}
+
+/// `+` and `-` of `numeric_std` (`form` 0: two vectors, 1: vector and integer, 2: integer and
+/// vector), where at least one vector is longer than 64 elements or the result is.
+pub(crate) fn add(m: &mut Machine, a: &[u64], sub: bool, signed: bool, form: u8) -> Option<u64> {
+    let (n, x, y) = operands(m, a, signed, form)?;
     let s = add_words(&x, &y, n, sub);
     emit(m, &s, n, Bounds::Down)
+}
+
+/// `maximum` / `minimum` of `numeric_std` (forms as in [`add`]): the larger or smaller operand
+/// extended to the common length.
+pub(crate) fn minmax(m: &mut Machine, a: &[u64], max: bool, signed: bool, form: u8) -> Option<u64> {
+    let (n, x, y) = operands(m, a, signed, form)?;
+    let less = if signed {
+        cmp_words(&fill_top(x, n), &fill_top(y, n), n, true)
+    } else {
+        cmp_words(&x, &y, n, false)
+    }
+    .is_lt();
+    emit(m, if less == max { &y } else { &x }, n, Bounds::Down)
+}
+
+/// The element count and plane blocks (32 bytes each) of the array operand at cell `i`, up to
+/// [`MAX_BITS`] elements; `None` for a null or longer one.
+fn planes<'a>(m: &'a Machine, a: &[u64], i: usize) -> Option<(usize, &'a [u8])> {
+    let &[data, left, right, d] = a.get(i..i + ARRAY_REGS)? else {
+        return None;
+    };
+    let (lo, hi) = if d == 1 { (right, left) } else { (left, right) };
+    let n = usize::try_from((hi as i64).checked_sub(lo as i64)?)
+        .ok()?
+        .checked_add(1)?;
+    (n <= MAX_BITS).then_some(())?;
+    Some((n, m.rd(data, n.div_ceil(64) as u64 * 32).ok()?))
+}
+
+fn block(b: &[u8], k: usize) -> [u64; 4] {
+    let c = &b[32 * k..32 * k + 32];
+    [le(&c[0..8]), le(&c[8..16]), le(&c[16..24]), le(&c[24..32])]
+}
+
+/// `std_match` of two vectors of one length over 64 elements (up to [`MAX_BITS`]): an element
+/// matches when either side is `-` or both are `0 1 L H` with the same value. Unequal lengths and
+/// null arrays take the general path.
+pub(crate) fn std_match(m: &Machine, a: &[u64]) -> Option<u64> {
+    let ((n, p), (k, q)) = (planes(m, a, 0)?, planes(m, a, A1)?);
+    if n != k {
+        return None;
+    }
+    for b in 0..n.div_ceil(64) {
+        let (x, y) = (block(p, b), block(q, b));
+        let known = (x[1] & !x[3]) & (y[1] & !y[3]);
+        let ok = x[3] | y[3] | known & !(x[0] ^ y[0]);
+        if !ok & low(n - b * 64) != 0 {
+            return Some(0);
+        }
+    }
+    Some(1)
+}
+
+/// A block of an operand extended to the common length: the elements below `keep` as they are,
+/// those in `fill` zeros (planes of `'0'`), or with `sign` (the masks of its sign element's planes)
+/// copies of its sign element.
+pub(crate) fn ext_block(x: [u64; 4], keep: u64, fill: u64, sign: Option<[u64; 4]>) -> [u64; 4] {
+    let mut y = x.map(|w| w & keep);
+    match sign {
+        Some(s) => {
+            for (w, s) in y.iter_mut().zip(s) {
+                *w |= s & fill;
+            }
+        }
+        None => y[1] |= fill,
+    }
+    y
+}
+
+/// The fold of the body of `?=` over one block of two operands of `valid` elements, as three
+/// words: elements with a `U` (not against `-`), with an `X` (a non-`U` metavalue against
+/// anything but `-`) and with two known different values. `-` matches anything.
+pub(crate) fn qeq_block(p: [u64; 4], q: [u64; 4], valid: u64) -> [u64; 3] {
+    let live = !(p[3] | q[3]) & valid;
+    let (up, uq) = (!(p[0] | p[1] | p[2] | p[3]), !(q[0] | q[1] | q[2] | q[3]));
+    let both = (p[1] & !p[3]) & (q[1] & !q[3]);
+    [
+        live & (up | uq),
+        live & !(up | uq) & !both,
+        live & both & (p[0] ^ q[0]),
+    ]
+}
+
+/// The `std_ulogic` code the body of `?=` returns for the words of [`qeq_block`] (ored over the
+/// blocks): `U` before `X` before a mismatch, else a match (`0` U, `1` X, `2` '0', `3` '1').
+pub(crate) fn qeq_code(w: [u64; 3]) -> u64 {
+    if w[0] != 0 {
+        0
+    } else if w[1] != 0 {
+        1
+    } else if w[2] != 0 {
+        2
+    } else {
+        3
+    }
+}
+
+/// `?=` of `numeric_std` where a vector is longer than 64 elements (forms as in [`add`]): the
+/// code of [`qeq_code`]. Any element value is taken; null arrays, an integer that does not fit
+/// and more than [`MAX_BITS`] elements take the general path.
+pub(crate) fn qeq(m: &Machine, a: &[u64], signed: bool, form: u8) -> Option<u64> {
+    // The integer operand as `n`-element words (a vector over 64 elements always holds it).
+    let int = |i: u64, n: usize| Some(int_words(int_operand(i, signed)?, n, signed));
+    let (n, p, k, q, iw) = match form {
+        0 => {
+            let ((n, p), (k, q)) = (planes(m, a, 0)?, planes(m, a, A1)?);
+            (n, p, k, q, None)
+        }
+        1 => {
+            let (n, p) = planes(m, a, 0).filter(|v| v.0 > 64)?;
+            (n, p, n, p, Some(int(*a.get(A1)?, n)?))
+        }
+        _ => {
+            let (n, q) = planes(m, a, 1).filter(|v| v.0 > 64)?;
+            (n, q, n, q, Some(int(*a.first()?, n)?))
+        }
+    };
+    let size = n.max(k);
+    // Per operand: the sign element's plane masks, for a `signed` extension.
+    let sign = |x: &[u8], c: usize| {
+        let s = block(x, (c - 1) / 64);
+        s.map(|w| 0u64.wrapping_sub(w >> ((c - 1) % 64) & 1))
+    };
+    let ext = |x: &[u8], c: usize, b: usize, valid: u64| {
+        let raw = if b * 64 < c { block(x, b) } else { [0; 4] };
+        let keep = low(c.saturating_sub(b * 64));
+        ext_block(raw, keep, valid & !keep, signed.then(|| sign(x, c)))
+    };
+    let mut acc = [0u64; 3];
+    for b in 0..size.div_ceil(64) {
+        let valid = low(size - b * 64);
+        let (x, y) = match (form, iw) {
+            (0, _) => (ext(p, n, b, valid), ext(q, k, b, valid)),
+            (1, Some(w)) => (ext(p, n, b, valid), [w[b], valid, 0, 0]),
+            (_, Some(w)) => ([w[b], valid, 0, 0], ext(q, k, b, valid)),
+            _ => return None,
+        };
+        for (t, v) in acc.iter_mut().zip(qeq_block(x, y, valid)) {
+            *t |= v;
+        }
+    }
+    Some(qeq_code(acc))
+}
+
+/// The ordering relations `?<` ... of `numeric_std` (forms as in [`add`]) on an operand with a
+/// metavalue other than `-`: the body returns `X` without a report. A `-`, a null array, an
+/// integer that does not fit and more than [`MAX_BITS`] elements take the general path.
+pub(crate) fn order_meta(m: &Machine, a: &[u64], signed: bool, form: u8) -> Option<u64> {
+    let (i, ops) = match form {
+        0 => (None, [planes(m, a, 0)?, planes(m, a, A1)?].to_vec()),
+        1 => (Some(*a.get(A1)?), vec![planes(m, a, 0)?]),
+        _ => (Some(*a.first()?), vec![planes(m, a, 1)?]),
+    };
+    if let Some(i) = i {
+        let n = ops[0].0;
+        let i = int_operand(i, signed)?;
+        if n <= 64 {
+            fit_bits(i, n, signed)?;
+        }
+    }
+    let mut meta = false;
+    for (n, p) in ops {
+        for b in 0..n.div_ceil(64) {
+            let (x, valid) = (block(p, b), low(n - b * 64));
+            if x[3] & valid != 0 {
+                return None;
+            }
+            meta |= !(x[1] & !x[3]) & valid != 0;
+        }
+    }
+    meta.then_some(1)
 }
 
 /// An integer operand: a NATURAL one (`unsigned`) must not be negative.

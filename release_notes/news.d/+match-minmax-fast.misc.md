@@ -1,0 +1,1 @@
+The `numeric_std` functions `maximum` and `minimum`, the matching relations `?=`, `?/=`, `?<`, `?<=`, `?>` and `?>=`, and `std_match` of vectors run much faster, in compiled code as well as in the interpreter.

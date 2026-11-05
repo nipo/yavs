@@ -160,6 +160,24 @@ pub enum Op {
         signed: bool,
         form: Form,
     },
+    /// The matching relational operators `?=` `?/=` `?<` `?<=` `?>` `?>=` of `numeric_std`
+    /// (a `std_ulogic`), with the reports of the bodies (null, `-` in the ordering ones, an
+    /// integer that does not fit) made by the native.
+    QCompare {
+        cmp: Cmp,
+        signed: bool,
+        form: Form,
+    },
+    /// `maximum` / `minimum` of two vectors or a vector and an integer: a metavalue gives all
+    /// `X`, a null array the null constant, an integer that does not fit its warning, all in the
+    /// native.
+    MinMax {
+        max: bool,
+        signed: bool,
+        form: Form,
+    },
+    /// `std_match` of two vectors; a null array and unequal lengths warn in the native.
+    Match,
     ToInteger {
         signed: bool,
     },
@@ -284,6 +302,33 @@ pub fn parse(key: &str) -> Option<Op> {
                 kind: ["/", "rem", "mod"].iter().position(|x| *x == n)? as u8,
                 signed: r == "signed",
             })
+        }
+        ("numeric_std", n @ ("?>" | "?<" | "?<=" | "?>=" | "?=" | "?/="), ps, "std_ulogic")
+            if !bit =>
+        {
+            let (signed, form, _) = num_form(ps)?;
+            let cmp = match n {
+                "?>" => Cmp::Gt,
+                "?<" => Cmp::Lt,
+                "?<=" => Cmp::Le,
+                "?>=" => Cmp::Ge,
+                "?=" => Cmp::Eq,
+                _ => Cmp::Ne,
+            };
+            Some(Op::QCompare { cmp, signed, form })
+        }
+        ("numeric_std", n @ ("maximum" | "minimum"), ps, r) if !bit => {
+            let (signed, form, t) = num_form(ps)?;
+            (r == t).then_some(Op::MinMax {
+                max: n == "maximum",
+                signed,
+                form,
+            })
+        }
+        ("numeric_std", "std_match", [a, b], "boolean")
+            if !bit && a == b && ["unsigned", "signed", "std_ulogic_vector"].contains(a) =>
+        {
+            Some(Op::Match)
         }
         ("numeric_std", n @ (">" | "<" | "<=" | ">=" | "=" | "/="), ps, "boolean") => {
             let (signed, form, _) = num_form(ps)?;

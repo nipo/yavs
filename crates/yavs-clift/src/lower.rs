@@ -7191,6 +7191,28 @@ impl Gen<'_> {
     /// An array operand (`data, left, right, dir` as values) of 1 to 64 elements that holds only
     /// `0 1 L H` (and, with `pure`, no `L` or `H`): `(n, bits, mask)`, taking `fb` for any other.
     fn small_operand(&mut self, r: &[Reg], pure: bool, fb: Block) -> (Value, Value, Value) {
+        let (n, mask, w) = self.plane_operand(r, fb);
+        let live = self.b.ins().band_not(w[1], w[3]);
+        // `0 L`: plane 1 only; `1 H`: planes 0 and 1.
+        let zero = self.b.ins().band_not(live, w[0]);
+        let one = self.b.ins().band(live, w[0]);
+        let both = self.b.ins().bor(zero, one);
+        let all = self.b.ins().band(both, mask);
+        let oka = self.b.ins().icmp(IntCC::Equal, all, mask);
+        self.guard(oka, fb);
+        if pure {
+            // Plane 2 is the weak bit of `L` and `H`.
+            let weak = self.b.ins().band(w[2], mask);
+            let okw = self.b.ins().icmp_imm_s(IntCC::Equal, weak, 0);
+            self.guard(okw, fb);
+        }
+        let bits = self.b.ins().band(one, mask);
+        (n, bits, mask)
+    }
+
+    /// An array operand of 1 to 64 elements: `(n, mask, planes)`, the four planes of its block
+    /// unmasked; `fb` for any other length.
+    fn plane_operand(&mut self, r: &[Reg], fb: Block) -> (Value, Value, Vec<Value>) {
         let (l, rt, d) = (self.ld(r[1]), self.ld(r[2]), self.ld(r[3]));
         let down = self.b.ins().icmp_imm_s(IntCC::Equal, d, 1);
         let hi = self.b.ins().select(down, l, rt);
@@ -7210,22 +7232,7 @@ impl Gen<'_> {
         let w: Vec<Value> = (0..4)
             .map(|k| self.b.ins().load(I64, gf, p, 8 * k))
             .collect();
-        let live = self.b.ins().band_not(w[1], w[3]);
-        // `0 L`: plane 1 only; `1 H`: planes 0 and 1.
-        let zero = self.b.ins().band_not(live, w[0]);
-        let one = self.b.ins().band(live, w[0]);
-        let both = self.b.ins().bor(zero, one);
-        let all = self.b.ins().band(both, mask);
-        let oka = self.b.ins().icmp(IntCC::Equal, all, mask);
-        self.guard(oka, fb);
-        if pure {
-            // Plane 2 is the weak bit of `L` and `H`.
-            let weak = self.b.ins().band(w[2], mask);
-            let okw = self.b.ins().icmp_imm_s(IntCC::Equal, weak, 0);
-            self.guard(okw, fb);
-        }
-        let bits = self.b.ins().band(one, mask);
-        (n, bits, mask)
+        (n, mask, w)
     }
 
     /// The low `n` bits (0 to 64) as a mask.
@@ -7263,10 +7270,25 @@ impl Gen<'_> {
         let layout = ok(ieee_layout(op), "not a native computed in place")?;
         let (fb, done) = (self.b.create_block(), self.b.create_block());
         let pure = matches!(op, Op::Resize { .. } | Op::Shift(_) | Op::ShiftFn(_));
-        let (mut arrs, mut ints) = (Vec::new(), Vec::new());
+        // `std_match` and `?=` / `?/=` take every element value: all four planes.
+        let plane_op = matches!(
+            op,
+            Op::Match
+                | Op::QCompare {
+                    cmp: Cmp::Eq | Cmp::Ne,
+                    ..
+                }
+        );
+        let (mut arrs, mut ints, mut planes) = (Vec::new(), Vec::new(), Vec::new());
         let mut at = 0;
         for a in layout {
             match a {
+                Arg::Arr if plane_op => {
+                    let (n, mask, w) = self.plane_operand(&rs[at..at + ARRAY_REGS], fb);
+                    arrs.push((n, w[0], mask));
+                    planes.push(w);
+                    at += ARRAY_REGS;
+                }
                 Arg::Arr => {
                     arrs.push(self.small_operand(&rs[at..at + ARRAY_REGS], pure, fb));
                     at += ARRAY_REGS;
@@ -7329,7 +7351,7 @@ impl Gen<'_> {
                 let nm = self.b.ins().bnot(mag);
                 Out::Scalar(self.b.ins().select(neg, nm, mag))
             }
-            Op::Add { sub, signed, form } => {
+            Op::Add { signed, form, .. } | Op::MinMax { signed, form, .. } => {
                 let (n, x, y) = match form {
                     Form::Vv => {
                         let ((n1, b1, _), (n2, b2, _)) = (arrs[0], arrs[1]);
@@ -7358,10 +7380,24 @@ impl Gen<'_> {
                         }
                     }
                 };
-                let r = if sub {
-                    self.b.ins().isub(x, y)
-                } else {
-                    self.b.ins().iadd(x, y)
+                let r = match op {
+                    Op::Add { sub: true, .. } => self.b.ins().isub(x, y),
+                    Op::Add { .. } => self.b.ins().iadd(x, y),
+                    // The larger or smaller of the extended values.
+                    Op::MinMax { max, .. } => {
+                        let less = if signed {
+                            let (sx, sy) = (self.sext_bits(x, n), self.sext_bits(y, n));
+                            self.b.ins().icmp(IntCC::SignedLessThan, sx, sy)
+                        } else {
+                            self.b.ins().icmp(IntCC::UnsignedLessThan, x, y)
+                        };
+                        if max {
+                            self.b.ins().select(less, y, x)
+                        } else {
+                            self.b.ins().select(less, x, y)
+                        }
+                    }
+                    _ => return Err("not a native computed in place".into()),
                 };
                 Out::Vector(n, r, false)
             }
@@ -7396,11 +7432,68 @@ impl Gen<'_> {
                 };
                 Out::Vector(n, self.b.ins().imul(x, y), false)
             }
+            // `?=` / `?/=` of operands of one length, any element value: the body's fold as
+            // `U` (a `U` not against `-`), else `X`, else a mismatch (`'0'`, `'1'` for `?/=`).
+            Op::QCompare {
+                cmp: k @ (Cmp::Eq | Cmp::Ne),
+                signed,
+                form,
+            } => {
+                let (n, _, mask) = arrs[0];
+                let (p, q) = match form {
+                    Form::Vv => {
+                        let same = self.b.ins().icmp(IntCC::Equal, n, arrs[1].0);
+                        self.guard(same, fb);
+                        (planes[0].clone(), planes[1].clone())
+                    }
+                    _ => {
+                        let v = ints[0];
+                        let okf = fits(self, v, n, mask, signed);
+                        self.guard(okf, fb);
+                        let iv = self.b.ins().band(v, mask);
+                        (planes[0].clone(), vec![iv, mask, c0, c0])
+                    }
+                };
+                let dash = self.b.ins().bor(p[3], q[3]);
+                let live = self.b.ins().band_not(mask, dash);
+                let unk = |g: &mut Self, x: &[Value]| {
+                    let a = g.b.ins().bor(x[0], x[1]);
+                    let b = g.b.ins().bor(x[2], x[3]);
+                    let o = g.b.ins().bor(a, b);
+                    g.b.ins().bnot(o)
+                };
+                let (up, uq) = (unk(self, &p), unk(self, &q));
+                let u = self.b.ins().bor(up, uq);
+                let dp = self.b.ins().band_not(p[1], p[3]);
+                let dq = self.b.ins().band_not(q[1], q[3]);
+                let both = self.b.ins().band(dp, dq);
+                let un = self.b.ins().band(live, u);
+                let nu = self.b.ins().band_not(live, u);
+                let xx = self.b.ins().band_not(nu, both);
+                let diff = self.b.ins().bxor(p[0], q[0]);
+                let lb = self.b.ins().band(live, both);
+                let mis = self.b.ins().band(lb, diff);
+                let (m_val, e_val) = if k == Cmp::Ne { (3, 2) } else { (2, 3) };
+                let (cm, ce, cx) = (self.c64(m_val), self.c64(e_val), self.c64(1));
+                let t = self.b.ins().icmp_imm_s(IntCC::NotEqual, mis, 0);
+                let r = self.b.ins().select(t, cm, ce);
+                let t = self.b.ins().icmp_imm_s(IntCC::NotEqual, xx, 0);
+                let r = self.b.ins().select(t, cx, r);
+                let t = self.b.ins().icmp_imm_s(IntCC::NotEqual, un, 0);
+                Out::Scalar(self.b.ins().select(t, c0, r))
+            }
             Op::Compare {
                 cmp: k,
                 signed,
                 form,
+            }
+            | Op::QCompare {
+                cmp: k,
+                signed,
+                form,
             } => {
+                // `?=` ...: `'0'` or `'1'`, and an integer must fit the vector's length.
+                let q = matches!(op, Op::QCompare { .. });
                 let (x, y) = match form {
                     Form::Vv => {
                         let ((n1, b1, _), (n2, b2, _)) = (arrs[0], arrs[1]);
@@ -7413,7 +7506,11 @@ impl Gen<'_> {
                     _ => {
                         let (n, bits, _) = arrs[0];
                         let v = ints[0];
-                        if !signed {
+                        if q {
+                            let (n, _, mask) = arrs[0];
+                            let okf = fits(self, v, n, mask, signed);
+                            self.guard(okf, fb);
+                        } else if !signed {
                             let nn = nonneg(self, v);
                             self.guard(nn, fb);
                         }
@@ -7438,6 +7535,24 @@ impl Gen<'_> {
                     (Cmp::Ne, _) => IntCC::NotEqual,
                 };
                 let r = self.b.ins().icmp(cc, x, y);
+                let r = self.b.ins().uextend(I64, r);
+                Out::Scalar(if q { self.b.ins().iadd_imm_s(r, 2) } else { r })
+            }
+            // Per element: either side `-`, or both known (`0 1 L H`) with the same value.
+            Op::Match => {
+                let ((n1, _, mask), (n2, _, _)) = (arrs[0], arrs[1]);
+                let same = self.b.ins().icmp(IntCC::Equal, n1, n2);
+                self.guard(same, fb);
+                let (p, q) = (&planes[0], &planes[1]);
+                let kp = self.b.ins().band_not(p[1], p[3]);
+                let kq = self.b.ins().band_not(q[1], q[3]);
+                let both = self.b.ins().band(kp, kq);
+                let diff = self.b.ins().bxor(p[0], q[0]);
+                let eq = self.b.ins().band_not(both, diff);
+                let dash = self.b.ins().bor(p[3], q[3]);
+                let ok = self.b.ins().bor(dash, eq);
+                let bad = self.b.ins().band_not(mask, ok);
+                let r = self.b.ins().icmp_imm_s(IntCC::Equal, bad, 0);
                 Out::Scalar(self.b.ins().uextend(I64, r))
             }
             Op::ToUnsigned | Op::ToSigned => {

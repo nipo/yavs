@@ -1336,6 +1336,171 @@ fn add<const SUB: bool, const SIGNED: bool, const FORM: u8>(
     put(m, &out)
 }
 
+/// Element `i` of `RESIZE (v, size)`: zeros, or the sign element of a `signed` operand, above `v`.
+fn resized(v: &LogicVec, i: usize, signed: bool) -> StdULogic {
+    match v.len() {
+        n if i < n => v.get(i),
+        n if signed => v.get(n - 1),
+        _ => StdULogic::Zero,
+    }
+}
+
+/// The matching relational operators: the one-word path or wide compare, else a port of the
+/// bodies (every report included). An integer is `to_unsigned`/`to_signed` at the vector's length.
+fn qcompare<const C: u8, const SIGNED: bool, const FORM: u8>(
+    m: &mut Machine,
+    ctx: Cx<'_, '_, '_>,
+    _: Option<TyId>,
+    a: &[u64],
+) -> Ret {
+    if let Some(r) = fast_qcompare::<C, SIGNED, FORM>(m, a) {
+        return Ok(Some(r));
+    }
+    let c = CMPS[C as usize];
+    let name = format!("?{}", cmp_name(c));
+    let (l, r) = match FORM {
+        0 => (vh(m, a, 0)?.v, vh(m, a, A1)?.v),
+        1 => {
+            let l = vh(m, a, 0)?;
+            let i = int(a, A1)?;
+            let i = if SIGNED { i } else { natural(m, i)? };
+            let r = from_int(m, ctx, i, l.v.len() as i64, SIGNED, false)?;
+            (l.v, r.v)
+        }
+        _ => {
+            let r = vh(m, a, 1)?;
+            let i = int(a, 0)?;
+            let i = if SIGNED { i } else { natural(m, i)? };
+            let l = from_int(m, ctx, i, r.v.len() as i64, SIGNED, false)?;
+            (l.v, r.v)
+        }
+    };
+    let x = StdULogic::X as u64;
+    if l.is_empty() || r.is_empty() {
+        warn(
+            m,
+            ctx,
+            &format!("NUMERIC_STD.\"{name}\": null detected, returning X"),
+        )?;
+        return Ok(Some(x));
+    }
+    if C >= 4 {
+        // The body's fold: a `U` ends it, an `X` stays, else `and` (`or` for `?/=`) of 0 and 1.
+        let ne = C == 5;
+        let size = l.len().max(r.len());
+        let mut result = if ne { StdULogic::Zero } else { StdULogic::One };
+        for i in 0..size {
+            let e = resized(&l, i, SIGNED).match_eq(resized(&r, i, SIGNED));
+            let e = if ne { e.not() } else { e };
+            if e == StdULogic::U {
+                return Ok(Some(StdULogic::U as u64));
+            } else if e == StdULogic::X || result == StdULogic::X {
+                result = StdULogic::X;
+            } else if ne {
+                result = result.or(e);
+            } else {
+                result = result.and(e);
+            }
+        }
+        return Ok(Some(result as u64));
+    }
+    let dash = |v: &LogicVec| (0..v.len()).any(|i| v.get(i) == StdULogic::DontCare);
+    if dash(&l) || dash(&r) {
+        report(
+            m,
+            ctx,
+            Severity::Error,
+            &format!("NUMERIC_STD.\"{name}\": '-' found in compare string"),
+        )?;
+        return Ok(Some(x));
+    }
+    let (Some(lb), Some(rb)) = (l.to_bitvec(), r.to_bitvec()) else {
+        return Ok(Some(x));
+    };
+    Ok(Some(2 + u64::from(holds(c, lb.cmp_ext(&rb, SIGNED)))))
+}
+
+/// `maximum` / `minimum` (the body's `to_01 (resize (x), 'X')` of both operands, so a metavalue
+/// gives all `X`, a null array the null constant, neither with a report): the one-word or wide
+/// path, else this port; an integer is `to_unsigned`/`to_signed` at the vector's length.
+fn minmax<const MAX: bool, const SIGNED: bool, const FORM: u8>(
+    m: &mut Machine,
+    ctx: Cx<'_, '_, '_>,
+    _: Option<TyId>,
+    a: &[u64],
+) -> Ret {
+    if let Some(r) = fast_minmax::<MAX, SIGNED, FORM>(m, a) {
+        return Ok(Some(r));
+    }
+    let (l, r) = match FORM {
+        0 => (vh(m, a, 0)?.v, vh(m, a, A1)?.v),
+        1 => {
+            let l = vh(m, a, 0)?;
+            let i = int(a, A1)?;
+            let i = if SIGNED { i } else { natural(m, i)? };
+            (from_int(m, ctx, i, l.v.len() as i64, SIGNED, false)?.v, l.v)
+        }
+        _ => {
+            let r = vh(m, a, 1)?;
+            let i = int(a, 0)?;
+            let i = if SIGNED { i } else { natural(m, i)? };
+            (from_int(m, ctx, i, r.v.len() as i64, SIGNED, false)?.v, r.v)
+        }
+    };
+    // (Forms 1 and 2 put the converted integer first; the pick below is symmetric.)
+    if l.is_empty() || r.is_empty() {
+        return put(m, &Vh::null());
+    }
+    let size = l.len().max(r.len());
+    let (Some(x), Some(y)) = (l.to_bitvec(), r.to_bitvec()) else {
+        return put(m, &Vh::down(x_vec(size)));
+    };
+    let (x, y) = (zero_ext(&x, size, SIGNED), zero_ext(&y, size, SIGNED));
+    let less = x.cmp_ext(&y, SIGNED).is_lt();
+    let v = LogicVec::from_bitvec(if less == MAX { &y } else { &x });
+    put(m, &Vh::down(v))
+}
+
+/// `std_match` of two vectors: the one-word or wide path, else a port of the body: a null array
+/// and unequal lengths warn and give `false`.
+fn std_match(m: &mut Machine, ctx: Cx<'_, '_, '_>, _: Option<TyId>, a: &[u64]) -> Ret {
+    if let Some(r) = fast_match(m, a) {
+        return Ok(Some(r));
+    }
+    let (l, r) = (vh(m, a, 0)?.v, vh(m, a, A1)?.v);
+    if l.is_empty() || r.is_empty() {
+        warn(
+            m,
+            ctx,
+            "NUMERIC_STD.STD_MATCH: null detected, returning FALSE",
+        )?;
+        return Ok(Some(0));
+    }
+    if l.len() != r.len() {
+        warn(
+            m,
+            ctx,
+            "NUMERIC_STD.STD_MATCH: L'LENGTH /= R'LENGTH, returning FALSE",
+        )?;
+        return Ok(Some(0));
+    }
+    // MATCH_TABLE: `-` matches anything, else both must be `0 1 L H` with the same value.
+    let known = |e: StdULogic| {
+        matches!(
+            e,
+            StdULogic::Zero | StdULogic::One | StdULogic::L | StdULogic::H
+        )
+    };
+    let one = |e: StdULogic| matches!(e, StdULogic::One | StdULogic::H);
+    let ok = (0..l.len()).all(|i| {
+        let (x, y) = (l.get(i), r.get(i));
+        x == StdULogic::DontCare
+            || y == StdULogic::DontCare
+            || known(x) && known(y) && one(x) == one(y)
+    });
+    Ok(Some(u64::from(ok)))
+}
+
 fn mul<const SIGNED: bool, const FORM: u8>(
     m: &mut Machine,
     ctx: Cx<'_, '_, '_>,
@@ -1744,7 +1909,7 @@ pub(crate) type FastFn = fn(&mut Machine, &[u64]) -> Option<u64>;
 
 /// The bits of `TO_UNSIGNED (arg, size)` / `TO_SIGNED` for `size` from 1 to 64 when `arg` fits.
 #[inline(always)]
-fn fit_bits(arg: i64, size: usize, signed: bool) -> Option<u64> {
+pub(crate) fn fit_bits(arg: i64, size: usize, signed: bool) -> Option<u64> {
     let fits = if signed {
         size >= 64 || (-(1i64 << (size - 1))..1i64 << (size - 1)).contains(&arg)
     } else {
@@ -1870,6 +2035,125 @@ fn fast_compare<const C: u8, const SIGNED: bool, const FORM: u8>(
         }
     };
     Some(u64::from(holds(CMPS[C as usize], ord)))
+}
+
+/// `?=` ... `?>=`: for operands of `0 1 L H` the relation of [`fast_compare`] as `'0'` or `'1'`
+/// (the codes 2 and 3), with the integer fitting the vector's length (else the body's
+/// `to_unsigned` warns). `?=` and `?/=` take any element value ([`fast_qeq`]), the ordering
+/// relations give `X` for a metavalue other than `-`; a `-` there, a null array and anything else
+/// go to the general path.
+fn fast_qcompare<const C: u8, const SIGNED: bool, const FORM: u8>(
+    m: &mut Machine,
+    a: &[u64],
+) -> Option<u64> {
+    if C >= 4 {
+        return fast_qeq::<SIGNED, FORM>(m, a, C == 5);
+    }
+    if FORM != 0
+        && let Some(v) = small(m, a, usize::from(FORM != 1))
+    {
+        let i = nat_or_int(cell(a, if FORM == 1 { A1 } else { 0 })?, SIGNED)?;
+        fit_bits(i, v.n, SIGNED)?;
+    }
+    fast_compare::<C, SIGNED, FORM>(m, a)
+        .map(|h| h + 2)
+        .or_else(|| wide::order_meta(m, a, SIGNED, FORM))
+}
+
+/// The `std_ulogic` code of the body's `?=` fold (`wide::qeq_code`) for two operands of up to 64
+/// elements as planes, the shorter extended with zeros or, for `signed`, its sign element.
+fn qeq_word(p: [u64; 4], n: usize, q: [u64; 4], k: usize, signed: bool) -> u64 {
+    let size = n.max(k);
+    let valid = low(size);
+    let ext = |x: [u64; 4], c: usize| {
+        let sign = signed.then(|| x.map(|w| 0u64.wrapping_sub(w >> (c - 1) & 1)));
+        wide::ext_block(x, low(c), valid & !low(c), sign)
+    };
+    wide::qeq_code(wide::qeq_block(ext(p, n), ext(q, k), valid))
+}
+
+/// `?=` (`ne` false) and `?/=` of up to 64 elements of any value, or the wide form.
+fn fast_qeq<const SIGNED: bool, const FORM: u8>(
+    m: &mut Machine,
+    a: &[u64],
+    ne: bool,
+) -> Option<u64> {
+    let code = match FORM {
+        0 => match (block_of(m, a), block_of(m, a.get(A1..)?)) {
+            (Some((n, p)), Some((k, q))) => qeq_word(p, n, q, k, SIGNED),
+            _ => wide::qeq(m, a, SIGNED, 0)?,
+        },
+        _ => {
+            let at = usize::from(FORM != 1);
+            let i = cell(a, if FORM == 1 { A1 } else { 0 })?;
+            match block_of(m, a.get(at..)?) {
+                Some((n, p)) => {
+                    let b = fit_bits(nat_or_int(i, SIGNED)?, n, SIGNED)?;
+                    qeq_word(p, n, [b, low(n), 0, 0], n, SIGNED)
+                }
+                None => wide::qeq(m, a, SIGNED, FORM)?,
+            }
+        }
+    };
+    // `?/=` is the element-wise negation of the fold: `U` and `X` stay.
+    Some(if ne && code >= 2 { 5 - code } else { code })
+}
+
+/// `maximum` / `minimum` of up to 1024 elements of `0 1 L H`: the operand with the larger (smaller)
+/// value, both extended to the longer length; the result is `(n-1 downto 0)`. Integer rules of
+/// [`fast_qcompare`]; anything else goes to the body.
+fn fast_minmax<const MAX: bool, const SIGNED: bool, const FORM: u8>(
+    m: &mut Machine,
+    a: &[u64],
+) -> Option<u64> {
+    let (n, x, y) = match FORM {
+        0 => {
+            let (Some(l), Some(r)) = (small(m, a, 0), small(m, a, A1)) else {
+                return wide::minmax(m, a, MAX, SIGNED, 0);
+            };
+            let n = l.n.max(r.n);
+            (
+                n,
+                extend_bits(l.bits, l.n, n, SIGNED),
+                extend_bits(r.bits, r.n, n, SIGNED),
+            )
+        }
+        1 => {
+            let Some(l) = small(m, a, 0) else {
+                return wide::minmax(m, a, MAX, SIGNED, 1);
+            };
+            let i = nat_or_int(cell(a, A1)?, SIGNED)?;
+            (l.n, l.bits, fit_bits(i, l.n, SIGNED)?)
+        }
+        _ => {
+            let Some(r) = small(m, a, 1) else {
+                return wide::minmax(m, a, MAX, SIGNED, 2);
+            };
+            let i = nat_or_int(cell(a, 0)?, SIGNED)?;
+            (r.n, fit_bits(i, r.n, SIGNED)?, r.bits)
+        }
+    };
+    let less = if SIGNED {
+        signed_of(x, n) < signed_of(y, n)
+    } else {
+        x < y
+    };
+    put_down(m, n, if less == MAX { y } else { x }).ok()
+}
+
+/// `std_match` of two vectors of one length, up to 1024 elements: an element matches when either
+/// side is `-`, or both are `0 1 L H` with the same value (plane 3 is `-`, plane 1 without plane 3
+/// the known elements, plane 0 their value). Unequal lengths and null arrays go to the body.
+fn fast_match(m: &mut Machine, a: &[u64]) -> Option<u64> {
+    let (Some((n, p)), Some((k, q))) = (block_of(m, a), block_of(m, a.get(A1..)?)) else {
+        return wide::std_match(m, a);
+    };
+    if n != k {
+        return None;
+    }
+    let (kp, kq) = (p[1] & !p[3], q[1] & !q[3]);
+    let ok = p[3] | q[3] | kp & kq & !(p[0] ^ q[0]);
+    Some(u64::from(!ok & low(n) == 0))
 }
 
 fn fast_to_integer<const SIGNED: bool>(m: &mut Machine, a: &[u64]) -> Option<u64> {
@@ -2205,6 +2489,36 @@ pub(crate) fn lookup(symbol: &str) -> Option<NativeFn> {
             }
             cs!(0, 1, 2, 3, 4, 5)
         }
+        Op::QCompare {
+            cmp,
+            signed,
+            form: f,
+        } => {
+            let c = CMPS.iter().position(|x| *x == cmp)?;
+            let fs = form(f);
+            macro_rules! cs {
+                ($($c:literal),*) => {
+                    match (c, signed, fs) {
+                        $(
+                            ($c, false, 0) => qcompare::<$c, false, 0> as NativeFn,
+                            ($c, false, 1) => qcompare::<$c, false, 1> as NativeFn,
+                            ($c, false, _) => qcompare::<$c, false, 2> as NativeFn,
+                            ($c, true, 0) => qcompare::<$c, true, 0> as NativeFn,
+                            ($c, true, 1) => qcompare::<$c, true, 1> as NativeFn,
+                            ($c, true, _) => qcompare::<$c, true, 2> as NativeFn,
+                        )*
+                        _ => return None,
+                    }
+                };
+            }
+            cs!(0, 1, 2, 3, 4, 5)
+        }
+        Op::MinMax {
+            max,
+            signed,
+            form: f,
+        } => pick3!(minmax, max, signed, form(f)),
+        Op::Match => std_match,
         Op::ToInteger { signed: false } => to_integer::<false>,
         Op::ToInteger { signed: true } => to_integer::<true>,
         Op::ToUnsigned => to_unsigned::<false>,
@@ -2362,6 +2676,36 @@ pub(crate) fn lookup_fast(symbol: &str) -> Option<FastFn> {
             }
             cs!(0, 1, 2, 3, 4, 5)
         }
+        Op::QCompare {
+            cmp,
+            signed,
+            form: f,
+        } => {
+            let c = CMPS.iter().position(|x| *x == cmp)?;
+            let fs = form(f);
+            macro_rules! cs {
+                ($($c:literal),*) => {
+                    match (c, signed, fs) {
+                        $(
+                            ($c, false, 0) => fast_qcompare::<$c, false, 0> as FastFn,
+                            ($c, false, 1) => fast_qcompare::<$c, false, 1> as FastFn,
+                            ($c, false, _) => fast_qcompare::<$c, false, 2> as FastFn,
+                            ($c, true, 0) => fast_qcompare::<$c, true, 0> as FastFn,
+                            ($c, true, 1) => fast_qcompare::<$c, true, 1> as FastFn,
+                            ($c, true, _) => fast_qcompare::<$c, true, 2> as FastFn,
+                        )*
+                        _ => return None,
+                    }
+                };
+            }
+            cs!(0, 1, 2, 3, 4, 5)
+        }
+        Op::MinMax {
+            max,
+            signed,
+            form: f,
+        } => pick3_fast!(fast_minmax, max, signed, form(f)),
+        Op::Match => fast_match,
         Op::To01 => fast_to_01,
         Op::Mul { signed, form: f } => match (signed, form(f)) {
             (false, 0) => fast_mul::<false, 0>,

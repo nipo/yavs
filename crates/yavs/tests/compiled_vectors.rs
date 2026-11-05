@@ -721,3 +721,173 @@ end;
 fn mul_integer_in_compiled_code_matches_the_interpreter() {
     all_tiers_match("compiled_mul_integer", MULINT);
 }
+
+/// The matching operators `?<` ... `?/=`, `maximum`, `minimum` and `std_match`, vectors and
+/// integers, `unsigned` and `signed`: lengths around 64 and unequal, metavalues, `-`, weak bits,
+/// null, integers that fit, just fit and just do not, non-zero lower bounds in both directions,
+/// in functions, in a process and in a counted loop.
+const MATCHES: &str = r#"library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+entity y is end;
+architecture a of y is
+  function img(v : unsigned) return string is
+  begin
+    return integer'image(v'left) & "," & integer'image(v'right) & "," &
+           boolean'image(v'ascending) & ":" & to_string(std_logic_vector(v));
+  end function;
+  function img(v : signed) return string is
+  begin
+    return img(unsigned(v));
+  end function;
+  function pick(i : natural; meta : boolean) return std_logic is
+  begin
+    if meta and i mod 7 = 3 then return std_logic'val(i mod 9); end if;
+    case (i * 5 + i / 3) mod 4 is
+      when 0 => return '0';
+      when 1 => return '1';
+      when 2 => return 'L';
+      when others => return 'H';
+    end case;
+  end function;
+  function down(n : natural; k : natural; meta : boolean) return unsigned is
+    variable r : unsigned(n + 4 downto 5);
+  begin
+    for i in r'range loop r(i) := pick(i * k, meta); end loop;
+    return r;
+  end function;
+  function up(n : natural; k : natural; meta : boolean) return unsigned is
+    variable r : unsigned(3 to n + 2);
+  begin
+    for i in r'range loop r(i) := pick(i * k + 1, meta); end loop;
+    return r;
+  end function;
+  -- Operands for a vector of n elements: they fit, just fit or just do not.
+  function ui(n : natural; k : natural) return natural is
+  begin
+    case k mod 8 is
+      when 0 => return 0;
+      when 1 => return 1;
+      when 2 => return 255;
+      when 3 => return integer'high;
+      when 4 => if n < 31 then return 2 ** n - 1; else return 12345; end if;
+      when 5 => if n < 31 then return 2 ** n; else return 99; end if;
+      when 6 => if n < 31 then return 2 ** n + 1; else return 7; end if;
+      when others => return 65535;
+    end case;
+  end function;
+  function si(n : natural; k : natural) return integer is
+  begin
+    case k mod 10 is
+      when 0 => return 0;
+      when 1 => return -1;
+      when 2 => return integer'low;
+      when 3 => return integer'high;
+      when 4 => if n < 32 and n > 0 then return 2 ** (n - 1) - 1; else return 77; end if;
+      when 5 => if n < 32 and n > 0 then return 2 ** (n - 1); else return 78; end if;
+      when 6 => if n < 32 and n > 0 then return -(2 ** (n - 1)); else return -79; end if;
+      when 7 => if n < 32 and n > 0 then return -(2 ** (n - 1)) - 1; else return -80; end if;
+      when 8 => return -1000;
+      when others => return 1000;
+    end case;
+  end function;
+  -- The ordering relations report an error for a `-`, which ends the run with status 1.
+  function dash(x : std_ulogic_vector) return boolean is
+  begin
+    for i in x'range loop
+      if x(i) = '-' then return true; end if;
+    end loop;
+    return false;
+  end function;
+  function qs(x, y : unsigned) return string is
+  begin
+    if dash(std_ulogic_vector(x)) or dash(std_ulogic_vector(y)) then
+      return std_ulogic'image(x ?= y) & std_ulogic'image(x ?/= y) &
+             boolean'image(std_match(x, y)) & img(maximum(x, y)) & img(minimum(x, y));
+    end if;
+    return std_ulogic'image(x ?< y) & std_ulogic'image(x ?<= y) & std_ulogic'image(x ?> y) &
+           std_ulogic'image(x ?>= y) & std_ulogic'image(x ?= y) & std_ulogic'image(x ?/= y) &
+           boolean'image(std_match(x, y)) & boolean'image(std_match(std_logic_vector(x), std_logic_vector(y))) &
+           img(maximum(x, y)) & img(minimum(x, y));
+  end function;
+  function qg(x, y : signed) return string is
+  begin
+    if dash(std_ulogic_vector(x)) or dash(std_ulogic_vector(y)) then
+      return std_ulogic'image(x ?= y) & std_ulogic'image(x ?/= y) &
+             boolean'image(std_match(x, y)) & img(maximum(x, y)) & img(minimum(x, y));
+    end if;
+    return std_ulogic'image(x ?< y) & std_ulogic'image(x ?<= y) & std_ulogic'image(x ?> y) &
+           std_ulogic'image(x ?>= y) & std_ulogic'image(x ?= y) & std_ulogic'image(x ?/= y) &
+           boolean'image(std_match(x, y)) &
+           img(maximum(x, y)) & img(minimum(x, y));
+  end function;
+  function qu(x : unsigned; i : natural) return string is
+  begin
+    if dash(std_ulogic_vector(x)) then
+      return std_ulogic'image(x ?= i) & std_ulogic'image(i ?/= x) &
+             img(maximum(x, i)) & img(minimum(i, x));
+    end if;
+    return std_ulogic'image(x ?< i) & std_ulogic'image(i ?<= x) & std_ulogic'image(x ?> i) &
+           std_ulogic'image(i ?>= x) & std_ulogic'image(x ?= i) & std_ulogic'image(i ?/= x) &
+           img(maximum(x, i)) & img(minimum(i, x));
+  end function;
+  function qi(x : signed; i : integer) return string is
+  begin
+    if dash(std_ulogic_vector(x)) then
+      return std_ulogic'image(x ?= i) & std_ulogic'image(i ?/= x) &
+             img(maximum(x, i)) & img(minimum(i, x));
+    end if;
+    return std_ulogic'image(x ?< i) & std_ulogic'image(i ?<= x) & std_ulogic'image(x ?> i) &
+           std_ulogic'image(i ?>= x) & std_ulogic'image(x ?= i) & std_ulogic'image(i ?/= x) &
+           img(maximum(x, i)) & img(minimum(i, x));
+  end function;
+begin
+  process
+    constant la : integer_vector := (1, 1, 2, 7, 8, 32, 33, 63, 64, 64, 65, 1, 0, 5, 3, 70, 9);
+    constant lb : integer_vector := (1, 64, 2, 8, 9, 32, 31, 64, 63, 64, 65, 64, 5, 0, 4, 3, 70);
+    variable n : integer := 0;
+    variable w : signed(15 downto 0) := x"8001";
+    variable u : unsigned(11 downto 0) := x"801";
+    variable p : signed(15 downto 0);
+    variable q : unsigned(15 downto 0);
+  begin
+    for i in la'range loop
+      for k in 1 to 3 loop
+        for meta in boolean'range loop
+          report integer'image(la(i)) & "/" & integer'image(lb(i)) & "/" & integer'image(k) & "/" &
+                 boolean'image(meta) & ": " &
+                 qs(down(la(i), k, meta), up(lb(i), k + 1, meta)) & " " &
+                 qs(up(la(i), k, meta), down(lb(i), k + 1, meta)) & " " &
+                 qg(signed(down(la(i), k, meta)), signed(up(lb(i), k + 1, meta))) & " " &
+                 qg(signed(up(la(i), k, meta)), signed(down(lb(i), k + 1, meta))) & " " &
+                 qu(down(la(i), k + 2, meta), ui(la(i), k)) & " " &
+                 qu(up(la(i), k, meta), ui(la(i), k + 1)) & " " &
+                 qi(signed(down(la(i), k, meta)), si(la(i), k)) & " " &
+                 qi(signed(up(la(i), k + 3, meta)), si(la(i), k + 1));
+        end loop;
+      end loop;
+    end loop;
+    for k in 0 to 300 loop
+      p := maximum(w(7 downto 0) * to_signed(k mod 100 - 50, 8), minimum(w, k - 150));
+      q := minimum(u(7 downto 0) * to_unsigned(k mod 200, 8), maximum(u, k));
+      if (p ?< w) = '1' then n := n + 1; end if;
+      if (q ?>= u) = '1' then n := n + 2; end if;
+      if (p ?= k - 100) = '1' then n := n + 4; end if;
+      if std_match(q, u & "0000") then n := n + 8; end if;
+      n := n + to_integer(p) + to_integer(q);
+      w := p + k;
+      u := q(11 downto 0) + k;
+      if k mod 60 = 0 then
+        report integer'image(n) & " " & img(p) & " " & img(q) & " " & qs(q, u & "0000");
+      end if;
+    end loop;
+    report "done " & integer'image(n);
+    wait;
+  end process;
+end;
+"#;
+
+#[test]
+fn matching_operators_in_compiled_code_match_the_interpreter() {
+    all_tiers_match("compiled_match", MATCHES);
+}

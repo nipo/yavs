@@ -449,14 +449,18 @@ pub fn ieee_layout(op: yavs_ir::ieee::Op) -> Option<&'static [Arg]> {
     use yavs_ir::ieee::{Form, Op};
     Some(match op {
         Op::ToInteger { .. } | Op::NumNot | Op::VecNot | Op::Neg | Op::Abs => &[Arg::Arr],
-        Op::Add { form, .. } | Op::Compare { form, .. } | Op::Mul { form, .. } => match form {
+        Op::Add { form, .. }
+        | Op::Compare { form, .. }
+        | Op::QCompare { form, .. }
+        | Op::MinMax { form, .. }
+        | Op::Mul { form, .. } => match form {
             Form::Vv => &[Arg::Arr, Arg::Arr],
             Form::Vi => &[Arg::Arr, Arg::Int],
             Form::Iv => &[Arg::Int, Arg::Arr],
         },
         Op::ToUnsigned | Op::ToSigned => &[Arg::Int, Arg::Int],
         Op::Resize { .. } | Op::Shift(_) | Op::ShiftFn(_) | Op::To01 => &[Arg::Arr, Arg::Int],
-        Op::NumGate(_) | Op::VecGate(_) => &[Arg::Arr, Arg::Arr],
+        Op::NumGate(_) | Op::VecGate(_) | Op::Match => &[Arg::Arr, Arg::Arr],
         _ => return None,
     })
 }
