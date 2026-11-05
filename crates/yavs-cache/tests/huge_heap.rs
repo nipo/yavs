@@ -26,7 +26,8 @@ fn heap_marked() -> bool {
 }
 
 fn main() {
-    if let Some(want) = std::env::args().nth(1) {
+    // Only `on` and `off` are child modes; libtest options such as --test-threads are ignored.
+    if let Some(want) = std::env::args().nth(1).filter(|a| a == "on" || a == "off") {
         yavs_cache::huge_heap();
         let v = vec![1u8; 8 << 20];
         assert_eq!(heap_marked(), want == "on", "{} bytes", v.len());
@@ -43,5 +44,14 @@ fn main() {
             .status()
             .unwrap();
         assert!(st.success(), "{want}");
+    }
+    // Regression (#1090): a libtest option as first argument must not be taken as a mode.
+    if std::env::var_os("HUGE_HEAP_NESTED").is_none() {
+        let st = Command::new(std::env::current_exe().unwrap())
+            .arg("--test-threads=2")
+            .env("HUGE_HEAP_NESTED", "1")
+            .status()
+            .unwrap();
+        assert!(st.success(), "--test-threads=2");
     }
 }
