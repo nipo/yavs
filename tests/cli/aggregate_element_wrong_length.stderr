@@ -1,0 +1,11 @@
+error[E3009]: value length 0 does not match field B length 3
+  --> $DIR/aggregate_element_wrong_length.vhd:13:5
+   |
+13 |     cs <= ((false, "111"), (true, ""));
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: at 0 fs, delta 0, in process aggregate_element_wrong_length.process (aggregate_element_wrong_length.vhd:12)
+   = help: make both sides the same length, or change the target's constraint
+
+error: aborting due to 1 previous error
+

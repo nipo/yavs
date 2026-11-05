@@ -1058,6 +1058,22 @@ impl Elab<'_> {
         // An array generic of a constrained subtype takes that subtype's bounds, not the
         // actual's (implicit subtype conversion, LRM 6.5.6.2, 6.5.7.1).
         let v = self.m.as_subtype(db, o.subtype, v, Some(s), decl.span)?;
+        // So must the lengths of its elements and fields (#1105).
+        if let Ok(Some(shape)) = self.m.shape(db, o.subtype, Some(s), decl.span)
+            && let Some((want, have)) = length_differs(&shape, &v)
+        {
+            return Err(Box::new(
+                Diagnostic::error(
+                    codes::GENERIC_RANGE,
+                    format!(
+                        "value of generic `{}` has a part of {have} elements where its subtype has {want}",
+                        decl.name
+                    ),
+                )
+                .with_primary(at, "instantiated here")
+                .with_secondary(decl.span, "generic declared here"),
+            ));
+        }
         // Scalar generic values must lie in the generic's subtype (LRM 6.5.6.2).
         if db.types[db.base(o.subtype)].kind.is_scalar()
             && let Some(x) = v.as_int()
@@ -1205,8 +1221,12 @@ impl Elab<'_> {
         let DeclKind::Object(o) = &decl.kind else {
             return Err(Box::new(ice(decl.span, "GUARD is not an object")));
         };
+        // A guard with an external name starts false: its process gives the value (#1102).
+        let early = |e: &yavs_sem::ExprId| {
+            !db.uses_external(*e) && db.external_uses(ExtOwner::Expr(*e)).is_empty()
+        };
         self.m.sig_init = true;
-        let init = o.default.map(|e| self.m.eval(db, e, Some(s)));
+        let init = o.default.filter(early).map(|e| self.m.eval(db, e, Some(s)));
         self.m.sig_init = false;
         let init = init.transpose()?;
         let Some(shape) = self
@@ -2088,6 +2108,12 @@ impl Elab<'_> {
                     }
                     // The guard process `GUARD <= guard_expression` (LRM 11.2): its
                     // statement is the block statement; it drives GUARD.
+                    if let DeclKind::Object(go) = &self.db.decls[g].kind
+                        && let Some(cond) = go.default
+                    {
+                        let hs = self.db.alias_external_uses(ExtOwner::Expr(cond), bscope);
+                        self.pending.extend(hs.iter().map(|&h| (b, h)));
+                    }
                     let o = self.m.signal(b, g).expect("GUARD just elaborated");
                     let n = Symbol::intern("_guard");
                     let name = Ident {
@@ -4485,7 +4511,19 @@ impl Elab<'_> {
                 | StmtKind::ConcProcCall { .. } => {
                     self.db.alias_external_uses(ExtOwner::Stmt(st), scope);
                 }
-                StmtKind::Block { scope, body, .. } | StmtKind::ForGenerate { scope, body, .. } => {
+                StmtKind::Block {
+                    scope, body, guard, ..
+                } => {
+                    let (scope, body, guard) = (*scope, body.clone(), *guard);
+                    if let Some(g) = guard
+                        && let DeclKind::Object(o) = &self.db.decls[g].kind
+                        && let Some(cond) = o.default
+                    {
+                        self.db.alias_external_uses(ExtOwner::Expr(cond), scope);
+                    }
+                    nested.push((scope, body));
+                }
+                StmtKind::ForGenerate { scope, body, .. } => {
                     nested.push((*scope, body.clone()));
                 }
                 StmtKind::IfGenerate { alts } => {
@@ -5235,6 +5273,18 @@ impl Model {
         scope: Option<ScopeId>,
     ) -> R<Val> {
         let span = db.externals[x].span;
+        // The initial value of a signal may read another's, if that one is elaborated (#1102).
+        if self.sig_init
+            && db.externals[x].class == ExternalClass::Signal
+            && let Some(s) = scope
+            && let ExtTarget::Signal(o) = self.external_target(db, x, s)?
+        {
+            let o = self.nets.obj(o);
+            let (d, sc) = (o.decl, o.scope);
+            if let Some(v) = self.signal_init(db, d, sc) {
+                return Ok(v);
+            }
+        }
         if db.externals[x].class != ExternalClass::Constant {
             return Err(Box::new(
                 Diagnostic::error(
@@ -5677,6 +5727,8 @@ impl Model {
             }
         };
         let mut lh: Vec<Option<(i64, i64)>> = vec![None; indexes.len()];
+        // A slice gives the formal its direction, and null slices alone its bounds (#1100, #1101).
+        let mut sliced: Option<crate::hier::Bounds> = None;
         for &(steps, e) in parts {
             let espan = db.exprs[e].span;
             let Some(first) = self
@@ -5687,8 +5739,14 @@ impl Model {
             };
             let ranges: Vec<(i64, i64)> = match first {
                 Sel::Index(xs) => xs.iter().map(|&x| (x, x)).collect(),
-                Sel::Slice(b) if !b.is_empty() => vec![b.low_high()],
-                Sel::Slice(_) => continue,
+                Sel::Slice(b) if !b.is_empty() => {
+                    sliced = Some(b);
+                    vec![b.low_high()]
+                }
+                Sel::Slice(b) => {
+                    sliced = sliced.or(Some(b));
+                    continue;
+                }
                 Sel::Field(_) => return Err(Box::new(ice(espan, "field of an array port"))),
             };
             for (d, (lo, hi)) in ranges.into_iter().enumerate() {
@@ -5698,12 +5756,16 @@ impl Model {
         }
         let mut dims = Vec::with_capacity(indexes.len());
         for (d, &ix) in indexes.iter().enumerate() {
-            let dir = self.scalar_bounds(db, ix, Some(s), span)?.dir;
+            let dir = match sliced {
+                Some(b) => b.dir,
+                None => self.scalar_bounds(db, ix, Some(s), span)?.dir,
+            };
             let Some((lo, hi)) = lh[d] else {
-                return Err(unsupported(
-                    span,
-                    "an individually associated port with only null slices",
-                ));
+                let Some(b) = sliced else {
+                    return Err(Box::new(ice(span, "no part of an individual association")));
+                };
+                dims.push(b);
+                continue;
             };
             dims.push(match dir {
                 yavs_sem::types::Direction::To => crate::hier::Bounds {
@@ -6083,5 +6145,28 @@ fn same_values(a: &Shape, b: &Shape) -> bool {
                 && fa.iter().zip(fb).all(|((_, x), (_, y))| same_values(x, y))
         }
         _ => false,
+    }
+}
+
+/// The first array in value `v` whose length differs from shape's: (the shape's, the value's).
+fn length_differs(shape: &Shape, v: &Val) -> Option<(u64, u64)> {
+    match (shape, v) {
+        (Shape::Array { elem, .. }, Val::Array(a)) => {
+            let have = crate::value::bounds_of(a).iter().map(|b| b.len()).product();
+            if have != shape.len() {
+                return Some((shape.len(), have));
+            }
+            match &a.elems {
+                yavs_sem::stat::Elems::Runs(rs) => {
+                    rs.iter().find_map(|(_, x)| length_differs(elem, x))
+                }
+                yavs_sem::stat::Elems::Bytes(_) => None,
+            }
+        }
+        (Shape::Record { fields, .. }, Val::Record(vs)) => fields
+            .iter()
+            .zip(vs.iter())
+            .find_map(|((_, f), x)| length_differs(f, x)),
+        _ => None,
     }
 }

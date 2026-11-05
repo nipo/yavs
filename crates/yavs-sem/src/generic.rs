@@ -208,6 +208,10 @@ pub(crate) struct Remap {
     exprs: FxHashMap<ExprId, ExprId>,
     #[serde(serialize_with = "crate::ids::ser_id_map")]
     stmts: FxHashMap<StmtId, StmtId>,
+    /// External names that depend on a generic: one copy for an expression and the LSP rooted
+    /// at it (#1096).
+    #[serde(serialize_with = "crate::ids::ser_id_map")]
+    externals: FxHashMap<crate::ids::ExternalId, crate::ids::ExternalId>,
     /// Formal constants to actual expressions.
     #[serde(serialize_with = "crate::ids::ser_id_map")]
     consts: FxHashMap<DeclId, ExprId>,
@@ -242,6 +246,8 @@ impl Remap {
         self.scopes.extend(o.scopes.iter().map(|(a, b)| (*a, *b)));
         self.exprs.extend(o.exprs.iter().map(|(a, b)| (*a, *b)));
         self.stmts.extend(o.stmts.iter().map(|(a, b)| (*a, *b)));
+        self.externals
+            .extend(o.externals.iter().map(|(a, b)| (*a, *b)));
         self.consts.extend(o.consts.iter().map(|(a, b)| (*a, *b)));
         self.formal_firsts.extend(o.formal_firsts.iter().copied());
     }
@@ -2824,6 +2830,29 @@ impl Db {
     /// package instance (`None` when the generic package has no body), or the
     /// body region of an instantiated subprogram. Subprograms of the instance get
     /// their cloned `Body::Hir`.
+    /// Clone the bodies of the instances of subprograms declared in process region `scope`
+    /// (and in the subprograms in it): what they assign are drivers of the process, known
+    /// when its declarations end, and each instance has its own external names (#1096).
+    pub(crate) fn clone_local_instances(&mut self, scope: ScopeId) -> Result<(), Reported> {
+        for d in self.scopes[scope].order.clone() {
+            match self.decls[d].kind.subprogram().map(|sp| &sp.body) {
+                Some(&Body::Instance(i)) => {
+                    let g = self.insts[i].generic;
+                    let local = matches!(
+                        self.decls[g].kind.subprogram().map(|sp| &sp.body),
+                        Some(Body::Hir { .. })
+                    );
+                    if local {
+                        self.instance_body(i)?;
+                    }
+                }
+                Some(&Body::Hir { scope: inner, .. }) => self.clone_local_instances(inner)?,
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
     pub fn instance_body(&mut self, inst: InstId) -> Result<Option<ScopeId>, Reported> {
         if let Some(&s) = self.insts[inst].body.get() {
             return Ok(Some(s));
@@ -3859,35 +3888,7 @@ impl Db {
         match k {
             ExprKind::Const(c) => ExprKind::Const(*c),
             ExprKind::Obj(d) => ExprKind::Obj(self.r_decl(r, *d)),
-            ExprKind::External(x) => {
-                let old = &self.externals[*x];
-                let (class, path_kind, path, st, span) = (
-                    old.class,
-                    old.path_kind,
-                    old.path.iter().map(|(i, e)| (*i, *e)).collect::<Vec<_>>(),
-                    old.subtype,
-                    old.span,
-                );
-                let saved = std::mem::take(&mut r.changed);
-                let path: Box<[_]> = path
-                    .into_iter()
-                    .map(|(i, e)| (i, e.map(|e| self.r_expr(r, e))))
-                    .collect();
-                let subtype = self.r_subtype(r, st);
-                let changed = r.changed;
-                r.changed = saved || changed;
-                if !changed {
-                    ExprKind::External(*x)
-                } else {
-                    ExprKind::External(self.externals.push(External {
-                        class,
-                        path_kind,
-                        path,
-                        subtype,
-                        span,
-                    }))
-                }
-            }
+            ExprKind::External(x) => ExprKind::External(self.r_external(r, *x)),
             ExprKind::Call {
                 callee,
                 args,
@@ -4003,11 +4004,47 @@ impl Db {
         ss.iter().map(|&s| self.r_stmt(r, s)).collect()
     }
 
+    /// The external name `x` in the copy: a new one when a generic changes its path or subtype.
+    fn r_external(&mut self, r: &mut Remap, x: crate::ids::ExternalId) -> crate::ids::ExternalId {
+        if let Some(&n) = r.externals.get(&x) {
+            r.changed = true;
+            return n;
+        }
+        let old = &self.externals[x];
+        let (class, path_kind, path, st, span) = (
+            old.class,
+            old.path_kind,
+            old.path.iter().map(|(i, e)| (*i, *e)).collect::<Vec<_>>(),
+            old.subtype,
+            old.span,
+        );
+        let saved = std::mem::take(&mut r.changed);
+        let path: Box<[_]> = path
+            .into_iter()
+            .map(|(i, e)| (i, e.map(|e| self.r_expr(r, e))))
+            .collect();
+        let subtype = self.r_subtype(r, st);
+        let changed = r.changed;
+        r.changed = saved || changed;
+        if !changed {
+            return x;
+        }
+        let n = self.externals.push(External {
+            class,
+            path_kind,
+            path,
+            subtype,
+            span,
+        });
+        r.externals.insert(x, n);
+        n
+    }
+
     fn r_lsp(&mut self, r: &mut Remap, l: &Lsp) -> Lsp {
         Lsp {
             root: match l.root {
                 ObjRoot::Decl(d) => ObjRoot::Decl(self.r_decl(r, d)),
-                ObjRoot::External(x) => ObjRoot::External(x),
+                ObjRoot::External(x) => ObjRoot::External(self.r_external(r, x)),
                 ObjRoot::ImplicitSignal(d) => ObjRoot::ImplicitSignal(self.r_decl(r, d)),
             },
             path: self.r_path(r, &l.path),

@@ -1,0 +1,14 @@
+error[E2115]: value of generic `g` has a part of 0 elements where its subtype has 1
+  --> $DIR/generic_part_wrong_length.vhd:10:3
+   |
+10 | /   b : block
+11 | |     generic (g : word_vec_t(1 to n) := (others => (1 to 0 => '0')));
+   | |              - generic declared here
+12 | |   begin
+13 | |   end block;
+   | |____________^ instantiated here
+   |
+   = note: in instance generic_part_wrong_length
+
+error: aborting due to 1 previous error
+

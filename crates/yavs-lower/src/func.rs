@@ -1978,7 +1978,9 @@ fn inst_object_of(
                 None
             };
             let (st, def) = (o.subtype, o.default);
+            // One initialised from an external name always has its elaborated value (#1102).
             let init = if array
+                || def.is_some_and(|e| db.uses_external(e))
                 || matches!(
                     o.role,
                     ObjRole::Port | ObjRole::Guard | ObjRole::ImplicitSignal
@@ -2484,6 +2486,10 @@ fn guard_process(
     let Some(cond) = o.default else {
         return Err(cx.ice(st.span, "GUARD without its condition"));
     };
+    for &h in db.external_uses(yavs_sem::external::ExtOwner::Expr(cond)) {
+        let x = db.implicit_external(h).ok_or(Failed)?;
+        external_alias(db, pb, cx, ir, h, x)?;
+    }
     let Some(&Obj::Signal { sig }) = cx.objs.get(&g) else {
         return Err(cx.ice(st.span, "GUARD was not lowered as a signal"));
     };

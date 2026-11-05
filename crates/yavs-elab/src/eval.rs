@@ -1252,7 +1252,7 @@ impl Model {
 
     /// The initial value of signal `d` of the instance `scope` from its leaves; `None` for
     /// an array of composites (its leaves are not one run of elements).
-    fn signal_init(&self, db: &Db, d: DeclId, scope: ScopeId) -> Option<Val> {
+    pub(crate) fn signal_init(&self, db: &Db, d: DeclId, scope: ScopeId) -> Option<Val> {
         let obj = self.nets.obj(self.signal(scope, d)?);
         let mut next = obj.leaves.0.index();
         init_val(db, &obj.shape, &self.nets, &mut next)

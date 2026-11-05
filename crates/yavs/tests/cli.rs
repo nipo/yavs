@@ -2298,6 +2298,66 @@ fn external_alias_process_missing() {
     run_snapshot("external_alias_process_missing", 2);
 }
 
+/// External names depending on a generic of a subprogram in a process (#1096).
+#[test]
+fn external_generic_subprogram() {
+    run_snapshot("external_generic_subprogram", 0);
+}
+
+/// A protected method in a process drives for the process (#1097).
+#[test]
+fn external_protected_in_process() {
+    run_snapshot("external_protected_in_process", 0);
+}
+
+/// A folded null aggregate of constrained array elements (#1098).
+#[test]
+fn null_array_constrained_elements() {
+    run_snapshot("null_array_constrained_elements", 0);
+}
+
+/// An external name in a constraint in a process (#1099).
+#[test]
+fn external_in_process_constraint() {
+    run_snapshot("external_in_process_constraint", 0);
+}
+
+/// Individual association with null slices and a slice direction (#1100, #1101).
+#[test]
+fn individual_null_slices() {
+    run_snapshot("individual_null_slices", 0);
+}
+
+/// An external signal in a guard and as a signal's initial value (#1102).
+#[test]
+fn external_guard_and_init() {
+    run_snapshot("external_guard_and_init", 0);
+}
+
+/// A package path through a nested package (#1103).
+#[test]
+fn external_nested_package() {
+    run_snapshot("external_nested_package", 0);
+}
+
+/// A port conversion of a composite with a null array field (#1104).
+#[test]
+fn port_conversion_null_field() {
+    run_snapshot("port_conversion_null_field", 0);
+}
+
+/// A folded aggregate with an element of the wrong length is a length error (#1105).
+#[test]
+fn aggregate_element_wrong_length() {
+    run_snapshot("aggregate_element_wrong_length", 1);
+}
+
+/// A generic with a part of the wrong length is E2115 (#1105).
+#[test]
+fn generic_part_wrong_length() {
+    run_snapshot("generic_part_wrong_length", 2);
+}
+
 /// E2121 with two types of one name (#1026), and with two different names.
 #[test]
 fn external_same_type_name() {

@@ -206,7 +206,8 @@ impl Map {
         places(prog, ty, shape, &desc, 0, &mut Vec::new(), &mut per, false)?;
         let mut flat = Vec::new();
         for (path, leaf, n) in shape.leaves() {
-            let mut v = per.remove(&path).ok_or_else(mismatch)?;
+            // A leaf inside a null array has no places (#1104).
+            let mut v = per.remove(&path).unwrap_or_default();
             if v.len() as u64 != n {
                 return Err(mismatch());
             }

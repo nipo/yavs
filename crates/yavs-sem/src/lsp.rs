@@ -844,15 +844,19 @@ impl Db {
     /// assign (14.7.2).
     fn scope_subprogram_drivers(&self, scope: ScopeId, out: &mut Vec<Lsp>) {
         for &d in &self.scopes[scope].order {
-            if let Some(sp) = self.decls[d].kind.subprogram()
-                && let crate::decl::Body::Hir { scope, stmts } = &sp.body
-            {
-                let mut ls = Vec::new();
-                self.collect_drivers(stmts, &mut ls);
-                for l in ls {
-                    push_unique(self, out, self.cut_at_subprogram_values(l));
+            // With the methods of a protected type; without uninstantiated subprograms, which
+            // never run (#1096, #1097).
+            for m in self.decl_subprograms(d) {
+                if let Some(sp) = self.decls[m].kind.subprogram()
+                    && let crate::decl::Body::Hir { scope, stmts } = &sp.body
+                {
+                    let mut ls = Vec::new();
+                    self.collect_drivers(stmts, &mut ls);
+                    for l in ls {
+                        push_unique(self, out, self.cut_at_subprogram_values(l));
+                    }
+                    self.scope_subprogram_drivers(*scope, out);
                 }
-                self.scope_subprogram_drivers(*scope, out);
             }
         }
     }

@@ -81,7 +81,7 @@ pub mod codes {
     pub const BAD_NAME: &str = "E2113";
     /// A subprogram is called before its body is elaborated (LRM 14.4.2).
     pub const BODY_NOT_ELABORATED: &str = "E2114";
-    /// A generic value is outside the generic's subtype.
+    /// A generic value is outside the generic's subtype, or a part of it has another length.
     pub const GENERIC_RANGE: &str = "E2115";
     /// A package needs a body (subprograms, deferred constants) and has none (LRM 4.8).
     pub const BODY_MISSING: &str = "E2116";

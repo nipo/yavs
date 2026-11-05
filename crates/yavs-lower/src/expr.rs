@@ -230,7 +230,13 @@ impl<'a> Fx<'a, '_> {
         let db = self.db;
         let e = &db.exprs[id];
         let span = e.span;
-        if let Some(c) = e.value {
+        // A folded aggregate with a null array inside is lowered as an aggregate: the folded
+        // form has one layout for its elements, and the run-time checks report a wrong length
+        // (#1105).
+        let folded = e.value.filter(|&c| {
+            !matches!(e.kind, ExprKind::Aggregate { .. }) || !holds_null_array(&db.consts[c])
+        });
+        if let Some(c) = folded {
             let v = self.konst_checked(&db.consts[c], e.subtype, span)?;
             // A folded constant keeps the bounds of its subtype, element bounds too, not those
             // of its initialiser's literals (LRM 6.4.2.2): `'element'left` of it, or of a
@@ -373,6 +379,17 @@ impl<'a> Fx<'a, '_> {
         };
         let t = self.db.base(st);
         if self.is_general(t, span)? {
+            // No element to take the element bounds from: they are the subtype's (#1098).
+            let null = a.bounds.iter().any(|&(l, d, r)| match d {
+                Direction::To => l > r,
+                Direction::Downto => l < r,
+            });
+            if null && let Some(desc) = self.desc_of(st, None, span)? {
+                let tid = self.ty(t, span)?;
+                let size = self.size_of(tid, desc);
+                let data = self.alloc_val(size, tid, Some(desc));
+                return Ok(V::A(data, desc));
+            }
             return self.konst_comp(v, st, span);
         }
         let tid = self.ty(t, span)?;
@@ -6187,6 +6204,29 @@ fn elab_known(db: &Db, e: ExprId) -> bool {
         ExprKind::ImplicitConv { operand }
         | ExprKind::Qualified { operand, .. }
         | ExprKind::Conv { operand, .. } => elab_known(db, *operand),
+        _ => false,
+    }
+}
+
+/// Whether composite constant `v` has a null array as an element or field.
+fn holds_null_array(v: &ConstValue) -> bool {
+    fn null(v: &ConstValue) -> bool {
+        match v {
+            ConstValue::Array(a) => {
+                a.bounds.iter().any(|&(l, d, r)| match d {
+                    Direction::To => l > r,
+                    Direction::Downto => l < r,
+                }) || holds_null_array(v)
+            }
+            _ => holds_null_array(v),
+        }
+    }
+    match v {
+        ConstValue::Record(vs) => vs.iter().any(null),
+        ConstValue::Array(a) => match &a.elems {
+            Elems::Runs(rs) => rs.iter().any(|(_, x)| null(x)),
+            Elems::Bytes(_) => false,
+        },
         _ => false,
     }
 }

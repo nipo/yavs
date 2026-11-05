@@ -355,9 +355,11 @@ impl Db {
     }
 
     /// The subprograms with VHDL bodies declaration `d` brings: itself, or the methods of a
-    /// protected type's body (#255).
+    /// protected type's body (#255). An uninstantiated subprogram brings none: only its
+    /// instances run, and its names depend on generics with no value (#1096).
     pub fn decl_subprograms(&self, d: DeclId) -> Vec<DeclId> {
         match &self.decls[d].kind {
+            DeclKind::Subprogram(sp) if sp.generics.is_some() => Vec::new(),
             DeclKind::Subprogram(sp) if matches!(sp.body, Body::Hir { .. }) => vec![d],
             // Methods are declared in the protected type declaration and completed in the body;
             // the body's own subprograms are declared there.
@@ -423,6 +425,7 @@ impl Db {
                     if let Some(e) = o.default {
                         push(self, e, exprs);
                     }
+                    self.subtype_exprs(o.subtype, &mut |e| push(self, e, exprs));
                 }
                 DeclKind::Alias(Alias::Object { target, .. }) => {
                     if self.external_alias(x).is_some() {
@@ -471,8 +474,8 @@ impl Db {
     /// none.
     pub fn package_path_target(&self, x: ExternalId) -> Result<DeclId, String> {
         let ext = &self.externals[x];
-        let [(l, _), (p, _), (last, _)] = &ext.path[..] else {
-            return Err("nested package paths are not supported yet".into());
+        let [(l, _), (p, _), inner @ .., (last, _)] = &ext.path[..] else {
+            return Err("a package path names a library, a package and an object".into());
         };
         let unit = self
             .libs
@@ -487,7 +490,18 @@ impl Db {
         let Some(u) = unit else {
             return Err(format!("package `{}.{}` is not analyzed", l.text, p.text));
         };
-        let Some(d) = self.scopes[self.units[u].scope]
+        let mut region = self.units[u].scope;
+        for (name, _) in inner {
+            let found = self.scopes[region]
+                .names
+                .get(&name.key)
+                .and_then(|v| v.first());
+            match found.map(|&d| &self.decls[d].kind) {
+                Some(DeclKind::Package { scope, .. }) => region = *scope,
+                _ => return Err(format!("no nested package `{}`", name.text)),
+            }
+        }
+        let Some(d) = self.scopes[region]
             .names
             .get(&last.key)
             .and_then(|v| v.first().copied())
@@ -514,6 +528,40 @@ impl Db {
             }
             _ => Err(format!("`{}` is not a {what}", last.text)),
         }
+    }
+
+    /// The expressions of the constraint of subtype `st`: the bounds of a declared object can
+    /// name an external object (#1099).
+    fn subtype_exprs(&self, st: crate::ids::SubtypeId, f: &mut dyn FnMut(ExprId)) {
+        fn go(c: &crate::types::Constraint, f: &mut dyn FnMut(ExprId)) {
+            use crate::types::{Constraint, RangeC};
+            match c {
+                Constraint::Range(r) => range(r, f),
+                Constraint::Array { dims, elem } => {
+                    for r in dims.iter().flatten() {
+                        range(r, f);
+                    }
+                    go(elem, f);
+                }
+                Constraint::Record { elems } => elems.iter().for_each(|(_, c)| go(c, f)),
+                Constraint::FromObject { expr, .. } => f(*expr),
+                Constraint::None => {}
+            }
+            fn range(r: &RangeC, f: &mut dyn FnMut(ExprId)) {
+                match r {
+                    RangeC::Explicit { left, right, .. } => {
+                        f(*left);
+                        f(*right);
+                    }
+                    RangeC::Attr {
+                        prefix: crate::hir::AttrPrefix::Expr(p),
+                        ..
+                    } => f(*p),
+                    RangeC::Attr { .. } => {}
+                }
+            }
+        }
+        go(&self.subtypes[st].constraint, f);
     }
 
     /// External names (and implicit aliases of them) in statement `s` and below; `roots`
@@ -545,10 +593,11 @@ impl Db {
                 lsps(&info.drivers);
                 lsps(info.reads_all.as_deref().unwrap_or(&[]));
                 for &d in &self.scopes[*scope].order {
-                    if let DeclKind::Object(o) = &self.decls[d].kind
-                        && let Some(e) = o.default
-                    {
-                        push(self, e);
+                    if let DeclKind::Object(o) = &self.decls[d].kind {
+                        if let Some(e) = o.default {
+                            push(self, e);
+                        }
+                        self.subtype_exprs(o.subtype, &mut |e| push(self, e));
                     }
                 }
             }

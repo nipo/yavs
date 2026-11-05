@@ -447,7 +447,10 @@ const EXPLAIN: &[(&str, &str)] = &[
         "E2114",
         "A subprogram is called before its body is elaborated (LRM 14.4.2).",
     ),
-    ("E2115", "A generic value is outside the generic's subtype."),
+    (
+        "E2115",
+        "A generic value is outside the generic's subtype, or a part of it has another length.",
+    ),
     (
         "E2116",
         "A package needs a body (subprograms, deferred constants) and has none (LRM 4.8).",

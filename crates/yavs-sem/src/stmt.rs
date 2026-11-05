@@ -2013,6 +2013,7 @@ impl Db {
             self.check_calls_wait(&body, sp, None)?;
         }
         let all = matches!(sensitivity, Sensitivity::All);
+        self.clone_local_instances(pscope)?;
         let info = self.process_info(pscope, &body, all);
         self.check_passive(passive, &info)?;
         Ok(StmtKind::Process {
