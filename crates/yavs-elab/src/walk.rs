@@ -3471,7 +3471,8 @@ impl Elab<'_> {
     /// one-dimensional array of std_ulogic, BIT or BOOLEAN) in the kernel's codes.
     fn lit_value(&mut self, s: ScopeId, x: ExprId, shape: &Shape) -> Option<yavs_kernel::LogicVec> {
         let (ety, _) = logic_elem(shape)?;
-        if self.db.base(self.db.exprs[x].subtype) != shape.ty() {
+        // A kernel `Lit` holds a first element, a null value has none: the lowered process runs it.
+        if shape.len() == 0 || self.db.base(self.db.exprs[x].subtype) != shape.ty() {
             return None;
         }
         let v = self.static_val(s, x)?;

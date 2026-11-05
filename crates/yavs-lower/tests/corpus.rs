@@ -18,6 +18,7 @@ use yavs_sem::{Db, LangRev, Options};
 
 /// Corpus files whose output matches sim1's exactly.
 const PASS: &[&str] = &[
+    "composite/null_record_field",
     "composite/stack_cells_nested",
     "composite/stack_nested_index",
     "held/stack_gate_index",

@@ -1,0 +1,1 @@
+Concurrent assignments with a static null operand, such as `y <= x when c = '1' else (others => '0');` on a zero-width vector or record field, no longer stop elaboration with an internal compiler error.

@@ -2782,6 +2782,32 @@ fn logic_gates_run_in_the_kernel() {
 /// constants only). Reports,
 /// with time and delta, are those of the interpreted statements over all value triples
 /// (the corpus case `sigassign/mux_gates`).
+/// A static null operand has no first element for a kernel literal: the statement stays a lowered
+/// process, while the same statements of a nonnull width and null ones of signals stay native.
+#[test]
+fn null_values_are_no_kernel_literals() {
+    let src = "library ieee; use ieee.std_logic_1164.all;
+entity t is end;
+architecture a of t is
+  signal c : std_logic;
+  signal n0, n1, n2 : std_logic_vector(-1 downto 0);
+  signal w0, w1 : std_logic_vector(7 downto 0);
+  constant nk : std_logic_vector(-1 downto 0) := (others => '0');
+  constant wk : std_logic_vector(7 downto 0) := (others => '0');
+begin
+  n1 <= n0 when c = '1' else (others => '0');
+  n2 <= n0 and nk;
+  w1 <= w0 when c = '1' else (others => '0');
+  w0 <= w1 and wk;
+  n0 <= n1 when c = '1' else n2;
+end;";
+    let (_, e) = elab("null_lits", src, "t", &[]);
+    let native: Vec<bool> = (e.procs.iter())
+        .map(|p| p.gate.is_some() || p.mux.is_some())
+        .collect();
+    assert_eq!(native, [false, false, true, true, true]);
+}
+
 #[test]
 fn muxes_and_relations_run_in_the_kernel() {
     let src = include_str!("../../../tests/corpus/sigassign/mux_gates.vhd");

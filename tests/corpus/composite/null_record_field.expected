@@ -1,0 +1,12 @@
+exit	0
+diag	note	1000000	0	:tb_null_record_field:u0:_p10	u0: 1 10100101 tid= else= then= str= range= arms= gate= tree= copy= zero=1 ones=1
+diag	note	2000000	0	:tb_null_record_field:u8:_p10	u8: 1 00111100 tid=11000011 else=00000000 then=11000011 str=00000000 range=00000000 arms=11111111 gate=11000011 tree=00000000 copy=11000011 zero=0 ones=0
+diag	note	3000000	0	:tb_null_record_field:u1:_p10	u1: 0 00001111 tid=1 else=0 then=1 str=0 range=0 arms=0 gate=1 tree=0 copy=1 zero=0 ones=1
+diag	note	4000000	0	:tb_null_record_field:u0b:_p10	u0b: 0 11110000 tid= else= then= str= range= arms= gate= tree= copy= zero=1 ones=1
+diag	note	5000000	0	:tb_null_record_field:ua:_p10	ua: 1 10000001 tid= else= then= str= range= arms= gate= tree= copy= zero=1 ones=1
+diag	note	11000000	0	:tb_null_record_field:u0:_p10	u0: 1 10100101 tid= else= then= str= range= arms= gate= tree= copy= zero=1 ones=1
+diag	note	12000000	0	:tb_null_record_field:u8:_p10	u8: 1 00111100 tid=11111111 else=11111111 then=11111111 str=11111111 range=11111111 arms=11111111 gate=11111111 tree=11111111 copy=11111111 zero=0 ones=1
+diag	note	13000000	0	:tb_null_record_field:u1:_p10	u1: 0 00001111 tid=1 else=1 then=1 str=1 range=1 arms=1 gate=1 tree=1 copy=1 zero=0 ones=1
+diag	note	14000000	0	:tb_null_record_field:u0b:_p10	u0b: 0 11110000 tid= else= then= str= range= arms= gate= tree= copy= zero=1 ones=1
+diag	note	15000000	0	:tb_null_record_field:ua:_p10	ua: 1 10000001 tid= else= then= str= range= arms= gate= tree= copy= zero=1 ones=1
+diag	note	26000000	0	:tb_null_record_field:_p0	done
