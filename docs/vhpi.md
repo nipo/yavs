@@ -30,8 +30,8 @@ For calling a plain C function from VHDL without a plugin, see "Calling C from V
 The plugin below prints the value of the signal `q` of the top level when the simulation ends.
 Build it with the header from the source tree,
 [`vhpi_user.h`](https://github.com/ru551n/yavs/blob/main/crates/yavs-vhpi/include/vhpi_user.h) (the release
-archives do not contain it). On Linux the `vhpi_*` functions stay unresolved at link time and bind
-to the `yavs` executable when the plugin loads:
+archives do not contain it). On Linux and macOS the `vhpi_*` functions stay unresolved at link time
+and bind to the `yavs` executable when the plugin loads:
 
 ```c
 #include <stdio.h>
@@ -61,6 +61,10 @@ gcc -shared -fPIC -I path/to/yavs/crates/yavs-vhpi/include hello_vhpi.c -o hello
 yavs analyze --work=lib:out/lib dut.vhd tb.vhd
 yavs run --work=lib:out/lib --vhpi=./hello_vhpi.so tb
 ```
+
+On macOS the linker refuses unresolved symbols in a library unless told otherwise, so build the
+plugin with `cc -shared -fPIC -undefined dynamic_lookup -I path/to/yavs/crates/yavs-vhpi/include
+hello_vhpi.c -o hello_vhpi.dylib`.
 
 For a top level `tb` with an unsigned signal `q` the run ends with a line such as `:TB q = 0110`
 (the full name of the root instance is upper case; the plugin reads names case-insensitively).
@@ -106,7 +110,8 @@ yavs run --vhpi=LIB[:ENTRY] [--vhpi=...] TOP
   system's library search path.
 - A plugin that cannot be loaded is error `E0901`, one with no entry `E0902`; both end the run with
   exit status 2 before time 0.
-- Linux: a plugin leaves the `vhpi_*` symbols unresolved; they bind to the `yavs` executable. Windows:
+- Linux and macOS: a plugin leaves the `vhpi_*` symbols unresolved (on macOS, link it with
+  `-undefined dynamic_lookup`); they bind to the `yavs` executable. Windows:
   `yavs.exe` exports the same set; a plugin brings its own import library or resolves the names at
   run time.
 - Plugin calls are serialized, so a plugin needs no locking whatever `--threads` says. VHPI times

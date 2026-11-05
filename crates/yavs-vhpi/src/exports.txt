@@ -1,7 +1,8 @@
 # Symbols the simulator executable exports to VHPI plugins.
 # One per line; DATA marks a data symbol (needed for the Windows .def).
 # build.rs turns this into the Linux dynamic list, the Windows .def and
-# import libraries, and the Rust table that keeps every symbol linked.
+# import libraries, the macOS exported symbols list, and the Rust table
+# that keeps every symbol linked.
 vhpi_assert
 vhpi_check_error
 vhpi_compare_handles

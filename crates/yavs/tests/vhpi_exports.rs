@@ -1,9 +1,11 @@
 //! The `yavs` executable must export every VHPI symbol of the vendored
 //! `vhpi_user.h`, or no plugin can bind to it (#266). Reads the ELF `.dynsym` (Linux) or the
-//! PE export directory (Windows, #124) of the built binary.
+//! PE export directory (Windows, #124) of the built binary, or asks `nm` for the exported
+//! symbols of the Mach-O file (macOS).
 #![cfg(any(
     all(target_os = "linux", target_pointer_width = "64"),
-    all(windows, target_pointer_width = "64")
+    all(windows, target_pointer_width = "64"),
+    all(target_os = "macos", target_pointer_width = "64")
 ))]
 
 use std::collections::BTreeSet;
@@ -30,6 +32,7 @@ fn header_symbols() -> BTreeSet<String> {
     out
 }
 
+#[cfg(not(target_os = "macos"))]
 fn u(b: &[u8], at: usize, n: usize) -> usize {
     let mut a = [0u8; 8];
     a[..n].copy_from_slice(&b[at..at + n]);
@@ -66,6 +69,23 @@ fn dynsym(b: &[u8]) -> BTreeSet<String> {
             let end = s + b[s..].iter().position(|&c| c == 0).unwrap();
             String::from_utf8_lossy(&b[s..end]).into_owned()
         })
+        .collect()
+}
+
+#[cfg(target_os = "macos")]
+/// Names of the defined external symbols of the Mach-O executable (`nm -gU`,
+/// from the command line tools that also provide the C compiler).
+fn dynsym(_: &[u8]) -> BTreeSet<String> {
+    let o = std::process::Command::new("nm")
+        .args(["-gUj", env!("CARGO_BIN_EXE_yavs")])
+        .output()
+        .expect("nm");
+    assert!(o.status.success(), "nm failed: {o:?}");
+    String::from_utf8(o.stdout)
+        .unwrap()
+        .lines()
+        .filter_map(|l| l.strip_prefix('_'))
+        .map(str::to_owned)
         .collect()
 }
 

@@ -18,10 +18,16 @@ pub fn command_line(c: &std::process::Command) -> String {
 /// panics). `name` only makes a leftover after a killed run recognisable.
 pub struct Tmp(tempfile::TempDir);
 
+/// Made in the resolved temp directory, so a path the test builds is spelled
+/// as the one yavs reports from its working directory (macOS's temp dir is
+/// a symlink into `/private`). Not on Windows, where resolving adds `\\?\`.
 pub fn tempdir(name: &str) -> Tmp {
+    let base = std::env::temp_dir();
+    #[cfg(unix)]
+    let base = std::fs::canonicalize(&base).expect("temp dir");
     Tmp(tempfile::Builder::new()
         .prefix(&format!("yavs-{name}-"))
-        .tempdir()
+        .tempdir_in(base)
         .expect("tmp"))
 }
 

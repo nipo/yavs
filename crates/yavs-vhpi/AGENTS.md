@@ -50,7 +50,7 @@ and how to load a plugin: update both when support changes).
 | `src/foreign.rs` | Foreign models (#274): registrations (`vhpi_register_foreignf`, `vhpi_get_foreignf_info`), the calls of `'FOREIGN "VHPI library model"` subprograms as `Object::Call`/`Object::Param` (record fields and signal drivers as its `Part`s, #330), their reads, writes and transactions, `foreign_model` (the `yavs_interp::ForeignModel` the CLI binds); foreign architectures (#330): `elaborate` (their `elabf`, `execf`), `vhpi_create` of processes and drivers, transactions on those drivers; holds the calls into plugin code (`elabf`, `execf`) |
 | `src/shim.c` | `vhpi_printf`, `vhpi_vprintf`, `vhpi_assert`, `vhpi_control` (C variadics) |
 | `src/exports.txt` | The one list of exported symbols |
-| `build.rs` | Generates the Linux version script, the Windows `.def`, the test import library `yavs-vhpi-host.lib` (no `yavs.lib`) and a Rust table referencing every symbol; exports `DEP_YAVS_VHPI_VERSION_SCRIPT`, `_DEF`, `_IMPORT_LIB_DIR` |
+| `build.rs` | Generates the Linux version script, the Windows `.def`, the macOS exported symbols list, the test import library `yavs-vhpi-host.lib` (no `yavs.lib`) and a Rust table referencing every symbol; exports `DEP_YAVS_VHPI_VERSION_SCRIPT`, `_DEF`, `_EXPORTED_SYMBOLS`, `_IMPORT_LIB_DIR` |
 | `src/lib.rs` | `set_design`, `elaborate_foreign` (the models of foreign architectures, #330), `set_runtime` (the shared variables, #309), `set_design_root` (a root-only design for the spike host), `set_resolution`, `run_callbacks` (outside a simulation, the spike host), `take_control` |
 | `tests/vhpi.rs`, `tests/plugin/plugin.c` | ABI vs C header (`abi_matches_c_header`, all ~610 constants, sizes, offsets), C plugin loaded both ways, missing file/entry/symbol errors |
 | `tests/plugin/sched.c` | Callback scenarios (one entry each) run by `crates/yavs/tests/vhpi_run.rs` through `yavs run --vhpi` |
@@ -76,6 +76,7 @@ and how to load a plugin: update both when support changes).
 | Header is the official IEEE file, unchanged; Rust side hand-written, checked against it by a test | Names and layouts are fixed by the standard; no libclang on Windows | `docs/decisions.md` "VHPI ABI and symbol export" |
 | Linux exports `src/exports.txt` via `-rdynamic` plus `-Wl,--version-script` (cargo-zigbuild rejects `--dynamic-list`; zig exports more than the list); plugins loaded `RTLD_NOW | RTLD_GLOBAL` | Missing symbols fail at load, naming them | same |
 | Windows: `.def` only; no `yavs.lib` is built or shipped | Same symbol set as Linux | same; COCOTB.md "Windows" |
+| macOS: `-Wl,-exported_symbols_list` from `src/exports.txt` (`_` prefixed); plugins link with `-undefined dynamic_lookup` | Same symbol set as Linux; the Mach-O linker refuses unresolved symbols by default | same |
 | One process-wide state behind a mutex never held while plugin code runs | VHPI has no context argument | same |
 | Handles are `(index, generation)` packed into the pointer value; never NULL, never dereferenced; 64-bit only | Rule 9 | `docs/plan.md` rule 9 |
 | Disabled callbacks that are never removed must stay cheap | Python testbench frameworks never remove them | rule 9, #123 |
@@ -180,7 +181,7 @@ Callback rules (#272, #123):
   wine.
 - The CLI must call `keep_exports()` (done first in its `main`); otherwise the linker drops the
   symbols before the export list applies. `crates/yavs/tests/vhpi_exports.rs` checks the
-  built binary's `.dynsym` against `vhpi_user.h` (Linux only; no Windows export-table check yet).
+  built binary's exports against `vhpi_user.h` (ELF `.dynsym`, PE export directory, `nm` on macOS).
 - Never hold the state mutex while calling into a plugin (callbacks re-enter the ABI).
 
 ## 5. How to work here

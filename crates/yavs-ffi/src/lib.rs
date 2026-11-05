@@ -2,12 +2,12 @@
 //! VHPIDIRECT `foreign` subprograms, without libffi.
 //!
 //! Classification is plain Rust ([`abi`]): each argument gets an integer
-//! register, a float register or a stack slot per the target ABI. A small
-//! per-target asm trampoline ([`sys`]) loads the registers, copies the
-//! stack slots below a 16-byte aligned stack pointer, calls the function
+//! register, a float register or a place on the stack per the target ABI.
+//! A small per-target asm trampoline ([`sys`]) loads the registers, copies
+//! the stack area below a 16-byte aligned stack pointer, calls the function
 //! and stores both result registers. Supported targets: x86_64 Linux
-//! (SysV), x86_64 Windows (Win64) and aarch64 Linux (AAPCS64). Any other
-//! target is a compile-time error.
+//! (SysV), x86_64 Windows (Win64), aarch64 Linux (AAPCS64) and aarch64
+//! macOS (Apple arm64). Any other target is a compile-time error.
 //!
 //! [`vhdl`] maps VHDL parameter and result types to C types by the
 //! VHPIDIRECT convention, so existing C code for it works unchanged.
