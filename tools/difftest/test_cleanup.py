@@ -34,5 +34,27 @@ class Cleanup(unittest.TestCase):
             self.assertEqual(kept, {"bad"})
 
 
+class Setup(unittest.TestCase):
+    def fail(self, cand, **env):
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus = Path(tmp) / "corpus"
+            corpus.mkdir()
+            (corpus / "a.vhd").write_text("-- difftest: top=t\n")
+            conf = Path(tmp) / "none.conf"
+            e = {k: v for k, v in os.environ.items() if k != "YAVS_BIN"}
+            e.update(YAVS_SIMS_CONF=str(conf), PATH="/nonexistent", **env)
+            p = subprocess.run([sys.executable, str(DIFFTEST), "--candidate", cand, "--no-sandbox", "--corpus", str(corpus)],
+                               env=e, capture_output=True, text=True)
+            self.assertEqual(p.returncode, 1, p.stdout)
+            self.assertNotIn("FAIL", p.stdout)  # stopped at setup, ran no test
+            return p.stderr
+
+    def test_unconfigured_label_and_missing_yavs_stop_at_setup(self):
+        self.assertIn("no `difftest` key in tools/sims.local.conf", self.fail("sim1"))
+        self.assertIn("did you mean yavs-interp?", self.fail("yavs-intrp"))
+        self.assertIn("YAVS_BIN", self.fail("yavs"))
+        self.assertIn("YAVS_BIN", self.fail("yavs", YAVS_BIN="/nonexistent/yavs"))
+
+
 if __name__ == "__main__":
     unittest.main()

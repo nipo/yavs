@@ -450,6 +450,18 @@ def _one(vhd, args, template, ignore):
         return {**res, "ok": False, "msg": f"harness error: {e!r}"}
 
 
+def candidate_error(cand):
+    """Why `cand` cannot run at all (checked before the first test), or None."""
+    if cand in TEMPLATES:
+        if not shutil.which(os.environ.get("YAVS_BIN") or "yavs"):
+            return f"--candidate {cand}: yavs not found: set YAVS_BIN to the yavs binary or put yavs on PATH"
+    elif not simconf.get(cand, "difftest") and re.fullmatch(r"[\w-]+", cand):  # a bare word is a label
+        near = difflib.get_close_matches(cand, [*TEMPLATES, *simconf.labels()], 1)
+        return (f"--candidate {cand}: no such label: it has no `difftest` key in tools/sims.local.conf"
+                + (f" (did you mean {near[0]}?)" if near else ""))
+    return None
+
+
 def main():
     global CORPUS
     ap = argparse.ArgumentParser(description=__doc__)
@@ -479,6 +491,9 @@ def main():
     tests = sorted(p for p in CORPUS.rglob("*.vhd") if re.search(args.filter, str(p.relative_to(CORPUS))) and not (args.exclude and re.search(args.exclude, str(p.relative_to(CORPUS)))))
     if args.list:
         print("\n".join(str(p.relative_to(CORPUS)) for p in tests)); return
+    setup_error = candidate_error(args.candidate)
+    if setup_error:
+        sys.exit(setup_error)
     jobs = max(1, min(args.jobs, MAX_JOBS))
     fails, results = 0, []
     guard(CACHE)
