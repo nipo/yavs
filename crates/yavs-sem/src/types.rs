@@ -634,7 +634,6 @@ impl Db {
         elements: &[ast::ElementDecl],
         span: Span,
     ) -> Result<TypeId, Reported> {
-        let ty = self.types.next_id();
         let mut elems: Vec<RecordElem> = Vec::new();
         let mut failed = false;
         for e in elements {
@@ -711,7 +710,7 @@ impl Db {
         if failed {
             return Err(Reported);
         }
-        let got = self.new_type(
+        Ok(self.new_type(
             decl,
             name,
             false,
@@ -720,9 +719,7 @@ impl Db {
             },
             Constraint::None,
             span,
-        );
-        debug_assert_eq!(got, ty);
-        Ok(got)
+        ))
     }
 
     /// The index of record element `key` of record type `t`.
