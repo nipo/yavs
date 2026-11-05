@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.15.1 (2026-11-05)
+
+- Needs yavs 0.15.1 or later. All changes: the yavs 0.15.1 release notes.
+
 ## 0.15.0 (2026-11-04)
 
 - Needs yavs 0.15.0 or later. All changes: the yavs 0.15.0 release notes.

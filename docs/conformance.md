@@ -1,15 +1,15 @@
 # yavs conformance report
 
-Generated: yavs 0.14.0 at commit `6494ba05ef` (2026-11-04) by `tools/conformance/run.py`; do not edit by hand.
+Generated: yavs 0.15.0 at commit `1c18e4530c` (2026-11-05) by `tools/conformance/run.py`; do not edit by hand.
 
 yavs is checked by running the test suites of VHDL libraries, a VHDL language test suite and real designs on it, and by comparing its output
-with two established open-source VHDL simulators, called sim1 and sim2 here. Each suite judges its own tests. Over the suites below, 15048 of 15151
+with two established open-source VHDL simulators, called sim1 and sim2 here. Each suite judges its own tests. Over the suites below, 15051 of 15154
 tests pass; every failure is tracked as an issue. This is evidence, not a proof of correctness.
 
 | Project or suite | What it is | Passed / total |
 | --- | --- | ---: |
-| Differential testbenches | small testbenches of this repository; output must equal sim1's, at 1 and 4 threads | 648/648 |
-| Known simulator differences | one reproducer per case where simulators disagree | 265/265 |
+| Differential testbenches | small testbenches of this repository; output must equal sim1's, at 1 and 4 threads | 650/650 |
+| Known simulator differences | one reproducer per case where simulators disagree | 266/266 |
 | sim1's regression tests | a reference simulator's own self-checking tests (runnable ones) | 1014/1070 |
 | sim2's regression tests | a reference simulator's own self-checking tests (runnable ones) | 463/504 |
 | VESTs | VHDL-1993 language test suite | 3694/3694 |
@@ -40,7 +40,7 @@ Every testbench of `tests/corpus` runs on yavs and its normalised output is comp
 | --- | --- | --- | --- |
 | access | 8/8 | 8/8 | 8/8 |
 | arith | 8/8 | 8/8 | 8/8 |
-| composite | 155/155 | 155/155 | 155/155 |
+| composite | 157/157 | 157/157 | 157/157 |
 | delta | 14/14 | 14/14 | 14/14 |
 | env | 16/16 | 16/16 | 16/16 |
 | force | 12/12 | 12/12 | 12/12 |
@@ -63,7 +63,7 @@ Every testbench of `tests/corpus` runs on yavs and its normalised output is comp
 | std93 | 6/6 | 6/6 | 6/6 |
 | synopsys | 20/20 | 20/20 | 20/20 |
 | textio | 19/19 | 19/19 | 19/19 |
-| total | 648/648 | 648/648 | 648/648 |
+| total | 650/650 | 650/650 | 650/650 |
 
 Failing: none.
 
@@ -85,8 +85,8 @@ Not passing: sim1: 56; sim2: 41 (the classes of each are in `docs/conformance.js
 ### Known simulator differences
 
 [`docs/design/simulator-discrepancies.md`](https://github.com/ru551n/yavs/blob/main/docs/design/simulator-discrepancies.md) lists every case where the references disagree with each other, with the language reference or with yavs:
-265 catalogued behaviours, each with a reproducer under `tests/discrepancies/<case>/`. CI runs every reproducer on yavs and fails when yavs's output
-differs from the recorded one (matches). Kinds: LRM clear 175, LRM ambiguity 78, reference bug 7, other 4, library availability 1.
+266 catalogued behaviours, each with a reproducer under `tests/discrepancies/<case>/`. CI runs every reproducer on yavs and fails when yavs's output
+differs from the recorded one (matches). Kinds: LRM clear 175, LRM ambiguity 79, reference bug 7, other 4, library availability 1.
 
 Policy (`docs/plan.md`): where the language reference is clear, yavs follows it even against all references; where it is unclear yavs is permissive
 and follows the majority of the references that run the construct. The verdicts of each reference are in the catalogue; the table gives the clause, the kind,
@@ -361,6 +361,7 @@ and yavs's verdict.
 | [`aggregate-declared-operator-direction`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/aggregate-declared-operator-direction) | 9.3.3.3 | LRM ambiguity | OK |
 | [`record-static-default-length`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/record-static-default-length) | 5.3.2.2, 6.5.2 | LRM clear | REJECT |
 | [`qualified-record-own-bounds`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/qualified-record-own-bounds) | 9.3.5 | LRM clear | OK |
+| [`array-more-than-64-bit-elements`](https://github.com/ru551n/yavs/tree/main/tests/discrepancies/array-more-than-64-bit-elements) | 5.3.2 | LRM ambiguity | REJECT |
 
 </details>
 
