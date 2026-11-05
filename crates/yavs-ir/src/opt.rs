@@ -4222,7 +4222,7 @@ impl<'a> Opt<'a> {
     /// The length of the result of a native `ieee` call whose operand lengths and sizes are
     /// constants (`Key::Nat`). A null operand gives a null result.
     fn native_len(&self, native: crate::NativeId, args: crate::Regs) -> Option<i64> {
-        use crate::ieee::{Form, Op};
+        use crate::ieee::{Form, Op, Syn};
         let key = crate::ieee::symbol_key(&self.prog.natives.get(native)?.symbol)?;
         let op = crate::ieee::parse(key)?;
         let regs = self
@@ -4297,6 +4297,32 @@ impl<'a> Opt<'a> {
                 Form::Vi => alen(0),
                 Form::Iv => alen(1),
             },
+            // The shifts of the Synopsys packages keep the argument's length.
+            Op::Syn(Syn::Shift { .. }) => alen(0).filter(|n| *n > 0),
+            // The operators of the Synopsys packages: a null operand is the body's error.
+            Op::Syn(Syn::Oper { kind, l, r, .. }) => {
+                use crate::ieee::{Opd, SynKind};
+                if matches!(kind, SynKind::Cmp(_)) {
+                    return None;
+                }
+                let (a, b) = match (l, r) {
+                    (Opd::I, _) => (alen(1)?, alen(1)?),
+                    (_, Opd::I) => (alen(0)?, alen(0)?),
+                    _ => (alen(0)?, alen(1)?),
+                };
+                let int_form = l == Opd::I || r == Opd::I;
+                // A mixed pair pads its unsigned operand by one element.
+                let a = a + i64::from(l == Opd::U && r == Opd::S);
+                let b = b + i64::from(l == Opd::S && r == Opd::U);
+                if a <= 0 || b <= 0 {
+                    return None;
+                }
+                match kind {
+                    SynKind::Mul => a.checked_add(b),
+                    _ if int_form => Some(a),
+                    _ => Some(a.max(b)),
+                }
+            }
             // Only proven equal operands: unequal ones keep the native's report and the check
             // of the result (#1063).
             Op::VecGate(_) | Op::NumGate(_) => {

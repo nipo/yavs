@@ -7052,7 +7052,7 @@ impl Gen {
         op: yavs_ir::ieee::Op,
     ) -> Result<(), String> {
         use IP::*;
-        use yavs_ir::ieee::{ARRAY_REGS, Cmp, Form, Gate, Op, Shift};
+        use yavs_ir::ieee::{ARRAY_REGS, Cmp, Form, Gate, Op, Opd, Shift, Syn, SynKind};
         // SAFETY: integer arithmetic on registers, reads through `host`, a result written to a
         // fresh temporary block; well-formed blocks of c.f.
         unsafe {
@@ -7090,7 +7090,11 @@ impl Gen {
             };
             let pure = matches!(
                 op,
-                Op::Resize { .. } | Op::Shift(_) | Op::ShiftFn(_) | Op::Div { .. }
+                Op::Resize { .. }
+                    | Op::Shift(_)
+                    | Op::ShiftFn(_)
+                    | Op::Div { .. }
+                    | Op::Syn(Syn::Shift { .. })
             );
             // The operands in argument order.
             // `std_match` and `?=` / `?/=` take every element value: all four planes.
@@ -7137,6 +7141,14 @@ impl Gen {
                 Scalar(LLVMValueRef),
                 // Count, bits, and whether the bounds are `1 to n` (else `n - 1 downto 0`).
                 Vector(LLVMValueRef, LLVMValueRef, bool),
+                // Count, bits and the bounds (left, right, direction) of an operand.
+                Bounds(
+                    LLVMValueRef,
+                    LLVMValueRef,
+                    LLVMValueRef,
+                    LLVMValueRef,
+                    LLVMValueRef,
+                ),
             }
             let out = match op {
                 Op::ToInteger { signed } => {
@@ -7327,19 +7339,7 @@ impl Gen {
                             if form == Form::Vi { (e, v) } else { (v, e) }
                         }
                     };
-                    let p = match (k, signed) {
-                        (Cmp::Gt, false) => LLVMIntUGT,
-                        (Cmp::Lt, false) => LLVMIntULT,
-                        (Cmp::Le, false) => LLVMIntULE,
-                        (Cmp::Ge, false) => LLVMIntUGE,
-                        (Cmp::Gt, true) => LLVMIntSGT,
-                        (Cmp::Lt, true) => LLVMIntSLT,
-                        (Cmp::Le, true) => LLVMIntSLE,
-                        (Cmp::Ge, true) => LLVMIntSGE,
-                        (Cmp::Eq, _) => LLVMIntEQ,
-                        (Cmp::Ne, _) => LLVMIntNE,
-                    };
-                    let r = self.zext(cmp(p, x, y));
+                    let r = self.zext(cmp(int_pred(k, signed), x, y));
                     Out::Scalar(if q { add(r, self.c64(2)) } else { r })
                 }
                 // Per element: either side `-`, or both known (`0 1 L H`) with the same value.
@@ -7411,6 +7411,139 @@ impl Gen {
                     };
                     Out::Vector(n, res, false)
                 }
+                // `conv_unsigned` and friends of a vector: the low `size` bits of the operand
+                // extended with zeros or its sign (unlike `resize`, a signed one keeps no sign
+                // bit when it shrinks), the weak elements made binary.
+                Op::Syn(Syn::Conv {
+                    from_signed: Some(signed),
+                    ..
+                }) => {
+                    let (n, bits, _) = arrs[0];
+                    let new = ints[0];
+                    ok(and(
+                        cmp(LLVMIntSGE, new, c1),
+                        cmp(LLVMIntSLE, new, self.c64(64)),
+                    ));
+                    let x = if signed { sext(bits, n) } else { bits };
+                    Out::Vector(new, and(x, lowk(new)), false)
+                }
+                // `conv_unsigned`, `conv_signed`, `conv_std_logic_vector` of an integer: the low
+                // bits of its two's complement. The unsigned body fails for `INTEGER'LOW`.
+                Op::Syn(Syn::Conv {
+                    to_signed,
+                    from_signed: None,
+                }) => {
+                    let (v, size) = (ints[0], ints[1]);
+                    ok(and(
+                        cmp(LLVMIntSGE, size, c1),
+                        cmp(LLVMIntSLE, size, self.c64(64)),
+                    ));
+                    if !to_signed {
+                        for low in [i64::from(i32::MIN), i64::MIN] {
+                            ok(cmp(LLVMIntNE, v, self.c64(low)));
+                        }
+                    }
+                    Out::Vector(size, and(v, lowk(size)), false)
+                }
+                // `shl` / `shr` of the Synopsys packages: the argument's elements (no weak ones)
+                // moved, zeros or the sign shifted in, by a count of at most 31 elements.
+                Op::Syn(Syn::Shift { right, signed }) => {
+                    let ((n, bits, _), (n2, count, _)) = (arrs[0], arrs[1]);
+                    ok(cmp(LLVMIntULE, n2, self.c64(31)));
+                    let big = cmp(LLVMIntUGE, count, n);
+                    let cnt = pick(big, c0, count);
+                    let res = if !right {
+                        pick(big, c0, shl(bits, cnt))
+                    } else if !signed {
+                        pick(big, c0, lshr(bits, cnt))
+                    } else {
+                        let kk = umin(count, sub(n, c1));
+                        LLVMBuildAShr(b, sext(bits, n), kk, c"".as_ptr())
+                    };
+                    Out::Vector(n, res, false)
+                }
+                // `conv_integer`: at most 31 (unsigned) or 32 (signed) elements.
+                Op::Syn(Syn::ToInt { signed }) => {
+                    let (n, bits, _) = arrs[0];
+                    ok(cmp(LLVMIntULE, n, self.c64(31 + i64::from(signed))));
+                    Out::Scalar(if signed { sext(bits, n) } else { bits })
+                }
+                // The operators of the Synopsys packages: both operands extended to the body's
+                // common length (an integer: the low bits of its two's complement, so no fit
+                // guard), then the plain operation.
+                Op::Syn(Syn::Oper { kind, l, r, keep }) => {
+                    if l != Opd::I && r != Opd::I {
+                        let ((n1, b1, _), (n2, b2, _)) = (arrs[0], arrs[1]);
+                        let p = if l == Opd::U && r == Opd::S {
+                            add(n1, c1)
+                        } else {
+                            n1
+                        };
+                        let q = if l == Opd::S && r == Opd::U {
+                            add(n2, c1)
+                        } else {
+                            n2
+                        };
+                        let n = if kind == SynKind::Mul {
+                            add(p, q)
+                        } else {
+                            pick(cmp(LLVMIntUGT, p, q), p, q)
+                        };
+                        ok(cmp(LLVMIntULE, n, self.c64(64)));
+                        let x = if l == Opd::S { sext(b1, n1) } else { b1 };
+                        let y = if r == Opd::S { sext(b2, n2) } else { b2 };
+                        match kind {
+                            SynKind::Add => Out::Vector(n, add(x, y), false),
+                            SynKind::Sub => Out::Vector(n, sub(x, y), false),
+                            SynKind::Mul => Out::Vector(n, mul(x, y), false),
+                            SynKind::Cmp(k) => Out::Scalar(self.zext(cmp(
+                                int_pred(k, l == Opd::S || r == Opd::S),
+                                x,
+                                y,
+                            ))),
+                        }
+                    } else {
+                        let vec_first = r == Opd::I;
+                        let (n, bits, mask) = arrs[0];
+                        let iv = ints[0];
+                        match kind {
+                            SynKind::Add | SynKind::Sub => {
+                                let (x, y) = if vec_first { (bits, iv) } else { (iv, bits) };
+                                let s = if kind == SynKind::Add {
+                                    add(x, y)
+                                } else {
+                                    sub(x, y)
+                                };
+                                if keep {
+                                    let base = usize::from(!vec_first);
+                                    let (le, ri, di) = (
+                                        self.ld(c, rs[base + 1]),
+                                        self.ld(c, rs[base + 2]),
+                                        self.ld(c, rs[base + 3]),
+                                    );
+                                    Out::Bounds(n, s, le, ri, di)
+                                } else {
+                                    Out::Vector(n, s, false)
+                                }
+                            }
+                            SynKind::Mul => return Err("not a native computed in place".into()),
+                            SynKind::Cmp(k) => {
+                                let s_vec = if vec_first { l } else { r } == Opd::S;
+                                let low = and(iv, mask);
+                                let (x, y) = if s_vec {
+                                    (sext(bits, n), sext(low, n))
+                                } else {
+                                    // The integer's low `n + 1` bits as a signed value.
+                                    ok(cmp(LLVMIntULT, n, self.c64(64)));
+                                    let len = add(n, c1);
+                                    (bits, sext(and(iv, lowk(len)), len))
+                                };
+                                let (x, y) = if vec_first { (x, y) } else { (y, x) };
+                                Out::Scalar(self.zext(cmp(int_pred(k, true), x, y)))
+                            }
+                        }
+                    }
+                }
                 Op::NumGate(g) | Op::VecGate(g) => {
                     let ((n1, b1, _), (n2, b2, _)) = (arrs[0], arrs[1]);
                     ok(cmp(LLVMIntEQ, n1, n2));
@@ -7448,14 +7581,15 @@ impl Gen {
             };
             match out {
                 Out::Scalar(v) => self.st(c, dst, v),
-                Out::Vector(n, bits, up) => {
+                out @ (Out::Vector(..) | Out::Bounds(..)) => {
+                    let (n, bits, left, right, down) = match out {
+                        Out::Vector(n, bits, true) => (n, bits, c1, n, c0),
+                        Out::Vector(n, bits, false) => (n, bits, sub(n, c1), c0, c1),
+                        Out::Bounds(n, bits, l, r, d) => (n, bits, l, r, d),
+                        Out::Scalar(_) => unreachable!(),
+                    };
                     let mask = lowk(n);
                     let (at, p) = self.temp_alloc(c, self.c64(i64::from(PUT_SMALL_BYTES)), slow);
-                    let (left, right, down) = if up {
-                        (c1, n, c0)
-                    } else {
-                        (sub(n, c1), c0, c1)
-                    };
                     let words = [
                         add(at, self.c64((16 + yavs_ir::DOPE_DIM_BYTES) as i64)),
                         add(at, self.c64(16)),
@@ -9496,6 +9630,23 @@ impl Drop for Gen {
     fn drop(&mut self) {
         // SAFETY: we own the builder.
         unsafe { LLVMDisposeBuilder(self.b) }
+    }
+}
+
+/// The predicate of a `numeric_std` or Synopsys relational operator on integers.
+fn int_pred(k: yavs_ir::ieee::Cmp, signed: bool) -> IP {
+    use yavs_ir::ieee::Cmp;
+    match (k, signed) {
+        (Cmp::Gt, false) => IP::LLVMIntUGT,
+        (Cmp::Lt, false) => IP::LLVMIntULT,
+        (Cmp::Le, false) => IP::LLVMIntULE,
+        (Cmp::Ge, false) => IP::LLVMIntUGE,
+        (Cmp::Gt, true) => IP::LLVMIntSGT,
+        (Cmp::Lt, true) => IP::LLVMIntSLT,
+        (Cmp::Le, true) => IP::LLVMIntSLE,
+        (Cmp::Ge, true) => IP::LLVMIntSGE,
+        (Cmp::Eq, _) => IP::LLVMIntEQ,
+        (Cmp::Ne, _) => IP::LLVMIntNE,
     }
 }
 

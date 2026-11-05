@@ -1482,3 +1482,208 @@ fn div_by_zero_in_compiled_code_matches_the_interpreter() {
         );
     }
 }
+
+/// The operators and conversions of the Synopsys packages (`std_logic_arith` with
+/// `std_logic_unsigned`): every pair of operand kinds and result type, integers that the packages
+/// truncate (the most negative value, 2 ** n, -1000), weak bits, metavalues (the body warns and
+/// gives `X`s; the compiled guard hands those calls to the body), lengths around 32 and 64 (a
+/// mixed pair and a product reach 65), bounds that do not start at zero in both directions.
+const SYN: &str = r#"library ieee;
+use ieee.std_logic_1164.all;
+use ieee.std_logic_arith.all;
+use ieee.std_logic_unsigned.all;
+entity y is end;
+architecture a of y is
+  function img(v : std_logic_vector) return string is
+  begin
+    return integer'image(v'left) & "," & integer'image(v'right) & "," &
+           boolean'image(v'ascending) & ":" & to_string(v);
+  end function;
+  function img(v : unsigned) return string is
+  begin
+    return img(std_logic_vector(v));
+  end function;
+  function img(v : signed) return string is
+  begin
+    return img(std_logic_vector(v));
+  end function;
+  function pick(i : natural; meta : boolean) return std_logic is
+  begin
+    if meta and i mod 7 = 3 then return std_logic'val(i mod 9); end if;
+    case (i * 5 + i / 3) mod 4 is
+      when 0 => return '0';
+      when 1 => return '1';
+      when 2 => return 'L';
+      when others => return 'H';
+    end case;
+  end function;
+  function down(n : natural; k : natural; meta : boolean) return unsigned is
+    variable r : unsigned(n + 4 downto 5);
+  begin
+    for i in r'range loop r(i) := pick(i * k, meta); end loop;
+    return r;
+  end function;
+  function up(n : natural; k : natural; meta : boolean) return unsigned is
+    variable r : unsigned(3 to n + 2);
+  begin
+    for i in r'range loop r(i) := pick(i * k + 1, meta); end loop;
+    return r;
+  end function;
+  function si(n : natural; k : natural) return integer is
+  begin
+    case k mod 10 is
+      when 0 => return 0;
+      when 1 => return -1;
+      when 2 => return integer'low;
+      when 3 => return integer'high;
+      when 4 => if n < 31 then return 2 ** n - 1; else return 77; end if;
+      when 5 => if n < 31 then return 2 ** n; else return 78; end if;
+      when 6 => if n < 31 then return -(2 ** n); else return -79; end if;
+      when 7 => if n < 31 then return -(2 ** n) - 1; else return -80; end if;
+      when 8 => return -1000;
+      when others => return 1000;
+    end case;
+  end function;
+  -- Without INTEGER'LOW: the unsigned conversion of it fails in the body.
+  function sj(n : natural; k : natural) return integer is
+  begin
+    if k mod 10 = 2 then return -2 ** 20; else return si(n, k); end if;
+  end function;
+  function ops(x, y : unsigned) return string is
+    constant sx : signed(x'length - 1 downto 0) := signed(x);
+    constant sy : signed(y'length - 1 downto 0) := signed(y);
+  begin
+    return img(unsigned'(x + y)) & " " & img(unsigned'(x - y)) & " " & img(signed'(sx + sy)) & " " &
+           img(signed'(sx - sy)) & " " & img(signed'(x + sy)) & " " & img(signed'(sx - y)) & " " &
+           img(signed'(sx + y)) & " " & img(signed'(x - sy));
+  end function;
+  function muls(x, y : unsigned) return string is
+    constant sx : signed(x'length - 1 downto 0) := signed(x);
+    constant sy : signed(y'length - 1 downto 0) := signed(y);
+  begin
+    return img(unsigned'(x * y)) & " " & img(signed'(sx * sy)) & " " & img(signed'(x * sy)) & " " &
+           img(signed'(sx * y));
+  end function;
+  function cmps(x, y : unsigned) return string is
+    constant sx : signed(x'length - 1 downto 0) := signed(x);
+    constant sy : signed(y'length - 1 downto 0) := signed(y);
+  begin
+    return boolean'image(x < y) & boolean'image(x <= y) & boolean'image(x > y) &
+           boolean'image(x >= y) & boolean'image(x = y) & boolean'image(x /= y) & " " &
+           boolean'image(sx < sy) & boolean'image(sx <= sy) & boolean'image(sx > sy) &
+           boolean'image(sx >= sy) & boolean'image(sx = sy) & boolean'image(sx /= sy) & " " &
+           boolean'image(x < sy) & boolean'image(x >= sy) & boolean'image(x = sy) & " " &
+           boolean'image(sx > y) & boolean'image(sx <= y) & boolean'image(sx /= y);
+  end function;
+  function intops(x : unsigned; i : integer) return string is
+    constant sx : signed(x'length - 1 downto 0) := signed(x);
+  begin
+    return img(unsigned'(x + i)) & " " & img(unsigned'(i + x)) & " " & img(unsigned'(x - i)) & " " &
+           img(unsigned'(i - x)) & " " & img(signed'(sx + i)) & " " & img(signed'(i + sx)) & " " &
+           img(signed'(sx - i)) & " " & img(signed'(i - sx));
+  end function;
+  function intcmps(x : unsigned; i : integer) return string is
+    constant sx : signed(x'length - 1 downto 0) := signed(x);
+  begin
+    return boolean'image(x < i) & boolean'image(x <= i) & boolean'image(x > i) &
+           boolean'image(x >= i) & boolean'image(x = i) & boolean'image(x /= i) & " " &
+           boolean'image(i < x) & boolean'image(i >= x) & boolean'image(i = x) & " " &
+           boolean'image(sx < i) & boolean'image(sx <= i) & boolean'image(sx > i) &
+           boolean'image(sx >= i) & boolean'image(sx = i) & boolean'image(sx /= i) & " " &
+           boolean'image(i > sx) & boolean'image(i <= sx) & boolean'image(i /= sx);
+  end function;
+  function lvops(a, b : std_logic_vector; i : integer) return string is
+  begin
+    return img(a + b) & " " & img(a - b) & " " & img(a * b) & " " & img(a + i) & " " &
+           img(i + a) & " " & img(a - i) & " " & img(i - a) & " " &
+           boolean'image(a < b) & boolean'image(a >= b) & boolean'image(a = b) &
+           boolean'image(a /= b) & boolean'image(a < i) & boolean'image(i <= a) &
+           boolean'image(a = i) & boolean'image(i /= a);
+  end function;
+  function convs(x : unsigned; i : integer; n : natural; k : natural) return string is
+    constant sx : signed(x'length - 1 downto 0) := signed(x);
+    constant lx : std_logic_vector(x'length - 1 downto 0) := std_logic_vector(x);
+    constant s : natural := 1 + (k * 7 + n) mod 70;
+    constant t : natural := 1 + (k * 3) mod 5;
+  begin
+    return img(conv_unsigned(x, s)) & " " & img(conv_signed(x, s)) & " " &
+           img(conv_unsigned(sx, s)) & " " & img(conv_signed(sx, s)) & " " &
+           img(conv_std_logic_vector(x, s)) & " " & img(conv_std_logic_vector(sx, t)) & " " &
+           img(conv_unsigned(i, s)) & " " & img(conv_signed(i, s)) & " " &
+           img(conv_std_logic_vector(i, s)) & " " & img(conv_unsigned(i, t)) & " " &
+           img(ext(lx, s)) & " " & img(sxt(lx, s)) & " " & img(ext(lx, t)) & " " & img(sxt(lx, t));
+  end function;
+  function shifts(x : unsigned; c : unsigned) return string is
+    constant sx : signed(x'length - 1 downto 0) := signed(x);
+    constant lx : std_logic_vector(x'length - 1 downto 0) := std_logic_vector(x);
+    constant lc : std_logic_vector(c'length - 1 downto 0) := std_logic_vector(c);
+  begin
+    return img(shl(x, c)) & " " & img(shr(x, c)) & " " & img(shl(sx, c)) & " " & img(shr(sx, c)) & " " &
+           img(shl(lx, lc)) & " " & img(shr(lx, lc));
+  end function;
+  function ints(x : unsigned) return string is
+    constant sx : signed(x'length - 1 downto 0) := signed(x);
+    constant lx : std_logic_vector(x'length - 1 downto 0) := std_logic_vector(x);
+  begin
+    return integer'image(conv_integer(x)) & " " & integer'image(conv_integer(sx)) & " " &
+           integer'image(conv_integer(lx));
+  end function;
+begin
+  process
+    constant la : integer_vector := (1, 2, 31, 32, 33, 64, 5, 16, 30, 3, 63, 65);
+    variable n : integer := 0;
+    variable w : unsigned(15 downto 0) := x"8001";
+    variable u : std_logic_vector(11 downto 0) := x"801";
+    variable p : unsigned(15 downto 0);
+    variable q : std_logic_vector(11 downto 0);
+    variable c : unsigned(7 downto 0);
+  begin
+    for i in la'range loop
+      for k in 0 to 9 loop
+        for meta in boolean'range loop
+          report integer'image(la(i)) & "/" & integer'image(k) & "/" & boolean'image(meta) & ": " &
+                 ops(down(la(i), k, meta), up(la(i), k + 1, meta)) & " | " &
+                 ops(up(la(i), k + 2, meta), down(1 + (la(i) + k) mod 33, k, meta)) & " | " &
+                 cmps(down(la(i), k, meta), up(la(i), k + 3, meta)) & " | " &
+                 cmps(up(1 + (la(i) + k) mod 5, k, meta), down(la(i), k + 1, meta)) & " | " &
+                 intops(down(la(i), k + 4, meta), si(la(i), k)) & " | " &
+                 intcmps(up(la(i), k, meta), si(la(i), k + 1));
+          if la(i) + (la(i) + k) mod 33 < 130 then
+            report muls(down(la(i), k, meta), up(1 + (la(i) + k) mod 33, k + 1, meta));
+          end if;
+          report lvops(std_logic_vector(down(la(i), k, meta)), std_logic_vector(up(la(i), k + 1, meta)), si(la(i), k)) & " | " &
+                 lvops(std_logic_vector(up(la(i), k, meta)), std_logic_vector(down(la(i), k + 2, meta)), si(la(i), k + 1)) &
+                 " | " & convs(down(la(i), k, meta), sj(la(i), k), la(i), k) &
+                 " | " & convs(up(la(i), k, meta), sj(la(i), k + 1), la(i), k + 2);
+          report shifts(down(la(i), k, meta), up(1 + (k * 5) mod 6, k + 1, false)) & " | " &
+                 shifts(up(la(i), k + 4, meta), down(1 + (la(i) + k) mod 7, k + 2, meta)) & " | " &
+                 shifts(down(la(i), k + 1, false), conv_unsigned(k * k, 1 + (k * 3) mod 9));
+          if la(i) < 31 then
+            report ints(down(la(i), k, meta)) & " " & ints(up(la(i), k + 1, meta));
+          end if;
+        end loop;
+      end loop;
+    end loop;
+    for k in 0 to 300 loop
+      p := w(7 downto 0) * unsigned(w(12 downto 5)) + (k mod 100);
+      q := u + std_logic_vector(p(11 downto 0)) - k;
+      c := conv_unsigned(k * 37, 8) + conv_unsigned(w(3 downto 0), 8);
+      n := n + conv_integer(p(15 downto 8)) + conv_integer(q(10 downto 0)) + conv_integer(c);
+      if p(7 downto 0) < unsigned(u(7 downto 0)) then n := n + 1; end if;
+      if q > k then n := n + 3; end if;
+      w := p + k;
+      u := q + 5;
+      if k mod 60 = 0 then
+        report integer'image(n) & " " & img(p) & " " & img(q) & " " & img(c);
+      end if;
+    end loop;
+    report "done " & integer'image(n);
+    wait;
+  end process;
+end;
+"#;
+
+#[test]
+fn synopsys_operators_in_compiled_code_match_the_interpreter() {
+    all_tiers_match("compiled_syn", SYN);
+}

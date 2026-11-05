@@ -7,7 +7,7 @@
 //! convention: array arguments are four cells (`data, left, right, dir`), scalars one (#697).
 
 use crate::ieee_wide::{self as wide, Bounds};
-use yavs_ir::ieee::{ARRAY_REGS, Cmp, Form, Gate, Math, Op, Shift, Syn};
+use yavs_ir::ieee::{ARRAY_REGS, Cmp, Form, Gate, Math, Op, Opd, Shift, Syn, SynKind};
 use yavs_ir::{DOPE_DIM_BYTES, TyId, Width, dim_len};
 use yavs_kernel::{Ctx, LogicVec, Severity};
 use yavs_logic::{BitVec, StdULogic};
@@ -1040,6 +1040,9 @@ fn conv_vec<const FROM_SIGNED: bool>(
     _: Option<TyId>,
     a: &[u64],
 ) -> Ret {
+    if let Some(v) = fast_syn_conv_vec::<FROM_SIGNED>(m, a) {
+        return Ok(Some(v));
+    }
     let l = vh(m, a, 0)?;
     let size = int(a, A1)?;
     let Some(b) = l.v.to_bitvec() else {
@@ -1064,6 +1067,9 @@ fn conv_int<const SIGNED: bool>(
     _: Option<TyId>,
     a: &[u64],
 ) -> Ret {
+    if let Some(v) = fast_syn_conv_int::<SIGNED>(m, a) {
+        return Ok(Some(v));
+    }
     let (arg, size) = (int(a, 0)?, int(a, 1)?);
     // INTEGER'LOW: -2**31 in 2008, -2**63 in 2019.
     let low = m.rt.revision.integer_bounds().low;
@@ -2222,6 +2228,322 @@ fn fast_div<const KIND: u8, const SIGNED: bool, const FORM: u8>(
     put_down(m, len, out & low(len)).ok()
 }
 
+/// A Synopsys operator (`K`: 0 `+`, 1 `-`, 2 `*`, 3 and up `CMPS`; `LK`, `RK`: 0 unsigned, 1
+/// signed, 2 integer) on 1 to 64 elements of `0 1 L H` with the body's lengths and integer
+/// truncation (decisions.md); `None`: the general path. `KEEP`: the operand's own bounds.
+fn fast_oper<const K: u8, const LK: u8, const RK: u8, const KEEP: bool>(
+    m: &mut Machine,
+    a: &[u64],
+) -> Option<u64> {
+    let cmp = |ord: std::cmp::Ordering| Some(u64::from(holds(CMPS[K as usize - 3], ord)));
+    if LK != 2 && RK != 2 {
+        let (l, r) = (small(m, a, 0)?, small(m, a, A1)?);
+        let p = l.n + usize::from(LK == 0 && RK == 1);
+        let q = r.n + usize::from(LK == 1 && RK == 0);
+        let n = if K == 2 { p + q } else { p.max(q) };
+        if n > 64 {
+            return None;
+        }
+        let x = extend_bits(l.bits, l.n, n, LK == 1);
+        let y = extend_bits(r.bits, r.n, n, RK == 1);
+        return match K {
+            0 => put_down(m, n, x.wrapping_add(y)).ok(),
+            1 => put_down(m, n, x.wrapping_sub(y)).ok(),
+            2 => put_down(m, n, x.wrapping_mul(y)).ok(),
+            _ if LK == 1 || RK == 1 => cmp(signed_of(x, n).cmp(&signed_of(y, n))),
+            _ => cmp(x.cmp(&y)),
+        };
+    }
+    let vec_first = RK == 2;
+    let (v, i) = if vec_first {
+        (small(m, a, 0)?, cell(a, A1)?)
+    } else {
+        (small(m, a, 1)?, cell(a, 0)?)
+    };
+    let iv = i as u64;
+    match K {
+        0 | 1 => {
+            let y = iv & low(v.n);
+            let (x, y) = if vec_first { (v.bits, y) } else { (y, v.bits) };
+            let r = if K == 0 {
+                x.wrapping_add(y)
+            } else {
+                x.wrapping_sub(y)
+            };
+            if KEEP {
+                put_small(m, v.n, r, v.left, v.right, v.down).ok()
+            } else {
+                put_down(m, v.n, r).ok()
+            }
+        }
+        2 => None,
+        _ => {
+            // A signed vector against the integer's low `n` bits; an unsigned one against its
+            // low `n + 1` bits as a signed value.
+            let o = if (if vec_first { LK } else { RK }) == 1 {
+                signed_of(v.bits, v.n).cmp(&signed_of(iv & low(v.n), v.n))
+            } else {
+                if v.n >= 64 {
+                    return None;
+                }
+                (v.bits as i64).cmp(&signed_of(iv & low(v.n + 1), v.n + 1))
+            };
+            cmp(if vec_first { o } else { o.reverse() })
+        }
+    }
+}
+
+/// `conv_unsigned`, `conv_signed`, `conv_std_logic_vector`, `ext`, `sxt` of 1 to 64 elements of
+/// `0 1 L H` to 1 to 64: the low `min (n, size)` elements, zero or the top element above them.
+fn fast_syn_conv_vec<const FROM_SIGNED: bool>(m: &mut Machine, a: &[u64]) -> Option<u64> {
+    let l = small(m, a, 0)?;
+    let size = usize::try_from(cell(a, A1)?)
+        .ok()
+        .filter(|s| (1..=64).contains(s))?;
+    let bits = if l.n >= size {
+        l.bits & low(size)
+    } else {
+        extend_bits(l.bits, l.n, size, FROM_SIGNED)
+    };
+    put_down(m, size, bits).ok()
+}
+
+/// The conversions of an integer to 1 to 64 elements: its low two's complement bits. The unsigned
+/// body fails for `INTEGER'LOW` (either revision), which the body words.
+fn fast_syn_conv_int<const SIGNED: bool>(m: &mut Machine, a: &[u64]) -> Option<u64> {
+    let (arg, size) = (cell(a, 0)?, usize::try_from(cell(a, 1)?).ok()?);
+    if !(1..=64).contains(&size) || (!SIGNED && (arg == i64::MIN || arg == i64::from(i32::MIN))) {
+        return None;
+    }
+    put_down(m, size, arg as u64 & low(size)).ok()
+}
+
+/// `conv_integer` of 1 to 31 (unsigned) or 32 (signed) elements of `0 1 L H`; a longer vector is
+/// the body's failure, a metavalue its warning.
+fn fast_syn_to_int<const SIGNED: bool>(m: &mut Machine, a: &[u64]) -> Option<u64> {
+    let l = small(m, a, 0)?;
+    if l.n > 31 + usize::from(SIGNED) {
+        return None;
+    }
+    Some(if SIGNED {
+        signed_of(l.bits, l.n) as u64
+    } else {
+        l.bits
+    })
+}
+
+fn syn_to_int<const SIGNED: bool>(
+    m: &mut Machine,
+    _: Cx<'_, '_, '_>,
+    _: Option<TyId>,
+    a: &[u64],
+) -> Ret {
+    match fast_syn_to_int::<SIGNED>(m, a) {
+        Some(v) => Ok(Some(v)),
+        None => fallback(m),
+    }
+}
+
+/// `shl` / `shr`: the elements (no `L` or `H`) move, zeros or the sign come in, by a count of at
+/// most 31 elements (a longer one may name 2 ** 31, the body's error). Result `(n-1 downto 0)`.
+fn fast_syn_shift<const RIGHT: bool, const SIGNED: bool>(
+    m: &mut Machine,
+    a: &[u64],
+) -> Option<u64> {
+    let (v, c) = (small(m, a, 0)?, small(m, a, A1)?);
+    if !v.pure || c.n > 31 {
+        return None;
+    }
+    let n = v.n;
+    let big = c.bits >= n as u64;
+    let bits = match (RIGHT, SIGNED) {
+        (false, _) => {
+            if big {
+                0
+            } else {
+                v.bits << c.bits
+            }
+        }
+        (true, false) => {
+            if big {
+                0
+            } else {
+                v.bits >> c.bits
+            }
+        }
+        (true, true) => (signed_of(v.bits, n) >> c.bits.min(n as u64 - 1)) as u64,
+    };
+    put_down(m, n, bits & low(n)).ok()
+}
+
+/// [`fast_syn_shift`] on any argument, metavalues and weak elements included (they move as they
+/// are): `Ok(None)` for a null argument and for a count that is empty, over 31 elements or not binary.
+fn syn_shift_wide<const RIGHT: bool, const SIGNED: bool>(m: &mut Machine, a: &[u64]) -> Ret {
+    let (v, c) = (vh(m, a, 0)?, vh(m, a, A1)?);
+    let n = v.v.len();
+    let count = c.v.to_bitvec().filter(|b| (1..=31).contains(&b.len()));
+    let (Some(cnt), true) = (count.and_then(|b| b.to_u64()), n > 0) else {
+        return Ok(None);
+    };
+    let c = usize::try_from(cnt).unwrap_or(usize::MAX);
+    let out = match (RIGHT, SIGNED) {
+        (false, _) => v.v.shl(c),
+        (true, false) => v.v.shr(c),
+        (true, true) => v.v.sra(c),
+    };
+    put(m, &Vh::down(out))
+}
+
+fn syn_shift<const RIGHT: bool, const SIGNED: bool>(
+    m: &mut Machine,
+    _: Cx<'_, '_, '_>,
+    _: Option<TyId>,
+    a: &[u64],
+) -> Ret {
+    if let Some(v) = fast_syn_shift::<RIGHT, SIGNED>(m, a) {
+        return Ok(Some(v));
+    }
+    match syn_shift_wide::<RIGHT, SIGNED>(m, a)? {
+        Some(v) => Ok(Some(v)),
+        None => fallback(m),
+    }
+}
+
+/// [`fast_oper`] on vectors of any length, on `BitVec`s. `Ok(None)`: the body's (a null or a
+/// metavalue, which it words with its warnings and its index error).
+fn oper_wide<const K: u8, const LK: u8, const RK: u8, const KEEP: bool>(
+    m: &mut Machine,
+    a: &[u64],
+) -> Ret {
+    let bin = |v: &Vh| v.v.to_bitvec().filter(|b| !b.is_empty());
+    let down = |b: &BitVec| Vh::down(LogicVec::from_bitvec(b));
+    if LK != 2 && RK != 2 {
+        let (l, r) = (vh(m, a, 0)?, vh(m, a, A1)?);
+        let (Some(x), Some(y)) = (bin(&l), bin(&r)) else {
+            return Ok(None);
+        };
+        let p = x.len() + usize::from(LK == 0 && RK == 1);
+        let q = y.len() + usize::from(LK == 1 && RK == 0);
+        let n = if K == 2 { p + q } else { p.max(q) };
+        let (x, y) = (x.extend(n, LK == 1), y.extend(n, RK == 1));
+        return match K {
+            0 => put(m, &down(&x.add(&y, false))),
+            1 => put(m, &down(&x.sub(&y))),
+            2 => put(m, &down(&x.mul_trunc(&y, n))),
+            _ => {
+                let o = x.cmp_num(&y, LK == 1 || RK == 1);
+                Ok(Some(u64::from(holds(CMPS[K as usize - 3], o))))
+            }
+        };
+    }
+    let vec_first = RK == 2;
+    let (v, i) = if vec_first {
+        (vh(m, a, 0)?, int(a, A1)?)
+    } else {
+        (vh(m, a, 1)?, int(a, 0)?)
+    };
+    let Some(x) = bin(&v) else {
+        return Ok(None);
+    };
+    let n = x.len();
+    match K {
+        0 | 1 => {
+            let y = BitVec::from_i64(n, i);
+            let (p, q) = if vec_first { (x, y) } else { (y, x) };
+            let r = if K == 0 { p.add(&q, false) } else { p.sub(&q) };
+            let mut out = down(&r);
+            if KEEP {
+                (out.left, out.right, out.down) = (v.left, v.right, v.down);
+            }
+            put(m, &out)
+        }
+        2 => Ok(None),
+        _ => {
+            // A signed vector against the integer's low `n` bits, an unsigned one (one more
+            // element) against its low `n + 1` bits, both as signed values.
+            let o = if (if vec_first { LK } else { RK }) == 1 {
+                x.cmp_num(&BitVec::from_i64(n, i), true)
+            } else {
+                x.extend(n + 1, false)
+                    .cmp_num(&BitVec::from_i64(n + 1, i), true)
+            };
+            let o = if vec_first { o } else { o.reverse() };
+            Ok(Some(u64::from(holds(CMPS[K as usize - 3], o))))
+        }
+    }
+}
+
+/// The native of [`fast_oper`]: its result, or the body when a metavalue or a null asks for it.
+fn oper<const K: u8, const LK: u8, const RK: u8, const KEEP: bool>(
+    m: &mut Machine,
+    _: Cx<'_, '_, '_>,
+    _: Option<TyId>,
+    a: &[u64],
+) -> Ret {
+    if let Some(v) = fast_oper::<K, LK, RK, KEEP>(m, a) {
+        return Ok(Some(v));
+    }
+    match oper_wide::<K, LK, RK, KEEP>(m, a)? {
+        Some(v) => Ok(Some(v)),
+        None => fallback(m),
+    }
+}
+
+fn oper_code(k: SynKind) -> u8 {
+    match k {
+        SynKind::Add => 0,
+        SynKind::Sub => 1,
+        SynKind::Mul => 2,
+        SynKind::Cmp(c) => 3 + CMPS.iter().position(|x| *x == c).unwrap_or(0) as u8,
+    }
+}
+
+fn opd_code(o: Opd) -> u8 {
+    match o {
+        Opd::U => 0,
+        Opd::S => 1,
+        Opd::I => 2,
+    }
+}
+
+/// The forms of one operator kind: every pair of operands but two integers.
+macro_rules! oper_forms {
+    ($f:ident, $t:ty, $k:literal, $l:expr, $r:expr, $keep:expr) => {
+        match ($l, $r, $keep) {
+            (0, 0, _) => $f::<$k, 0, 0, false> as $t,
+            (1, 1, _) => $f::<$k, 1, 1, false> as $t,
+            (0, 1, _) => $f::<$k, 0, 1, false> as $t,
+            (1, 0, _) => $f::<$k, 1, 0, false> as $t,
+            (0, 2, false) => $f::<$k, 0, 2, false> as $t,
+            (0, 2, true) => $f::<$k, 0, 2, true> as $t,
+            (1, 2, false) => $f::<$k, 1, 2, false> as $t,
+            (1, 2, true) => $f::<$k, 1, 2, true> as $t,
+            (2, 0, false) => $f::<$k, 2, 0, false> as $t,
+            (2, 0, true) => $f::<$k, 2, 0, true> as $t,
+            (2, 1, false) => $f::<$k, 2, 1, false> as $t,
+            (2, 1, true) => $f::<$k, 2, 1, true> as $t,
+            _ => return None,
+        }
+    };
+}
+
+macro_rules! oper_pick {
+    ($f:ident, $t:ty, $k:expr, $l:expr, $r:expr, $keep:expr) => {
+        match $k {
+            0 => oper_forms!($f, $t, 0, $l, $r, $keep),
+            1 => oper_forms!($f, $t, 1, $l, $r, $keep),
+            2 => oper_forms!($f, $t, 2, $l, $r, $keep),
+            3 => oper_forms!($f, $t, 3, $l, $r, $keep),
+            4 => oper_forms!($f, $t, 4, $l, $r, $keep),
+            5 => oper_forms!($f, $t, 5, $l, $r, $keep),
+            6 => oper_forms!($f, $t, 6, $l, $r, $keep),
+            7 => oper_forms!($f, $t, 7, $l, $r, $keep),
+            8 => oper_forms!($f, $t, 8, $l, $r, $keep),
+            _ => return None,
+        }
+    };
+}
+
 /// `to_01` of 1 to 64 elements that are all `0 1 L H`: the bits as `(n-1 downto 0)`, whatever the
 /// operand's bounds. A metavalue (the result is `xmap`), a null or a longer vector takes the general path.
 fn fast_to_01(m: &mut Machine, a: &[u64]) -> Option<u64> {
@@ -2777,6 +3099,24 @@ pub(crate) fn lookup(symbol: &str) -> Option<NativeFn> {
             (true, false) => syn_add::<true, false>,
             (true, true) => syn_add::<true, true>,
         },
+        Op::Syn(Syn::Oper { kind, l, r, keep }) => {
+            oper_pick!(
+                oper,
+                NativeFn,
+                oper_code(kind),
+                opd_code(l),
+                opd_code(r),
+                keep
+            )
+        }
+        Op::Syn(Syn::Shift { right, signed }) => match (right, signed) {
+            (false, false) => syn_shift::<false, false>,
+            (false, true) => syn_shift::<false, true>,
+            (true, false) => syn_shift::<true, false>,
+            (true, true) => syn_shift::<true, true>,
+        },
+        Op::Syn(Syn::ToInt { signed: false }) => syn_to_int::<false>,
+        Op::Syn(Syn::ToInt { signed: true }) => syn_to_int::<true>,
         Op::Syn(Syn::Mult { signed: false }) => syn_mult::<false>,
         Op::Syn(Syn::Mult { signed: true }) => syn_mult::<true>,
         Op::Syn(Syn::MakeBinary) => make_binary,
@@ -2958,6 +3298,42 @@ pub(crate) fn lookup_fast(symbol: &str) -> Option<FastFn> {
             signed,
             form: f,
         } => divs!(fast_div, FastFn, kind, signed, form(f)),
+        Op::Syn(Syn::Shift { right, signed }) => match (right, signed) {
+            (false, false) => fast_syn_shift::<false, false>,
+            (false, true) => fast_syn_shift::<false, true>,
+            (true, false) => fast_syn_shift::<true, false>,
+            (true, true) => fast_syn_shift::<true, true>,
+        },
+        Op::Syn(Syn::ToInt { signed: false }) => fast_syn_to_int::<false>,
+        Op::Syn(Syn::ToInt { signed: true }) => fast_syn_to_int::<true>,
+        Op::Syn(Syn::Conv {
+            from_signed: Some(false),
+            ..
+        }) => fast_syn_conv_vec::<false>,
+        Op::Syn(Syn::Conv {
+            from_signed: Some(true),
+            ..
+        }) => fast_syn_conv_vec::<true>,
+        Op::Syn(Syn::Conv {
+            to_signed,
+            from_signed: None,
+        }) => {
+            if to_signed {
+                fast_syn_conv_int::<true>
+            } else {
+                fast_syn_conv_int::<false>
+            }
+        }
+        Op::Syn(Syn::Oper { kind, l, r, keep }) => {
+            oper_pick!(
+                fast_oper,
+                FastFn,
+                oper_code(kind),
+                opd_code(l),
+                opd_code(r),
+                keep
+            )
+        }
         Op::Mul { signed, form: f } => match (signed, form(f)) {
             (false, 0) => fast_mul::<false, 0>,
             (false, 1) => fast_mul::<false, 1>,

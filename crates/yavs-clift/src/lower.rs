@@ -7417,14 +7417,18 @@ impl Gen<'_> {
         args: yavs_ir::Regs,
         dst: Option<Reg>,
     ) -> Result<(), String> {
-        use yavs_ir::ieee::{ARRAY_REGS, Cmp, Form, Gate, Op, Shift};
+        use yavs_ir::ieee::{ARRAY_REGS, Cmp, Form, Gate, Op, Opd, Shift, Syn, SynKind};
         let rs = ok(f.regs(args), "operand list out of range")?.to_vec();
         let d = ok(dst, "a native without a result")?;
         let layout = ok(ieee_layout(op), "not a native computed in place")?;
         let (fb, done) = (self.b.create_block(), self.b.create_block());
         let pure = matches!(
             op,
-            Op::Resize { .. } | Op::Shift(_) | Op::ShiftFn(_) | Op::Div { .. }
+            Op::Resize { .. }
+                | Op::Shift(_)
+                | Op::ShiftFn(_)
+                | Op::Div { .. }
+                | Op::Syn(Syn::Shift { .. })
         );
         // `std_match` and `?=` / `?/=` take every element value: all four planes.
         let plane_op = matches!(
@@ -7477,6 +7481,8 @@ impl Gen<'_> {
             Scalar(Value),
             // Count, bits, and whether the bounds are `1 to n` (else `n - 1 downto 0`).
             Vector(Value, Value, bool),
+            // Count, bits and the bounds (left, right, direction) of an operand.
+            Bounds(Value, Value, Value, Value, Value),
         }
         let out = match op {
             Op::ToInteger { signed } => {
@@ -7709,19 +7715,7 @@ impl Gen<'_> {
                         if form == Form::Vi { (e, v) } else { (v, e) }
                     }
                 };
-                let cc = match (k, signed) {
-                    (Cmp::Gt, false) => IntCC::UnsignedGreaterThan,
-                    (Cmp::Lt, false) => IntCC::UnsignedLessThan,
-                    (Cmp::Le, false) => IntCC::UnsignedLessThanOrEqual,
-                    (Cmp::Ge, false) => IntCC::UnsignedGreaterThanOrEqual,
-                    (Cmp::Gt, true) => IntCC::SignedGreaterThan,
-                    (Cmp::Lt, true) => IntCC::SignedLessThan,
-                    (Cmp::Le, true) => IntCC::SignedLessThanOrEqual,
-                    (Cmp::Ge, true) => IntCC::SignedGreaterThanOrEqual,
-                    (Cmp::Eq, _) => IntCC::Equal,
-                    (Cmp::Ne, _) => IntCC::NotEqual,
-                };
-                let r = self.b.ins().icmp(cc, x, y);
+                let r = self.b.ins().icmp(int_cc(k, signed), x, y);
                 let r = self.b.ins().uextend(I64, r);
                 Out::Scalar(if q { self.b.ins().iadd_imm_s(r, 2) } else { r })
             }
@@ -7838,6 +7832,190 @@ impl Gen<'_> {
                 };
                 Out::Vector(n, res, false)
             }
+            // The operators of the Synopsys packages: both operands extended to the body's
+            // common length (an integer: the low bits of its two's complement, so no fit
+            // guard), then the plain operation.
+            // `conv_unsigned` and friends of a vector: the low `size` bits of the operand
+            // extended with zeros or its sign (unlike `resize`, a signed one keeps no sign bit
+            // when it shrinks), the weak elements made binary.
+            Op::Syn(Syn::Conv {
+                from_signed: Some(signed),
+                ..
+            }) => {
+                let (n, bits, _) = arrs[0];
+                let new = ints[0];
+                let ge = self.b.ins().icmp(IntCC::SignedGreaterThanOrEqual, new, c1);
+                let le = self
+                    .b
+                    .ins()
+                    .icmp_imm_s(IntCC::SignedLessThanOrEqual, new, 64);
+                let okr = self.b.ins().band(ge, le);
+                self.guard(okr, fb);
+                let x = if signed {
+                    self.sext_bits(bits, n)
+                } else {
+                    bits
+                };
+                let mask = self.low_mask(new);
+                Out::Vector(new, self.b.ins().band(x, mask), false)
+            }
+            // `conv_unsigned`, `conv_signed`, `conv_std_logic_vector` of an integer: the low bits
+            // of its two's complement. The unsigned body fails for `INTEGER'LOW`.
+            Op::Syn(Syn::Conv {
+                to_signed,
+                from_signed: None,
+            }) => {
+                let (v, size) = (ints[0], ints[1]);
+                let ge = self.b.ins().icmp(IntCC::SignedGreaterThanOrEqual, size, c1);
+                let le = self
+                    .b
+                    .ins()
+                    .icmp_imm_s(IntCC::SignedLessThanOrEqual, size, 64);
+                let okr = self.b.ins().band(ge, le);
+                self.guard(okr, fb);
+                if !to_signed {
+                    for low in [i64::from(i32::MIN), i64::MIN] {
+                        let ne = self.b.ins().icmp_imm_s(IntCC::NotEqual, v, low);
+                        self.guard(ne, fb);
+                    }
+                }
+                let mask = self.low_mask(size);
+                Out::Vector(size, self.b.ins().band(v, mask), false)
+            }
+            // `shl` / `shr` of the Synopsys packages: the argument's elements (no weak ones)
+            // moved, zeros or the sign shifted in, by a count of at most 31 elements.
+            Op::Syn(Syn::Shift { right, signed }) => {
+                let ((n, bits, _), (n2, count, _)) = (arrs[0], arrs[1]);
+                let lim = self
+                    .b
+                    .ins()
+                    .icmp_imm_s(IntCC::UnsignedLessThanOrEqual, n2, 31);
+                self.guard(lim, fb);
+                let big = self
+                    .b
+                    .ins()
+                    .icmp(IntCC::UnsignedGreaterThanOrEqual, count, n);
+                let cnt = self.b.ins().select(big, c0, count);
+                let res = if !right {
+                    let r = self.b.ins().ishl(bits, cnt);
+                    self.b.ins().select(big, c0, r)
+                } else if !signed {
+                    let r = self.b.ins().ushr(bits, cnt);
+                    self.b.ins().select(big, c0, r)
+                } else {
+                    let nm1 = self.b.ins().isub(n, c1);
+                    let kk = self.b.ins().umin(count, nm1);
+                    let se = self.sext_bits(bits, n);
+                    self.b.ins().sshr(se, kk)
+                };
+                Out::Vector(n, res, false)
+            }
+            // `conv_integer`: at most 31 (unsigned) or 32 (signed) elements.
+            Op::Syn(Syn::ToInt { signed }) => {
+                let (n, bits, _) = arrs[0];
+                let lim = self.b.ins().icmp_imm_s(
+                    IntCC::UnsignedLessThanOrEqual,
+                    n,
+                    31 + i64::from(signed),
+                );
+                self.guard(lim, fb);
+                Out::Scalar(if signed {
+                    self.sext_bits(bits, n)
+                } else {
+                    bits
+                })
+            }
+            Op::Syn(Syn::Oper { kind, l, r, keep }) => {
+                if l != Opd::I && r != Opd::I {
+                    let ((n1, b1, _), (n2, b2, _)) = (arrs[0], arrs[1]);
+                    let p = if l == Opd::U && r == Opd::S {
+                        self.b.ins().iadd_imm_s(n1, 1)
+                    } else {
+                        n1
+                    };
+                    let q = if l == Opd::S && r == Opd::U {
+                        self.b.ins().iadd_imm_s(n2, 1)
+                    } else {
+                        n2
+                    };
+                    let n = if kind == SynKind::Mul {
+                        self.b.ins().iadd(p, q)
+                    } else {
+                        self.b.ins().umax(p, q)
+                    };
+                    let fit = self
+                        .b
+                        .ins()
+                        .icmp_imm_s(IntCC::UnsignedLessThanOrEqual, n, 64);
+                    self.guard(fit, fb);
+                    let x = if l == Opd::S {
+                        self.sext_bits(b1, n1)
+                    } else {
+                        b1
+                    };
+                    let y = if r == Opd::S {
+                        self.sext_bits(b2, n2)
+                    } else {
+                        b2
+                    };
+                    match kind {
+                        SynKind::Add => Out::Vector(n, self.b.ins().iadd(x, y), false),
+                        SynKind::Sub => Out::Vector(n, self.b.ins().isub(x, y), false),
+                        SynKind::Mul => Out::Vector(n, self.b.ins().imul(x, y), false),
+                        SynKind::Cmp(k) => {
+                            let t = self
+                                .b
+                                .ins()
+                                .icmp(int_cc(k, l == Opd::S || r == Opd::S), x, y);
+                            Out::Scalar(self.b.ins().uextend(I64, t))
+                        }
+                    }
+                } else {
+                    let vec_first = r == Opd::I;
+                    let (n, bits, mask) = arrs[0];
+                    let iv = ints[0];
+                    match kind {
+                        SynKind::Add | SynKind::Sub => {
+                            let (x, y) = if vec_first { (bits, iv) } else { (iv, bits) };
+                            let s = if kind == SynKind::Add {
+                                self.b.ins().iadd(x, y)
+                            } else {
+                                self.b.ins().isub(x, y)
+                            };
+                            if keep {
+                                let base = usize::from(!vec_first);
+                                let (le, ri, di) = (
+                                    self.ld(rs[base + 1]),
+                                    self.ld(rs[base + 2]),
+                                    self.ld(rs[base + 3]),
+                                );
+                                Out::Bounds(n, s, le, ri, di)
+                            } else {
+                                Out::Vector(n, s, false)
+                            }
+                        }
+                        SynKind::Mul => return Err("not a native computed in place".into()),
+                        SynKind::Cmp(k) => {
+                            let s_vec = if vec_first { l } else { r } == Opd::S;
+                            let low = self.b.ins().band(iv, mask);
+                            let (x, y) = if s_vec {
+                                (self.sext_bits(bits, n), self.sext_bits(low, n))
+                            } else {
+                                // The integer's low `n + 1` bits as a signed value.
+                                let small = self.b.ins().icmp_imm_s(IntCC::UnsignedLessThan, n, 64);
+                                self.guard(small, fb);
+                                let len = self.b.ins().iadd_imm_s(n, 1);
+                                let lm = self.low_mask(len);
+                                let low = self.b.ins().band(iv, lm);
+                                (bits, self.sext_bits(low, len))
+                            };
+                            let (x, y) = if vec_first { (x, y) } else { (y, x) };
+                            let t = self.b.ins().icmp(int_cc(k, true), x, y);
+                            Out::Scalar(self.b.ins().uextend(I64, t))
+                        }
+                    }
+                }
+            }
             Op::NumGate(g) | Op::VecGate(g) => {
                 let ((n1, b1, _), (n2, b2, _)) = (arrs[0], arrs[1]);
                 let same = self.b.ins().icmp(IntCC::Equal, n1, n2);
@@ -7890,15 +8068,18 @@ impl Gen<'_> {
         };
         match out {
             Out::Scalar(v) => self.st(d, v),
-            Out::Vector(n, bits, up) => {
+            out @ (Out::Vector(..) | Out::Bounds(..)) => {
+                let (n, bits, left, right, down) = match out {
+                    Out::Vector(n, bits, true) => (n, bits, c1, n, c0),
+                    Out::Vector(n, bits, false) => {
+                        (n, bits, self.b.ins().iadd_imm_s(n, -1), c0, c1)
+                    }
+                    Out::Bounds(n, bits, l, r, d) => (n, bits, l, r, d),
+                    Out::Scalar(_) => unreachable!(),
+                };
                 let mask = self.low_mask(n);
                 let sz = self.c64(i64::from(PUT_SMALL_BYTES));
                 let (at, p) = self.temp_alloc(sz, fb);
-                let (left, right, down) = if up {
-                    (c1, n, c0)
-                } else {
-                    (self.b.ins().iadd_imm_s(n, -1), c0, c1)
-                };
                 let data = self
                     .b
                     .ins()
@@ -10528,4 +10709,21 @@ pub fn compile(prog: &Program, max_size: usize) -> Result<crate::ClifTier, Error
         instrs,
         times,
     })
+}
+
+/// The condition of a `numeric_std` or Synopsys relational operator on integers.
+fn int_cc(k: yavs_ir::ieee::Cmp, signed: bool) -> IntCC {
+    use yavs_ir::ieee::Cmp;
+    match (k, signed) {
+        (Cmp::Gt, false) => IntCC::UnsignedGreaterThan,
+        (Cmp::Lt, false) => IntCC::UnsignedLessThan,
+        (Cmp::Le, false) => IntCC::UnsignedLessThanOrEqual,
+        (Cmp::Ge, false) => IntCC::UnsignedGreaterThanOrEqual,
+        (Cmp::Gt, true) => IntCC::SignedGreaterThan,
+        (Cmp::Lt, true) => IntCC::SignedLessThan,
+        (Cmp::Le, true) => IntCC::SignedLessThanOrEqual,
+        (Cmp::Ge, true) => IntCC::SignedGreaterThanOrEqual,
+        (Cmp::Eq, _) => IntCC::Equal,
+        (Cmp::Ne, _) => IntCC::NotEqual,
+    }
 }

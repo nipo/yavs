@@ -446,7 +446,7 @@ pub enum Arg {
 /// elements without a metavalue (the native's own fast path, `ieee::small`; `Gen::ieee_fast`),
 /// and their arguments; any other operand, and every case that warns or fails, runs the callback.
 pub fn ieee_layout(op: yavs_ir::ieee::Op) -> Option<&'static [Arg]> {
-    use yavs_ir::ieee::{Form, Op};
+    use yavs_ir::ieee::{Form, Op, Opd, Syn};
     Some(match op {
         Op::ToInteger { .. } | Op::NumNot | Op::VecNot | Op::Neg | Op::Abs => &[Arg::Arr],
         Op::Add { form, .. }
@@ -458,6 +458,20 @@ pub fn ieee_layout(op: yavs_ir::ieee::Op) -> Option<&'static [Arg]> {
             Form::Vv => &[Arg::Arr, Arg::Arr],
             Form::Vi => &[Arg::Arr, Arg::Int],
             Form::Iv => &[Arg::Int, Arg::Arr],
+        },
+        Op::Syn(Syn::Shift { .. }) => &[Arg::Arr, Arg::Arr],
+        Op::Syn(Syn::ToInt { .. }) => &[Arg::Arr],
+        Op::Syn(Syn::Conv {
+            from_signed: Some(_),
+            ..
+        }) => &[Arg::Arr, Arg::Int],
+        Op::Syn(Syn::Conv {
+            from_signed: None, ..
+        }) => &[Arg::Int, Arg::Int],
+        Op::Syn(Syn::Oper { l, r, .. }) => match (l, r) {
+            (Opd::I, _) => &[Arg::Int, Arg::Arr],
+            (_, Opd::I) => &[Arg::Arr, Arg::Int],
+            _ => &[Arg::Arr, Arg::Arr],
         },
         Op::ToUnsigned | Op::ToSigned => &[Arg::Int, Arg::Int],
         Op::Resize { .. } | Op::Shift(_) | Op::ShiftFn(_) | Op::To01 => &[Arg::Arr, Arg::Int],

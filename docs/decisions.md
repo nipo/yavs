@@ -3285,7 +3285,8 @@ user's performance priority:
   of `std_logic_arith` run natively for `(n-1 downto 0)` operands of one length with `0`/`1`
   elements only (`L`/`H` compare differently in the bodies) and are handed back otherwise;
   `make_binary` now covers every result type. `std_match`, the `?=` family and the
-  `*_unsigned`/`std_logic_unsigned` wrappers stay VHDL: none of them was above 0.5% of the
+  `*_unsigned`/`std_logic_unsigned` wrappers stay VHDL (the Synopsys operators became natives
+  since, #1108, below): none of them was above 0.5% of the
   instructions of any benchmark. The vector/integer forms of `/` `rem` `mod` are natives since
   #1108 (`Op::Div { form }`): an integer that fits the vector's length is converted at that
   length and divided as the vector form is. One that does not is what the body computes at the
@@ -3306,6 +3307,28 @@ user's performance priority:
   if any element is `U`, else `X` if any is not `0 1 L H`", and `xor` to "`U`, else `X`, else the
   parity of the ones", in any order. The bodies loop over the elements; a 512-bit `or_reduce`
   cost about 50 us in the interpreter.
+
+- **The Synopsys operators and conversions (#1108, 2026-11-05):** the operators `+ - *` and the six
+  relations of `std_logic_arith` (`unsigned`, `signed` and the mixed pairs, with an integer on
+  either side, `std_logic_vector` or the package's own result), `std_logic_unsigned` and
+  `std_logic_signed` (the same on `std_logic_vector`), `conv_integer`, `conv_unsigned`/
+  `conv_signed`/`conv_std_logic_vector` of a vector or an integer, `ext`, `sxt`, `shl` and `shr` are
+  natives (`Syn::Oper`, `Syn::ToInt`, `Syn::Conv`, `Syn::Shift`) with a one-word path, and a `BitVec`
+  path for longer vectors that the operators take; the rest is the body's:
+  operands of 1 to 64 elements of `0 1 L H` (the bodies make the elements binary first, so `L`
+  and `H` are `0` and `1`) are computed from the plane words; everything else (a null, a
+  metavalue, a `conv_integer` operand over 31 or 32 elements, a shift count over 31 elements or an
+  argument with `L` or `H`) is handed back, so every warning, all-`X` result and error is the
+  body's by construction. The
+  forms differ from `numeric_std` and the natives follow the bodies: the result of `+ - <` has the
+  longer length (one more for an unsigned beside a signed), `*` the sum, an integer is its low
+  bits as a two's complement of the vector's length (one more for a comparison with an unsigned
+  vector) with no fit check, and `std_logic_unsigned`/`std_logic_signed` keep the vector's own
+  bounds in the integer forms where the others return `(n-1 downto 0)`. Compiled code computes
+  them in place (`ieee_layout`); `conv_unsigned` of a signed vector is not `resize` (a shrinking
+  `resize` keeps the sign bit), so it has its own arm. Not native: the forms with a `std_ulogic`
+  operand and unary `+ - abs` (unary `-` of a `signed` still reaches the binary one through
+  its body's `0 - L`).
 
 ## Skipped unchanged assignments (yavs-kernel, yavs-elab, #420, 2026-10-20)
 

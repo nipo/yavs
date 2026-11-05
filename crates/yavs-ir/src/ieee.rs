@@ -80,6 +80,24 @@ pub enum Math {
     Sign,
 }
 
+/// What an operator of the Synopsys packages computes.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SynKind {
+    Add,
+    Sub,
+    Mul,
+    Cmp(Cmp),
+}
+
+/// An operand of such an operator: `unsigned` (or `std_logic_unsigned`'s vector), `signed` (or
+/// `std_logic_signed`'s), or an integer.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Opd {
+    U,
+    S,
+    I,
+}
+
 /// The helpers of the vendored Synopsys `std_logic_arith`, which hold the cost of its operators.
 /// Each handles operands of `0 1 L H` only and hands the call back to the VHDL body for
 /// anything else (a metavalue, an unusual range): the body then makes the results and warnings.
@@ -105,6 +123,27 @@ pub enum Syn {
     Conv {
         to_signed: bool,
         from_signed: Option<bool>,
+    },
+    /// `shl` (`right` false) and `shr` of an `unsigned` or `signed` by an `unsigned` count, also
+    /// on `std_logic_vector` in `std_logic_unsigned` and `std_logic_signed`: the elements move
+    /// unchanged, zeros come in (the sign element for a signed `shr`).
+    Shift {
+        right: bool,
+        signed: bool,
+    },
+    /// `conv_integer` of an `unsigned` (or `std_logic_unsigned`'s vector) or a `signed`.
+    ToInt {
+        signed: bool,
+    },
+    /// An operator of `std_logic_arith`, `std_logic_unsigned` or `std_logic_signed` on two
+    /// operands (at most one an integer): the whole body in one call. `keep`: the result has
+    /// the vector operand's bounds (the `std_logic_vector` result with an integer), else
+    /// `(n-1 downto 0)`.
+    Oper {
+        kind: SynKind,
+        l: Opd,
+        r: Opd,
+        keep: bool,
     },
 }
 
@@ -453,6 +492,54 @@ pub fn parse(key: &str) -> Option<Op> {
                 },
             }))
         }
+        (
+            "std_logic_arith",
+            n @ ("ext" | "sxt"),
+            ["std_ulogic_vector", "integer"],
+            "std_ulogic_vector",
+        ) => {
+            // Zero or sign extension of the vector, as `conv_unsigned` of an unsigned or a signed.
+            Some(Op::Syn(Syn::Conv {
+                to_signed: false,
+                from_signed: Some(n == "sxt"),
+            }))
+        }
+        ("std_logic_arith", n @ ("shl" | "shr"), [a, "unsigned"], r)
+            if *a == r && (r == "unsigned" || r == "signed") =>
+        {
+            Some(Op::Syn(Syn::Shift {
+                right: n == "shr",
+                signed: r == "signed",
+            }))
+        }
+        (
+            "std_logic_unsigned" | "std_logic_signed",
+            n @ ("shl" | "shr"),
+            ["std_ulogic_vector", "std_ulogic_vector"],
+            "std_ulogic_vector",
+        ) => Some(Op::Syn(Syn::Shift {
+            right: n == "shr",
+            signed: pkg == "std_logic_signed",
+        })),
+        ("std_logic_arith", "conv_integer", [t @ ("unsigned" | "signed")], "integer") => {
+            Some(Op::Syn(Syn::ToInt {
+                signed: *t == "signed",
+            }))
+        }
+        (
+            "std_logic_unsigned" | "std_logic_signed",
+            "conv_integer",
+            ["std_ulogic_vector"],
+            "integer",
+        ) => Some(Op::Syn(Syn::ToInt {
+            signed: pkg == "std_logic_signed",
+        })),
+        (
+            "std_logic_arith" | "std_logic_unsigned" | "std_logic_signed",
+            n @ ("+" | "-" | "*" | "<" | "<=" | ">" | ">=" | "=" | "/="),
+            [a, b],
+            r,
+        ) => syn_oper(pkg, n, a, b, r),
         ("math_real", "uniform", ["integer", "integer", "real"], "") => Some(Op::Uniform),
         ("std_logic_1164", n @ ("to_hstring" | "to_ostring"), ["std_ulogic_vector"], "string") => {
             Some(Op::Str(n == "to_ostring"))
@@ -492,6 +579,59 @@ fn num_form(ps: &[&str]) -> Option<(bool, Form, &'static str)> {
         ["integer", b] => v(b).map(|(s, t)| (s, Form::Iv, t)),
         _ => None,
     }
+}
+
+/// The operator `n` of a Synopsys package on operand types `a` and `b` and result type `r`.
+fn syn_oper(pkg: &str, n: &str, a: &str, b: &str, r: &str) -> Option<Op> {
+    let arith = pkg == "std_logic_arith";
+    let opd = |t: &str| match (t, pkg) {
+        ("integer", _) => Some(Opd::I),
+        ("unsigned", "std_logic_arith") | ("std_ulogic_vector", "std_logic_unsigned") => {
+            Some(Opd::U)
+        }
+        ("signed", "std_logic_arith") | ("std_ulogic_vector", "std_logic_signed") => Some(Opd::S),
+        _ => None,
+    };
+    let (l, rt) = (opd(a)?, opd(b)?);
+    if l == Opd::I && rt == Opd::I {
+        return None;
+    }
+    let kind = match n {
+        "+" => SynKind::Add,
+        "-" => SynKind::Sub,
+        "*" => SynKind::Mul,
+        _ => SynKind::Cmp(match n {
+            "<" => Cmp::Lt,
+            "<=" => Cmp::Le,
+            ">" => Cmp::Gt,
+            ">=" => Cmp::Ge,
+            "=" => Cmp::Eq,
+            _ => Cmp::Ne,
+        }),
+    };
+    let int_form = l == Opd::I || rt == Opd::I;
+    if matches!(kind, SynKind::Cmp(_)) {
+        return (r == "boolean").then_some(Op::Syn(Syn::Oper {
+            kind,
+            l,
+            r: rt,
+            keep: false,
+        }));
+    }
+    // The result type of `std_logic_arith`: signed when an operand is, else unsigned; the
+    // other packages return `std_logic_vector`.
+    let want = if l == Opd::S || rt == Opd::S {
+        "signed"
+    } else {
+        "unsigned"
+    };
+    let ok = r == "std_ulogic_vector" || (arith && r == want);
+    (ok && !(kind == SynKind::Mul && int_form)).then_some(Op::Syn(Syn::Oper {
+        kind,
+        l,
+        r: rt,
+        keep: !arith && int_form,
+    }))
 }
 
 /// The reduced key of a mangled `ieee` subprogram name, `None` when it is not one of an `ieee`

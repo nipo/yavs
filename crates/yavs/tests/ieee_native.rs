@@ -777,9 +777,486 @@ fn native_synopsys_arith_matches_bodies() {
     assert_eq!(n.status.code(), v.status.code());
 }
 
+/// The head of the Synopsys operator tests: `uv`/`gv` build the package's own `unsigned` and
+/// `signed`, `lv` a `std_logic_vector`; `extra` is the `use` clause of `std_logic_unsigned` or
+/// `std_logic_signed` (or nothing).
+fn syn_head(extra: &str) -> String {
+    ARITH_HEAD
+        .replace("entity ta is", "entity t is")
+        .replace("of ta is", "of t is")
+        .replacen(
+            "use ieee.std_logic_arith.all;\n",
+            &format!("use ieee.std_logic_arith.all;\n{extra}"),
+            1,
+        )
+        .replacen(
+            "begin\n  process\n",
+            "  function lv (s : string; l : integer; asc : boolean) return std_logic_vector is\n  begin return std_logic_vector(sv(s, l, asc)); end function;\nbegin\n  process\n",
+            1,
+        )
+}
+
+/// The patterns of an `n` element operand: zeros, ones, alternating, only the top or the bottom
+/// element set, and the alternating pattern in `L` and `H`.
+fn syn_pats(n: usize) -> Vec<String> {
+    let alt: String = (0..n).map(|i| if i % 2 == 0 { '1' } else { '0' }).collect();
+    vec![
+        "0".repeat(n),
+        "1".repeat(n),
+        alt.clone(),
+        format!("1{}", "0".repeat(n - 1)),
+        format!("{}1", "0".repeat(n - 1)),
+        alt.replace('1', "H").replace('0', "L"),
+        format!("0{}", "1".repeat(n - 1)),
+    ]
+}
+
+/// Each of `exprs` as a `report` with its result type spelled out (the operators overload on it).
+fn syn_report(body: &mut String, expr: &str, rty: &str) {
+    let e = match rty {
+        "b" => format!("img(boolean'({expr}))"),
+        "i" => format!("integer'image({expr})"),
+        "v" => format!("img(std_ulogic_vector(std_logic_vector'({expr})))"),
+        t => format!("img({t}'({expr}))"),
+    };
+    let _ = writeln!(body, "    report {e};");
+}
+
+/// The operators of the Synopsys packages against their bodies: every pair of operand kinds,
+/// lengths around the one-word limit, both directions with lower bounds other than zero, extreme
+/// and out of range integers (the packages truncate them), weak bits, metavalues (the bodies
+/// warn and give all `X`) and the results of both vector types. With `wide_int` (2019) only the
+/// integers beyond 32 bits, which are the one thing the revisions change.
+fn syn_oper_test(pkg: &str, std: &str, wide_int: bool) {
+    let (ua, sa) = match pkg {
+        "arith" => ("uv", "gv"),
+        _ => ("lv", "lv"),
+    };
+    let extra = match pkg {
+        "unsigned" => "use ieee.std_logic_unsigned.all;\n",
+        "signed" => "use ieee.std_logic_signed.all;\n",
+        _ => "",
+    };
+    // The vector type of each operand kind and the types an operator of that mix may return.
+    let mut kinds: Vec<(&str, &str, Vec<&str>)> = Vec::new();
+    if pkg == "arith" {
+        kinds.push((ua, ua, vec!["unsigned", "v"]));
+        kinds.push((sa, sa, vec!["signed", "v"]));
+        kinds.push((ua, sa, vec!["signed", "v"]));
+        kinds.push((sa, ua, vec!["signed", "v"]));
+    } else {
+        kinds.push(("lv", "lv", vec!["v"]));
+    }
+    let lens: [(usize, usize); 8] = [
+        (1, 1),
+        (1, 4),
+        (9, 5),
+        (32, 32),
+        (33, 31),
+        (63, 64),
+        (64, 64),
+        (65, 3),
+    ];
+    let ints: Vec<&str> = if wide_int {
+        vec![
+            "4294967296",
+            "(-4294967297)",
+            "9223372036854775807",
+            "(-9223372036854775807 - 1)",
+            "(-2147483647 - 1)",
+        ]
+    } else {
+        vec![
+            "0",
+            "(-1)",
+            "517",
+            "(-518)",
+            "2147483647",
+            "(-2147483647 - 1)",
+        ]
+    };
+    // VHDL-1993 hides no relational operator: `std_logic_vector` ones are ambiguous there.
+    let cmps = !(std == "1993" && pkg != "arith");
+    let mut body = String::new();
+    let mut k = 0usize;
+    let lit = |ty: &str, x: &str, n: usize, k: usize| {
+        let asc = k % 2 == 1;
+        // `sv` declares both directions, so the left bound is at least `n - 1` either way.
+        let lo = [0usize, 3, 100][k % 3];
+        let l = if asc { lo.max(n - 1) } else { lo + n - 1 };
+        format!("{ty}(\"{x}\", {l}, {asc})")
+    };
+    if !wide_int {
+        for (ta, tb, rtys) in &kinds {
+            let mixed = ta != tb;
+            for &(na, nb) in &lens {
+                let (pa, pb) = (syn_pats(na), syn_pats(nb));
+                for i in [2usize, 5, 3] {
+                    let (a, b) = (&pa[i], &pb[(i * 3 + 1) % pb.len()]);
+                    k += 1;
+                    let (x, y) = (lit(ta, a, na, k), lit(tb, b, nb, k + 1));
+                    for op in ["+", "-"] {
+                        // The `std_logic_vector` result once per pair, the package's own type always.
+                        for r in rtys.iter().take(if i == 2 { 2 } else { 1 }) {
+                            syn_report(&mut body, &format!("{x} {op} {y}"), r);
+                        }
+                    }
+                    if na + nb < 80 && !(mixed && na + nb > 70) {
+                        for r in rtys.iter().take(if i == 2 { 2 } else { 1 }) {
+                            syn_report(&mut body, &format!("{x} * {y}"), r);
+                        }
+                    }
+                    for op in ["<", "<=", ">", ">=", "=", "/="] {
+                        if cmps {
+                            syn_report(&mut body, &format!("{x} {op} {y}"), "b");
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // An integer against a vector of each length and kind, both orders.
+    let int_kinds: Vec<(&str, &str)> = if pkg == "arith" {
+        vec![(ua, "unsigned"), (sa, "signed")]
+    } else {
+        vec![("lv", "v")]
+    };
+    for (ta, rt) in int_kinds {
+        for n in [1usize, 2, 8, 32, 33, 63, 64, 65] {
+            let pa = syn_pats(n);
+            let pats: &[usize] = if n > 8 { &[2, 5] } else { &[2, 1, 3] };
+            for &i in pats {
+                for (j, int) in ints.iter().enumerate() {
+                    k += 1;
+                    let x = lit(ta, &pa[i], n, k);
+                    for op in ["+", "-"] {
+                        syn_report(&mut body, &format!("{x} {op} {int}"), rt);
+                        syn_report(&mut body, &format!("{int} {op} {x}"), rt);
+                        if (i + j) % 3 == 0 {
+                            syn_report(&mut body, &format!("{x} {op} {int}"), "v");
+                        }
+                    }
+                    for op in ["<", ">=", "="] {
+                        if cmps {
+                            syn_report(&mut body, &format!("{x} {op} {int}"), "b");
+                            syn_report(&mut body, &format!("{int} {op} {x}"), "b");
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // `shl` and `shr`: counts below, at and beyond the length, a count of 31 elements, weak and
+    // undefined elements in the count.
+    if !wide_int {
+        let counts = [
+            "0",
+            "1",
+            "10",
+            "111",
+            "100000",
+            "1000000",
+            "1000001",
+            "L",
+            "H",
+            "X",
+            "H0L",
+            "0000000000000000000000000000001",
+        ];
+        for (ta, rt) in [(ua, "unsigned"), (sa, "signed")] {
+            if pkg != "arith" && ta == sa && rt == "signed" {
+                continue;
+            }
+            for n in [1usize, 2, 8, 33, 64, 65] {
+                let pa = syn_pats(n);
+                for &i in &[2usize, 5, 3] {
+                    for (j, c) in counts.iter().enumerate() {
+                        k += 1;
+                        let x = lit(ta, &pa[i], n, k);
+                        let cnt = lit(if pkg == "arith" { "uv" } else { "lv" }, c, c.len(), k + 1);
+                        let r = if pkg == "arith" { rt } else { "v" };
+                        if (i + j) % 2 == 0 || n <= 8 {
+                            syn_report(&mut body, &format!("shl({x}, {cnt})"), r);
+                            syn_report(&mut body, &format!("shr({x}, {cnt})"), r);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // A metavalue in the argument of a shift moves with the others.
+    if !wide_int {
+        for m in "UXZW-".chars() {
+            for n in [3usize, 65] {
+                let mut p: Vec<char> = syn_pats(n)[2].chars().collect();
+                p[n / 2] = m;
+                let a: String = p.into_iter().collect();
+                for c in ["1", "10", "111", "L"] {
+                    k += 1;
+                    let x = lit(ua, &a, n, k);
+                    let cnt = lit(if pkg == "arith" { "uv" } else { "lv" }, c, c.len(), k + 1);
+                    let r = if pkg == "arith" { "unsigned" } else { "v" };
+                    syn_report(&mut body, &format!("shl({x}, {cnt})"), r);
+                    syn_report(&mut body, &format!("shr({x}, {cnt})"), r);
+                }
+                if pkg == "arith" {
+                    let x = lit(sa, &a, n, k);
+                    let cnt = lit("uv", "10", 2, k + 1);
+                    syn_report(&mut body, &format!("shr({x}, {cnt})"), "signed");
+                }
+            }
+        }
+    }
+    // Metavalues: each code at the first and the last element of either operand.
+    if !wide_int {
+        for (ta, tb, rtys) in &kinds {
+            for (na, nb) in [(1usize, 1usize), (33, 33), (64, 64)] {
+                let good = |n: usize| syn_pats(n)[2].clone();
+                for m in "UXZW-".chars() {
+                    for at in [0, na - 1] {
+                        let mut s: Vec<char> = good(na).chars().collect();
+                        s[at] = m;
+                        let a: String = s.into_iter().collect();
+                        k += 1;
+                        let (x, y) = (lit(ta, &a, na, k), lit(tb, &good(nb), nb, k + 1));
+                        for r in rtys.iter().take(1) {
+                            syn_report(&mut body, &format!("{x} + {y}"), r);
+                            syn_report(&mut body, &format!("{y} - {x}"), r);
+                        }
+                        if cmps {
+                            syn_report(&mut body, &format!("{x} < {y}"), "b");
+                            syn_report(&mut body, &format!("{y} = {x}"), "b");
+                        }
+                        let own = match *ta {
+                            "uv" => "unsigned",
+                            "gv" => "signed",
+                            _ => "v",
+                        };
+                        syn_report(&mut body, &format!("{x} + 3"), own);
+                        if cmps {
+                            syn_report(&mut body, &format!("{x} >= 3"), "b");
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let src = format!(
+        "{}{body}    wait;\n  end process;\nend architecture;\n",
+        syn_head(extra)
+    );
+    // Every statement ran: an error would end both runs at the same place and hide the rest.
+    let code = diff_run(&format!("syn_oper_{pkg}_{std}"), &src, "t", std, 150);
+    assert_eq!(code, Some(0), "{pkg} {std}");
+}
+
+#[test]
+fn native_synopsys_operators_match_bodies_arith() {
+    for (std, wide) in [("2008", false), ("2019", true), ("1993", false)] {
+        syn_oper_test("arith", std, wide);
+    }
+}
+
+#[test]
+fn native_synopsys_operators_match_bodies_unsigned() {
+    for (std, wide) in [("2008", false), ("2019", true), ("1993", false)] {
+        syn_oper_test("unsigned", std, wide);
+    }
+}
+
+#[test]
+fn native_synopsys_operators_match_bodies_signed() {
+    for (std, wide) in [("2008", false), ("2019", true), ("1993", false)] {
+        syn_oper_test("signed", std, wide);
+    }
+}
+
+/// `conv_unsigned`, `conv_signed`, `conv_std_logic_vector`, `ext`, `sxt` and `conv_integer`
+/// against their bodies: sizes around the one-word limit and below the vector's length, integers
+/// that the packages truncate (`INTEGER'LOW` only for the signed ones: the unsigned body fails
+/// on it), weak bits, metavalues, both directions with lower bounds other than zero.
+fn syn_conv_test(std: &str, wide_int: bool) {
+    let ints: Vec<&str> = if wide_int {
+        vec!["4294967296", "(-4294967297)", "9223372036854775807"]
+    } else {
+        vec!["0", "(-1)", "517", "(-518)", "2147483647", "1000000"]
+    };
+    let mut body = String::new();
+    let mut k = 0usize;
+    let lit = |ty: &str, x: &str, n: usize, k: usize| {
+        let asc = k % 2 == 1;
+        let lo = [0usize, 3, 100][k % 3];
+        let l = if asc { lo.max(n - 1) } else { lo + n - 1 };
+        format!("{ty}(\"{x}\", {l}, {asc})")
+    };
+    let sizes = [1usize, 2, 7, 8, 31, 32, 33, 63, 64, 65, 70];
+    for n in [1usize, 2, 8, 31, 32, 33, 63, 64, 65] {
+        let pats = syn_pats(n);
+        for i in [2usize, 5, 3] {
+            for &s in &sizes {
+                k += 1;
+                for (ty, f, r) in [
+                    ("uv", "conv_unsigned", "unsigned"),
+                    ("gv", "conv_unsigned", "unsigned"),
+                    ("uv", "conv_signed", "signed"),
+                    ("gv", "conv_signed", "signed"),
+                    ("uv", "conv_std_logic_vector", "v"),
+                    ("gv", "conv_std_logic_vector", "v"),
+                ] {
+                    let x = lit(ty, &pats[i], n, k);
+                    syn_report(&mut body, &format!("{f}({x}, {s})"), r);
+                }
+                let x = lit("lv", &pats[i], n, k);
+                syn_report(&mut body, &format!("ext({x}, {s})"), "v");
+                syn_report(&mut body, &format!("sxt({x}, {s})"), "v");
+            }
+        }
+    }
+    for int in &ints {
+        for &s in &sizes {
+            for (f, r) in [
+                ("conv_unsigned", "unsigned"),
+                ("conv_signed", "signed"),
+                ("conv_std_logic_vector", "v"),
+            ] {
+                syn_report(&mut body, &format!("{f}({int}, {s})"), r);
+            }
+        }
+    }
+    // INTEGER'LOW: the signed conversions only.
+    let low = if wide_int {
+        "(-9223372036854775807 - 1)"
+    } else {
+        "(-2147483647 - 1)"
+    };
+    for &s in &sizes {
+        syn_report(&mut body, &format!("conv_signed({low}, {s})"), "signed");
+        syn_report(
+            &mut body,
+            &format!("conv_std_logic_vector({low}, {s})"),
+            "v",
+        );
+    }
+    // Sizes below 1 and metavalues, which the bodies word themselves.
+    for m in "UXZW-".chars() {
+        for n in [1usize, 8, 33] {
+            let mut s: Vec<char> = syn_pats(n)[2].chars().collect();
+            s[n / 2] = m;
+            let a: String = s.into_iter().collect();
+            k += 1;
+            syn_report(
+                &mut body,
+                &format!("conv_unsigned({}, 9)", lit("uv", &a, n, k)),
+                "unsigned",
+            );
+            syn_report(&mut body, &format!("sxt({}, 40)", lit("lv", &a, n, k)), "v");
+            syn_report(
+                &mut body,
+                &format!("conv_integer({})", lit("uv", &a[..n.min(30)], n.min(30), k)),
+                "i",
+            );
+        }
+    }
+    // conv_integer of unsigned and signed vectors up to the package's limits.
+    for n in [1usize, 2, 8, 30, 31] {
+        for i in [2usize, 1, 5, 6] {
+            k += 1;
+            let x = lit("uv", &syn_pats(n)[i], n, k);
+            syn_report(&mut body, &format!("conv_integer({x})"), "i");
+        }
+    }
+    for n in [1usize, 2, 8, 31, 32] {
+        for i in [2usize, 1, 5, 6, 3] {
+            k += 1;
+            let x = lit("gv", &syn_pats(n)[i], n, k);
+            syn_report(&mut body, &format!("conv_integer({x})"), "i");
+        }
+    }
+    for (pk, ns) in [("unsigned", [1usize, 8, 31]), ("signed", [1, 8, 32])] {
+        let mut b = String::new();
+        for n in ns {
+            for i in [2usize, 1, 5, 3] {
+                k += 1;
+                let x = lit("lv", &syn_pats(n)[i], n, k);
+                syn_report(&mut b, &format!("conv_integer({x})"), "i");
+            }
+        }
+        let extra = format!("use ieee.std_logic_{pk}.all;\n");
+        let src = format!(
+            "{}{b}    wait;\n  end process;\nend architecture;\n",
+            syn_head(&extra)
+        );
+        let code = diff_run(&format!("syn_conv_integer_{pk}_{std}"), &src, "t", std, 10);
+        assert_eq!(code, Some(0), "{pk} {std}");
+    }
+    let src = format!(
+        "{}{body}    wait;\n  end process;\nend architecture;\n",
+        syn_head("")
+    );
+    let code = diff_run(&format!("syn_conv_{std}"), &src, "t", std, 300);
+    assert_eq!(code, Some(0), "conversions {std}");
+}
+
+#[test]
+fn native_synopsys_conversions_match_bodies() {
+    syn_conv_test("2008", false);
+    syn_conv_test("2019", true);
+    syn_conv_test("1993", false);
+}
+
+/// `conv_integer` of a vector the package refuses (unsigned over 31 elements, signed over 32) is
+/// the body's FAILURE: one process per case, the report and the exit status are the body's.
+#[test]
+fn native_synopsys_conv_integer_limits_match_bodies() {
+    let cases = [
+        format!("conv_integer(uv(\"{}\", 31, false))", "1".repeat(32)),
+        format!("conv_integer(gv(\"{}\", 32, false))", "1".repeat(33)),
+        "conv_integer(uv(\"\", -1, false))".to_string(),
+        "conv_integer(gv(\"\", -1, false))".to_string(),
+        "conv_unsigned(5, 0)".to_string(),
+    ];
+    for (i, c) in cases.iter().enumerate() {
+        let r = if c.starts_with("conv_unsigned") {
+            format!("img(unsigned'({c}))")
+        } else {
+            format!("integer'image({c})")
+        };
+        let src = format!(
+            "{}    report {r};\n    wait;\n  end process;\nend architecture;\n",
+            syn_head("")
+        );
+        diff_run(&format!("syn_limit{i}"), &src, "t", "2008", 0);
+    }
+}
+
+/// A null operand is the body's index error: one process per case so each error ends its own run.
+#[test]
+fn native_synopsys_operators_null_match_bodies() {
+    let cases = [
+        "unsigned'(uv(\"\", -1, false) + uv(\"101\", 2, false))",
+        "unsigned'(uv(\"101\", 2, false) - uv(\"\", -1, false))",
+        "uv(\"\", -1, false) < uv(\"1\", 0, false)",
+        "gv(\"1\", 0, false) = gv(\"\", -1, true)",
+        "signed'(gv(\"\", -1, true) + 3)",
+        "uv(\"\", -1, false) > 3",
+        "unsigned'(uv(\"\", -1, false) * uv(\"1\", 0, false))",
+        // A count of 32 elements with its top element set: the body's 2 ** 31 overflows.
+        "shl(uv(\"101\", 2, false), uv(\"10000000000000000000000000000000\", 31, false))",
+        "shr(gv(\"101\", 2, false), uv(\"10000000000000000000000000000000\", 31, false))",
+        "shl(gv(\"\", -1, false), uv(\"1\", 0, false))",
+    ];
+    for (i, c) in cases.iter().enumerate() {
+        let src = format!(
+            "{}    report img({c});\n    wait;\n  end process;\nend architecture;\n",
+            syn_head("")
+        );
+        diff_run(&format!("syn_null{i}"), &src, "t", "2008", 0);
+    }
+}
+
 /// Analyze `src` (entity `ent`) and run it with natives on and off: same stdout, stderr and
 /// exit status, and at least `min` lines of output.
-fn diff_run(tag: &str, src: &str, ent: &str, std: &str, min: usize) {
+fn diff_run(tag: &str, src: &str, ent: &str, std: &str, min: usize) -> Option<i32> {
     let dir = tempdir("ieee");
     std::fs::write(dir.join("t.vhd"), src).expect("write");
     if let Some(keep) = std::env::var_os("YAVS_IEEE_KEEP") {
@@ -809,6 +1286,7 @@ fn diff_run(tag: &str, src: &str, ent: &str, std: &str, min: usize) {
     assert_eq!(ns.lines().count(), vs.lines().count(), "{tag}");
     assert_eq!(n.stderr, v.stderr, "{tag}");
     assert_eq!(n.status.code(), v.status.code(), "{tag}");
+    n.status.code()
 }
 
 /// `*` around the limit of its fast path (products of 64 and 65 elements) and off it: extreme
