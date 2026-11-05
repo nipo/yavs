@@ -106,9 +106,10 @@ unsafe extern "C" fn trampoline(frame: *mut Frame) {
     )
 }
 
-/// AAPCS64. `x0` = frame, kept in x19 across the call; x29 holds the
-/// entry `sp`. The stack area is an even number of 8-byte slots.
-#[cfg(all(target_arch = "aarch64", target_os = "linux"))]
+/// AAPCS64 and Apple arm64. `x0` = frame, kept in x19 across the call;
+/// x29 holds the entry `sp`. The stack area is an even number of 8-byte
+/// words. x18, reserved on Apple, is not touched.
+#[cfg(all(target_arch = "aarch64", any(target_os = "linux", target_os = "macos")))]
 #[unsafe(naked)]
 unsafe extern "C" fn trampoline(frame: *mut Frame) {
     core::arch::naked_asm!(

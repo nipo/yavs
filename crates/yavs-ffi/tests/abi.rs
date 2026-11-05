@@ -312,6 +312,119 @@ fn stack_is_16_aligned_for_odd_and_even_spills() {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+extern "C" fn narrow_spills(
+    r0: i64,
+    r1: i64,
+    r2: i64,
+    r3: i64,
+    r4: i64,
+    r5: i64,
+    r6: i64,
+    r7: i64,
+    a: i8,
+    b: u8,
+    c: i16,
+    d: u32,
+    e: u8,
+    f: i32,
+    g: u16,
+    h: i64,
+) -> i64 {
+    let regs = r0 + r1 + r2 + r3 + r4 + r5 + r6 + r7;
+    regs + i64::from(a)
+        + i64::from(b) * 1000
+        + i64::from(c) * 1_000_000
+        + i64::from(d) * 1_000_000_000
+        + i64::from(e) * 1_000_000_000_000
+        + i64::from(f)
+        + i64::from(g) * 7
+        + h * 13
+}
+
+extern "C" fn narrow_float_spills(
+    r0: f64,
+    r1: f64,
+    r2: f64,
+    r3: f64,
+    r4: f64,
+    r5: f64,
+    r6: f64,
+    r7: f64,
+    a: f32,
+    b: f32,
+    c: f64,
+    d: f32,
+) -> f64 {
+    r0 + r1
+        + r2
+        + r3
+        + r4
+        + r5
+        + r6
+        + r7
+        + f64::from(a)
+        + f64::from(b) * 10.0
+        + c * 100.0
+        + f64::from(d) * 1000.0
+}
+
+/// Narrow types past the registers: slot ABIs give each a word, Apple
+/// arm64 packs them at their natural alignment.
+#[test]
+fn narrow_arguments_on_the_stack() {
+    use CType::*;
+    let mut params = vec![I64; 8];
+    params.extend([I8, U8, I16, U32, U8, I32, U16, I64]);
+    let mut args: Vec<Arg> = (1..=8).map(Arg::I64).collect();
+    args.extend([
+        Arg::I8(-3),
+        Arg::U8(250),
+        Arg::I16(-300),
+        Arg::U32(4_000_000_000),
+        Arg::U8(9),
+        Arg::I32(-123_456),
+        Arg::U16(65_000),
+        Arg::I64(-5),
+    ]);
+    let want = narrow_spills(
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        -3,
+        250,
+        -300,
+        4_000_000_000,
+        9,
+        -123_456,
+        65_000,
+        -5,
+    );
+    assert_eq!(
+        run(narrow_spills as *const c_void, &params, Some(I64), &args),
+        Ret::I64(want)
+    );
+
+    let mut params = vec![F64; 8];
+    params.extend([F32, F32, F64, F32]);
+    let mut args: Vec<Arg> = (1..=8).map(|i| Arg::F64(f64::from(i))).collect();
+    args.extend([Arg::F32(1.5), Arg::F32(-2.5), Arg::F64(3.25), Arg::F32(4.0)]);
+    assert_eq!(
+        run(
+            narrow_float_spills as *const c_void,
+            &params,
+            Some(F64),
+            &args
+        ),
+        Ret::F64(36.0 + 1.5 - 25.0 + 325.0 + 4000.0)
+    );
+}
+
 #[test]
 fn errors_are_structured_and_nothing_is_called() {
     let s = sig(&[CType::I32], Some(CType::I64));

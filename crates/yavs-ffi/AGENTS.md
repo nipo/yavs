@@ -8,8 +8,8 @@ Read the root `AGENTS.md` first. This file is for an agent about to change `crat
   subprograms) **without libffi**: argument classification in plain Rust per target ABI, plus a
   small asm trampoline per target. Also the VHDL to C type mapping in the reference simulator's convention, so C
   code written for the reference simulator works unchanged.
-- Targets: x86_64 Linux (SysV), x86_64 Windows (Win64), aarch64 Linux (AAPCS64). Any other target
-  is a compile error.
+- Targets: x86_64 Linux (SysV), x86_64 Windows (Win64), aarch64 Linux (AAPCS64), aarch64 macOS
+  (Apple arm64). Any other target is a compile error.
 - Does not: marshal VHDL values (bit-planes to bytes, records, copy-back: `yavs-interp`
   `foreign.rs`), load shared libraries or look up symbols (`yavs-vhpi` `bind_foreign`, called by
   `yavs run --load`).
@@ -21,7 +21,7 @@ Read the root `AGENTS.md` first. This file is for an agent about to change `crat
 | File | Responsibility |
 |---|---|
 | `src/lib.rs` | `CType`, `Signature`, `Arg`, `Ret`, `MAX_ARGS = 64`, errors |
-| `src/abi.rs` | Classification: integer register, float register or stack slot per ABI |
+| `src/abi.rs` | Classification: integer register, float register or stack byte offset per ABI |
 | `src/sys.rs` | The only `unsafe`: naked asm trampolines per target and the call into them; `ForeignFn`, `call`, `testing` |
 | `src/typed.rs` | `CArgType`/`CRetType`/`CFnPtr`: signatures from Rust `extern "C" fn` types, `ForeignFn::from_fn` without `unsafe` |
 | `src/vhdl.rs` | VHDL to C mapping (`vhdl::lower`): smallest signed int for integer ranges, smallest unsigned for enums, ... |
@@ -40,6 +40,7 @@ Read the root `AGENTS.md` first. This file is for an agent about to change `crat
 | More than 64 arguments is an error, never a crash | Fail early | `MAX_ARGS` |
 | Typed Rust callees bind without `unsafe` (`ForeignFn::from_fn`); real symbols are bound by the elaborator, the one unsafe step | Safe tests and natives | `docs/decisions.md` "IR and interpreter" (Foreign calls) |
 | All three platforms tier 1: test aarch64 under qemu-user, Windows under wine | Plan platforms | `docs/plan.md` "Platforms"; docs/STATUS.md "ffi" |
+| Apple arm64 shares the AAPCS64 trampoline; only classification differs (stack arguments packed at natural size and alignment, so `Loc::Stack` is a byte offset for every ABI). Tested natively on a Mac, not in CI | macOS is outside the plan's platforms, but builds from source should not stop at this crate | user, 2026-11-05 |
 
 Module-local decisions go in this section in the same commit (root `AGENTS.md` rule 24).
 
@@ -47,8 +48,10 @@ Module-local decisions go in this section in the same commit (root `AGENTS.md` r
 
 - Stack pointer 16-byte aligned at the call; stack slots copied below it. Win64 needs the 32-byte
   shadow space and passes floats in the matching positional register; AAPCS64 and SysV count
-  integer and float registers separately. Every change gets a generated or hand-written case on
-  **all three** targets (cross commands below), not just the host.
+  integer and float registers separately. Apple arm64 packs stack arguments (an `int8_t` takes one
+  byte); the slot ABIs give every stack argument 8 bytes. Every change gets a generated or hand-written case on
+  **all three** targets (cross commands below), not just the host, plus `cargo test -p yavs-ffi`
+  on a Mac when classification changes.
 - Keep classification in Rust (`abi.rs`) and the asm minimal; no per-signature asm.
 - The generated tests use a fixed seed: changing `build.rs` changes the case set, review it.
 
