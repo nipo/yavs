@@ -29,11 +29,13 @@ pub(crate) enum Cb {
     Eloop,
     /// `yavs_rt_gather`, `yavs_rt_scatter`: a whole record read or drive with no image.
     Record,
+    /// `yavs_rt_planes`: a signal read from the kernel's planes out of line.
+    Planes,
     /// Not a callback: an activation that skipped the table's tags (`rt::enter`, `lean`).
     Lean,
 }
 
-const NAMES: [&str; 21] = [
+const NAMES: [&str; 22] = [
     "step",
     "signal",
     "deopt",
@@ -54,11 +56,12 @@ const NAMES: [&str; 21] = [
     "region",
     "eloop",
     "record",
+    "planes",
     "lean",
 ];
 
 #[cfg(any(debug_assertions, feature = "op-census"))]
-static COUNTS: [AtomicU64; 21] = [const { AtomicU64::new(0) }; 21];
+static COUNTS: [AtomicU64; 22] = [const { AtomicU64::new(0) }; 22];
 
 #[inline(always)]
 pub(crate) fn cb(c: Cb) {

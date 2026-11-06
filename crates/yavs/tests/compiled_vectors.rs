@@ -2179,3 +2179,299 @@ fn elements_of_array_operands_in_subprograms_match_the_interpreter() {
         assert_eq!(go(&flags), want, "{flags:?}");
     }
 }
+
+/// Procedures with signal parameters of array types (#1121), whose element reads are references
+/// sliced from the formal and whose drives go through the caller's driver: whole signals, a slice
+/// and descending actuals, an individually associated constrained formal (a reference of several
+/// parts), ports, delayed and transport drives, integer elements, elements across a plane word
+/// and wider than 64, `'event` and `'last_value` of an element, one package procedure from two
+/// processes, a resolved signal driven through it by two processes, a procedure that waits,
+/// forces on the actuals. The runs on four threads pool every batch (`YAVS_POOL_ALL`).
+const SIGPARAMS: &str = r#"library ieee; use ieee.std_logic_1164.all; use ieee.numeric_std.all;
+package sp is
+  type t_arr is array (natural range <>) of signed(15 downto 0);
+  subtype t_arr4 is t_arr(0 to 3);
+  type i_arr is array (natural range <>) of integer;
+  type r_arr is array (natural range <>) of std_logic_vector(7 downto 0);
+  type t18 is array (natural range <>) of signed(17 downto 0);
+  type tw is array (natural range <>) of unsigned(79 downto 0);
+  procedure halve (signal src : in t_arr; signal dst : out t_arr);
+  procedure put (signal r : out r_arr; v : integer; act : boolean);
+end;
+
+package body sp is
+  procedure halve (signal src : in t_arr; signal dst : out t_arr) is
+  begin
+    for k in dst'range loop
+      dst(k) <= shift_right(src(src'low + k - dst'low), 1);
+    end loop;
+  end;
+
+  procedure put (signal r : out r_arr; v : integer; act : boolean) is
+  begin
+    for k in r'range loop
+      if act then
+        r(k) <= std_logic_vector(to_unsigned((v + k) mod 256, 8));
+      else
+        r(k) <= (others => 'Z');
+      end if;
+    end loop;
+  end;
+end;
+
+library ieee; use ieee.std_logic_1164.all; use ieee.numeric_std.all;
+use work.sp.all;
+entity sub is
+  port (clk : in std_logic; pi : in t_arr; po : out t_arr);
+end;
+architecture a of sub is
+begin
+  process (clk) is
+    procedure inc (signal s : in t_arr; signal d : out t_arr) is
+    begin
+      for k in s'range loop
+        d(k) <= s(k) + 1;
+      end loop;
+    end;
+  begin
+    if rising_edge(clk) then
+      inc(pi, po);
+    end if;
+  end process;
+end;
+
+library ieee; use ieee.std_logic_1164.all; use ieee.numeric_std.all;
+use work.sp.all;
+entity y is
+end;
+architecture a of y is
+  signal clk : std_logic := '0';
+  signal t : t_arr(0 to 12) := (others => (others => '0'));
+  signal l1 : t_arr(0 to 6) := (others => (others => '0'));
+  signal l2 : t_arr(0 to 3) := (others => (others => '0'));
+  signal m : t_arr(0 to 7) := (others => (others => '0'));
+  signal dn : t_arr(7 downto 0) := (others => (others => '0'));
+  signal dm : t_arr(3 downto 0) := (others => (others => '0'));
+  signal q4 : t_arr(0 to 3) := (others => (others => '0'));
+  signal dl : t_arr(0 to 3) := (others => (others => '0'));
+  signal pq : t_arr(0 to 3);
+  signal h1, h2 : t_arr(0 to 2) := (others => (others => '0'));
+  signal wq : t_arr(0 to 1) := (others => (others => '0'));
+  signal ia, ib : i_arr(0 to 4) := (others => 0);
+  signal rs : r_arr(0 to 3);
+  signal ev : integer := 0;
+  signal a18, b18 : t18(0 to 9) := (others => (others => '0'));
+  signal aw, bw : tw(0 to 2) := (others => (others => '0'));
+  signal done : boolean := false;
+
+  function sum (a : t_arr) return signed is
+    variable s : signed(23 downto 0) := (others => '0');
+  begin
+    for k in a'range loop
+      s := s + a(k);
+    end loop;
+    return s;
+  end;
+begin
+  clk <= not clk after 5 ns when not done;
+  u : entity work.sub port map (clk => clk, pi => l2, po => pq);
+
+  main : process (clk) is
+    -- One adder-tree stage: element reads of the formal, its bounds, drives of its elements.
+    procedure reduce (signal src : in t_arr; signal dst : out t_arr) is
+    begin
+      for k in dst'range loop
+        if 2 * k + 1 <= src'high then
+          dst(k) <= src(2 * k) + src(2 * k + 1);
+        else
+          dst(k) <= src(2 * k);
+        end if;
+      end loop;
+    end;
+    -- Bounds of a slice or a descending actual: positions relative to the formal.
+    procedure mix (signal src : in t_arr; signal dst : out t_arr) is
+    begin
+      for k in 0 to dst'length - 1 loop
+        dst(dst'left - k * (dst'left - dst'right) / (dst'length - 1)) <= src(src'right) - src(src'left + k * (src'right - src'left) / (src'length - 1));
+      end loop;
+      dst(dst'right) <= src(src'left);
+    end;
+    -- A constrained formal, individually associated below: a reference of several parts.
+    procedure take4 (signal src : in t_arr4; signal dst : out t_arr) is
+    begin
+      for k in src'range loop
+        dst(k) <= src(k) - k;
+      end loop;
+    end;
+    -- Delays and transport through the formal.
+    procedure later (signal src : in t_arr; signal dst : out t_arr) is
+    begin
+      dst(0) <= transport src(1) after 1 ns;
+      dst(1) <= src(2) after 2 ns;
+      dst(2 to 3) <= src(3 to 4);
+    end;
+    -- Integer elements.
+    procedure iadd (signal a : in i_arr; signal b : out i_arr; n : integer) is
+    begin
+      for k in a'range loop
+        b(k) <= a(k) + n * k;
+      end loop;
+    end;
+    -- Elements that cross a plane word.
+    procedure add18 (signal a : in t18; signal b : out t18) is
+    begin
+      for k in a'range loop
+        b(k) <= a(k) + a((k + 3) mod a'length);
+      end loop;
+    end;
+    -- Elements wider than 64.
+    procedure wide (signal a : in tw; signal b : out tw) is
+    begin
+      for k in a'range loop
+        b(k) <= a(k) + a(a'high - k) + 1;
+      end loop;
+    end;
+    variable n : integer := 0;
+  begin
+    if rising_edge(clk) then
+      n := n + 1;
+      for k in a18'range loop
+        a18(k) <= a18(k) + to_signed(k * 4099 + 7, 18);
+      end loop;
+      for k in aw'range loop
+        aw(k) <= aw(k) + shift_left(to_unsigned(k * 977 + 3, 80), 50);
+      end loop;
+      add18(a18, b18);
+      wide(aw, bw);
+      for k in t'range loop
+        t(k) <= t(k) + to_signed(7 + 3 * k, 16);
+      end loop;
+      reduce(t, l1);
+      reduce(l1, l2);
+      mix(t(2 to 9), m);
+      mix(m, dn);
+      mix(dn(6 downto 3), dm);
+      take4(src(0) => t(5), src(1) => t(1), src(2 to 3) => t(10 to 11), dst => q4);
+      later(t, dl);
+      iadd(ia, ib, n);
+      ia <= (n, n * 2, -n, n mod 7, 3);
+    end if;
+  end process;
+
+  -- Attributes of the formal's elements in a process woken by the actual.
+  wt : process (t) is
+    procedure watch (signal src : in t_arr; signal e : out integer) is
+    begin
+      if src(0)'event then
+        e <= to_integer(src(0)(3 downto 0)) + to_integer(src(1)'last_value(3 downto 0));
+      end if;
+    end;
+  begin
+    watch(t, ev);
+  end process;
+
+  -- The same package procedure from two processes, each with its own signals.
+  p1 : process (clk) is
+  begin
+    if rising_edge(clk) then
+      halve(l1(0 to 2), h1);
+    end if;
+  end process;
+  p2 : process (clk) is
+  begin
+    if falling_edge(clk) then
+      halve(l1(4 to 6), h2);
+    end if;
+  end process;
+
+  -- A resolved signal driven by two processes through one procedure.
+  r1 : process (clk) is
+    variable n : integer := 0;
+  begin
+    if rising_edge(clk) then
+      n := n + 1;
+      put(rs, n, n mod 3 /= 0);
+    end if;
+  end process;
+  r2 : process (clk) is
+    variable n : integer := 0;
+  begin
+    if rising_edge(clk) then
+      n := n + 1;
+      put(rs, 100 + n, n mod 3 = 0);
+    end if;
+  end process;
+
+  -- A procedure that waits (no native frame).
+  w : process is
+    procedure follow (signal s : in t_arr; signal d : out t_arr) is
+    begin
+      wait on s;
+      d(0) <= s(0);
+      d(1) <= s(s'high);
+    end;
+  begin
+    follow(l2, wq);
+  end process;
+
+  -- Forces on an actual the procedures read.
+  f : process is
+  begin
+    wait for 203 ns;
+    t(3) <= force to_signed(1000, 16);
+    wait for 100 ns;
+    t(3) <= release;
+    wait for 200 ns;
+    l1 <= force (others => to_signed(-5, 16));
+    wait for 50 ns;
+    l1 <= release;
+    wait;
+  end process;
+
+  rep : process is
+  begin
+    for c in 1 to 90 loop
+      wait until rising_edge(clk);
+      wait for 1 ns;
+      report integer'image(c) & " " & to_hstring(sum(l1)) & " " & to_hstring(sum(l2)) & " "
+        & to_hstring(sum(m)) & " " & to_hstring(sum(dn)) & " " & to_hstring(sum(dm)) & " "
+        & to_hstring(sum(q4)) & " " & to_hstring(sum(dl)) & " " & to_hstring(sum(pq)) & " "
+        & to_hstring(sum(h1)) & " " & to_hstring(sum(h2)) & " " & to_hstring(sum(wq)) & " "
+        & integer'image(ib(0) + ib(1) + ib(2) + ib(3) + ib(4)) & " " & integer'image(ev) & " "
+        & to_string(rs(0)) & to_string(rs(3)) & " " & to_hstring(b18(0) + b18(4) + b18(9)) & " "
+        & to_hstring(bw(0) xor bw(1) xor bw(2));
+    end loop;
+    done <= true;
+    wait;
+  end process;
+end;
+"#;
+
+#[test]
+fn signal_parameters_in_compiled_code_match_the_interpreter() {
+    all_tiers_match("compiled_sigparams", SIGPARAMS);
+    let dir = tempdir("compiled_sigparams_threads");
+    std::fs::write(dir.join("y.vhd"), SIGPARAMS).expect("write");
+    let a = yavs(
+        &dir,
+        &["analyze", "--std=2008", "--work=work:work", "y.vhd"],
+    );
+    assert!(a.status.success(), "{a:?}");
+    let go = |tier: &str, threads: &str| {
+        let o = Command::new(env!("CARGO_BIN_EXE_yavs"))
+            .args(["run", "--std=2008", "--work=work:work", tier])
+            .args(["--threads", threads, "y"])
+            .env("YAVS_POOL_ALL", "1")
+            .current_dir(&dir)
+            .output()
+            .expect("run yavs");
+        (
+            o.status.code(),
+            String::from_utf8_lossy(&o.stdout).into_owned(),
+        )
+    };
+    let want = go("--tier=interp", "1");
+    assert_eq!(go("--tier=interp", "4"), want);
+    #[cfg(feature = "clift")]
+    assert_eq!(go("--tier=clift", "4"), want);
+}

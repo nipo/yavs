@@ -911,6 +911,9 @@ case!(
 );
 // A one-element aggregate choice is straight code and conversion copies run in the kernel.
 case!(agg_carry, "acc=", &[], [("ops", Max(6310))]);
+// An element of a signal parameter is read as that element of the actual, its bounds from the
+// actual's descriptor: no read of the whole signal per element (#1121).
+case!(sigparam_tree, "q=5CA0", &[], [("ops", Max(70700))]);
 case!(
     static_chain,
     "acc=",
@@ -1910,6 +1913,21 @@ mod clift {
             ("cb_record", Max(1100)),
             ("cb_signal", Max(7000)),
             ("gathers_read", Max(40)),
+        ]
+    );
+    // A procedure with signal parameters of an array type runs on native frames: the element
+    // references sliced inline (no `yavs_rt_xstep`), its 16-element reads in place, no frame
+    // materialised (#1121).
+    clift_case!(
+        sigparam_tree,
+        "sigparam_tree",
+        "q=5CA0",
+        [
+            ("cb_xstep", Max(4)),
+            ("cb_step", Max(4)),
+            ("cb_signal", Max(6)),
+            ("cb_deopt", Max(2)),
+            ("cb_planes", Max(4)),
         ]
     );
     clift_case!(

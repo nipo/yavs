@@ -595,7 +595,7 @@ impl Jit {
             )?,
             imp(MEMO, &[I64, I64, I32, I64, I32, I64, I64], Some(I32))?,
             imp(MEMO_KEEP, &[I64, I64, I32, I64, I32, I64, I64], Some(I32))?,
-            imp(DRIVE_NAT, &[I64, I32, I64, I64, I64, I32], Some(I32))?,
+            imp(DRIVE_NAT, &[I64, I64, I32, I64, I64, I64, I32], Some(I32))?,
             imp(ELOOP, &[I64; 12], Some(I64))?,
             imp(LAYOUT_WORD, &[I64, I32, I64, I64, I32], Some(I64))?,
             imp(DRIVE_FLUSH, &[I64, I64, I64, I32], Some(I32))?,
@@ -1683,7 +1683,7 @@ struct Imports {
     /// `yavs_rt_memo` and `yavs_rt_memo_keep`: the memo of pure calls.
     memo: FuncRef,
     memo_keep: FuncRef,
-    /// `yavs_rt_drive_nat(env, driver, lo, len, wave, flags) -> u32`: `drive` for a native frame,
+    /// `yavs_rt_drive_nat(env, mem, driver, lo, len, wave, flags) -> u32`: `drive` for a native frame,
     /// 0 when nothing was done (no frame view).
     drive_nat: FuncRef,
     /// `yavs_rt_eloop(env, mem, prog, nprog, inputs, ind, bound, step, depth, fhi, slots,
@@ -2000,6 +2000,10 @@ struct Gen<'a> {
     /// and the one the instruction being generated makes, entered after `track`.
     sdyn: Vec<SigConst>,
     sdyn_new: Option<SigConst>,
+    /// The references of this block a `SigSlice` of a constant length made, and that length (a
+    /// guess `sig_entry` tests), with the one the instruction being generated makes.
+    slices: Vec<(Reg, i64)>,
+    slice_new: Option<(Reg, i64)>,
     /// What this body may assume about its instance's signals: frame-mode code of a process copy
     /// (`Program::facts`); instances with other facts have another copy.
     facts: Option<&'a yavs_ir::InstFacts>,
@@ -2631,6 +2635,8 @@ fn gen_func(
         sigval_next: None,
         sdyn: Vec::new(),
         sdyn_new: None,
+        slices: Vec::new(),
+        slice_new: None,
         facts: prog
             .facts(id)
             .filter(|_| !native && f.kind == FuncKind::Process),
@@ -2781,6 +2787,9 @@ fn gen_func(
             g.sdyn
                 .retain(|s| !defs.iter().any(|d| d.0 == s.dst.0 || d.0 == s.dst.0 + 1));
             g.sdyn.extend(g.sdyn_new.take());
+            g.slices
+                .retain(|s| !defs.iter().any(|d| d.0 == s.0.0 || d.0 == s.0.0 + 1));
+            g.slices.extend(g.slice_new.take());
             if let Some((r, o)) = g.objnew.take()
                 && let Some(k) = g.known.get_mut(r.0 as usize)
             {
@@ -2885,6 +2894,7 @@ fn gen_func(
             g.drop_pend();
             g.clear();
             g.sdyn.clear();
+            g.slices.clear();
             for (r, v, dirty) in carried {
                 g.cache[r as usize] = Some(v);
                 if dirty {
@@ -3918,6 +3928,43 @@ fn gen_func(
                 g.st(dst, v);
                 g.st(Reg(dst.0 + 1), l);
                 g.join(join);
+            }
+            // A part of a reference of one range (a signal parameter's element or slice); a
+            // reference of several parts or a range out of bounds is the interpreter's.
+            Inst::SigSlice {
+                dst,
+                sig,
+                offset,
+                len,
+            } => {
+                let (slow, join) = g.slow_path_x(pc, &inst, f);
+                let (lo, hi) = (g.ld(sig), g.ld(Reg(sig.0 + 1)));
+                let (o, l) = (g.ld(offset), g.ld(len));
+                let max = i64::from(u32::MAX);
+                let base = g.b.ins().ushr_imm_s(lo, 32);
+                let one = g.b.ins().icmp_imm_s(IntCC::NotEqual, base, max);
+                let a = g.b.ins().icmp_imm_s(IntCC::UnsignedLessThanOrEqual, o, max);
+                let b = g.b.ins().icmp_imm_s(IntCC::UnsignedLessThanOrEqual, l, max);
+                let ok = g.b.ins().band(one, a);
+                let ok = g.b.ins().band(ok, b);
+                g.guard(ok, slow);
+                let end = g.b.ins().iadd(o, l);
+                let inside = g.b.ins().icmp(IntCC::UnsignedLessThanOrEqual, end, hi);
+                let at = g.lo32(lo);
+                let at = g.b.ins().iadd(at, o);
+                let fits =
+                    g.b.ins()
+                        .icmp_imm_s(IntCC::UnsignedLessThanOrEqual, at, max);
+                let ok = g.b.ins().band(inside, fits);
+                g.guard(ok, slow);
+                let v = g.b.ins().iadd(lo, o);
+                g.st(dst, v);
+                g.st(Reg(dst.0 + 1), l);
+                g.join(join);
+                g.slice_new = g
+                    .kint(len)
+                    .filter(|l| (1..=64).contains(l))
+                    .map(|l| (dst, l));
             }
             Inst::MakeDope { at, parts } => {
                 let rs = f.regs(parts).ok_or("operand list out of range")?;
@@ -9140,6 +9187,8 @@ impl Gen<'_> {
     /// plane blocks (`yavs_rt_planes`); anything else through `TierHost::signal`.
     fn sig_read(&mut self, pc: u32, dst: Reg, sig: Reg) {
         let known = self.kint(Reg(sig.0 + 1));
+        // A slice's length is a guess: `sig_entry` tests it (the slow path where it fails).
+        let known = known.or_else(|| self.slices.iter().find(|s| s.0 == sig).map(|s| s.1));
         if let Some(l) = known
             && !(1..=i64::from(u32::MAX)).contains(&l)
         {
@@ -9778,12 +9827,12 @@ impl Gen<'_> {
         let flags = self.b.ins().bor(fl, cm);
         let (lo, len) = (self.ld(target), self.ld(Reg(target.0 + 1)));
         if self.nat.is_some() {
-            // A native frame has no frame view: the kernel's answer or the materialised frames,
-            // whose interpreter runs the `Drive` (and reports its error).
-            let call = self
-                .b
-                .ins()
-                .call(self.imp.drive_nat, &[self.env, drv, lo, len, w, flags]);
+            // A native frame: the kernel straight or the host's answer, else the materialised
+            // frames, whose interpreter runs the `Drive` (and reports its error).
+            let call = self.b.ins().call(
+                self.imp.drive_nat,
+                &[self.env, self.mem, drv, lo, len, w, flags],
+            );
             let r = self.b.inst_results(call)[0];
             let done = self.b.ins().icmp_imm_s(IntCC::NotEqual, r, 0);
             self.guard(done, slow);

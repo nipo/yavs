@@ -14251,3 +14251,34 @@ Written by Claude. One stage of an adder tree as a function (`r(k) := src(2 * k)
 
   The process loop (mode 1) and the #1110 and #1118 testbenches run the same instructions.
 - **Left (half the gap):** the native-frame call (prologue, slot registration, the parameter's region), the whole-signal read the call needs, and three plane copies per element where the process has two signal reads. Inlining the function (`YAVS_CLIFT_INLINE=50000`) does not pay: the inlined body keeps the callee's frame in memory (its slots registered for the runtime), so nothing of the constant arguments folds, and the caller grows (96.4 to 99.5 G instructions per 200 k cycles before, 87.0 to 89.0 G after).
+
+## Signal parameters of array types: element reads, bounds, slices and drives (yavs-lower, yavs-clift, yavs-llvm `rt`, #1121, 2026-11-06)
+
+A procedure with signal parameters of an unconstrained array type (one adder-tree stage, `reduce(t, l1)`) ran twice as long as
+the same loops in the process. Three causes, each fixed where every caller goes through:
+
+- **Lowering.** `src(i)` of a signal parameter whose elements are arrays read the whole actual (`SigRead` of all of it into a
+  temporary, then an `LCopy` of the element), and `src'high`, `dst'range` read the value only for its bounds. Now
+  `Fx::sig_part` takes signal parameters as it takes signals (a `SigSlice` of the formal's reference, a read of that element
+  only), and `Fx::dope_of` answers a signal parameter from the actual's descriptor, as `read_obj` already used for the value.
+  The semantics do not change: the descriptor is the one the value read had.
+- **Cranelift: `SigSlice` inline.** A reference of one range is sliced in registers in both modes (base not `MULTI`, offset and
+  length below 2^32, the range inside the reference, the element index below 2^32: the interpreter's tests); anything else is
+  stepped (a native frame through `yavs_rt_xstep`). A `SigSlice` of a constant length of up to 64 leaves that length as a guess
+  for a `SigRead` of its result in the same block (`Gen::slices`): `sig_entry` tests the length, so a wrong guess only takes the
+  slow path; the read is then the in-place word read instead of `yavs_rt_planes`.
+- **Drives of a native frame.** `yavs_rt_drive_nat` now takes `mem` and gives a zero-delay drive to the kernel straight
+  (`direct_drive_now` on `TierFrame::kctx`, as frame-mode `yavs_rt_drive` does), the host's `drive_try` otherwise. Every way into
+  a native frame writes the view first (`rt::enter`, `call_on` through `view_again`/`view`) and clears `kctx` at its end, so the
+  context is the running activation's or null. The LLVM generator passes `mem` too (build-checked only).
+- **Measured** (`tools/build-bench.sh --features clift`, 16 units, 1 M cycles, 8 runs on cores 8 to 11, medians): `--tier=clift`
+  42.5 to 24.2 s against 22.4 s for the loops in the process; the default tier 42.4 to 26.7 s against 21.8 s. Without the
+  drive change 26.4 s against 25.1 s. User-space instructions at 200 k cycles: the procedure 41 percent fewer; the loops in the
+  process, the same stage on variables, a procedure driving one vector and the record pipelines of #1110 within 0.3 percent
+  (their timings, on a loaded host, were within the spread). What is left is the call itself: the native frame's prologue (the held regions of the two
+  descriptor parameters) and the drive callback per element.
+- **Tests.** `compiled_vectors.rs` `signal_parameters_in_compiled_code_match_the_interpreter` (whole, slice and descending
+  actuals, an individually associated constrained formal, ports, delayed and transport drives, integer elements, `'event` and
+  `'last_value` of an element, one package procedure from two processes, a resolved signal driven through it by two
+  processes, a procedure that waits, forces; every tier and `--threads 4`); `perf.rs` `sigparam_tree` (`ops` and, under
+  `clift`, `cb_xstep`, `cb_step`, `cb_signal`, `cb_deopt` and the new `cb_planes`, `yavs_rt_planes` calls in debug builds).

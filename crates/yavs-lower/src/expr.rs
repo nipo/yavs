@@ -2312,7 +2312,8 @@ impl<'a> Fx<'a, '_> {
                     return Ok(self.inst_array(Some(d), space, off).1);
                 }
                 Some(Obj::Fixed { space, off, size }) => return Ok(self.addr(space, off + size)),
-                Some(Obj::Signal { .. }) => {
+                // A signal parameter's bounds are its actual's descriptor: no read of the value.
+                Some(Obj::Signal { .. } | Obj::SignalRef { .. }) => {
                     let span = self.db.exprs[e].span;
                     if let Some(d) = self.sig_dope(d, span)? {
                         return Ok(d);
@@ -5397,8 +5398,10 @@ impl<'a> Fx<'a, '_> {
         };
         let t = db.base(db.exprs[e].subtype);
         let root_t = db.base(ty::obj_subtype(db, d).ok_or(Failed)?);
-        if !matches!(self.cx.objs.get(&d), Some(Obj::Signal { .. }))
-            || !ty::is_array(db, t)
+        if !matches!(
+            self.cx.objs.get(&d),
+            Some(Obj::Signal { .. } | Obj::SignalRef { .. })
+        ) || !ty::is_array(db, t)
             || self.is_general(t, span)?
             || !self.is_general(root_t, span)?
         {

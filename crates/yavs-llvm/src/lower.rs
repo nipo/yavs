@@ -1109,7 +1109,7 @@ struct Gen {
     /// `yavs_rt_drive(env, regs, mem, pc, driver, lo, len, wave, inertial) -> u32`.
     drive_ty: LLVMTypeRef,
     drive: LLVMValueRef,
-    /// `yavs_rt_drive_nat(env, driver, lo, len, wave, flags) -> u32`: `drive` for a native frame,
+    /// `yavs_rt_drive_nat(env, mem, driver, lo, len, wave, flags) -> u32`: `drive` for a native frame,
     /// 1 when done and 0 when nothing was done (no frame view).
     drive_nat_ty: LLVMTypeRef,
     drive_nat: LLVMValueRef,
@@ -1482,8 +1482,8 @@ impl Gen {
             let mut dparams = [ptr, ptr, ptr, i32, i32, i64, i64, ptr, i32];
             let drive_ty = LLVMFunctionType(i32, dparams.as_mut_ptr(), 9, 0);
             let drive_nat_name = CString::new(DRIVE_NAT).expect("no NUL");
-            let mut nparams = [ptr, i32, i64, i64, ptr, i32];
-            let drive_nat_ty = LLVMFunctionType(i32, nparams.as_mut_ptr(), 6, 0);
+            let mut nparams = [ptr, ptr, i32, i64, i64, ptr, i32];
+            let drive_nat_ty = LLVMFunctionType(i32, nparams.as_mut_ptr(), 7, 0);
             let drive_bit_name = CString::new(DRIVE_BIT).expect("no NUL");
             let mut bparams = [ptr, ptr, ptr, i32, i32, i64, i64, i64, i64];
             let drive_bit_ty = LLVMFunctionType(i32, bparams.as_mut_ptr(), 9, 0);
@@ -6074,6 +6074,7 @@ impl Gen {
                 // frames, whose interpreter runs the `Drive` (and reports its error).
                 let mut args = [
                     c.env,
+                    c.mem,
                     driver,
                     self.ld(c, target),
                     self.ld(c, Reg(target.0 + 1)),
@@ -6085,7 +6086,7 @@ impl Gen {
                     self.drive_nat_ty,
                     self.drive_nat,
                     args.as_mut_ptr(),
-                    6,
+                    7,
                     c"".as_ptr(),
                 );
                 self.guard(c, self.icmp(IP::LLVMIntNE, ok, self.c32(0)), slow);

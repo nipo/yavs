@@ -1065,11 +1065,13 @@ fn drive_f_rest(mem: *mut Mem, pc: u32, driver: u32, lo: u64, wave: *const u8, l
     }
 }
 
-/// `yavs_rt_drive` for a native frame (`TierHost::drive_try`): no frame view and no pc, any delay.
-/// 1 when done, 0 when nothing was done: the caller materialises its frames and the interpreter
-/// runs the `Drive`. `wave` is read as in `yavs_rt_drive`.
+/// `yavs_rt_drive` for a native frame: no pc, any delay; a zero-delay drive goes to the kernel
+/// straight as frame-mode code's does (`direct`), the rest to `TierHost::drive_try`. 1 when done, 0
+/// when nothing was done: the caller materialises its frames and the interpreter runs the `Drive`.
+/// `wave` is read as in `yavs_rt_drive`.
 pub unsafe extern "C" fn yavs_rt_drive_nat(
     env: *mut c_void,
+    mem: *mut Mem,
     driver: u32,
     lo: u64,
     len: u64,
@@ -1099,6 +1101,12 @@ pub unsafe extern "C" fn yavs_rt_drive_nat(
     } else {
         (word(0) as i64, unsafe { plane_block(wave) })
     };
+    // SAFETY: `mem` is the view of the activation or call the native frame runs in.
+    if let Some((c, ds, ss)) = unsafe { direct(&(*mem).fr) }
+        && yavs_interp::direct_drive_now(c, ds, ss, driver, [lo, len], delay, block)
+    {
+        return 1;
+    }
     u32::from(host.drive_try(driver, [lo, len], delay, block, inertial))
 }
 
@@ -1934,6 +1942,7 @@ pub unsafe extern "C" fn yavs_rt_planes(
     n: u64,
     dst: *mut u64,
 ) {
+    cb(Cb::Planes);
     for c in 0..n.div_ceil(64) {
         let k = (n - c * 64).min(64);
         let from = bit0 + c * 64;
