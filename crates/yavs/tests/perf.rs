@@ -1000,11 +1000,10 @@ fn spec_nested() {
     assert_eq!((shared.code, copies.code), (0, 0), "{}", copies.all());
     assert!(copies.all().contains("sum="), "{}", copies.all());
     assert_eq!(shared.stdout, copies.stdout);
-    assert!(
-        copies.counters["ops"] < shared.counters["ops"],
-        "{:?}",
-        copies.counters
-    );
+    // `ops` is counted in debug and `op-census` builds only (`check_bounds` asks it there).
+    if let (Some(c), Some(s)) = (copies.counters.get("ops"), shared.counters.get("ops")) {
+        assert!(c < s, "{:?}", copies.counters);
+    }
     check_bounds(
         "spec_nested",
         &copies,
