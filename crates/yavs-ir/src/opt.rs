@@ -1661,9 +1661,22 @@ impl<'a> Opt<'a> {
         )
     }
 
+    /// The first non-empty block at each start: how the block after a suspension that ends the
+    /// block before is found (one map, not a search of the blocks per suspension).
+    fn starting_at(&self) -> FxMap<u32, usize> {
+        let mut m = FxMap::default();
+        for (i, x) in self.blocks.iter().enumerate() {
+            if x.1 > x.0 {
+                m.entry(x.0).or_insert(i);
+            }
+        }
+        m
+    }
+
     /// The blocks the blocks `work` can reach, a suspension's continuation included.
     fn reached_from(&self, mut work: Vec<usize>) -> Vec<bool> {
         let mut seen = vec![false; self.blocks.len()];
+        let mut starts: Option<FxMap<u32, usize>> = None;
         while let Some(b) = work.pop() {
             if seen.get(b) != Some(&false) {
                 continue;
@@ -1678,14 +1691,13 @@ impl<'a> Opt<'a> {
                 || self.f.body.is_some()
                 || self.f.flags.contains(FuncFlags::MAY_SUSPEND)
             {
+                // (Only the last instruction of the block can be such a suspension.)
                 let (start, end) = self.blocks[b];
-                for pc in start..end {
-                    if self.is_susp(&self.code[pc as usize])
-                        && pc + 1 == end
-                        && let Some(n) = self.blocks.iter().position(|x| x.0 == end && x.1 > end)
-                    {
-                        work.push(n);
-                    }
+                if end > start
+                    && self.is_susp(&self.code[end as usize - 1])
+                    && let Some(&n) = starts.get_or_insert_with(|| self.starting_at()).get(&end)
+                {
+                    work.push(n);
                 }
             }
         }
@@ -5416,13 +5428,14 @@ impl<'a> Opt<'a> {
             }
         };
         // Where a block that ends in a suspension goes on: the block after it.
+        let starts = self.starting_at();
         let after = |b: usize| -> Option<usize> {
             let (s, e) = self.blocks[b];
             (!perm
                 && e > s
                 && self.is_susp(&self.code[e as usize - 1])
                 && !matches!(self.code[e as usize - 1], Inst::Br { .. }))
-            .then(|| self.blocks.iter().position(|x| x.0 == e && x.1 > e))
+            .then(|| starts.get(&e).copied())
             .flatten()
         };
         let mut live_in: Vec<Vec<u64>> = vec![vec![0; w]; nb];

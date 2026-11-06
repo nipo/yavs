@@ -501,11 +501,12 @@ impl Opt<'_> {
             roots.push(b.0 as usize);
         }
         if self.f.kind == FuncKind::Process && !perm {
+            let starts = self.starting_at();
             for b in 0..nb {
                 let (s, e) = self.blocks[b];
                 if e > s
                     && self.is_susp(&self.code[e as usize - 1])
-                    && let Some(n) = self.blocks.iter().position(|x| x.0 == e && x.1 > e)
+                    && let Some(&n) = starts.get(&e)
                 {
                     roots.push(n);
                 }
