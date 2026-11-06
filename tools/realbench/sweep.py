@@ -36,7 +36,7 @@ def one(t, B, key, worlds):
         text = p.stdout + p.stderr + "".join((d / x).read_text(errors="replace") for x in (R.OUT, R.ERR) if (d / x).exists())
         bad = [l[:300] for l in text.splitlines() if BAD.search(l)]
         return n, ("broken" if bad else "ok"), p.returncode, bad[:3]
-    except R.Fail as e:
+    except (R.Fail, R.P.Fail) as e:
         return n, "not run", None, [str(e).splitlines()[-1][:300]]
     finally:
         shutil.rmtree(d, ignore_errors=True)
@@ -53,12 +53,12 @@ def main():
     NO_SANDBOX = a.no_sandbox
     B = str(Path(a.bin).resolve())
     key = R.B.binary_key(B)
-    tests = [t for t in R.load_tests() if re.search(a.filter, t["name"]) and t["category"] != "cpubench"]
+    tests = [t for t in R.load_tests() if re.search(a.filter, t["name"])]
     for t in tests:  # libraries one at a time: tests share them
         try:
             for m in t["corpus"]:
                 R.ensure_base("yavs", m, B, key)
-        except R.Fail as e:
+        except (R.Fail, R.P.Fail) as e:
             print(f"{t['name']}: libraries not built: {str(e).splitlines()[-1][:200]}", flush=True)
     worlds = R.CACHE / "sweep" / str(os.getpid())
     worlds.mkdir(parents=True)
