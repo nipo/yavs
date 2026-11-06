@@ -4648,7 +4648,8 @@ has no process body. Output is unchanged at any thread count and with `--shuffle
   per element) are committed with one lookup of the signal and its storage (`commit_codes`, `commit_planes_run`).
 - **Wake at finish** (`SimControl::wake_sole`): one changed element with one resident waiter without an edge
   trigger is woken in `finish_direct`, without the changed list and the scan in `cycle`; not with an observer of
-  value changes.
+  value changes. A signal no process ever waited for leaves there too, its readers armed, images written and
+  events counted (#1118: register chains 3 to 4 percent fewer instructions).
 - **A batch of one process** (`SimControl::run_one`): no order, batch loop, late list or unwind guard around a loop;
   the clocked commit takes the direct entries from the process's own lists (`commit_rest` is the old tail).
 - **Lists**: the per-process wait, waveform and schedule lists, a driver's pending transactions and

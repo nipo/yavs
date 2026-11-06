@@ -50,11 +50,12 @@ fn run_in(
     extra: usize,
     noise: bool,
 ) -> (Vec<String>, Stats) {
-    run_g(skip, every, ops, values, threads, extra, noise, 0)
+    run_g(skip, every, ops, values, threads, extra, noise, 0, true)
 }
 
 /// `run_in` where `reg_en` declares its read of `d` conditional on `en = '1'` (`guard` 1: one
-/// literal, 2: two alternatives), as `Builder::idle_skip_guarded` takes it.
+/// literal, 2: two alternatives), as `Builder::idle_skip_guarded` takes it; without `watch` no
+/// process waits for `d` and `en`.
 #[allow(clippy::too_many_arguments)]
 fn run_g(
     skip: Skip,
@@ -65,6 +66,7 @@ fn run_g(
     extra: usize,
     noise: bool,
     guard: u8,
+    watch: bool,
 ) -> (Vec<String>, Stats) {
     let mut b = Builder::new();
     let clk = logic(&mut b, "clk", StdULogic::Zero);
@@ -120,7 +122,7 @@ fn run_g(
     let one = Range::new(0, 1);
     // A process that only waits for `d` and `en`: their changes wake it at once
     // (`wake_sole`), which must arm the readers too.
-    for sig in [d, en] {
+    for sig in [d, en].into_iter().filter(|_| watch) {
         b.process(
             "watch",
             NONE,
@@ -321,6 +323,25 @@ fn skips_in_the_pool_are_those_of_the_serial_run() {
     }
 }
 
+/// Inputs no process waits for: their events are dropped when they are finished, and must still
+/// arm the registers that read them (no observer of value changes, so the drop is taken), also
+/// under a condition on `en`, which changes in the same cycle as `d` at edges 10 and 30: a
+/// condition's signals are read too, so their own events arm the register whatever the order.
+#[test]
+fn inputs_nothing_waits_for_still_arm_their_readers() {
+    for guard in [0, 1, 2] {
+        for every in [2, 3, 5, 8, 1000] {
+            let (off, _) = run_g(Skip::Off, every, &[], false, 1, 0, false, guard, false);
+            let (on, st) = run_g(Skip::On, every, &[], false, 1, 0, false, guard, false);
+            let (check, stc) = run_g(Skip::Check, every, &[], false, 1, 0, false, guard, false);
+            assert_eq!(on, off, "guard {guard}, every {every}");
+            assert_eq!(on, check, "guard {guard}, every {every}");
+            assert!(st.idle_skips > 0, "the skip never fired");
+            assert_eq!(st.idle_skips, stc.idle_skips);
+        }
+    }
+}
+
 /// Events on elements of an input that a register does not read leave it skipped (#686: the
 /// fields of a record share a kernel signal).
 #[test]
@@ -345,9 +366,9 @@ fn guarded_reads_arm_only_while_the_condition_holds() {
     for guard in [1, 2] {
         for every in [3, 8] {
             let (_, plain) = run_in(Skip::On, every, &[], true, 1, 0, false);
-            let (off, _) = run_g(Skip::Off, every, &[], true, 1, 0, false, guard);
-            let (on, st) = run_g(Skip::On, every, &[], true, 1, 0, false, guard);
-            let (check, stc) = run_g(Skip::Check, every, &[], true, 1, 0, false, guard);
+            let (off, _) = run_g(Skip::Off, every, &[], true, 1, 0, false, guard, true);
+            let (on, st) = run_g(Skip::On, every, &[], true, 1, 0, false, guard, true);
+            let (check, stc) = run_g(Skip::Check, every, &[], true, 1, 0, false, guard, true);
             assert_eq!(on, off);
             assert_eq!(on, check);
             assert_eq!(st.idle_skips, stc.idle_skips);
@@ -366,7 +387,7 @@ fn guarded_reads_arm_only_while_the_condition_holds() {
 /// attributed to the next process of the batch, or to none).
 #[test]
 fn a_wrong_read_list_is_caught_by_the_check_and_names_the_process() {
-    let r = std::panic::catch_unwind(|| run_g(Skip::Check, 3, &[], true, 1, 0, false, 9));
+    let r = std::panic::catch_unwind(|| run_g(Skip::Check, 3, &[], true, 1, 0, false, 9, true));
     let msg = match r {
         Ok(_) => panic!("the check missed a skip that is wrong"),
         Err(p) => p

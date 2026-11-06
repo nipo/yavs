@@ -3297,9 +3297,10 @@ impl SimControl {
 
     /// The resumption of `cycle` for signal `s` done at once when one element of it changed and
     /// one resident process without an edge trigger waits for that element (a stage of a
-    /// chain), so the waiters of a value wake when it changes. False
-    /// (nothing done) otherwise: `cycle` looks at the signal. Only with no observer of value
-    /// changes, which must see the change before any process is resumed.
+    /// chain), so the waiters of a value wake when it changes; for a signal no process ever
+    /// waited for, only its events are counted. False (nothing done) otherwise: `cycle` looks at
+    /// the signal. Only with no observer of value changes, which must see the change before any
+    /// process is resumed.
     #[inline(always)]
     fn wake_sole(&mut self, s: u32) -> bool {
         // A GUARD that other guards read stays in `changed_sigs` (`run_guards`).
@@ -3311,22 +3312,27 @@ impl SimControl {
         }
         let sig = &self.signals[s as usize];
         let waiters = &self.waiters[s as usize];
-        let one = match sig.changed[..] {
-            [r] if r.len == 1 => waiters.sole_resident(r.offset),
-            [] => return false,
-            _ => None,
+        // No process ever waited for it: `cycle` would only count its events.
+        let p = if waiters.is_unwatched() {
+            None
+        } else {
+            let one = match sig.changed[..] {
+                [r] if r.len == 1 => waiters.sole_resident(r.offset),
+                [] => return false,
+                _ => None,
+            };
+            let Some(w) = (match one {
+                Some(w) => Some(w),
+                None => waiters.sole_whole(),
+            }) else {
+                return false;
+            };
+            // An edge trigger reads signals this update may not have finished yet.
+            if self.cfg.edge_triggers && w.tid != 0 || !alive(&self.procs, w) {
+                return false;
+            }
+            Some(w.proc)
         };
-        let Some(w) = (match one {
-            Some(w) => Some(w),
-            None => waiters.sole_whole(),
-        }) else {
-            return false;
-        };
-        // An edge trigger reads signals this update may not have finished yet.
-        if self.cfg.edge_triggers && w.tid != 0 || !alive(&self.procs, w) {
-            return false;
-        }
-        let p = w.proc;
         // The signal leaves `changed_sigs`: its images are written here.
         if !self.signals[s as usize].images.is_empty() {
             self.stats.image_writes += self.images.push_sig(&self.signals[s as usize]);
@@ -3334,7 +3340,9 @@ impl SimControl {
         let sig = &mut self.signals[s as usize];
         self.stats.events += sig.changed.len() as u64 + std::mem::take(&mut sig.nruns);
         sig.changed.clear();
-        self.wake(p, false);
+        if let Some(p) = p {
+            self.wake(p, false);
+        }
         true
     }
 
