@@ -3380,13 +3380,10 @@ fn gen_func(
                     Some(_) => g.nat_temp_base(),
                     None => g.mem_ld(MEM_TEMP_BASE),
                 };
-                let over = g.b.ins().icmp(IntCC::UnsignedGreaterThan, len, base);
-                let (cut, same) = (g.b.create_block(), g.b.create_block());
-                g.b.ins().brif(over, cut, &[], same, &[]);
-                g.b.switch_to_block(cut);
-                g.mem_st(MEM_TEMP_LEN, base);
-                g.b.ins().jump(same, &[]);
-                g.b.switch_to_block(same);
+                // The length cut back to the base, as a store with no branch: a branch over the
+                // store was a taken branch site at every statement.
+                let cut = g.b.ins().umin(len, base);
+                g.mem_st(MEM_TEMP_LEN, cut);
                 g.join(join);
                 // A `wait until <edge>` short-cuts only where the edge trigger resumed the
                 // activation (`WAIT_SAME_EDGE`, #772).
@@ -7573,7 +7570,9 @@ impl Gen<'_> {
         let rs = ok(f.regs(args), "operand list out of range")?.to_vec();
         let d = ok(dst, "a native without a result")?;
         let layout = ok(ieee_layout(op), "not a native computed in place")?;
+        // The native call is the rare way (wide operands, metavalues): out of line.
         let (fb, done) = (self.b.create_block(), self.b.create_block());
+        self.b.set_cold_block(fb);
         let pure = matches!(
             op,
             Op::Resize { .. }
@@ -9242,7 +9241,10 @@ impl Gen<'_> {
         join: Block,
         sure: bool,
     ) {
+        // The codes are the rare form of a read this short (on the large designs nearly every
+        // such read is in one plane word): out of line, so the word read falls through.
         let codes_at = self.b.create_block();
+        self.b.set_cold_block(codes_at);
         let blocks = self.ent_ld(ent, SIG_PLANES);
         if !sure {
             let has = self.b.ins().icmp_imm_s(IntCC::NotEqual, blocks, 0);
