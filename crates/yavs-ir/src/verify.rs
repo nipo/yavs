@@ -142,9 +142,9 @@ pub(crate) fn verify_func(
         f.kind,
         FuncKind::Function | FuncKind::Elab | FuncKind::Thunk
     );
-    // Debug builds and tests only: the dataflow costs about 30 ms on a large verification
-    // library, and nothing depends on it until frames start with stale registers (#430).
-    if cfg!(debug_assertions) {
+    // Debug builds, tests and `YAVS_VERIFY_IR` only: the dataflow costs about 30 ms on a large
+    // verification library, and nothing depends on it until frames start with stale registers (#430).
+    if crate::build::eager_verify() {
         for (pc, r) in undefined_uses(prog, f) {
             err(
                 Some(pc as usize),

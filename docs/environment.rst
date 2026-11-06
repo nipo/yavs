@@ -195,7 +195,7 @@ Diagnostics of a run
      - the table's own
      - ``run``
    * - ``YAVS_VERIFY_IR``
-     - Verifies every IR function at once rather than when it first runs. Always on in a debug build.
+     - Verifies every IR function at once rather than when it first runs, checks that no register is read before it is written, and verifies each function again after inlining and optimising. A check for bugs in yavs; always on in a debug build.
      - any value
      - unset
      - ``run``
