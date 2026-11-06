@@ -884,6 +884,7 @@ impl Model {
             yavs_interp::replay_reports(&hit.reports);
             crate::callcache::count(true);
             if hit.session {
+                crate::callcache::count_session_hit();
                 self.session.log_hit(db, callee, vals, hit.val.clone());
             }
             return Ok(hit.val);

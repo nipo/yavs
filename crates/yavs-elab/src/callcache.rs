@@ -21,15 +21,25 @@ const MAX_RESULT: usize = 64 << 10;
 
 static HITS: AtomicU64 = AtomicU64::new(0);
 static RUNS: AtomicU64 = AtomicU64::new(0);
+static SESSION_HITS: AtomicU64 = AtomicU64::new(0);
 
-/// Elaboration-time calls of this process answered from the cache, and calls that ran the
-/// interpreter although they had a key (work counters, `YAVS_COUNTERS`).
-pub fn stats() -> (u64, u64) {
-    (HITS.load(Ordering::Relaxed), RUNS.load(Ordering::Relaxed))
+/// Elaboration-time calls of this process answered from the cache, calls that ran the
+/// interpreter although they had a key, and the hits among the first that were lowered and
+/// logged in the session (work counters, `YAVS_COUNTERS`).
+pub fn stats() -> (u64, u64, u64) {
+    (
+        HITS.load(Ordering::Relaxed),
+        RUNS.load(Ordering::Relaxed),
+        SESSION_HITS.load(Ordering::Relaxed),
+    )
 }
 
 pub(crate) fn count(hit: bool) {
     (if hit { &HITS } else { &RUNS }).fetch_add(1, Ordering::Relaxed);
+}
+
+pub(crate) fn count_session_hit() {
+    SESSION_HITS.fetch_add(1, Ordering::Relaxed);
 }
 
 /// A call's outcome: the value and the reports it made (printed again on a hit).
