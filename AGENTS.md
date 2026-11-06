@@ -287,6 +287,16 @@ cargo test -p yavs --features llvm --test perf                   # plus the LLVM
 - Rule of thumb for new counters: a plain increment on a path that is already slow, or one add per
   cycle. Nothing per op or per element on a fast path in release builds; `ops` and `cb_*` use
   `cfg(any(debug_assertions, feature = "op-census"))` for that reason.
+- Native `ieee` work, which `ops` does not see (a native call is one op whichever path it takes),
+  has three guards. (1) The decided path of every op of `yavs_ir::ieee::parse`:
+  `crates/yavs-interp/tests/common/ieee_paths.rs` `row` (one-word path in the interpreter,
+  computed in place by compiled code), checked against `lookup_fast` (`yavs-interp`), `ieee_layout`
+  (`yavs-llvm`) and the in-place arms of Cranelift (`yavs-clift` `tests/tier.rs`, `clift` CI job).
+  (2) `ieee_general.<key>` (every build): the calls of each native that ran its general path or
+  gave the call back to the body, bounded per key on `perf/ieee_paths.vhd` (`IEEE_GENERAL`, 0
+  where every call has a path). (3) Under `--features clift` the same design compiled, with the
+  native calls of compiled code per key (`IEEE_NATIVE_CALLS`, `cb_native` of `YAVS_COUNTERS=pc`).
+  **A new `ieee` path updates these tables and bounds in the same commit.**
 
 ## 5. When you finish a task
 

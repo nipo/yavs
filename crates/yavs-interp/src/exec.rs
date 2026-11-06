@@ -647,6 +647,9 @@ pub(crate) struct Machine {
     pub ieee_stop: bool,
     /// A native `ieee` subprogram gives its call back to the VHDL body (`ieee::fallback`).
     pub ieee_fallback: bool,
+    /// A native `ieee` subprogram ran its general path (`ieee::general`, only under
+    /// `YAVS_COUNTERS`): the caller counts it for the native's key and clears it.
+    pub ieee_general: bool,
     /// The slots of the native frames of compiled code, for the frame indices `nwin_from` to
     /// `nwin_to`, while a call from a native frame runs (`TierHost::native_direct`).
     nwin: Option<Box<dyn crate::NativeSlots>>,
@@ -1334,6 +1337,7 @@ impl Machine {
             pause: None,
             ieee_stop: false,
             ieee_fallback: false,
+            ieee_general: false,
             layouts: Vec::new(),
             layouts2: Vec::new(),
             plans: Vec::new(),
@@ -5386,6 +5390,9 @@ impl Machine {
                 return Err(e);
             }
         };
+        if std::mem::take(&mut self.ieee_general) {
+            crate::census::note_ieee(&n.symbol);
+        }
         if std::mem::take(&mut self.ieee_fallback) {
             let r = self.ieee_body(prog, &n.symbol, &cells, dst);
             self.cells = cells;
@@ -7545,6 +7552,8 @@ impl Machine {
                     if let Some(fast) = self.rt.fast.get(usize::from(native)).copied().flatten()
                         && let Some(v) = fast(self, &cells)
                     {
+                        // A one-word path never runs a native's general path (it would go uncounted).
+                        debug_assert!(!self.ieee_general);
                         if dst != pre::NONE16 {
                             self.regs[usize::from(dst)] = v;
                         }
@@ -7563,7 +7572,7 @@ impl Machine {
                     let cells = &mut cells[..usize::from(len)];
                     // Only the natives of `numeric_bit` look at the type, and only whether there is one.
                     let v = fun(self, ctx, bit.then_some(yavs_ir::TyId(0)), cells)?;
-                    if self.ieee_fallback | self.ieee_stop {
+                    if self.ieee_fallback | self.ieee_stop | self.ieee_general {
                         match self.ieee_after(prog, native, cells, dst, v)? {
                             Flow::Next => {
                                 k += 1;
@@ -9907,7 +9916,8 @@ impl Machine {
     }
 
     /// What `Op::CallIeee` does when the native gave the call back to the VHDL body
-    /// (`ieee_fallback`) or ended the process (`ieee_stop`); clears both.
+    /// (`ieee_fallback`), ended the process (`ieee_stop`) or ran its general path
+    /// (`ieee_general`); clears them.
     #[cold]
     fn ieee_after(
         &mut self,
@@ -9918,6 +9928,9 @@ impl Machine {
         v: Option<u64>,
     ) -> R<Flow> {
         let dst = (dst != pre::NONE16).then_some(Reg(u32::from(dst)));
+        if std::mem::take(&mut self.ieee_general) {
+            crate::census::note_ieee(Self::native_symbol(prog, native));
+        }
         if std::mem::take(&mut self.ieee_fallback) {
             let symbol = Self::native_symbol(prog, native);
             return self.ieee_body(prog, symbol, cells, dst);
@@ -12575,6 +12588,13 @@ impl crate::TierHost for Host<'_, '_, '_> {
         *slots = m.nwin.take();
         let fallback = std::mem::take(&mut m.ieee_fallback);
         let stop = std::mem::take(&mut m.ieee_stop);
+        // A call given back (or failed) is counted when the interpreter runs it again.
+        if m.ieee_general {
+            m.ieee_general = false;
+            if !fallback && r.is_ok() {
+                crate::census::note_ieee(&n.symbol);
+            }
+        }
         // The stacks may have moved (the temporary area).
         if m.regs.v.as_ptr() == tf.stack && m.slots_ptr() == tf.slots {
             m.tier_temp(tf);
@@ -12622,6 +12642,13 @@ impl crate::TierHost for Host<'_, '_, '_> {
         let r = fun(m, self.ctx, n.ty, cells);
         let fallback = std::mem::take(&mut m.ieee_fallback);
         let stop = std::mem::take(&mut m.ieee_stop);
+        // A call given back (or failed) is counted when the interpreter runs it again.
+        if m.ieee_general {
+            m.ieee_general = false;
+            if !fallback && r.is_ok() {
+                crate::census::note_ieee(&n.symbol);
+            }
+        }
         // A native run this way pushes no frame (it would be `Slow`): the stacks stay.
         debug_assert!(m.regs.v.as_ptr() == tf.stack && m.slots_ptr() == tf.slots);
         m.tier_temp(tf);
@@ -12680,6 +12707,13 @@ impl crate::TierHost for Host<'_, '_, '_> {
         }
         let fallback = std::mem::take(&mut m.ieee_fallback);
         let stop = std::mem::take(&mut m.ieee_stop);
+        // A call given back (or failed) is counted when the interpreter runs it again.
+        if m.ieee_general {
+            m.ieee_general = false;
+            if !fallback && r.is_ok() {
+                crate::census::note_ieee(&n.symbol);
+            }
+        }
         // Only the temporary area can have moved or grown.
         tf.temp = m.temp.as_mut_ptr();
         tf.temp_len = m.temp.len() as u64;

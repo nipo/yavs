@@ -502,3 +502,29 @@ pub fn ieee_fast(
         .sum();
     (f.regs(args)?.len() == want).then_some(op)
 }
+
+#[cfg(test)]
+#[path = "../../yavs-interp/tests/common/ieee_paths.rs"]
+mod ieee_paths;
+
+#[cfg(test)]
+mod path_tests {
+    use super::ieee_paths as paths;
+
+    /// Compiled code computes in place exactly the ops whose row says so: an op that leaves
+    /// `ieee_layout`, or a new op, fails here.
+    #[test]
+    fn in_place_set_is_the_decided_one() {
+        let ops = paths::every_op();
+        paths::assert_every_row_reached(&ops);
+        for (op, key) in &ops {
+            let row = paths::row(*op);
+            assert_eq!(
+                super::ieee_layout(*op).is_some(),
+                row.in_place,
+                "{key} ({op:?}): `ieee_layout` disagrees with row `{}` of yavs-interp/tests/common/ieee_paths.rs",
+                row.name
+            );
+        }
+    }
+}

@@ -433,6 +433,7 @@ fn vec_gate<const G: u8>(m: &mut Machine, ctx: Cx<'_, '_, '_>, _: Option<TyId>, 
     if let Some(r) = fast_vec_gate::<G>(m, a) {
         return Ok(Some(r));
     }
+    general(m);
     let (l, r) = (vh(m, a, 0)?, vh(m, a, A1)?);
     if l.v.len() != r.v.len() {
         let n = gate_name(g);
@@ -464,6 +465,7 @@ fn num_gate<const G: u8>(m: &mut Machine, _: Cx<'_, '_, '_>, _: Option<TyId>, a:
     if let Some(r) = fast_num_gate::<G>(m, a) {
         return Ok(Some(r));
     }
+    general(m);
     let (l, r) = (vh(m, a, 0)?, vh(m, a, A1)?);
     if l.v.len() != r.v.len() {
         return fallback(m);
@@ -484,6 +486,7 @@ fn num_not(m: &mut Machine, _: Cx<'_, '_, '_>, _: Option<TyId>, a: &[u64]) -> Re
     if let Some(r) = fast_num_not(m, a) {
         return Ok(Some(r));
     }
+    general(m);
     let l = vh(m, a, 0)?;
     put(m, &Vh::down(l.v.not()))
 }
@@ -494,6 +497,7 @@ fn neg_signed(m: &mut Machine, _: Cx<'_, '_, '_>, _: Option<TyId>, a: &[u64]) ->
     if let Some(r) = fast_neg(m, a) {
         return Ok(Some(r));
     }
+    general(m);
     let l = vh(m, a, 0)?;
     if l.v.is_empty() {
         return put(m, &Vh::null());
@@ -511,6 +515,7 @@ fn abs_signed(m: &mut Machine, _: Cx<'_, '_, '_>, _: Option<TyId>, a: &[u64]) ->
     if let Some(r) = fast_abs(m, a) {
         return Ok(Some(r));
     }
+    general(m);
     let l = vh(m, a, 0)?;
     if l.v.is_empty() {
         return put(m, &Vh::null());
@@ -531,6 +536,7 @@ fn vec_not(m: &mut Machine, _: Cx<'_, '_, '_>, _: Option<TyId>, a: &[u64]) -> Re
     if let Some(r) = fast_vec_not(m, a) {
         return Ok(Some(r));
     }
+    general(m);
     let l = vh(m, a, 0)?;
     put(m, &Vh::up1(l.v.not()))
 }
@@ -545,6 +551,7 @@ fn conv<const K: u8, const VEC: bool>(
         if let Some(r) = conv_small::<K>(m, a) {
             return Ok(Some(r));
         }
+        general(m);
         let l = vh(m, a, 0)?;
         let v = match K {
             0 => l.v.to_x01(),
@@ -608,6 +615,7 @@ fn to_01_vec(m: &mut Machine, _: Cx<'_, '_, '_>, _: Option<TyId>, a: &[u64]) -> 
     if let Some(r) = fast_to_01(m, a) {
         return Ok(Some(r));
     }
+    general(m);
     let l = vh(m, a, 0)?;
     let x = sul(a, A1)?;
     put(m, &Vh::down(to_01(&l.v, x)))
@@ -948,7 +956,18 @@ fn math<const K: u8>(m: &mut Machine, ctx: Cx<'_, '_, '_>, _: Option<TyId>, a: &
 /// Give the call back to the VHDL body: the metavalue and range cases of the Synopsys helpers.
 fn fallback(m: &mut Machine) -> Ret {
     m.ieee_fallback = true;
+    general(m);
     Ok(Some(0))
+}
+
+/// The native runs its general path: its one-word and wide paths declined, or it gives the
+/// call back to the body. Counted per native under `YAVS_COUNTERS` (`ieee_general.<key>`); the
+/// callers take the flag with `ieee_fallback`.
+#[inline]
+fn general(m: &mut Machine) {
+    if crate::census::ieee_on() {
+        m.ieee_general = true;
+    }
 }
 
 /// An operand the helpers treat as binary: `(n-1 downto 0)` with every element `0 1 L H`.
@@ -1043,6 +1062,7 @@ fn conv_vec<const FROM_SIGNED: bool>(
     if let Some(v) = fast_syn_conv_vec::<FROM_SIGNED>(m, a) {
         return Ok(Some(v));
     }
+    general(m);
     let l = vh(m, a, 0)?;
     let size = int(a, A1)?;
     let Some(b) = l.v.to_bitvec() else {
@@ -1070,6 +1090,7 @@ fn conv_int<const SIGNED: bool>(
     if let Some(v) = fast_syn_conv_int::<SIGNED>(m, a) {
         return Ok(Some(v));
     }
+    general(m);
     let (arg, size) = (int(a, 0)?, int(a, 1)?);
     // INTEGER'LOW: -2**31 in 2008, -2**63 in 2019.
     let low = m.rt.revision.integer_bounds().low;
@@ -1322,6 +1343,7 @@ fn add<const SUB: bool, const SIGNED: bool, const FORM: u8>(
     if let Some(r) = add_small::<SUB, SIGNED, FORM>(m, ctx, bit, a)? {
         return Ok(Some(r));
     }
+    general(m);
     let out = match FORM {
         0 => add_vv(&vh(m, a, 0)?.v, &vh(m, a, A1)?.v, SUB, SIGNED),
         1 => {
@@ -1362,6 +1384,7 @@ fn qcompare<const C: u8, const SIGNED: bool, const FORM: u8>(
     if let Some(r) = fast_qcompare::<C, SIGNED, FORM>(m, a) {
         return Ok(Some(r));
     }
+    general(m);
     let c = CMPS[C as usize];
     let name = format!("?{}", cmp_name(c));
     let (l, r) = match FORM {
@@ -1438,6 +1461,7 @@ fn minmax<const MAX: bool, const SIGNED: bool, const FORM: u8>(
     if let Some(r) = fast_minmax::<MAX, SIGNED, FORM>(m, a) {
         return Ok(Some(r));
     }
+    general(m);
     let (l, r) = match FORM {
         0 => (vh(m, a, 0)?.v, vh(m, a, A1)?.v),
         1 => {
@@ -1473,6 +1497,7 @@ fn std_match(m: &mut Machine, ctx: Cx<'_, '_, '_>, _: Option<TyId>, a: &[u64]) -
     if let Some(r) = fast_match(m, a) {
         return Ok(Some(r));
     }
+    general(m);
     let (l, r) = (vh(m, a, 0)?.v, vh(m, a, A1)?.v);
     if l.is_empty() || r.is_empty() {
         warn(
@@ -1516,6 +1541,7 @@ fn mul<const SIGNED: bool, const FORM: u8>(
     if let Some(r) = fast_mul::<SIGNED, FORM>(m, a) {
         return Ok(Some(r));
     }
+    general(m);
     // An integer operand is `TO_UNSIGNED`/`TO_SIGNED` of the vector's length, as the body does.
     let (l, r) = match FORM {
         0 => (vh(m, a, 0)?.v, vh(m, a, A1)?.v),
@@ -1669,6 +1695,7 @@ fn divide<const KIND: u8, const SIGNED: bool, const FORM: u8>(
     if let Some(r) = fast_div::<KIND, SIGNED, FORM>(m, a) {
         return Ok(Some(r));
     }
+    general(m);
     let bit = t.is_some();
     // An integer is `TO_UNSIGNED`/`TO_SIGNED` at the vector's length, or at the larger length it
     // needs, which the bodies then resize back (`narrow`).
@@ -1752,6 +1779,7 @@ fn compare<const C: u8, const SIGNED: bool, const FORM: u8>(
     if let Some(r) = fast_compare::<C, SIGNED, FORM>(m, a) {
         return Ok(Some(r));
     }
+    general(m);
     let c = CMPS[C as usize];
     let dflt = c == Cmp::Ne;
     let bad = |m: &mut Machine, ctx: Cx<'_, '_, '_>, what: &str| -> Ret {
@@ -1833,6 +1861,7 @@ fn to_integer<const SIGNED: bool>(
             return Ok(Some(if neg { (-(mag as i64) - 1) as u64 } else { mag }));
         }
     }
+    general(m);
     let l = vh(m, a, 0)?.v;
     if l.is_empty() {
         warnb(
@@ -1882,6 +1911,7 @@ fn to_unsigned<const SIGNED: bool>(
     if let Some(r) = fast_to_unsigned::<SIGNED>(m, a) {
         return Ok(Some(r));
     }
+    general(m);
     let (v, size) = (int(a, 0)?, int(a, 1)?);
     let v = if SIGNED { v } else { natural(m, v)? };
     let size = natural(m, size)?;
@@ -1902,6 +1932,7 @@ fn resize<const SIGNED: bool>(
     if let Some(r) = fast_resize::<SIGNED>(m, a) {
         return Ok(Some(r));
     }
+    general(m);
     let l = vh(m, a, 0)?.v;
     let new = natural(m, int(a, A1)?)? as usize;
     if new < 1 {
@@ -1963,6 +1994,7 @@ fn shift<const K: u8>(m: &mut Machine, _: Cx<'_, '_, '_>, _: Option<TyId>, a: &[
     if let Some(r) = fast_shift::<K>(m, a) {
         return Ok(Some(r));
     }
+    general(m);
     let l = vh(m, a, 0)?;
     let count = natural(m, int(a, A1)?)? as usize;
     shift_of::<K>(m, l, count)
@@ -1974,6 +2006,7 @@ fn shift_fn<const K: u8>(m: &mut Machine, _: Cx<'_, '_, '_>, _: Option<TyId>, a:
     if let Some(r) = fast_shift::<K>(m, a) {
         return Ok(Some(r));
     }
+    general(m);
     let l = vh(m, a, 0)?;
     let count = natural(m, int(a, A1)?)? as usize;
     if l.v.is_empty() {
@@ -2890,8 +2923,9 @@ fn conv_small<const K: u8>(m: &mut Machine, a: &[u64]) -> Option<u64> {
     put_block(m, blk.map(|p| p & mask), 1, n as i64, false)
 }
 
+// One word only: a longer vector goes to the native, whose general path is counted.
 fn fast_conv_vec<const K: u8>(m: &mut Machine, a: &[u64]) -> Option<u64> {
-    conv_small::<K>(m, a).or_else(|| conv::<K, true>(m, &mut None, None, a).ok().flatten())
+    conv_small::<K>(m, a)
 }
 
 /// `to_bitvector (s, xmap)` of up to 64 elements in one word; `None` for a longer one.
@@ -3355,4 +3389,32 @@ pub(crate) fn lookup_fast(symbol: &str) -> Option<FastFn> {
         Op::ShiftFn(Shift::Ror) | Op::Shift(Shift::Ror) => fast_shift::<4>,
         _ => return None,
     })
+}
+
+#[cfg(test)]
+#[path = "../tests/common/ieee_paths.rs"]
+mod ieee_paths;
+
+#[cfg(test)]
+mod path_tests {
+    use super::ieee_paths as paths;
+
+    /// Every op `parse` returns is implemented, and has a one-word path exactly when its row
+    /// says so: dropping an arm of `lookup_fast`, or a new op, fails here.
+    #[test]
+    fn one_word_paths_are_the_decided_ones() {
+        let ops = paths::every_op();
+        paths::assert_every_row_reached(&ops);
+        for (op, key) in &ops {
+            let sym = format!("yavs.ieee.{key}");
+            assert!(super::lookup(&sym).is_some(), "{key}: no native");
+            let row = paths::row(*op);
+            assert_eq!(
+                super::lookup_fast(&sym).is_some(),
+                row.fast,
+                "{key} ({op:?}): `lookup_fast` disagrees with row `{}` of tests/common/ieee_paths.rs",
+                row.name
+            );
+        }
+    }
 }

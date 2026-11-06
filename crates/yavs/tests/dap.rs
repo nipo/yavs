@@ -961,7 +961,8 @@ fn counters() {
         .expect("stderr");
     let counters: std::collections::BTreeMap<_, _> = err
         .lines()
-        .filter_map(|l| l.strip_prefix("counters: ")?.split_once('='))
+        // The value follows the last `=`: `ieee_general` keys spell operators such as "=".
+        .filter_map(|l| l.strip_prefix("counters: ")?.rsplit_once('='))
         .map(|(k, v)| (k, v.parse::<u64>().expect("counter value")))
         .collect();
     assert!(counters["cycles"] > 0, "{err}");

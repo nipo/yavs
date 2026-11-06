@@ -14165,3 +14165,40 @@ turned TRUE.
 - A `_guard` process whose condition reads a name `Walker::guard_reads` cannot resolve stays a normal process, woken by
   events only, so it would still miss a held transaction; no such condition was found (external names, a signal parameter and
   a dynamic index all resolve).
+
+## Guards for the paths of the `ieee` natives (yavs-interp, yavs-llvm, yavs-clift, yavs, #1108, 2026-11-06)
+
+`ops` counts a native call as one op whichever path it takes, so a lost one-word path (the `*` of #1095) moved no
+work counter. Three guards, all exact and host independent:
+
+- **A table of decided paths, exhaustive by construction.** `crates/yavs-interp/tests/common/ieee_paths.rs`: `row(op)`
+  is a `match` on `ieee::Op` (and `Syn`) without a wildcard, so a new op does not compile until it has a decision (a
+  one-word path in the interpreter, computed in place by compiled code). `every_op` spells keys from the packages,
+  designators and types `parse` matches, keeps those `parse` accepts (one key per op), and every row must be reached,
+  so a designator missing there fails too. Products of the enum fields were rejected: they hold ops `parse` never
+  returns (`Syn::Oper` `*` with an integer, two integer operands), which the in-place arms rightly refuse. One file
+  included by three tests (`#[path]`): `lookup_fast` (yavs-interp unit test), `ieee_layout` (yavs-llvm unit test, built
+  without LLVM) and the Cranelift arms (`tests/tier.rs`, `clift` CI job: each in-place op is compiled after asserting
+  that the call reaches the in-place lowering, and must leave no note). The LLVM generator's arms are build-checked
+  only (no CI job).
+- **`ieee_general.<key>` in `YAVS_COUNTERS`.** A native sets `Machine::ieee_general` where its general path starts,
+  after its one-word and wide paths declined (`ieee::general`), and when it gives the call back (`fallback`); every
+  caller that takes `ieee_fallback` takes the flag and counts the call for the native's key, `@<id>` dropped (it
+  moves with the library). Only under `YAVS_COUNTERS`: one load on paths that already allocate; the callers'
+  existing flag test on `Op::CallIeee`'s native branch takes one more byte; nothing on a one-word path. A call given
+  back by compiled code is counted when the interpreter runs it again. Natives with no split between a fast and a
+  general path (the scalar ones, reductions, `is_x`, `to_bitvector`, `rising_edge`, `math_real`, `uniform`) count
+  nothing. `to_x01` of a vector longer than 64 elements now goes from the `FastFn` to the native, so its general path
+  is counted (a `FastFn` that ran it went uncounted; a debug assertion in `Op::CallIeee` keeps it so). Every native
+  `ieee` key of the program gets a row, 0 included, so a bound cannot name a counter that is never printed.
+- **The same design compiled.** `perf.rs` `ieee_paths` runs `perf/ieee_paths.vhd` (every op with a path, 30 times on
+  8, 32, 64, 65 and 128 elements, both directions, the integer and Synopsys forms, checksums) on the interpreter and,
+  under `clift`, on `--tier=clift --verbose` with `YAVS_COUNTERS=pc`: `IEEE_GENERAL` bounds the general paths per key
+  (an unlisted key 0; listed today: `to_01`, `to_x01`, signed `shift_right` and the Synopsys conversions above 64
+  elements), `IEEE_NATIVE_CALLS` the `cb_native` calls per key (an unlisted key 0), and a function that stays
+  interpreted fails on its note. `--tier=clift` compiles before the run, so the counts are the same on every run at
+  `--threads 1`; at 4 threads 2 to 4 more calls of the first activations reach the native, so the test uses one.
+  `perf.rs` reads a counter name up to its last `=`, since operator keys hold one.
+- **Rule: a new `ieee` path updates the row, `IEEE_GENERAL` and `IEEE_NATIVE_CALLS` in the same commit** (root
+  `AGENTS.md` section 4). Not done: timing ratios per operation in `tools/bench` (section 4 item 4 of #1108).
+

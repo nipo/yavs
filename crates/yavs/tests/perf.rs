@@ -52,7 +52,8 @@ fn yavs(dir: &Path, env: &[(&str, &str)], args: &[&str]) -> Run {
     let stderr = String::from_utf8_lossy(&o.stderr).into_owned();
     let counters = stderr
         .lines()
-        .filter_map(|l| l.strip_prefix("counters: ")?.split_once('='))
+        // (A key may hold `=`: the `ieee` operator keys.)
+        .filter_map(|l| l.strip_prefix("counters: ")?.rsplit_once('='))
         .map(|(k, v)| (k.to_string(), v.parse().expect("counter value")))
         .collect();
     Run {
@@ -522,6 +523,100 @@ case!(
 );
 case!(ieee_operands, "acc=", &[], [("ops", Max(2716))]);
 case!(ieee_share, "n=", &[], [("ops", Max(3626))]);
+
+// `perf/ieee_paths.vhd`: the calls per native `ieee` key that ran its general path, also under
+// `clift`; an unlisted key is bounded by 0. A new path updates this table in the same commit
+// (root `AGENTS.md` section 4, `docs/decisions.md` "Guards for the paths of the `ieee` natives").
+const IEEE_GENERAL: &[(&str, u64)] = &[
+    ("numeric_std.shift_right(signed,integer)signed", 120),
+    (
+        "std_logic_1164.to_01(std_ulogic_vector,std_ulogic)std_ulogic_vector",
+        120,
+    ),
+    (
+        "std_logic_1164.to_x01(std_ulogic_vector)std_ulogic_vector",
+        60,
+    ),
+    ("std_logic_arith.conv_signed(integer,integer)signed", 60),
+    (
+        "std_logic_arith.conv_std_logic_vector(integer,integer)std_ulogic_vector",
+        60,
+    ),
+    (
+        "std_logic_arith.conv_std_logic_vector(unsigned,integer)std_ulogic_vector",
+        60,
+    ),
+    ("std_logic_arith.conv_unsigned(integer,integer)unsigned", 4),
+    ("std_logic_arith.conv_unsigned(signed,integer)unsigned", 60),
+    (
+        "std_logic_arith.ext(std_ulogic_vector,integer)std_ulogic_vector",
+        60,
+    ),
+    (
+        "std_logic_arith.sxt(std_ulogic_vector,integer)std_ulogic_vector",
+        60,
+    ),
+];
+
+/// What `perf/ieee_paths.vhd` reports: a checksum per width of every result.
+const IEEE_PATHS_SAYS: [&str; 4] = [
+    "W=128 sum=000000011EB213D5009266C30264A1AB 480000064DDE232F87E48E73C10E2C63 712444",
+    "W=65 sum=15B4689C2C156FFE8 F9BD46E713B1ADF50 383049",
+    "W=8 sum=86 F9 746273",
+    "W=128 syn sum=3FFFFFFFFFFFFFFF00000000007C6E37 568056",
+];
+
+/// `Max` bounds for every `<prefix><key>` counter of `r`: the count of `table`, 0 for a key not
+/// listed. A listed key must be a counter of `r` (`check_bounds` fails on a missing one).
+fn table_bounds(r: &Run, prefix: &str, table: &[(&str, u64)]) -> Vec<(String, Bound)> {
+    let mut b: Vec<(String, Bound)> = r
+        .counters
+        .keys()
+        .filter_map(|k| k.strip_prefix(prefix))
+        .filter(|k| !table.iter().any(|(t, _)| t == k))
+        .map(|k| (format!("{prefix}{k}"), Max(0)))
+        .collect();
+    b.extend(table.iter().map(|(k, v)| (format!("{prefix}{k}"), Max(*v))));
+    b
+}
+
+fn ieee_paths_check(r: &Run, mut bounds: Vec<(String, Bound)>) {
+    assert_eq!(r.code, 0, "ieee_paths: {}", r.all());
+    for says in IEEE_PATHS_SAYS {
+        assert!(
+            r.stdout.contains(says),
+            "ieee_paths: expected `{says}` in:\n{}",
+            r.stdout
+        );
+    }
+    let n = r
+        .counters
+        .keys()
+        .filter(|k| k.starts_with("ieee_general."))
+        .count();
+    assert!(n > 100, "ieee_paths: {n} `ieee_general` counters");
+    // The counter itself: a general path that is still taken.
+    bounds.push((
+        "ieee_general.std_logic_1164.to_01(std_ulogic_vector,std_ulogic)std_ulogic_vector".into(),
+        Min(120),
+    ));
+    let b: Vec<(&str, Bound)> = bounds.iter().map(|(k, b)| (k.as_str(), *b)).collect();
+    check_bounds("ieee_paths", r, &b);
+}
+
+#[test]
+fn ieee_paths() {
+    let d = tempdir("ieee_paths");
+    let r = run_design(
+        &d,
+        "ieee_paths",
+        include_str!("perf/ieee_paths.vhd"),
+        "interp",
+        &[],
+    );
+    let b = table_bounds(&r, "ieee_general.", IEEE_GENERAL);
+    ieee_paths_check(&r, b);
+}
 case!(elem_loops, "acc=", &[], [("ops", Max(27715))]);
 case!(wide_vec, "wide=0", &[], [("ops", Max(1997254))]);
 case!(
@@ -1811,6 +1906,241 @@ mod clift {
             ("cb_native", Max(4)),
         ]
     );
+
+    // `perf/ieee_paths.vhd` compiled: native calls per key (`cb_native` of `YAVS_COUNTERS=pc`), an
+    // unlisted key 0 (computed in place on every call); the in-place ops are listed for their calls
+    // on more than 64 elements. A new path updates this table in the same commit.
+    const IEEE_NATIVE_CALLS: &[(&str, u64)] = &[
+        (r#"numeric_std."*"(integer,signed)signed"#, 87),
+        (r#"numeric_std."*"(integer,unsigned)unsigned"#, 87),
+        (r#"numeric_std."*"(signed,integer)signed"#, 87),
+        (r#"numeric_std."*"(signed,signed)signed"#, 174),
+        (r#"numeric_std."*"(unsigned,integer)unsigned"#, 87),
+        (r#"numeric_std."*"(unsigned,unsigned)unsigned"#, 174),
+        (r#"numeric_std."+"(integer,signed)signed"#, 58),
+        (r#"numeric_std."+"(integer,unsigned)unsigned"#, 58),
+        (r#"numeric_std."+"(signed,integer)signed"#, 58),
+        (r#"numeric_std."+"(signed,signed)signed"#, 58),
+        (r#"numeric_std."+"(unsigned,integer)unsigned"#, 116),
+        (r#"numeric_std."+"(unsigned,unsigned)unsigned"#, 174),
+        (r#"numeric_std."-"(integer,signed)signed"#, 58),
+        (r#"numeric_std."-"(integer,unsigned)unsigned"#, 58),
+        (r#"numeric_std."-"(signed)signed"#, 116),
+        (r#"numeric_std."-"(signed,integer)signed"#, 58),
+        (r#"numeric_std."-"(signed,signed)signed"#, 58),
+        (r#"numeric_std."-"(unsigned,integer)unsigned"#, 58),
+        (r#"numeric_std."-"(unsigned,unsigned)unsigned"#, 116),
+        (r#"numeric_std."/"(integer,unsigned)unsigned"#, 58),
+        (r#"numeric_std."/"(signed,integer)signed"#, 58),
+        (r#"numeric_std."/"(signed,signed)signed"#, 58),
+        (r#"numeric_std."/"(unsigned,integer)unsigned"#, 58),
+        (r#"numeric_std."/"(unsigned,unsigned)unsigned"#, 58),
+        (r#"numeric_std."/="(signed,signed)boolean"#, 60),
+        (r#"numeric_std."/="(unsigned,integer)boolean"#, 60),
+        (r#"numeric_std."<"(signed,signed)boolean"#, 60),
+        (r#"numeric_std."<"(unsigned,unsigned)boolean"#, 58),
+        (r#"numeric_std."<="(unsigned,unsigned)boolean"#, 60),
+        (r#"numeric_std."="(integer,signed)boolean"#, 60),
+        (r#"numeric_std."="(unsigned,unsigned)boolean"#, 60),
+        (r#"numeric_std.">"(signed,integer)boolean"#, 60),
+        (r#"numeric_std.">"(unsigned,integer)boolean"#, 60),
+        (r#"numeric_std.">="(integer,unsigned)boolean"#, 60),
+        (r#"numeric_std.">="(signed,signed)boolean"#, 60),
+        (r#"numeric_std."?/="(unsigned,unsigned)std_ulogic"#, 60),
+        (r#"numeric_std."?<"(unsigned,unsigned)std_ulogic"#, 60),
+        (r#"numeric_std."?<="(signed,signed)std_ulogic"#, 60),
+        (r#"numeric_std."?="(unsigned,unsigned)std_ulogic"#, 60),
+        (r#"numeric_std."?>"(signed,integer)std_ulogic"#, 60),
+        (r#"numeric_std."?>="(unsigned,integer)std_ulogic"#, 60),
+        (r#"numeric_std."abs"(signed)signed"#, 116),
+        (r#"numeric_std."and"(signed)std_ulogic"#, 150),
+        (r#"numeric_std."and"(signed,signed)signed"#, 60),
+        (r#"numeric_std."and"(unsigned,unsigned)unsigned"#, 60),
+        (r#"numeric_std."mod"(integer,unsigned)unsigned"#, 58),
+        (r#"numeric_std."mod"(signed,integer)signed"#, 58),
+        (r#"numeric_std."mod"(signed,signed)signed"#, 58),
+        (r#"numeric_std."mod"(unsigned,integer)unsigned"#, 58),
+        (r#"numeric_std."mod"(unsigned,unsigned)unsigned"#, 58),
+        (r#"numeric_std."nand"(unsigned,unsigned)unsigned"#, 60),
+        (r#"numeric_std."nor"(unsigned,unsigned)unsigned"#, 60),
+        (r#"numeric_std."not"(signed)signed"#, 60),
+        (r#"numeric_std."not"(unsigned)unsigned"#, 60),
+        (r#"numeric_std."or"(unsigned,unsigned)unsigned"#, 118),
+        (r#"numeric_std."rem"(integer,unsigned)unsigned"#, 58),
+        (r#"numeric_std."rem"(signed,integer)signed"#, 58),
+        (r#"numeric_std."rem"(signed,signed)signed"#, 58),
+        (r#"numeric_std."rem"(unsigned,integer)unsigned"#, 58),
+        (r#"numeric_std."rem"(unsigned,unsigned)unsigned"#, 58),
+        (r#"numeric_std."xnor"(unsigned,unsigned)unsigned"#, 60),
+        (r#"numeric_std."xor"(signed,signed)signed"#, 1820),
+        (r#"numeric_std."xor"(unsigned)std_ulogic"#, 150),
+        (r#"numeric_std."xor"(unsigned,unsigned)unsigned"#, 2836),
+        ("numeric_std.maximum(signed,signed)signed", 60),
+        ("numeric_std.maximum(unsigned,integer)unsigned", 60),
+        ("numeric_std.maximum(unsigned,unsigned)unsigned", 60),
+        ("numeric_std.minimum(signed,integer)signed", 60),
+        ("numeric_std.minimum(signed,signed)signed", 60),
+        ("numeric_std.minimum(unsigned,unsigned)unsigned", 60),
+        ("numeric_std.resize(signed,integer)signed", 180),
+        ("numeric_std.resize(unsigned,integer)unsigned", 534),
+        ("numeric_std.rotate_left(unsigned,integer)unsigned", 118),
+        ("numeric_std.rotate_right(signed,integer)signed", 60),
+        ("numeric_std.rotate_right(unsigned,integer)unsigned", 60),
+        ("numeric_std.shift_left(signed,integer)signed", 60),
+        ("numeric_std.shift_left(unsigned,integer)unsigned", 60),
+        ("numeric_std.shift_right(signed,integer)signed", 150),
+        ("numeric_std.shift_right(unsigned,integer)unsigned", 178),
+        ("numeric_std.std_match(unsigned,unsigned)boolean", 120),
+        ("numeric_std.to_integer(signed)integer", 60),
+        ("numeric_std.to_integer(unsigned)integer", 60),
+        ("numeric_std.to_signed(integer,integer)signed", 60),
+        ("numeric_std.to_unsigned(integer,integer)unsigned", 118),
+        (
+            r#"std_logic_1164."and"(std_ulogic_vector,std_ulogic_vector)std_ulogic_vector"#,
+            60,
+        ),
+        (
+            r#"std_logic_1164."not"(std_ulogic_vector)std_ulogic_vector"#,
+            60,
+        ),
+        (
+            r#"std_logic_1164."or"(std_ulogic_vector,std_ulogic_vector)std_ulogic_vector"#,
+            60,
+        ),
+        (
+            r#"std_logic_1164."xor"(std_ulogic_vector,std_ulogic_vector)std_ulogic_vector"#,
+            1547,
+        ),
+        ("std_logic_1164.is_x(std_ulogic_vector)boolean", 150),
+        (
+            "std_logic_1164.to_bitvector(std_ulogic_vector,bit)bit_vector",
+            150,
+        ),
+        ("std_logic_1164.to_hstring(std_ulogic_vector)string", 5),
+        (
+            "std_logic_1164.to_x01(std_ulogic_vector)std_ulogic_vector",
+            150,
+        ),
+        (r#"std_logic_arith."*"(signed,signed)signed"#, 87),
+        (r#"std_logic_arith."*"(unsigned,unsigned)unsigned"#, 87),
+        (r#"std_logic_arith."+"(signed,signed)signed"#, 58),
+        (r#"std_logic_arith."+"(unsigned,integer)unsigned"#, 174),
+        (r#"std_logic_arith."+"(unsigned,unsigned)unsigned"#, 116),
+        (r#"std_logic_arith."-"(integer,unsigned)unsigned"#, 58),
+        (r#"std_logic_arith."-"(signed,integer)signed"#, 58),
+        (r#"std_logic_arith."-"(unsigned,unsigned)unsigned"#, 116),
+        (r#"std_logic_arith."/="(signed,signed)boolean"#, 60),
+        (r#"std_logic_arith."<"(unsigned,unsigned)boolean"#, 58),
+        (r#"std_logic_arith."<="(signed,signed)boolean"#, 60),
+        (r#"std_logic_arith."="(unsigned,unsigned)boolean"#, 60),
+        (r#"std_logic_arith.">"(signed,integer)boolean"#, 60),
+        (r#"std_logic_arith.">="(unsigned,unsigned)boolean"#, 60),
+        ("std_logic_arith.conv_signed(integer,integer)signed", 60),
+        (
+            "std_logic_arith.conv_std_logic_vector(integer,integer)std_ulogic_vector",
+            60,
+        ),
+        (
+            "std_logic_arith.conv_std_logic_vector(unsigned,integer)std_ulogic_vector",
+            60,
+        ),
+        ("std_logic_arith.conv_unsigned(signed,integer)unsigned", 60),
+        (
+            "std_logic_arith.ext(std_ulogic_vector,integer)std_ulogic_vector",
+            60,
+        ),
+        ("std_logic_arith.shl(unsigned,unsigned)unsigned", 60),
+        ("std_logic_arith.shr(signed,unsigned)signed", 60),
+        (
+            "std_logic_arith.sxt(std_ulogic_vector,integer)std_ulogic_vector",
+            60,
+        ),
+        (
+            r#"std_logic_signed."+"(std_ulogic_vector,std_ulogic_vector)std_ulogic_vector"#,
+            60,
+        ),
+        (
+            r#"std_logic_signed."-"(std_ulogic_vector,integer)std_ulogic_vector"#,
+            60,
+        ),
+        (
+            r#"std_logic_signed."<"(std_ulogic_vector,std_ulogic_vector)boolean"#,
+            60,
+        ),
+        (
+            r#"std_logic_unsigned."*"(std_ulogic_vector,std_ulogic_vector)std_ulogic_vector"#,
+            90,
+        ),
+        (
+            r#"std_logic_unsigned."+"(std_ulogic_vector,integer)std_ulogic_vector"#,
+            60,
+        ),
+        (
+            r#"std_logic_unsigned."+"(std_ulogic_vector,std_ulogic_vector)std_ulogic_vector"#,
+            60,
+        ),
+        (
+            r#"std_logic_unsigned."-"(integer,std_ulogic_vector)std_ulogic_vector"#,
+            60,
+        ),
+        (
+            r#"std_logic_unsigned."-"(std_ulogic_vector,std_ulogic_vector)std_ulogic_vector"#,
+            60,
+        ),
+        (
+            r#"std_logic_unsigned."<"(std_ulogic_vector,std_ulogic_vector)boolean"#,
+            60,
+        ),
+        (
+            r#"std_logic_unsigned."="(std_ulogic_vector,std_ulogic_vector)boolean"#,
+            60,
+        ),
+        (
+            r#"std_logic_unsigned.">"(std_ulogic_vector,integer)boolean"#,
+            90,
+        ),
+        (
+            "std_logic_unsigned.shl(std_ulogic_vector,std_ulogic_vector)std_ulogic_vector",
+            60,
+        ),
+        (
+            "std_logic_unsigned.shr(std_ulogic_vector,std_ulogic_vector)std_ulogic_vector",
+            60,
+        ),
+    ];
+
+    #[test]
+    fn ieee_paths() {
+        let d = tempdir("clift_ieee_paths");
+        let mut r = run_design_env(
+            &d,
+            "ieee_paths",
+            include_str!("perf/ieee_paths.vhd"),
+            "clift",
+            &["--verbose"],
+            &[("YAVS_COUNTERS", "pc")],
+        );
+        assert!(
+            !r.stderr.contains("stays interpreted"),
+            "ieee_paths: {}",
+            r.stderr
+        );
+        let mut calls: BTreeMap<String, u64> = IEEE_NATIVE_CALLS
+            .iter()
+            .map(|(k, _)| (format!("ieee_calls.{k}"), 0))
+            .collect();
+        for (k, v) in &r.counters {
+            if let Some(rest) = k.strip_prefix("cb_native.yavs.ieee.") {
+                let key = rest.rsplit_once(".pc").map_or(rest, |p| p.0);
+                let key = key.split_once('@').map_or(key, |p| p.0);
+                *calls.entry(format!("ieee_calls.{key}")).or_insert(0) += v;
+            }
+        }
+        r.counters.extend(calls);
+        let mut b = table_bounds(&r, "ieee_general.", IEEE_GENERAL);
+        b.extend(table_bounds(&r, "ieee_calls.", IEEE_NATIVE_CALLS));
+        ieee_paths_check(&r, b);
+    }
 }
 
 /// A pure function that reads a signal outside it (a warning under `--relaxed`) is not a function of

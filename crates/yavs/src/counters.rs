@@ -104,6 +104,10 @@ pub fn report(s: yavs_kernel::Stats, rt: Option<&yavs_interp::Runtime>) {
         rows.push(("count_copies", copies));
         rows.push(("count_withdrawn", withdrawn));
     }
+    // The calls of each native `ieee` subprogram that ran its general path (every build).
+    let ieee: Vec<(String, u64)> = rt
+        .map(|rt| yavs_interp::ieee_general(&rt.prog))
+        .unwrap_or_default();
     #[cfg(feature = "llvm")]
     {
         let l = |i: usize| LLVM[i].load(std::sync::atomic::Ordering::Relaxed);
@@ -113,6 +117,9 @@ pub fn report(s: yavs_kernel::Stats, rt: Option<&yavs_interp::Runtime>) {
     }
     for (name, v) in rows {
         eprintln!("counters: {name}={v}");
+    }
+    for (key, v) in ieee {
+        eprintln!("counters: ieee_general.{key}={v}");
     }
     // The callbacks of compiled code, by kind (debug builds and `op-census`; both generators).
     #[cfg(any(feature = "llvm", feature = "clift"))]

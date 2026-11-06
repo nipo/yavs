@@ -8209,6 +8209,11 @@ section 5). Sensitivity checked by turning optimisations off (`YAVS_NO_MEMO`, `Y
 `YAVS_NO_INLINE`, `YAVS_NO_NATIVE_IEEE`) and by `--cov` (skipping and idle skip off): the matching designs fail
 with the counter named.
 
+Native `ieee` work (#1108): the decided path of every `ieee::parse` op (one-word path, computed in place) in
+`crates/yavs-interp/tests/common/ieee_paths.rs`, checked against `lookup_fast`, `ieee_layout` and the Cranelift
+arms; the counter `ieee_general.<key>` (a native's general path or a call given back to the body) and the native
+calls of compiled code per key, bounded on `perf/ieee_paths.vhd` under the interpreter and `--tier=clift`.
+
 ## Sampling profiler, `yavs run --profile[=FILE]` (#580, 2026-10-23)
 
 `--profile` prints the busiest processes (instance path, file:line), instances, subprograms and interpreted source lines to stderr

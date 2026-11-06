@@ -1259,3 +1259,67 @@ fn search_loops_match_the_interpreter() {
         assert!(scans() > before, "no loop went through the helper");
     }
 }
+
+#[path = "../../yavs-interp/tests/common/ieee_paths.rs"]
+mod ieee_paths;
+
+/// Every op whose row says compiled code computes it in place compiles in place with no note: a
+/// dropped arm leaves the function interpreted.
+#[test]
+fn in_place_ieee_ops_have_their_arms() {
+    let ops = ieee_paths::every_op();
+    ieee_paths::assert_every_row_reached(&ops);
+    let mut n = 0;
+    for (op, key) in ops.iter().filter(|(op, _)| ieee_paths::row(*op).in_place) {
+        let sym = format!("yavs.ieee.{key}");
+        let regs = yavs_ir::ieee::arg_regs(key);
+        let mut pb = ProgramBuilder::new();
+        let native = pb.native(&sym, None);
+        let f = pb.declare("f", FuncKind::Function, None);
+        let mut fb = pb.define(f);
+        let slots: Vec<_> = (0..regs)
+            .map(|i| {
+                fb.param(
+                    &format!("a{i}"),
+                    Width::B8,
+                    ParamClass::Value,
+                    Mode::In,
+                    None,
+                )
+            })
+            .collect();
+        stmt(&mut fb);
+        let mut rs = Vec::new();
+        for s in slots {
+            let p = fb.addr(AddrSpace::Frame, s);
+            rs.push(load(&mut fb, p, Width::B8));
+        }
+        let args = fb.regs(&rs);
+        let dst = fb.reg(RegTy::I64);
+        let call = Inst::CallNative {
+            native,
+            args,
+            dst: Some(dst),
+        };
+        fb.emit(call);
+        fb.emit(Inst::Ret { v: Some(dst) });
+        fb.finish();
+        let prog = pb.finish().unwrap();
+        // The call must reach the in-place lowering, or a missing arm would compile as a call.
+        let func = prog.func(f).unwrap();
+        assert!(yavs_llvm::rt::frame_direct(&prog, func, &call), "{key}");
+        assert!(
+            yavs_interp::light_native(&prog, func, native, args),
+            "{key}"
+        );
+        assert_eq!(
+            yavs_llvm::native::ieee_fast(&prog, func, native, args, Some(dst)),
+            Some(*op),
+            "{key}"
+        );
+        let tier = yavs_clift::compile(&prog, usize::MAX).unwrap();
+        assert!(tier.notes.is_empty(), "{key} ({op:?}): {:?}", tier.notes);
+        n += 1;
+    }
+    assert!(n > 100, "{n} in-place ops");
+}

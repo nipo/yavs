@@ -44,6 +44,63 @@ pub fn ops_executed() -> Option<u64> {
     None
 }
 
+static IEEE_ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+static IEEE: std::sync::Mutex<Option<std::collections::HashMap<String, u64>>> =
+    std::sync::Mutex::new(None);
+
+/// Whether the general paths of the `ieee` natives are counted (`YAVS_COUNTERS` set, every
+/// build): one load per general path when off.
+#[inline]
+pub(crate) fn ieee_on() -> bool {
+    *IEEE_ON.get_or_init(|| std::env::var_os("YAVS_COUNTERS").is_some())
+}
+
+/// The key of a native `ieee` symbol without the body's function id, which moves with any
+/// change of the library.
+fn ieee_key(symbol: &str) -> Option<&str> {
+    let k = yavs_ir::ieee::symbol_key(symbol)?;
+    Some(k.split_once('@').map_or(k, |k| k.0))
+}
+
+/// One call of the native `symbol` that ran its general path or gave the call back.
+#[cold]
+#[inline(never)]
+pub(crate) fn note_ieee(symbol: &str) {
+    let Some(key) = ieee_key(symbol) else {
+        return;
+    };
+    *IEEE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get_or_insert_with(Default::default)
+        .entry(key.to_string())
+        .or_insert(0) += 1;
+}
+
+/// Per native `ieee` key of `prog`, the calls that ran the general path (the work counters
+/// `ieee_general.<key>`, 0 included), by key.
+pub fn ieee_general(prog: &yavs_ir::Program) -> Vec<(String, u64)> {
+    let counts = IEEE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone()
+        .unwrap_or_default();
+    let mut keys: Vec<String> = prog
+        .natives
+        .iter()
+        .filter_map(|(_, n)| ieee_key(&n.symbol))
+        .map(str::to_string)
+        .collect();
+    keys.sort();
+    keys.dedup();
+    keys.into_iter()
+        .map(|k| {
+            let n = counts.get(&k).copied().unwrap_or(0);
+            (k, n)
+        })
+        .collect()
+}
+
 /// Print the census (the `top` most frequent ops and pairs) to stderr; nothing without
 /// `op-census`.
 pub fn dump(top: usize) {

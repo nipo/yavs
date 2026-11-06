@@ -30,7 +30,8 @@ fn yavs(dir: &Path, env: &[(&str, &str)], args: &[&str]) -> Run {
     let all = String::from_utf8_lossy(&o.stderr).into_owned();
     let counters = all
         .lines()
-        .filter_map(|l| l.strip_prefix("counters: ")?.split_once('='))
+        // The value follows the last `=`: `ieee_general` keys spell operators such as "=".
+        .filter_map(|l| l.strip_prefix("counters: ")?.rsplit_once('='))
         .map(|(k, v)| (k.to_string(), v.parse().expect("counter value")))
         .collect();
     // What a run says apart from the counters (those differ by design).

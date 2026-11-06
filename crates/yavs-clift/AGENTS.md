@@ -29,7 +29,7 @@ tier of the release archives (user, 2026-10-28: one archive per platform); tunin
 | `src/cache.rs` | The compiled-code cache: `set_cache`, `cache_stats`, `Kv` (the objects store of the work library as Cranelift's `CacheKvStore`), `pre_key`, `pre_get`, `pre_note`, `pre_check`, `check` (the key made before the body, its entry `Pre`, `YAVS_CLIFT_PREKEY_CHECK`), the list of compiled functions the policy probes, `Routes` (the first route of each function, #1035) |
 | `crates/yavs/tests/clift_prekey.rs` | A warm run lowers nothing and the check agrees (1 and 4 threads, shuffled), a caller that misses over a linked callee, bad and foreign entries, and in debug builds the mutation test: each input left out (`YAVS_CLIFT_PREKEY_DROP`) and changed is caught |
 | `tests/stable_keys.rs` | A body does not follow what the policy compiles with it; another design misses (one test: the store is one per process) |
-| `tests/tier.rs` | The LLVM tier's tier-against-interpreter tests, run against this tier |
+| `tests/tier.rs` | The LLVM tier's tier-against-interpreter tests, run against this tier; `in_place_ieee_ops_have_their_arms`: every op `yavs-interp/tests/common/ieee_paths.rs` decides is computed in place compiles in place with no note (a dropped arm of `ieee_native` leaves its function interpreted). A moved or new `ieee` path updates that table and `perf.rs` `IEEE_NATIVE_CALLS` in the same commit |
 
 ## 3. Design decisions that bind this module
 
