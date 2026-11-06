@@ -7095,6 +7095,7 @@ impl Gen {
                     | Op::ShiftFn(_)
                     | Op::Div { .. }
                     | Op::Syn(Syn::Shift { .. })
+                    | Op::Syn(Syn::Unary { neg: false, .. } | Syn::Unary { abs: true, .. })
             );
             // The operands in argument order.
             // `std_match` and `?=` / `?/=` take every element value: all four planes.
@@ -7472,7 +7473,7 @@ impl Gen {
                 // common length (an integer: the low bits of its two's complement, so no fit
                 // guard), then the plain operation.
                 Op::Syn(Syn::Oper { kind, l, r, keep }) => {
-                    if l != Opd::I && r != Opd::I {
+                    if l.is_vec() && r.is_vec() {
                         let ((n1, b1, _), (n2, b2, _)) = (arrs[0], arrs[1]);
                         let p = if l == Opd::U && r == Opd::S {
                             add(n1, c1)
@@ -7503,9 +7504,16 @@ impl Gen {
                             ))),
                         }
                     } else {
-                        let vec_first = r == Opd::I;
+                        let vec_first = !r.is_vec();
                         let (n, bits, mask) = arrs[0];
-                        let iv = ints[0];
+                        let iv = if l == Opd::B || r == Opd::B {
+                            // A `std_ulogic`: `0 1 L H` (codes 2, 3, 6, 7) are its low bit.
+                            let c6 = sub(or(ints[0], self.c64(4)), self.c64(6));
+                            ok(cmp(LLVMIntULT, c6, self.c64(2)));
+                            and(ints[0], c1)
+                        } else {
+                            ints[0]
+                        };
                         match kind {
                             SynKind::Add | SynKind::Sub => {
                                 let (x, y) = if vec_first { (bits, iv) } else { (iv, bits) };
@@ -7541,6 +7549,37 @@ impl Gen {
                                 let (x, y) = if vec_first { (x, y) } else { (y, x) };
                                 Out::Scalar(self.zext(cmp(int_pred(k, true), x, y)))
                             }
+                        }
+                    }
+                }
+                // Unary `+ - abs` of the Synopsys packages: `-` is `0 - L` as `(n-1 downto 0)`,
+                // the operand stays as it is for `+` and a non-negative `abs` (no weak bit: `pure`).
+                Op::Syn(Syn::Unary { neg, abs, keep }) => {
+                    let (n, bits, _) = arrs[0];
+                    let (le, ri, di) = (self.ld(c, rs[1]), self.ld(c, rs[2]), self.ld(c, rs[3]));
+                    let ng = sub(c0, bits);
+                    if !neg {
+                        Out::Bounds(n, bits, le, ri, di)
+                    } else if !abs {
+                        if keep {
+                            Out::Bounds(n, ng, le, ri, di)
+                        } else {
+                            Out::Vector(n, ng, false)
+                        }
+                    } else {
+                        let flip = cmp(LLVMIntNE, and(lshr(bits, sub(n, c1)), c1), c0);
+                        let res = pick(flip, ng, bits);
+                        if keep {
+                            Out::Bounds(n, res, le, ri, di)
+                        } else {
+                            let top = sub(n, c1);
+                            Out::Bounds(
+                                n,
+                                res,
+                                pick(flip, top, le),
+                                pick(flip, c0, ri),
+                                pick(flip, c1, di),
+                            )
                         }
                     }
                 }

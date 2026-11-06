@@ -1,0 +1,1 @@
+The `+` and `-` of `std_logic_arith`, `std_logic_unsigned` and `std_logic_signed` with a `std_logic` operand, their unary `-` and `abs`, and the unary `+` of `std_logic_unsigned` and `std_logic_signed`, now run as native operations that compiled code computes in place on short vectors.

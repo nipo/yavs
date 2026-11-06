@@ -468,9 +468,10 @@ pub fn ieee_layout(op: yavs_ir::ieee::Op) -> Option<&'static [Arg]> {
         Op::Syn(Syn::Conv {
             from_signed: None, ..
         }) => &[Arg::Int, Arg::Int],
+        Op::Syn(Syn::Unary { .. }) => &[Arg::Arr],
         Op::Syn(Syn::Oper { l, r, .. }) => match (l, r) {
-            (Opd::I, _) => &[Arg::Int, Arg::Arr],
-            (_, Opd::I) => &[Arg::Arr, Arg::Int],
+            (Opd::I | Opd::B, _) => &[Arg::Int, Arg::Arr],
+            (_, Opd::I | Opd::B) => &[Arg::Arr, Arg::Int],
             _ => &[Arg::Arr, Arg::Arr],
         },
         Op::ToUnsigned | Op::ToSigned => &[Arg::Int, Arg::Int],

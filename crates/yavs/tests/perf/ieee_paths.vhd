@@ -1,6 +1,6 @@
 -- Every native ieee operation with a one-word or wide path, 30 times on 8, 32, 64, 65 and 128
--- elements, both directions, signed, integer and Synopsys forms; every result goes into the
--- checksum. tests/perf.rs bounds the general paths and compiled code's native calls per key.
+-- elements, both directions, signed, integer, std_ulogic and Synopsys forms; every result goes
+-- into the checksum. tests/perf.rs bounds the general paths and compiled code's native calls per key.
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -105,6 +105,7 @@ begin
     variable x, y, s : std_logic_vector(W - 1 downto 0);
     variable xp : std_logic_vector(2 * W - 1 downto 0);
     variable acc, i : integer := 0;
+    variable b : std_ulogic;
     procedure mix(c : boolean) is
     begin
       if c then acc := (acc * 3 + 1) mod 1000003; else acc := (acc * 5 + 2) mod 1000003; end if;
@@ -145,6 +146,16 @@ begin
       acc := (acc + conv_integer(x(19 mod W downto 0))) mod 1000003;
       s := s xor ieee.std_logic_signed."+"(x, y) xor ieee.std_logic_signed."-"(x, i);
       mix(ieee.std_logic_signed."<"(x, y));
+      -- A std_ulogic operand of + and -, and the unary operators.
+      b := ux(n mod W);
+      ur := ux + b; s := s xor std_logic_vector(ur);
+      ur := b - ux; s := s xor std_logic_vector(ur);
+      sr := sx - b; s := s xor std_logic_vector(sr);
+      sr := b + sx; s := s xor std_logic_vector(sr);
+      s := s xor (x + b) xor (b - y) xor ieee.std_logic_signed."-"(x, b) xor ieee.std_logic_signed."+"(b, y);
+      sr := -sx; s := s xor std_logic_vector(sr);
+      sr := abs sy; s := s xor std_logic_vector(sr);
+      s := s xor (+x) xor ieee.std_logic_signed."-"(x) xor ieee.std_logic_signed."abs"(y) xor ieee.std_logic_signed."+"(y);
       wait for 1 ns;
     end loop;
     report "W=" & integer'image(W) & " syn sum=" & to_hstring(s) & " " & integer'image(acc);

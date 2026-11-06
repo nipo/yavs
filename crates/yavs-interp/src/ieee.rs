@@ -2262,14 +2262,15 @@ fn fast_div<const KIND: u8, const SIGNED: bool, const FORM: u8>(
 }
 
 /// A Synopsys operator (`K`: 0 `+`, 1 `-`, 2 `*`, 3 and up `CMPS`; `LK`, `RK`: 0 unsigned, 1
-/// signed, 2 integer) on 1 to 64 elements of `0 1 L H` with the body's lengths and integer
-/// truncation (decisions.md); `None`: the general path. `KEEP`: the operand's own bounds.
+/// signed, 2 integer, 3 `std_ulogic`) on 1 to 64 elements of `0 1 L H` with the body's lengths
+/// and integer truncation (decisions.md); `None`: the general path. `KEEP`: the operand's own
+/// bounds.
 fn fast_oper<const K: u8, const LK: u8, const RK: u8, const KEEP: bool>(
     m: &mut Machine,
     a: &[u64],
 ) -> Option<u64> {
     let cmp = |ord: std::cmp::Ordering| Some(u64::from(holds(CMPS[K as usize - 3], ord)));
-    if LK != 2 && RK != 2 {
+    if LK < 2 && RK < 2 {
         let (l, r) = (small(m, a, 0)?, small(m, a, A1)?);
         let p = l.n + usize::from(LK == 0 && RK == 1);
         let q = r.n + usize::from(LK == 1 && RK == 0);
@@ -2287,12 +2288,13 @@ fn fast_oper<const K: u8, const LK: u8, const RK: u8, const KEEP: bool>(
             _ => cmp(x.cmp(&y)),
         };
     }
-    let vec_first = RK == 2;
+    let vec_first = RK >= 2;
     let (v, i) = if vec_first {
         (small(m, a, 0)?, cell(a, A1)?)
     } else {
         (small(m, a, 1)?, cell(a, 0)?)
     };
+    let i = if LK == 3 || RK == 3 { bit_of(i)? } else { i };
     let iv = i as u64;
     match K {
         0 | 1 => {
@@ -2450,7 +2452,7 @@ fn oper_wide<const K: u8, const LK: u8, const RK: u8, const KEEP: bool>(
 ) -> Ret {
     let bin = |v: &Vh| v.v.to_bitvec().filter(|b| !b.is_empty());
     let down = |b: &BitVec| Vh::down(LogicVec::from_bitvec(b));
-    if LK != 2 && RK != 2 {
+    if LK < 2 && RK < 2 {
         let (l, r) = (vh(m, a, 0)?, vh(m, a, A1)?);
         let (Some(x), Some(y)) = (bin(&l), bin(&r)) else {
             return Ok(None);
@@ -2469,13 +2471,20 @@ fn oper_wide<const K: u8, const LK: u8, const RK: u8, const KEEP: bool>(
             }
         };
     }
-    let vec_first = RK == 2;
+    let vec_first = RK >= 2;
     let (v, i) = if vec_first {
         (vh(m, a, 0)?, int(a, A1)?)
     } else {
         (vh(m, a, 1)?, int(a, 0)?)
     };
-    let Some(x) = bin(&v) else {
+    let (Some(x), Some(i)) = (
+        bin(&v),
+        if LK == 3 || RK == 3 {
+            bit_of(i)
+        } else {
+            Some(i)
+        },
+    ) else {
         return Ok(None);
     };
     let n = x.len();
@@ -2522,6 +2531,67 @@ fn oper<const K: u8, const LK: u8, const RK: u8, const KEEP: bool>(
     }
 }
 
+/// Unary `+`, `-` and `abs` of the Synopsys packages (`Syn::Unary`) on 1 to 64 elements of
+/// `0 1 L H`; an operand the body returns as it is (`+`, a non-negative `abs`) only without `L` or
+/// `H`, which it keeps. `None`: the body.
+fn fast_syn_unary<const NEG: bool, const ABS: bool, const KEEP: bool>(
+    m: &mut Machine,
+    a: &[u64],
+) -> Option<u64> {
+    let v = small(m, a, 0)?;
+    if !NEG || (ABS && v.bits >> (v.n - 1) & 1 == 0) {
+        return v
+            .pure
+            .then(|| put_small(m, v.n, v.bits, v.left, v.right, v.down).ok())?;
+    }
+    let r = v.bits.wrapping_neg();
+    if KEEP {
+        put_small(m, v.n, r, v.left, v.right, v.down).ok()
+    } else {
+        put_down(m, v.n, r).ok()
+    }
+}
+
+fn syn_unary<const NEG: bool, const ABS: bool, const KEEP: bool>(
+    m: &mut Machine,
+    _: Cx<'_, '_, '_>,
+    _: Option<TyId>,
+    a: &[u64],
+) -> Ret {
+    if let Some(v) = fast_syn_unary::<NEG, ABS, KEEP>(m, a) {
+        return Ok(Some(v));
+    }
+    general(m);
+    // Any length: the operand as it is (`+`, `abs` with a left element `0` or `L`, whatever the
+    // others are), else `0 - L` of `0 1 L H`; a null or a metavalue is the body's.
+    let v = vh(m, a, 0)?;
+    let n = v.v.len();
+    if !NEG || (ABS && n > 0 && matches!(v.v.get(n - 1), StdULogic::Zero | StdULogic::L)) {
+        return put(m, &v);
+    }
+    let Some(x) = v.v.to_bitvec().filter(|b| !b.is_empty()) else {
+        return fallback(m);
+    };
+    let mut out = Vh::down(LogicVec::from_bitvec(&BitVec::from_i64(n, 0).sub(&x)));
+    if KEEP {
+        (out.left, out.right, out.down) = (v.left, v.right, v.down);
+    }
+    put(m, &out)
+}
+
+/// The instance of `$f` for `Syn::Unary` (`+` is the same function whatever `keep` says).
+macro_rules! unary_pick {
+    ($f:ident, $t:ty, $neg:expr, $abs:expr, $keep:expr) => {
+        match ($neg, $abs, $keep) {
+            (false, _, _) => $f::<false, false, false> as $t,
+            (true, false, false) => $f::<true, false, false> as $t,
+            (true, false, true) => $f::<true, false, true> as $t,
+            (true, true, false) => $f::<true, true, false> as $t,
+            (true, true, true) => $f::<true, true, true> as $t,
+        }
+    };
+}
+
 fn oper_code(k: SynKind) -> u8 {
     match k {
         SynKind::Add => 0,
@@ -2536,7 +2606,14 @@ fn opd_code(o: Opd) -> u8 {
         Opd::U => 0,
         Opd::S => 1,
         Opd::I => 2,
+        Opd::B => 3,
     }
+}
+
+/// A `std_ulogic` operand of a Synopsys operator: `0 L` as 0, `1 H` as 1, `None` for a metavalue
+/// (the body's warning and all `X`).
+fn bit_of(code: i64) -> Option<i64> {
+    matches!(code, 2 | 3 | 6 | 7).then_some(code & 1)
 }
 
 /// The forms of one operator kind: every pair of operands but two integers.
@@ -2555,6 +2632,14 @@ macro_rules! oper_forms {
             (2, 0, true) => $f::<$k, 2, 0, true> as $t,
             (2, 1, false) => $f::<$k, 2, 1, false> as $t,
             (2, 1, true) => $f::<$k, 2, 1, true> as $t,
+            (0, 3, false) => $f::<$k, 0, 3, false> as $t,
+            (0, 3, true) => $f::<$k, 0, 3, true> as $t,
+            (1, 3, false) => $f::<$k, 1, 3, false> as $t,
+            (1, 3, true) => $f::<$k, 1, 3, true> as $t,
+            (3, 0, false) => $f::<$k, 3, 0, false> as $t,
+            (3, 0, true) => $f::<$k, 3, 0, true> as $t,
+            (3, 1, false) => $f::<$k, 3, 1, false> as $t,
+            (3, 1, true) => $f::<$k, 3, 1, true> as $t,
             _ => return None,
         }
     };
@@ -3151,6 +3236,7 @@ pub(crate) fn lookup(symbol: &str) -> Option<NativeFn> {
         },
         Op::Syn(Syn::ToInt { signed: false }) => syn_to_int::<false>,
         Op::Syn(Syn::ToInt { signed: true }) => syn_to_int::<true>,
+        Op::Syn(Syn::Unary { neg, abs, keep }) => unary_pick!(syn_unary, NativeFn, neg, abs, keep),
         Op::Syn(Syn::Mult { signed: false }) => syn_mult::<false>,
         Op::Syn(Syn::Mult { signed: true }) => syn_mult::<true>,
         Op::Syn(Syn::MakeBinary) => make_binary,
@@ -3340,6 +3426,9 @@ pub(crate) fn lookup_fast(symbol: &str) -> Option<FastFn> {
         },
         Op::Syn(Syn::ToInt { signed: false }) => fast_syn_to_int::<false>,
         Op::Syn(Syn::ToInt { signed: true }) => fast_syn_to_int::<true>,
+        Op::Syn(Syn::Unary { neg, abs, keep }) => {
+            unary_pick!(fast_syn_unary, FastFn, neg, abs, keep)
+        }
         Op::Syn(Syn::Conv {
             from_signed: Some(false),
             ..

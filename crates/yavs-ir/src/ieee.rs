@@ -90,12 +90,21 @@ pub enum SynKind {
 }
 
 /// An operand of such an operator: `unsigned` (or `std_logic_unsigned`'s vector), `signed` (or
-/// `std_logic_signed`'s), or an integer.
+/// `std_logic_signed`'s), an integer, or a `std_ulogic` (`+` and `-` only: `0 L` as 0, `1 H` as
+/// 1 added to the vector's length, a metavalue the body's).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Opd {
     U,
     S,
     I,
+    B,
+}
+
+impl Opd {
+    /// A vector operand, not an integer or a `std_ulogic`.
+    pub fn is_vec(self) -> bool {
+        matches!(self, Opd::U | Opd::S)
+    }
 }
 
 /// The helpers of the vendored Synopsys `std_logic_arith`, which hold the cost of its operators.
@@ -136,13 +145,22 @@ pub enum Syn {
         signed: bool,
     },
     /// An operator of `std_logic_arith`, `std_logic_unsigned` or `std_logic_signed` on two
-    /// operands (at most one an integer): the whole body in one call. `keep`: the result has
-    /// the vector operand's bounds (the `std_logic_vector` result with an integer), else
-    /// `(n-1 downto 0)`.
+    /// operands (at most one an integer or a `std_ulogic`): the whole body in one call. `keep`:
+    /// the result has the vector operand's bounds (the `std_logic_vector` result with an integer
+    /// or a `std_ulogic`), else `(n-1 downto 0)`.
     Oper {
         kind: SynKind,
         l: Opd,
         r: Opd,
+        keep: bool,
+    },
+    /// Unary `-` and `abs` of a `signed` or `std_logic_signed`'s vector, and `+` (`neg` false:
+    /// the operand as it is) of `std_logic_unsigned`'s and `std_logic_signed`'s: `-` is `0 - L`
+    /// as `(n-1 downto 0)`, `abs` the operand as it is when its left element is `0` or `L`;
+    /// `keep`: every result has the operand's bounds (`std_logic_unsigned`/`std_logic_signed`).
+    Unary {
+        neg: bool,
+        abs: bool,
         keep: bool,
     },
 }
@@ -540,6 +558,27 @@ pub fn parse(key: &str) -> Option<Op> {
             [a, b],
             r,
         ) => syn_oper(pkg, n, a, b, r),
+        // Not `+` of `std_logic_arith`: its body is `return L`, which costs less than a native
+        // beyond 64 elements.
+        ("std_logic_arith", n @ ("-" | "abs"), ["signed"], r)
+            if r == "signed" || r == "std_ulogic_vector" =>
+        {
+            Some(Op::Syn(Syn::Unary {
+                neg: true,
+                abs: n == "abs",
+                keep: false,
+            }))
+        }
+        (
+            p @ ("std_logic_unsigned" | "std_logic_signed"),
+            n @ ("+" | "-" | "abs"),
+            ["std_ulogic_vector"],
+            "std_ulogic_vector",
+        ) if n == "+" || p == "std_logic_signed" => Some(Op::Syn(Syn::Unary {
+            neg: n != "+",
+            abs: n == "abs",
+            keep: true,
+        })),
         ("math_real", "uniform", ["integer", "integer", "real"], "") => Some(Op::Uniform),
         ("std_logic_1164", n @ ("to_hstring" | "to_ostring"), ["std_ulogic_vector"], "string") => {
             Some(Op::Str(n == "to_ostring"))
@@ -590,10 +629,12 @@ fn syn_oper(pkg: &str, n: &str, a: &str, b: &str, r: &str) -> Option<Op> {
             Some(Opd::U)
         }
         ("signed", "std_logic_arith") | ("std_ulogic_vector", "std_logic_signed") => Some(Opd::S),
+        ("std_ulogic", _) => Some(Opd::B),
         _ => None,
     };
     let (l, rt) = (opd(a)?, opd(b)?);
-    if l == Opd::I && rt == Opd::I {
+    let bit = l == Opd::B || rt == Opd::B;
+    if (!l.is_vec() && !rt.is_vec()) || (bit && !(n == "+" || n == "-")) {
         return None;
     }
     let kind = match n {
@@ -609,7 +650,7 @@ fn syn_oper(pkg: &str, n: &str, a: &str, b: &str, r: &str) -> Option<Op> {
             _ => Cmp::Ne,
         }),
     };
-    let int_form = l == Opd::I || rt == Opd::I;
+    let int_form = !l.is_vec() || !rt.is_vec();
     if matches!(kind, SynKind::Cmp(_)) {
         return (r == "boolean").then_some(Op::Syn(Syn::Oper {
             kind,

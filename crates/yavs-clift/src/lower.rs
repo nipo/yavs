@@ -7446,6 +7446,7 @@ impl Gen<'_> {
                 | Op::ShiftFn(_)
                 | Op::Div { .. }
                 | Op::Syn(Syn::Shift { .. })
+                | Op::Syn(Syn::Unary { neg: false, .. } | Syn::Unary { abs: true, .. })
         );
         // `std_match` and `?=` / `?/=` take every element value: all four planes.
         let plane_op = matches!(
@@ -7943,7 +7944,7 @@ impl Gen<'_> {
                 })
             }
             Op::Syn(Syn::Oper { kind, l, r, keep }) => {
-                if l != Opd::I && r != Opd::I {
+                if l.is_vec() && r.is_vec() {
                     let ((n1, b1, _), (n2, b2, _)) = (arrs[0], arrs[1]);
                     let p = if l == Opd::U && r == Opd::S {
                         self.b.ins().iadd_imm_s(n1, 1)
@@ -7988,9 +7989,18 @@ impl Gen<'_> {
                         }
                     }
                 } else {
-                    let vec_first = r == Opd::I;
+                    let vec_first = !r.is_vec();
                     let (n, bits, mask) = arrs[0];
-                    let iv = ints[0];
+                    let iv = if l == Opd::B || r == Opd::B {
+                        // A `std_ulogic`: `0 1 L H` (codes 2, 3, 6, 7) are its low bit.
+                        let c = self.b.ins().bor_imm_s(ints[0], 4);
+                        let c = self.b.ins().iadd_imm_s(c, -6);
+                        let okb = self.b.ins().icmp_imm_s(IntCC::UnsignedLessThan, c, 2);
+                        self.guard(okb, fb);
+                        self.b.ins().band_imm_s(ints[0], 1)
+                    } else {
+                        ints[0]
+                    };
                     match kind {
                         SynKind::Add | SynKind::Sub => {
                             let (x, y) = if vec_first { (bits, iv) } else { (iv, bits) };
@@ -8030,6 +8040,37 @@ impl Gen<'_> {
                             let t = self.b.ins().icmp(int_cc(k, true), x, y);
                             Out::Scalar(self.b.ins().uextend(I64, t))
                         }
+                    }
+                }
+            }
+            // Unary `+ - abs` of the Synopsys packages: `-` is `0 - L` as `(n-1 downto 0)`, the
+            // operand stays as it is for `+` and a non-negative `abs` (no weak bit: `pure`).
+            Op::Syn(Syn::Unary { neg, abs, keep }) => {
+                let (n, bits, _) = arrs[0];
+                let (le, ri, di) = (self.ld(rs[1]), self.ld(rs[2]), self.ld(rs[3]));
+                let ng = self.b.ins().ineg(bits);
+                if !neg {
+                    Out::Bounds(n, bits, le, ri, di)
+                } else if !abs {
+                    if keep {
+                        Out::Bounds(n, ng, le, ri, di)
+                    } else {
+                        Out::Vector(n, ng, false)
+                    }
+                } else {
+                    let nm1 = self.b.ins().isub(n, c1);
+                    let sh = self.b.ins().ushr(bits, nm1);
+                    let top = self.b.ins().band(sh, c1);
+                    let flip = self.b.ins().icmp_imm_s(IntCC::NotEqual, top, 0);
+                    let res = self.b.ins().select(flip, ng, bits);
+                    if keep {
+                        Out::Bounds(n, res, le, ri, di)
+                    } else {
+                        let top = self.b.ins().iadd_imm_s(n, -1);
+                        let l2 = self.b.ins().select(flip, top, le);
+                        let r2 = self.b.ins().select(flip, c0, ri);
+                        let d2 = self.b.ins().select(flip, c1, di);
+                        Out::Bounds(n, res, l2, r2, d2)
                     }
                 }
             }

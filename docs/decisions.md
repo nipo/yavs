@@ -3386,9 +3386,26 @@ user's performance priority:
   vector) with no fit check, and `std_logic_unsigned`/`std_logic_signed` keep the vector's own
   bounds in the integer forms where the others return `(n-1 downto 0)`. Compiled code computes
   them in place (`ieee_layout`); `conv_unsigned` of a signed vector is not `resize` (a shrinking
-  `resize` keeps the sign bit), so it has its own arm. Not native: the forms with a `std_ulogic`
-  operand and unary `+ - abs` (unary `-` of a `signed` still reaches the binary one through
-  its body's `0 - L`).
+  `resize` keeps the sign bit), so it has its own arm.
+- **Synopsys forms with a `std_ulogic` operand and the unary operators (#1108, 2026-11-06):** `+`
+  and `-` of a vector and a `std_ulogic` (either side; `std_logic_arith` and the `std_logic`
+  forms of `std_logic_unsigned`/`std_logic_signed`) are `Syn::Oper` with the operand kind
+  `Opd::B`: the bodies extend the bit with zeros to the vector's length, so it is the integer form
+  with 0 or 1 (`0 L` and `1 H`; a metavalue is handed back for the body's warning and all `X`), and
+  the `std_logic_vector` forms keep the vector's bounds as the integer forms do. Unary `-` and
+  `abs` of `std_logic_arith`'s `signed`, `std_logic_unsigned`'s `+` and `std_logic_signed`'s three
+  are `Syn::Unary`: `+` and an `abs` whose left element is `0` or `L`
+  return the operand as it is (bounds, weak bits and metavalues kept, no warning), `-` and the
+  other `abs` are `0 - L` as `(n-1 downto 0)`, `std_logic_signed` keeps the operand's bounds for
+  every result; a null or a metavalue to negate goes to the body. Unary `-` and `abs` of
+  `numeric_std` (`Op::Neg`, `Op::Abs`) are not reused: their metavalue and null results differ.
+  Compiled code computes both in place up to 64 elements (an operand returned as it is only
+  without weak bits, `pure`); longer vectors take the `BitVec` paths. Not native, measured cheap
+  enough or rare (2026-11-06, default tier): unary `+` of `std_logic_arith` (`return L`, about 30
+  ns at any length; a native gained 15 ns up to 64 elements and lost 40 beyond), `conv_integer`
+  of an integer (inlined, 0 ns) or of a
+  `std_ulogic` (about 6 ns), `conv_unsigned`/`conv_signed`/`conv_std_logic_vector` of a
+  `std_ulogic` (about 65 ns, 2.5 times `+`).
 
 ## Skipped unchanged assignments (yavs-kernel, yavs-elab, #420, 2026-10-20)
 

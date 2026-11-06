@@ -1797,3 +1797,109 @@ fn guards_on_activity_match_the_interpreter() {
         .replace("guard_activity", "y");
     all_tiers_match("compiled_guard_activity", &src);
 }
+
+/// `+` and `-` with a `std_ulogic` operand and the unary `+`, `-` and `abs` of the Synopsys
+/// packages (`std_logic_arith`, and `std_logic_signed` or `std_logic_unsigned` on
+/// `std_logic_vector`): every bit value, weak bits, metavalues (the guard hands those calls to the
+/// body), lengths around 64, bounds that do not start at zero in both directions.
+fn syn_bit_src(pkg: &str) -> String {
+    let lv = if pkg == "signed" {
+        "img(lv + b) & img(b - lv) & img(lv - b) & img(b + lv) & img(+ lv) & img(- lv) & img(abs lv)"
+    } else {
+        "img(lv + b) & img(b - lv) & img(lv - b) & img(b + lv) & img(+ lv)"
+    };
+    r#"library ieee;
+use ieee.std_logic_1164.all;
+use ieee.std_logic_arith.all;
+use ieee.std_logic_PKG.all;
+entity y is end;
+architecture a of y is
+  function img(v : std_logic_vector) return string is
+  begin
+    return integer'image(v'left) & "," & integer'image(v'right) & "," &
+           boolean'image(v'ascending) & ":" & to_string(v) & " ";
+  end function;
+  function img(v : unsigned) return string is
+  begin
+    return img(std_logic_vector(v));
+  end function;
+  function img(v : signed) return string is
+  begin
+    return img(std_logic_vector(v));
+  end function;
+  function pick(i : natural; meta : boolean) return std_logic is
+  begin
+    if meta and i mod 7 = 3 then return std_logic'val(i mod 9); end if;
+    case (i * 5 + i / 3) mod 4 is
+      when 0 => return '0';
+      when 1 => return '1';
+      when 2 => return 'L';
+      when others => return 'H';
+    end case;
+  end function;
+  function down(n : natural; k : natural; meta : boolean) return unsigned is
+    variable r : unsigned(n + 4 downto 5);
+  begin
+    for i in r'range loop r(i) := pick(i * k, meta); end loop;
+    return r;
+  end function;
+  function up(n : natural; k : natural; meta : boolean) return unsigned is
+    variable r : unsigned(3 to n + 2);
+  begin
+    for i in r'range loop r(i) := pick(i * k + 1, meta); end loop;
+    return r;
+  end function;
+  function bits(x : unsigned; b : std_ulogic) return string is
+    constant lv : std_logic_vector(x'range) := std_logic_vector(x);
+  begin
+    return img(unsigned'(x + b)) & img(unsigned'(b + x)) & img(unsigned'(x - b)) &
+           img(unsigned'(b - x)) & img(signed'(signed(x) + b)) & img(signed'(b + signed(x))) &
+           img(signed'(signed(x) - b)) & img(signed'(b - signed(x))) &
+           img(std_logic_vector'(x + b)) & img(std_logic_vector'(b - signed(x))) & LV;
+  end function;
+  function unas(x : unsigned) return string is
+  begin
+    return img(unsigned'(+ x)) & img(signed'(+ signed(x))) & img(signed'(- signed(x))) &
+           img(signed'(abs signed(x))) & img(std_logic_vector'(+ x)) &
+           img(std_logic_vector'(- signed(x))) & img(std_logic_vector'(abs signed(x)));
+  end function;
+begin
+  process
+    constant la : integer_vector := (1, 2, 31, 32, 33, 63, 64, 65, 5, 16);
+    variable n : integer := 0;
+    variable w : unsigned(15 downto 0) := x"8001";
+    variable v : std_logic_vector(0 to 11) := x"801";
+    variable b : std_ulogic;
+  begin
+    for i in la'range loop
+      for k in 0 to 9 loop
+        for meta in boolean'range loop
+          b := std_ulogic'val((k + i) mod 9);
+          report bits(down(la(i), k, meta), b) & "| " & unas(up(la(i), k + 1, meta));
+          report bits(up(la(i), k + 2, meta), b) & "| " & unas(down(la(i), k, meta));
+        end loop;
+      end loop;
+    end loop;
+    for k in 0 to 300 loop
+      b := std_ulogic'val(2 + k mod 2);
+      w := w + b - unsigned(signed'(abs signed(w(7 downto 0)))) +
+           unsigned(signed'(- signed(w(15 downto 8))));
+      v := (v - b) + (+ v);
+      if k mod 30 = 0 then
+        report img(w) & img(v);
+      end if;
+    end loop;
+    report "done " & img(w) & img(v);
+    wait;
+  end process;
+end;
+"#
+    .replace("PKG", pkg)
+    .replace("LV", lv)
+}
+
+#[test]
+fn synopsys_bit_and_unary_operators_in_compiled_code_match_the_interpreter() {
+    all_tiers_match("compiled_syn_bit_s", &syn_bit_src("signed"));
+    all_tiers_match("compiled_syn_bit_u", &syn_bit_src("unsigned"));
+}

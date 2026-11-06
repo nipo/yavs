@@ -4297,8 +4297,8 @@ impl<'a> Opt<'a> {
                 Form::Vi => alen(0),
                 Form::Iv => alen(1),
             },
-            // The shifts of the Synopsys packages keep the argument's length.
-            Op::Syn(Syn::Shift { .. }) => alen(0).filter(|n| *n > 0),
+            // The shifts and unary operators of the Synopsys packages keep the argument's length.
+            Op::Syn(Syn::Shift { .. } | Syn::Unary { .. }) => alen(0).filter(|n| *n > 0),
             // The operators of the Synopsys packages: a null operand is the body's error.
             Op::Syn(Syn::Oper { kind, l, r, .. }) => {
                 use crate::ieee::{Opd, SynKind};
@@ -4306,11 +4306,11 @@ impl<'a> Opt<'a> {
                     return None;
                 }
                 let (a, b) = match (l, r) {
-                    (Opd::I, _) => (alen(1)?, alen(1)?),
-                    (_, Opd::I) => (alen(0)?, alen(0)?),
+                    (Opd::I | Opd::B, _) => (alen(1)?, alen(1)?),
+                    (_, Opd::I | Opd::B) => (alen(0)?, alen(0)?),
                     _ => (alen(0)?, alen(1)?),
                 };
-                let int_form = l == Opd::I || r == Opd::I;
+                let int_form = !l.is_vec() || !r.is_vec();
                 // A mixed pair pads its unsigned operand by one element.
                 let a = a + i64::from(l == Opd::U && r == Opd::S);
                 let b = b + i64::from(l == Opd::S && r == Opd::U);

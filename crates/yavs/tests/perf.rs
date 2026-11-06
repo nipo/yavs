@@ -537,6 +537,8 @@ const IEEE_GENERAL: &[(&str, u64)] = &[
         "std_logic_1164.to_x01(std_ulogic_vector)std_ulogic_vector",
         60,
     ),
+    (r#"std_logic_arith."-"(signed)signed"#, 60),
+    (r#"std_logic_arith."abs"(signed)signed"#, 60),
     ("std_logic_arith.conv_signed(integer,integer)signed", 60),
     (
         "std_logic_arith.conv_std_logic_vector(integer,integer)std_ulogic_vector",
@@ -556,6 +558,22 @@ const IEEE_GENERAL: &[(&str, u64)] = &[
         "std_logic_arith.sxt(std_ulogic_vector,integer)std_ulogic_vector",
         60,
     ),
+    (
+        r#"std_logic_signed."+"(std_ulogic_vector)std_ulogic_vector"#,
+        60,
+    ),
+    (
+        r#"std_logic_signed."-"(std_ulogic_vector)std_ulogic_vector"#,
+        60,
+    ),
+    (
+        r#"std_logic_signed."abs"(std_ulogic_vector)std_ulogic_vector"#,
+        60,
+    ),
+    (
+        r#"std_logic_unsigned."+"(std_ulogic_vector)std_ulogic_vector"#,
+        60,
+    ),
 ];
 
 /// What `perf/ieee_paths.vhd` reports: a checksum per width of every result.
@@ -563,7 +581,7 @@ const IEEE_PATHS_SAYS: [&str; 4] = [
     "W=128 sum=000000011EB213D5009266C30264A1AB 480000064DDE232F87E48E73C10E2C63 712444",
     "W=65 sum=15B4689C2C156FFE8 F9BD46E713B1ADF50 383049",
     "W=8 sum=86 F9 746273",
-    "W=128 syn sum=3FFFFFFFFFFFFFFF00000000007C6E37 568056",
+    "W=128 syn sum=3FFFFFFFFFFFFFFF00000000007C6E92 568056",
 ];
 
 /// `Max` bounds for every `<prefix><key>` counter of `r`: the count of `table`, 0 for a key not
@@ -2009,7 +2027,7 @@ mod clift {
         ),
         (
             r#"std_logic_1164."xor"(std_ulogic_vector,std_ulogic_vector)std_ulogic_vector"#,
-            1547,
+            2387,
         ),
         ("std_logic_1164.is_x(std_ulogic_vector)boolean", 150),
         (
@@ -2024,10 +2042,15 @@ mod clift {
         (r#"std_logic_arith."*"(signed,signed)signed"#, 87),
         (r#"std_logic_arith."*"(unsigned,unsigned)unsigned"#, 87),
         (r#"std_logic_arith."+"(signed,signed)signed"#, 58),
+        (r#"std_logic_arith."+"(std_ulogic,signed)signed"#, 60),
         (r#"std_logic_arith."+"(unsigned,integer)unsigned"#, 174),
+        (r#"std_logic_arith."+"(unsigned,std_ulogic)unsigned"#, 60),
         (r#"std_logic_arith."+"(unsigned,unsigned)unsigned"#, 116),
         (r#"std_logic_arith."-"(integer,unsigned)unsigned"#, 58),
+        (r#"std_logic_arith."-"(signed)signed"#, 60),
         (r#"std_logic_arith."-"(signed,integer)signed"#, 58),
+        (r#"std_logic_arith."-"(signed,std_ulogic)signed"#, 60),
+        (r#"std_logic_arith."-"(std_ulogic,unsigned)unsigned"#, 60),
         (r#"std_logic_arith."-"(unsigned,unsigned)unsigned"#, 116),
         (r#"std_logic_arith."/="(signed,signed)boolean"#, 60),
         (r#"std_logic_arith."<"(unsigned,unsigned)boolean"#, 58),
@@ -2035,6 +2058,7 @@ mod clift {
         (r#"std_logic_arith."="(unsigned,unsigned)boolean"#, 60),
         (r#"std_logic_arith.">"(signed,integer)boolean"#, 60),
         (r#"std_logic_arith.">="(unsigned,unsigned)boolean"#, 60),
+        (r#"std_logic_arith."abs"(signed)signed"#, 60),
         ("std_logic_arith.conv_signed(integer,integer)signed", 60),
         (
             "std_logic_arith.conv_std_logic_vector(integer,integer)std_ulogic_vector",
@@ -2056,7 +2080,19 @@ mod clift {
             60,
         ),
         (
+            r#"std_logic_signed."+"(std_ulogic,std_ulogic_vector)std_ulogic_vector"#,
+            60,
+        ),
+        (
+            r#"std_logic_signed."+"(std_ulogic_vector)std_ulogic_vector"#,
+            60,
+        ),
+        (
             r#"std_logic_signed."+"(std_ulogic_vector,std_ulogic_vector)std_ulogic_vector"#,
+            60,
+        ),
+        (
+            r#"std_logic_signed."-"(std_ulogic_vector)std_ulogic_vector"#,
             60,
         ),
         (
@@ -2064,7 +2100,15 @@ mod clift {
             60,
         ),
         (
+            r#"std_logic_signed."-"(std_ulogic_vector,std_ulogic)std_ulogic_vector"#,
+            60,
+        ),
+        (
             r#"std_logic_signed."<"(std_ulogic_vector,std_ulogic_vector)boolean"#,
+            60,
+        ),
+        (
+            r#"std_logic_signed."abs"(std_ulogic_vector)std_ulogic_vector"#,
             60,
         ),
         (
@@ -2072,7 +2116,15 @@ mod clift {
             90,
         ),
         (
+            r#"std_logic_unsigned."+"(std_ulogic_vector)std_ulogic_vector"#,
+            60,
+        ),
+        (
             r#"std_logic_unsigned."+"(std_ulogic_vector,integer)std_ulogic_vector"#,
+            60,
+        ),
+        (
+            r#"std_logic_unsigned."+"(std_ulogic_vector,std_ulogic)std_ulogic_vector"#,
             60,
         ),
         (
@@ -2081,6 +2133,10 @@ mod clift {
         ),
         (
             r#"std_logic_unsigned."-"(integer,std_ulogic_vector)std_ulogic_vector"#,
+            60,
+        ),
+        (
+            r#"std_logic_unsigned."-"(std_ulogic,std_ulogic_vector)std_ulogic_vector"#,
             60,
         ),
         (

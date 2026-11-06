@@ -1229,6 +1229,116 @@ fn native_synopsys_conv_integer_limits_match_bodies() {
     }
 }
 
+/// `+` and `-` with a `std_ulogic` operand and the unary `+`, `-` and `abs` of the Synopsys
+/// packages against their bodies: every bit value (`L` and `H` count, a metavalue is the body's
+/// warning and all `X`), lengths 1 to 65, both directions with lower bounds other than zero, the
+/// most negative value, weak bits and metavalues in a vector `abs` returns as it is.
+fn syn_bit_unary_test(pkg: &str, std: &str) {
+    let extra = match pkg {
+        "unsigned" => "use ieee.std_logic_unsigned.all;\n",
+        "signed" => "use ieee.std_logic_signed.all;\n",
+        _ => "",
+    };
+    let mut body = String::new();
+    let mut k = 0usize;
+    let lit = |ty: &str, x: &str, n: usize, k: usize| {
+        let asc = k % 2 == 1;
+        let lo = [0usize, 3, 100][k % 3];
+        let l = if asc { lo.max(n - 1) } else { lo + n - 1 };
+        format!("{ty}(\"{x}\", {l}, {asc})")
+    };
+    // The vector type of each kind and the types its operators return.
+    let kinds: Vec<(&str, Vec<&str>)> = if pkg == "arith" {
+        vec![("uv", vec!["unsigned", "v"]), ("gv", vec!["signed", "v"])]
+    } else {
+        vec![("lv", vec!["v"])]
+    };
+    for n in [1usize, 8, 33, 63, 64, 65] {
+        let mut pats = syn_pats(n);
+        // A non-negative vector with weak bits, and one with a metavalue below its top element.
+        pats.push(format!("L{}", "H".repeat(n - 1)));
+        if n > 2 {
+            pats.push(format!("0{}X1", "1".repeat(n - 3)));
+            pats.push(format!("1{}W0", "0".repeat(n - 3)));
+        }
+        for (i, p) in pats.iter().enumerate() {
+            for (ta, rtys) in &kinds {
+                k += 1;
+                let x = lit(ta, p, n, k);
+                // Every bit value up to 8 elements, a strong or weak one and a metavalue above.
+                for (j, b) in "01LHUXZW-".chars().enumerate() {
+                    if n > 8 && j != i % 4 && j != 4 + i % 5 {
+                        continue;
+                    }
+                    let b = format!("std_ulogic'('{b}')");
+                    for e in [
+                        format!("{x} + {b}"),
+                        format!("{b} - {x}"),
+                        format!("{b} + {x}"),
+                        format!("{x} - {b}"),
+                    ] {
+                        syn_report(&mut body, &e, rtys[0]);
+                    }
+                    if let [_, r] = rtys.as_slice() {
+                        syn_report(&mut body, &format!("{b} - {x}"), r);
+                    }
+                }
+                let unary: &[&str] = match (pkg, *ta) {
+                    ("arith", "uv") | ("unsigned", _) => &["+"],
+                    _ => &["+", "-", "abs "],
+                };
+                for op in unary {
+                    for r in rtys {
+                        syn_report(&mut body, &format!("{op}{x}"), r);
+                    }
+                }
+            }
+        }
+    }
+    let src = format!(
+        "{}{body}    wait;\n  end process;\nend architecture;\n",
+        syn_head(extra)
+    );
+    let code = diff_run(&format!("syn_bit_{pkg}_{std}"), &src, "t", std, 300);
+    assert_eq!(code, Some(0), "{pkg} {std}");
+}
+
+#[test]
+fn native_synopsys_bit_and_unary_operators_match_bodies() {
+    for std in ["2008", "1993"] {
+        for pkg in ["arith", "unsigned", "signed"] {
+            syn_bit_unary_test(pkg, std);
+        }
+    }
+}
+
+/// The new forms on a null vector: one process per case, the body's outcome.
+#[test]
+fn native_synopsys_bit_and_unary_null_match_bodies() {
+    let cases = [
+        ("", "img(unsigned'(uv(\"\", -1, false) + std_ulogic'('1')))"),
+        ("", "img(signed'(std_ulogic'('H') - gv(\"\", -1, true)))"),
+        ("", "img(signed'(- gv(\"\", -1, false)))"),
+        ("", "img(signed'(abs gv(\"\", -1, false)))"),
+        ("", "img(unsigned'(+ uv(\"\", -1, false)))"),
+        (
+            "use ieee.std_logic_signed.all;\n",
+            "img(std_ulogic_vector(std_logic_vector'(abs lv(\"\", -1, true))))",
+        ),
+        (
+            "use ieee.std_logic_unsigned.all;\n",
+            "img(std_ulogic_vector(std_logic_vector'(lv(\"\", -1, true) - std_ulogic'('1'))))",
+        ),
+    ];
+    for (i, (extra, c)) in cases.iter().enumerate() {
+        let src = format!(
+            "{}    report {c};\n    wait;\n  end process;\nend architecture;\n",
+            syn_head(extra)
+        );
+        diff_run(&format!("syn_bit_null{i}"), &src, "t", "2008", 0);
+    }
+}
+
 /// A null operand is the body's index error: one process per case so each error ends its own run.
 #[test]
 fn native_synopsys_operators_null_match_bodies() {

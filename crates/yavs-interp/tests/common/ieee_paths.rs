@@ -5,7 +5,7 @@
 // Each includer reads a part of it.
 #![allow(dead_code)]
 
-use yavs_ir::ieee::{Op, Syn, parse};
+use yavs_ir::ieee::{Op, Opd, Syn, parse};
 
 /// A one-word path in the interpreter (`lookup_fast` has an arm).
 pub const FAST: bool = true;
@@ -67,7 +67,10 @@ rows! {
     "Syn::Conv": Op::Syn(Syn::Conv { .. }) => FAST, IN_PLACE;
     "Syn::Shift": Op::Syn(Syn::Shift { .. }) => FAST, IN_PLACE;
     "Syn::ToInt": Op::Syn(Syn::ToInt { .. }) => FAST, IN_PLACE;
+    // A `std_ulogic` operand of `+` or `-`.
+    "Syn::Oper bit": Op::Syn(Syn::Oper { l: Opd::B, .. } | Syn::Oper { r: Opd::B, .. }) => FAST, IN_PLACE;
     "Syn::Oper": Op::Syn(Syn::Oper { .. }) => FAST, IN_PLACE;
+    "Syn::Unary": Op::Syn(Syn::Unary { .. }) => FAST, IN_PLACE;
     // The helpers the Synopsys bodies call after `Syn::Oper` gave the call back.
     "Syn::Add": Op::Syn(Syn::Add { .. }) => NO_FAST, CALL;
     "Syn::Mult": Op::Syn(Syn::Mult { .. }) => NO_FAST, CALL;
