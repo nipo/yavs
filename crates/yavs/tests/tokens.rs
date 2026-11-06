@@ -322,11 +322,7 @@ fn an_unreachable_token_server_is_a_warning() {
         .wait_with_output()
         .expect("run");
     // A port nothing listens on.
-    let gone = TcpListener::bind("127.0.0.1:0")
-        .expect("bind")
-        .local_addr()
-        .expect("addr")
-        .port();
+    let gone = common::NO_LISTENER;
     let mut c = yavs();
     c.args(["run", lib.as_str(), "--threads=4", "tok"])
         .env("YAVS_TOKENS", format!("{gone}:{SECRET}"))
