@@ -2104,6 +2104,33 @@ impl Signal {
         first && !pend_words.is_empty()
     }
 
+    /// `finish` takes the pending transactions as the initial value: no event or activity, and
+    /// `'last_value` the same value (an implicit GUARD signal, LRM 14.7.5.2 d).
+    pub(crate) fn settle_initial(
+        &mut self,
+        finish: impl FnOnce(&mut Signal) -> Result<(), ErrorKind>,
+    ) -> Result<(), ErrorKind> {
+        let stamps = self.stamps.clone();
+        let blk = (
+            self.blk_active.clone(),
+            self.blk_event.clone(),
+            self.blk_last.clone(),
+            self.bare_last,
+        );
+        finish(self)?;
+        self.stamps.copy_from_slice(&stamps);
+        (
+            self.blk_active,
+            self.blk_event,
+            self.blk_last,
+            self.bare_last,
+        ) = blk;
+        self.last_value.copy(0, &self.cur, 0, self.ty.len as usize);
+        self.changed.clear();
+        self.nruns = 0;
+        Ok(())
+    }
+
     /// The driving values the direct commits wrote back into the drivers they came from (all
     /// sole sources, `lag`), before something reads the drivers or makes the driving value
     /// differ from them.

@@ -125,3 +125,72 @@ fn guard_changes_in_the_cycle_of_its_condition() {
     };
     assert_eq!(values(&late), values(&same));
 }
+
+/// `Builder::guard_init`: at initialisation the guard processes run first, in order, and what they
+/// assign is GUARD's initial value (LRM 14.7.5.2): a process that runs before them in the batch
+/// order sees it, with no event, no activity and `'last_value` the same; a guard on another GUARD
+/// sees the outer one's; nothing changes a delta later.
+#[test]
+fn guard_init_gives_the_initial_value() {
+    for kernel_guard in [false, true] {
+        let mut b = Builder::new();
+        let one = Range::new(0, 1);
+        let zero = LogicVec::new(1, StdULogic::Zero);
+        let g1 = b.signal("g1", SignalType::logic(1), &zero);
+        let g2 = b.signal("g2", SignalType::logic(1), &zero);
+        let (d1, d2) = (b.driver(g1), b.driver(g2));
+        b.process(
+            "reader",
+            NONE,
+            &[],
+            p(move |c| {
+                let msg = format!(
+                    "g1={} g2={} event={} active={} last_event={} last_value={}",
+                    c.elem_code(g1, 0)?,
+                    c.elem_code(g2, 0)?,
+                    c.event(g1)?,
+                    c.active(g1)?,
+                    c.last_event(g1)? == Time::MAX,
+                    c.last_value(g1)?
+                );
+                c.report(Severity::Note, msg);
+                c.wait_on(g1)?;
+                c.wait_on(g2)
+            }),
+        );
+        let p1 = b.process(
+            "_guard1",
+            NONE,
+            &[d1],
+            p(move |c| {
+                c.assign_code_now(d1, one, StdULogic::One as u8);
+                Ok(())
+            }),
+        );
+        let p2 = b.process(
+            "_guard2",
+            NONE,
+            &[d2],
+            p(move |c| {
+                let code = c.elem_code(g1, 0)?;
+                c.assign_code_now(d2, one, code);
+                c.wait_on(g1)
+            }),
+        );
+        b.guard_init(p1);
+        b.guard_init(p2);
+        if kernel_guard {
+            b.guard_process(p2, &[(g1, one)]);
+        }
+        let (mut sim, trace) = build(b, Config::default());
+        sim.run_until(ns(1)).unwrap();
+        let one = StdULogic::One as u8;
+        assert_eq!(
+            trace.take(),
+            [format!(
+                "0 fs +0 p0 Note: g1={one} g2={one} event=false active=false last_event=true last_value=\"1\""
+            )],
+            "kernel_guard {kernel_guard}"
+        );
+    }
+}

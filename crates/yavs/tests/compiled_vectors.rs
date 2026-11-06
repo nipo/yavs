@@ -1778,3 +1778,13 @@ end;
 fn synopsys_operators_in_compiled_code_match_the_interpreter() {
     all_tiers_match("compiled_syn", SYN);
 }
+
+/// Guard conditions on signal attributes (`'event`, `'stable`, edge functions, a port, an external
+/// name, a guarded bus): GUARD's initial value, which the kernel takes from the guard process, and
+/// the guarded assignments it controls.
+#[test]
+fn guards_on_signal_attributes_match_the_interpreter() {
+    let src = include_str!("../../../tests/corpus/delta/guard_signal_attributes.vhd")
+        .replace("guard_signal_attributes", "y");
+    all_tiers_match("compiled_guard_attributes", &src);
+}

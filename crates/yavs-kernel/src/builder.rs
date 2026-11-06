@@ -64,6 +64,8 @@ struct ProcDecl {
     idle: Option<Vec<IdleRead>>,
     /// The signal parts the condition of a guarded block reads (`Builder::guard_process`).
     guard: Option<Vec<(SignalId, Range)>>,
+    /// It drives an implicit GUARD signal (`Builder::guard_init`).
+    guard_init: bool,
 }
 
 /// An element of a logic signal compared with a code: `eq` it is equal to it, else it is not.
@@ -414,6 +416,7 @@ impl Builder {
             trigger: None,
             idle: None,
             guard: None,
+            guard_init: false,
         });
         pid
     }
@@ -471,6 +474,16 @@ impl Builder {
     pub fn guard_process(&mut self, p: ProcId, reads: &[(SignalId, Range)]) {
         match self.procs.get_mut(p.0 as usize) {
             Some(d) => d.guard = Some(reads.to_vec()),
+            None => self.usage(format!("guard process {} does not exist", p.0)),
+        }
+    }
+
+    /// Process `p` drives an implicit GUARD signal (LRM 11.2). At initialisation it runs before
+    /// the other processes, and what it assigns is GUARD's initial value, with no event (LRM
+    /// 14.7.5.2: GUARD is set to its guard expression before any process executes).
+    pub fn guard_init(&mut self, p: ProcId) {
+        match self.procs.get_mut(p.0 as usize) {
+            Some(d) => d.guard_init = true,
             None => self.usage(format!("guard process {} does not exist", p.0)),
         }
     }
@@ -658,7 +671,11 @@ impl Builder {
         let mut names = Vec::with_capacity(self.procs.len());
         let mut idles = Vec::with_capacity(self.procs.len());
         let mut guards = Vec::with_capacity(self.procs.len());
+        let mut guard_inits = Vec::new();
         for p in self.procs {
+            if p.guard_init {
+                guard_inits.push(procs.len() as u32);
+            }
             let st = ProcState {
                 waveforms: p.drivers.iter().map(|_| Waveform::default()).collect(),
                 marks: (p.drivers.len() > crate::process::MARKED_DRIVERS).then(|| {
@@ -712,6 +729,7 @@ impl Builder {
             names,
             idles,
             guards,
+            guard_inits,
         )
     }
 }

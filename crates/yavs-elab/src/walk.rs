@@ -1241,29 +1241,19 @@ impl Elab<'_> {
     }
 
     /// The implicit GUARD signal of a guarded block (LRM 11.2), driven by the block's guard
-    /// process. It starts as the value of the guard condition (14.7.3.3, #464).
+    /// process. The kernel sets its initial value from that process (`ProcInst::guard_init`):
+    /// the guard expression may read what only exists at run time (`'event`, LRM 14.7.5.2 d).
     fn guard_signal(&mut self, s: ScopeId, g: yavs_sem::DeclId) -> R<()> {
         let db: &Db = self.db;
         let decl = &db.decls[g];
         let DeclKind::Object(o) = &decl.kind else {
             return Err(Box::new(ice(decl.span, "GUARD is not an object")));
         };
-        // A guard with an external name starts false: its process gives the value (#1102).
-        let early = |e: &yavs_sem::ExprId| {
-            !db.uses_external(*e) && db.external_uses(ExtOwner::Expr(*e)).is_empty()
-        };
-        self.m.sig_init = true;
-        let init = o.default.filter(early).map(|e| self.m.eval(db, e, Some(s)));
-        self.m.sig_init = false;
-        let init = init.transpose()?;
-        let Some(shape) = self
-            .m
-            .shape_init(db, o.subtype, init.as_ref(), Some(s), decl.span)?
-        else {
+        let Some(shape) = self.m.shape_init(db, o.subtype, None, Some(s), decl.span)? else {
             return Err(Box::new(ice(decl.span, "GUARD subtype")));
         };
         self.m
-            .add_obj(db, s, g, ObjKind::Signal, shape, init.as_ref(), decl.span)?;
+            .add_obj(db, s, g, ObjKind::Signal, shape, None, decl.span)?;
         Ok(())
     }
 
@@ -2158,6 +2148,7 @@ impl Elab<'_> {
                     let reads = self.guard_reads(b, g);
                     if let Some(p) = self.procs.last_mut() {
                         p.guard = reads;
+                        p.guard_init = true;
                     }
                 }
                 let mut c = 0;
@@ -3122,7 +3113,11 @@ impl Elab<'_> {
         let mut lsps = Vec::new();
         db.reads(cond, &mut lsps);
         let mut out = Vec::new();
-        for l in lsps {
+        for mut l in lsps {
+            // An implicit signal (`clk'stable`) is read like the signal it is (LRM 14.7.4).
+            if let ObjRoot::ImplicitSignal(d) = l.root {
+                l.root = ObjRoot::Decl(d);
+            }
             let (o, sels) = self.m.lsp_ref(db, &l, b).ok()?;
             for (leaf, r) in self.m.nets.select(o, &sels).ok()?.0 {
                 if !out.contains(&(leaf, r)) {
@@ -4695,6 +4690,7 @@ impl Elab<'_> {
             prog: None,
             idle: None,
             guard: None,
+            guard_init: false,
         });
         ProcIdx(self.procs.len() as u32 - 1)
     }

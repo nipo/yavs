@@ -404,6 +404,9 @@ impl Elaborated {
                 let r: Vec<_> = reads.iter().map(|&(l, r)| nets.kpart(l, r)).collect();
                 b.guard_process(pid, &r);
             }
+            if p.guard_init {
+                b.guard_init(pid);
+            }
             let trigger = p.trigger.filter(|t| !t.wait || !proc_waits);
             if let Some(t) = trigger {
                 let (signal, elem) = nets.kelem(t.leaf, t.elem);

@@ -662,24 +662,14 @@ impl Fx<'_, '_> {
                 .cx
                 .ice(span, "guarded assignment outside a guarded block"));
         };
-        // The condition of the block's own GUARD is evaluated here: the GUARD signal
-        // updates a delta after the signals the condition reads (11.6, 14.7.5.2).
-        let cond = match &db.decls[g].kind {
-            yavs_sem::decl::DeclKind::Object(o) if o.role == yavs_sem::decl::ObjRole::Guard => {
-                o.default
-            }
-            _ => None,
-        };
-        let c = if let Some(cond) = cond {
-            self.scalar_expr(cond)?
-        } else {
-            let c = self.sig_of(g, span)?;
-            let raw = self.reg(RegTy::I64);
-            self.emit(Inst::SigReadScalar { dst: raw, sig: c });
-            let tid = self.decl_ty(g, span)?;
-            let bias = self.code_bias(tid);
-            self.dec(raw, bias)
-        };
+        // GUARD itself (11.6): it changes in the cycle of its condition (14.7.4), and it keeps
+        // its value while no signal of the condition is active, which `'event` would not.
+        let c = self.sig_of(g, span)?;
+        let raw = self.reg(RegTy::I64);
+        self.emit(Inst::SigReadScalar { dst: raw, sig: c });
+        let tid = self.decl_ty(g, span)?;
+        let bias = self.code_bias(tid);
+        let c = self.dec(raw, bias);
         let (t, f, j) = (self.block(), self.block(), self.block());
         self.branch(c, t, f);
         self.at(t);

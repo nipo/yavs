@@ -1046,6 +1046,8 @@ pub struct SimControl {
     /// The `_guard` processes of guarded blocks (`Builder::guard_process`) and, per signal, the
     /// ones whose conditions read it. Their `ProcMeta::ready` stays true, so no wake queues them.
     guard_procs: Vec<u32>,
+    /// The processes that drive implicit GUARD signals (`Builder::guard_init`), ascending.
+    guard_inits: Vec<u32>,
     guard_readers: HashMap<u32, SmallVec<[u32; 2]>>,
     guard_due: Vec<u32>,
     /// Per signal, the processes of `idle_ok` that read it: `readers[readers_start[s]..
@@ -1248,6 +1250,7 @@ impl SimControl {
         names: Vec<String>,
         idles: Vec<Option<Vec<crate::builder::IdleRead>>>,
         guards: Vec<Option<Vec<(SignalId, Range)>>>,
+        guard_inits: Vec<u32>,
     ) -> Result<SimControl, SimError> {
         if let Some(pr) = crate::profile::installed() {
             for (s, name) in slots.iter_mut().zip(&names) {
@@ -1472,6 +1475,7 @@ impl SimControl {
         };
         let mut sim = SimControl {
             guard_procs,
+            guard_inits,
             guard_readers,
             guard_due: Vec::new(),
             readers_start,
@@ -2128,10 +2132,15 @@ impl SimControl {
             if !self.started {
                 self.started = true;
                 self.phase(Phase::StartOfSim);
-                for p in &mut self.procs {
-                    p.ready = true;
+                self.init_guards()?;
+                let inits = std::mem::take(&mut self.guard_inits);
+                let rest: Vec<u32> = (0..self.procs.len() as u32)
+                    .filter(|p| inits.binary_search(p).is_err())
+                    .collect();
+                for &p in &rest {
+                    self.procs[p as usize].ready = true;
                 }
-                self.run_batch((0..self.procs.len() as u32).collect(), false, true)?;
+                self.run_batch(rest, false, true)?;
                 for &g in &self.guard_procs {
                     self.procs[g as usize].ready = true;
                 }
@@ -2233,6 +2242,25 @@ impl SimControl {
             due.clear();
             self.guard_due = due;
         }
+    }
+
+    /// LRM 14.7.5.2 d: each implicit GUARD signal is set to its guard expression before the
+    /// processes run. Its process runs first, in elaboration order (an inner guard may read an
+    /// outer GUARD), and what it assigns becomes GUARD's initial value.
+    fn init_guards(&mut self) -> Result<(), SimError> {
+        let empty = self.empty_delta;
+        for i in 0..self.guard_inits.len() {
+            let g = self.guard_inits[i];
+            self.procs[g as usize].ready = true;
+            self.run_batch(vec![g], false, true)?;
+            for s in std::mem::take(&mut self.direct_sigs) {
+                let sig = &mut self.signals[s as usize];
+                sig.settle_initial(|sig| finish_signal(sig, Time::ZERO, 0).map(|_| ()))
+                    .map_err(|k| self.err(k))?;
+            }
+            self.empty_delta = empty;
+        }
+        Ok(())
     }
 
     /// Signal `s` had an event: the clocked processes that read it must run at their next edge.

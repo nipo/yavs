@@ -229,8 +229,9 @@ references with VHPI (a deposit queued there makes a delta at time 0, #347).
 Initialization (`settle` at build) computes driving values bottom-up and effective values
 top-down through ports without events; no signal is active then, so `'transaction` keeps its
 initial '0' until the first transaction, `'stable`/`'quiet` start TRUE and `'delayed` at the
-prefix's initial value (LRM 14.7.5.2, `docs/design/lrm-checks.md` L67, #241); then every process runs once at 0 fs delta 0, after
-`StartOfSim`. The first cycle at 0 fs is delta 1.
+prefix's initial value (LRM 14.7.5.2, `docs/design/lrm-checks.md` L67, #241); then, after `StartOfSim`, the processes
+that drive an implicit GUARD (`Builder::guard_init`) run one at a time and what each assigns is GUARD's initial value, with no
+event (`init_guards`, #1114), and every other process runs once at 0 fs delta 0. The first cycle at 0 fs is delta 1.
 
 **Ports** (`Builder::port(formal, actual, mode, PortConv)`) relate a formal range to an actual
 range: `in` feeds the formal's port layer, `out` and `buffer` add the formal as a source of the

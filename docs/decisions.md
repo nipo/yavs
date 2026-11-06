@@ -1815,14 +1815,10 @@ which tools/difftest parses.
   disconnect `bus`/`register` targets when GUARD is false, after the signal's disconnection
   time: elab takes it from `Db::disconnect_times` (a disconnection specification, 7.4) and
   gives it to the kernel signal, 0 fs without one (#260).
-  A guarded concurrent assignment tests the block's guard condition itself on the current
-  values, not the GUARD signal, which updates a delta after the signals the condition reads
-  (LRM 11.6; the references update GUARD in the cycle of the event); its sensitivity is the
-  condition's signals instead of GUARD (#373). GUARD starts as the condition on the initial
-  values of its signals (`guard_signal` in yavs-elab, evaluated like a signal's initial value,
-  #464). A process reading GUARD still sees later changes a delta late (open, #464: the
-  references update it in the cycle of the event, which needs the kernel to evaluate the
-  condition in its update phase).
+  A guarded concurrent assignment tests the GUARD signal and is sensitive to it (LRM 11.6): GUARD
+  changes in the cycle of its condition (#464), so the old test of the condition itself (#373)
+  is gone; it was wrong for a condition with `'event`. GUARD's initial value comes from the
+  kernel (#1114, "GUARD's initial value from the kernel" below).
 - **Null waveform elements** (LRM 10.5.2.2, #352): a waveform with a `null` element is driven
   one transaction per element in order. The first has the assignment's delay mechanism, so it
   preempts as the whole waveform would; the rest are transport, which only appends after it
@@ -14120,3 +14116,27 @@ Written by Claude. A parameter's host pointer was held over a function only with
 
 - **`perf/iterative` goes to `main` by a real merge commit, and the wide measurement runs on main after it** (user, 2026-11-04). The commits of the branch stay reachable for bisecting. The branch's own side branches that were held (resume-anywhere removal, `sharekey`, `hugeheap`) are not in the merge.
 - **Analysed units: `FORMAT` 16**, above main's 15 and the branch's 12. The branch left `yavs-sem` and `yavs-syntax` as they were, so the layout is main's and 16 only makes sure no library written by either is taken for the merged one.
+
+## GUARD's initial value from the kernel (yavs-kernel, yavs-elab, yavs-lower, yavs-sem, #1114, 2026-11-06)
+
+LRM 14.7.5.2 sets each implicit GUARD to its guard condition during initialization, after the explicit signals and the
+implicit `'stable`, `'quiet` and `'delayed` signals have their initial values and before any process runs. The elaborator
+evaluated the condition instead, with its own evaluator: `clk'event`, `'last_value`, `rising_edge(clk)` and a function with a
+signal parameter were `E2106`, and `clk'stable` read as FALSE.
+
+- **The kernel runs the `_guard` processes first at initialisation** (`Builder::guard_init`, `SimControl::init_guards`), one
+  at a time in elaboration order, so an inner guard reads the outer GUARD; what each assigns becomes GUARD's initial value
+  (`Signal::settle_initial`: no event, no activity, `'last_value` the same, nothing pending for delta 1). The other processes
+  run after them. The elaborator gives GUARD the default FALSE and no longer evaluates the condition (the #1102 filter for
+  external names is gone with it). A signal whose initial value names GUARD reads that FALSE, as sim1 does.
+- **A guarded concurrent assignment tests GUARD again** (11.6), sensitive to it, instead of the condition (#373): GUARD keeps
+  its value while no signal of its condition is active (14.7.4), and `clk'event` does not, so under
+  `clk'event and clk = '1'` the assignment ran only in the delta of the edge and took the value of the previous edge.
+- **An implicit signal in a condition is read like any signal** (`Walker::guard_reads`): a guard on `clk'stable` is a kernel
+  guard process and changes in the cycle of the implicit signal, not a delta later.
+- GUARD's own history at 0 ns: `'last_event` is TIME'HIGH and `'last_value` the current value (16.2: initialization is no
+  simulation cycle; user, 2026-11-06). sim1 and sim2 differ (`guard-initial-history`), sim1 does not evaluate a condition again when only the
+  prefix of `'last_value`, `'last_event` or `'last_active` is active (`guard-attribute-function-prefix`), and sim2 rejects these
+  attributes and `'event` in a guard (`guard-event-attribute`). Tests: `tests/corpus/delta/guard_signal_attributes.vhd` (reference output),
+  `crates/yavs-kernel/tests/guard.rs` `guard_init_gives_the_initial_value`, `compiled_vectors.rs`
+  `guards_on_signal_attributes_match_the_interpreter`.

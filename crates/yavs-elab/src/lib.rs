@@ -215,6 +215,9 @@ pub struct ProcInst {
     /// runs it in the update phase of the cycle in which one of them has an event, so GUARD
     /// changes in that cycle (LRM 11.2; `yavs_kernel::Builder::guard_process`).
     pub guard: Option<Vec<(LeafId, yavs_kernel::Range)>>,
+    /// The `_guard` process of a guarded block: what it assigns at initialisation is GUARD's
+    /// initial value (`yavs_kernel::Builder::guard_init`, LRM 14.7.5.2).
+    pub guard_init: bool,
 }
 
 /// The clock generator `x <= not x after T;` of [`ProcInst::toggle`].

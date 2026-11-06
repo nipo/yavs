@@ -83,6 +83,14 @@ yavs, with what to do about each.
      - Error ``E1101``: a guarded block implicitly declares the signal ``GUARD`` (LRM 2008 11.2),
        which an explicit declaration of the same name may not hide. A nested block has its own region.
      - Rename the declaration.
+   * - A guard condition that reads signal attributes: ``b : block (clk'event and clk = '1')``,
+       ``'last_value``, ``'stable``, ``rising_edge(clk)``
+     - Accepted. GUARD starts as the condition on the values before time 0 (``'event`` FALSE,
+       ``'last_event`` TIME'HIGH), with no event of its own, and keeps its value until a signal of
+       the condition is active again (LRM 2008 14.7.4, 14.7.5.2), also one the condition reads only
+       through ``'last_value`` or ``'last_event``. One reference simulator rejects these attributes
+       in a guard, and the other does not evaluate the guard again for ``'last_value``.
+     - Nothing; for code that must run elsewhere too, write the clocked process out.
    * - An index constraint whose discrete range has another type than its index:
        ``type nv is array (natural range <>) of bit; signal s : nv(color);`` or
        ``string_vec(severity_level)`` for an array indexed by ``natural``
