@@ -12658,8 +12658,8 @@ impl crate::TierHost for Host<'_, '_, '_> {
         } else {
             m.tier_view(tf);
         }
-        match r {
-            Ok(v) if !fallback => {
+        match native_result(&r) {
+            Some(v) if !fallback => {
                 if stop {
                     self.stop = true;
                     Stop(v)
@@ -12709,12 +12709,12 @@ impl crate::TierHost for Host<'_, '_, '_> {
         // A native run this way pushes no frame (it would be `Slow`): the stacks stay.
         debug_assert!(m.regs.v.as_ptr() == tf.stack && m.slots_ptr() == tf.slots);
         m.tier_temp(tf);
-        match r {
-            Ok(v) if !fallback && stop => {
+        match native_result(&r) {
+            Some(v) if !fallback && stop => {
                 self.stop = true;
                 Stop(v)
             }
-            Ok(v) if !fallback => Done(v),
+            Some(v) if !fallback => Done(v),
             _ => Slow,
         }
     }
@@ -12775,12 +12775,12 @@ impl crate::TierHost for Host<'_, '_, '_> {
         tf.temp = m.temp.as_mut_ptr();
         tf.temp_len = m.temp.len() as u64;
         tf.temp_cap = m.temp.capacity().min(u32::MAX as usize) as u64;
-        match r {
-            Ok(v) if !fallback && stop => {
+        match native_result(&r) {
+            Some(v) if !fallback && stop => {
                 self.stop = true;
                 Stop(v)
             }
-            Ok(v) if !fallback => Done(v),
+            Some(v) if !fallback => Done(v),
             _ => Slow,
         }
     }
@@ -13146,6 +13146,18 @@ fn expand_const(c: &ConstData) -> R<Vec<u8>> {
 thread_local! {
     /// Calls of `Machine::publish_shared` that went on to build roots (#356).
     static ROOT_BUILDS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// The result of a native called from compiled code, its tag and value read one at a time:
+/// a native stores the two words of `Option<u64>` apart, and a 16-byte copy of them right after
+/// the call waited for both stores to retire (no store forwarding from two stores to one load).
+#[inline(always)]
+fn native_result(r: &R<Option<u64>>) -> Option<Option<u64>> {
+    match *r {
+        Ok(None) => Some(None),
+        Ok(Some(v)) => Some(Some(v)),
+        Err(_) => None,
+    }
 }
 
 #[cfg(test)]
