@@ -341,6 +341,7 @@ const PASS: &[&str] = &[
     "psl/psl_pragma_93_logic",
     "generics/package_generic_map_body",
     "generics/alias_subtype_attr",
+    "generics/elab_call_table",
     "generics/generic_file_package",
     "generics/generic_file_package_arch",
     "hierarchy/record_port_parts_open",
