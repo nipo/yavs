@@ -11164,7 +11164,7 @@ impl Machine {
                 desc,
                 tab,
                 part,
-            } => self.sig_gather(prog, dst, desc, tab, part, ctx)?,
+            } => self.sig_gather(prog, dst, desc, tab, part, ctx, false)?,
             Inst::SigScatter {
                 driver,
                 src,
@@ -11173,7 +11173,7 @@ impl Machine {
                 ops,
                 mode,
                 has,
-            } => self.sig_scatter(prog, f, driver, src, desc, tab, ops, mode, has, ctx)?,
+            } => self.sig_scatter(prog, f, driver, src, desc, tab, ops, mode, has, ctx, false)?,
             Inst::Edge { dst, kind, sig } => {
                 let v = self.edge_inst(kind, sig, ctx)?;
                 self.set(dst, v);
@@ -12359,7 +12359,7 @@ impl crate::TierHost for Host<'_, '_, '_> {
                 desc,
                 tab,
                 part,
-            }) => m.sig_gather(self.prog, dst, desc, tab, part, self.ctx),
+            }) => m.sig_gather(self.prog, dst, desc, tab, part, self.ctx, true),
             Some(&Inst::SigScatter {
                 driver,
                 src,
@@ -12369,7 +12369,7 @@ impl crate::TierHost for Host<'_, '_, '_> {
                 mode,
                 has,
             }) => m.sig_scatter(
-                self.prog, f, driver, src, desc, tab, ops, mode, has, self.ctx,
+                self.prog, f, driver, src, desc, tab, ops, mode, has, self.ctx, true,
             ),
             Some(&Inst::Edge { dst, kind, sig }) => {
                 m.edge_inst(kind, sig, self.ctx).map(|v| m.set(dst, v))

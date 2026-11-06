@@ -43,6 +43,131 @@ pub(crate) struct MPlan {
     at: u64,
     desc: Box<[u8]>,
     bound: Option<Box<Bound>>,
+    /// What compiled code reads and drives the plan by once it has no image (`ImageCell::direct`).
+    gather: Option<Box<DirectGather>>,
+    scatter: Option<Box<DirectScatter>>,
+}
+
+/// What a whole gather of a plan with no image needs, fixed once the plan is bound: compiled code
+/// reads it through [`direct_gather`] with no host and no plan lookup.
+pub struct DirectGather {
+    plan: Arc<Plan>,
+    items: Box<[Item]>,
+    reads: Box<[Grp]>,
+    sigs: Box<[InstSig]>,
+}
+
+/// A whole gather into `out` by `d`, as `Machine::gather_leaves` reads a plan with no image.
+/// `false` on a mismatch or an error: the caller runs the instruction in the interpreter.
+pub fn direct_gather(c: &mut Ctx<'_>, d: &DirectGather, out: &mut [u8]) -> bool {
+    if d.plan.size != out.len() as u64 {
+        return false;
+    }
+    if let Err(e) = read_whole(c, &d.plan, &d.items, &d.reads, &d.sigs, out) {
+        return failed(e);
+    }
+    c.note_gather(false);
+    true
+}
+
+/// The groups `reads` of the items of a whole value of `plan` read into `out`.
+#[inline(always)]
+fn read_whole(
+    c: &Ctx<'_>,
+    plan: &Plan,
+    items: &[Item],
+    reads: &[Grp],
+    sigs: &[InstSig],
+    out: &mut [u8],
+) -> R<()> {
+    for g in reads {
+        let ts = &items[g.first as usize..][..g.n as usize];
+        // One plane word of the signal for all items of the group.
+        let blk = match g.word {
+            NO_WORD => None,
+            w => c
+                .planes(g.sig)
+                .and_then(|(p, _)| p.get(w as usize).copied()),
+        };
+        for t in ts {
+            let at = t.voff as usize;
+            let o = out
+                .get_mut(at..at + t.vsize as usize)
+                .ok_or_else(|| cold(|| ice("a leaf outside its value")))?;
+            let Some(blk) = blk else {
+                let (l, s) = (&plan.leaves[t.leaf as usize], &sigs[t.leaf as usize]);
+                read_leaf(c, s, l, t.k, o)?;
+                continue;
+            };
+            let sh = t.k % 64;
+            if t.kind == LeafKind::LogicScalar {
+                let code = (0..4).fold(0u8, |a, i| a | ((blk[i] >> sh & 1) as u8) << i);
+                put_le(o, u64::from(code.wrapping_sub(t.bias)));
+            } else {
+                let mask = if t.len == 64 {
+                    u64::MAX
+                } else {
+                    (1 << t.len) - 1
+                };
+                for (i, w) in o.as_chunks_mut::<8>().0.iter_mut().take(4).enumerate() {
+                    *w = (blk[i] >> sh & mask).to_le_bytes();
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// What a whole zero-delay scatter of a plan that compares no more needs, fixed once the plan is
+/// bound: compiled code drives it through [`direct_scatter`] with no host and no plan lookup.
+pub struct DirectScatter {
+    plan: Arc<Plan>,
+    items: Box<[Item]>,
+    runs: Box<[Grp]>,
+    refs: Box<[Option<yavs_kernel::DirectRef>]>,
+}
+
+/// A whole zero-delay scatter of `data` through driver slots from `driver` (`drivers`, the
+/// machine's) by `d`, as `Machine::scatter_leaves` drives a plan that does not compare. `false`
+/// on a mismatch or an error: the caller runs the instruction in the interpreter, which drives
+/// the same zero-delay values again (the same transactions) and reports the error.
+pub fn direct_scatter(
+    c: &mut Ctx<'_>,
+    drivers: &[crate::ProcDriver],
+    driver: u32,
+    d: &DirectScatter,
+    data: &[u8],
+    inertial: bool,
+) -> bool {
+    let Some(ds) = drivers.get(driver as usize..driver as usize + d.plan.leaves.len()) else {
+        return false;
+    };
+    if d.plan.size != data.len() as u64 {
+        return false;
+    }
+    let mode = if inertial {
+        yavs_kernel::DelayMode::Inertial { reject: None }
+    } else {
+        yavs_kernel::DelayMode::Transport
+    };
+    let when = (yavs_kernel::Time::ZERO, true, mode);
+    let mut run = None;
+    for g in &*d.runs {
+        if let Err(e) = scatter_run(c, &d.plan, &d.items, g, ds, data, &d.refs, &mut run, when) {
+            return failed(e);
+        }
+    }
+    match flush_run(c, &mut run, when) {
+        Ok(()) => true,
+        Err(e) => failed(e),
+    }
+}
+
+/// The error of a direct gather or scatter, dropped out of line: the interpreter reports it.
+#[cold]
+#[inline(never)]
+fn failed(_: crate::exec::Fault) -> bool {
+    false
 }
 
 /// A plan and the instance signal of each of its leaves; for a whole value also the instances of
@@ -883,10 +1008,59 @@ impl Machine {
         };
         *cell.left.get_mut() = left;
         cell.mask = bit;
+        cell.direct = 0;
         cell.tab = tab.0;
         cell.desc = desc;
         cell.size = size;
         cell.image = image;
+    }
+
+    /// The cell of a scatter through driver slot `driver` whose plan `b` (at `at`) compares no
+    /// more: no image, and `direct` names its [`DirectScatter`]. Another table's image stays.
+    #[cold]
+    #[inline(never)]
+    fn scat_direct(
+        &mut self,
+        b: &Bound,
+        at: usize,
+        tab: ConstId,
+        desc: u64,
+        driver: u32,
+        c: &mut Ctx<'_>,
+    ) {
+        let k = crate::GATHER_CELLS + driver as usize;
+        let keep = self.plans[at].ds == 0 || self.plans[at].at == desc;
+        if !keep
+            || b.items.is_empty()
+            || b.refs.get().is_none_or(|(base, _)| *base != driver)
+            || self
+                .icells
+                .get(k)
+                .is_some_and(|x| (x.image != 0 || x.direct != 0) && x.tab != tab.0)
+        {
+            return;
+        }
+        let size = b.plan.size as u32;
+        let refs = b.refs.get().map_or(Box::default(), |(_, r)| r.clone());
+        let d = self.plans[at].scatter.get_or_insert_with(|| {
+            Box::new(DirectScatter {
+                plan: b.plan.clone(),
+                items: b.items.clone(),
+                runs: b.runs.clone(),
+                refs,
+            })
+        });
+        let direct = &raw const **d as u64;
+        let Some(cell) = self.cell(k, c) else {
+            return;
+        };
+        *cell.left.get_mut() = 0;
+        cell.image = 0;
+        cell.mask = 0;
+        cell.tab = tab.0;
+        cell.desc = desc;
+        cell.size = size;
+        cell.direct = direct;
     }
 
     /// What compiled code copied through the cell of a gather since the host last looked, in the
@@ -910,6 +1084,43 @@ impl Machine {
         }
     }
 
+    /// The cell of a gather whose plan `b` (at `at`) has no image: `direct` names its
+    /// [`DirectGather`]. Another table's image or plan stays.
+    #[cold]
+    #[inline(never)]
+    fn gath_direct(&mut self, b: &Bound, at: usize, tab: ConstId, desc: u64, c: &mut Ctx<'_>) {
+        let k = tab.0 as usize % crate::GATHER_CELLS;
+        let keep = self.plans[at].ds == 0 || self.plans[at].at == desc;
+        if !keep
+            || b.items.is_empty()
+            || self
+                .icells
+                .get(k)
+                .is_some_and(|x| (x.image != 0 || x.direct != 0) && x.tab != tab.0)
+        {
+            return;
+        }
+        let size = b.plan.size as u32;
+        let d = self.plans[at].gather.get_or_insert_with(|| {
+            Box::new(DirectGather {
+                plan: b.plan.clone(),
+                items: b.items.clone(),
+                reads: b.reads.clone(),
+                sigs: b.sigs.clone(),
+            })
+        });
+        let direct = &raw const **d as u64;
+        let Some(cell) = self.cell(k, c) else {
+            return;
+        };
+        *cell.left.get_mut() = 0;
+        cell.image = 0;
+        cell.tab = tab.0;
+        cell.desc = desc;
+        cell.size = size;
+        cell.direct = direct;
+    }
+
     /// The cell of a gather for what plan `b` stands at now (`scat_put`).
     #[cold]
     #[inline(never)]
@@ -921,7 +1132,7 @@ impl Machine {
         if self
             .icells
             .get(k)
-            .is_some_and(|x| x.image != 0 && x.tab != tab.0)
+            .is_some_and(|x| (x.image != 0 || x.direct != 0) && x.tab != tab.0)
         {
             return;
         }
@@ -947,6 +1158,7 @@ impl Machine {
             return;
         };
         *cell.left.get_mut() = left;
+        cell.direct = 0;
         cell.tab = tab.0;
         cell.desc = desc;
         cell.size = size;
@@ -1144,6 +1356,8 @@ impl Machine {
                     at: NO_ADDR,
                     desc: d.into(),
                     bound: None,
+                    gather: None,
+                    scatter: None,
                 });
                 self.plans.len() - 1
             }
@@ -1208,6 +1422,7 @@ impl Machine {
 
     /// `Inst::SigGather`.
     #[inline(never)]
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn sig_gather(
         &mut self,
         prog: &Program,
@@ -1216,6 +1431,7 @@ impl Machine {
         tab: ConstId,
         part: Option<Part>,
         ctx: &mut Option<&mut Ctx<'_>>,
+        tier: bool,
     ) -> R<()> {
         let (at, mut b) = self.take_plan(prog, tab, self.r(desc))?;
         // The cell: what compiled code copied goes into the counts before the review, and it sees
@@ -1244,6 +1460,20 @@ impl Machine {
                     && (was && !matches!(b.img, Img::Ready { .. }) || !c.gate_unset())
                 {
                     self.gath_put(&mut b, at, tab, self.r(desc), c);
+                }
+                // A plan with no image that compiled code asks for: it reads it through
+                // `direct_gather` from now on.
+                if tier
+                    && part.is_none()
+                    && matches!(b.img, Img::Off)
+                    && let Some(c) = ctx.as_deref_mut()
+                    && !c.gate_unset()
+                    && self
+                        .icells
+                        .get(tab.0 as usize % crate::GATHER_CELLS)
+                        .is_none_or(|x| x.direct == 0 || x.tab != tab.0)
+                {
+                    self.gath_direct(&b, at, tab, self.r(desc), c);
                 }
                 self.put_plan(at, b);
                 Ok(())
@@ -1287,41 +1517,7 @@ impl Machine {
                 return Ok(());
             }
             c.note_gather(false);
-            for g in &*b.reads {
-                let ts = &b.items[g.first as usize..][..g.n as usize];
-                // One plane word of the signal for all items of the group.
-                let blk = match g.word {
-                    NO_WORD => None,
-                    w => c
-                        .planes(g.sig)
-                        .and_then(|(p, _)| p.get(w as usize).copied()),
-                };
-                for t in ts {
-                    let at = t.voff as usize;
-                    let o = out
-                        .get_mut(at..at + t.vsize as usize)
-                        .ok_or_else(|| cold(|| ice("a leaf outside its value")))?;
-                    let Some(blk) = blk else {
-                        let (l, s) = (&plan.leaves[t.leaf as usize], &b.sigs[t.leaf as usize]);
-                        read_leaf(c, s, l, t.k, o)?;
-                        continue;
-                    };
-                    let sh = t.k % 64;
-                    if t.kind == LeafKind::LogicScalar {
-                        let code = (0..4).fold(0u8, |a, i| a | ((blk[i] >> sh & 1) as u8) << i);
-                        put_le(o, u64::from(code.wrapping_sub(t.bias)));
-                    } else {
-                        let mask = if t.len == 64 {
-                            u64::MAX
-                        } else {
-                            (1 << t.len) - 1
-                        };
-                        for (i, w) in o.as_chunks_mut::<8>().0.iter_mut().take(4).enumerate() {
-                            *w = (blk[i] >> sh & mask).to_le_bytes();
-                        }
-                    }
-                }
-            }
+            read_whole(c, plan, &b.items, &b.reads, &b.sigs, out)?;
             if let Img::Ready {
                 id, check: true, ..
             } = b.img
@@ -1360,6 +1556,7 @@ impl Machine {
         mode: DriveMode,
         has: u8,
         ctx: &mut Option<&mut Ctx<'_>>,
+        tier: bool,
     ) -> R<()> {
         let Some(&[after, ref rest @ ..]) = f.regs(ops) else {
             return Err(cold(|| ice("a scatter without its operands")));
@@ -1415,6 +1612,20 @@ impl Machine {
                     && (was && !matches!(b.cmp, Cmp::Ready(_)) || !c.gate_unset())
                 {
                     self.scat_put(&mut b, at, tab, self.r(desc), driver, c);
+                }
+                // A plan that compares no more that compiled code asks for: it drives it through
+                // `direct_scatter` from now on.
+                if tier
+                    && has == 0
+                    && matches!(b.cmp, Cmp::Off)
+                    && let Some(c) = ctx.as_deref_mut()
+                    && !c.gate_unset()
+                    && self
+                        .icells
+                        .get(crate::GATHER_CELLS + driver as usize)
+                        .is_none_or(|x| x.direct == 0 || x.tab != tab.0)
+                {
+                    self.scat_direct(&b, at, tab, self.r(desc), driver, c);
                 }
                 self.put_plan(at, b);
                 Ok(())

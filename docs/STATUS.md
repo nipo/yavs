@@ -10966,6 +10966,10 @@ A whole zero-delay assignment of a record signal compares the value with the rec
 
 On perf/try-recinline: Cranelift frame-mode code compares a whole zero-delay record scatter with the record image, and copies a whole record gather from it, with no call when it can (`YAVS_IMAGE_INLINE` turns either off, `YAVS_IMAGE_CHECK` holds every use against the full test, always in debug builds; `docs/decisions.md` "Record images in compiled code"). No cycle measurement on a quiet host yet.
 
+## Record drives in compiled code
+
+Cranelift frame-mode code reads and drives a whole record signal whose plan has no record image (a record that changes at every clock, once the review has let the image go) on the kernel itself, through `yavs_rt_gather` and `yavs_rt_scatter`, not the signal callback (#1110; `YAVS_IMAGE_INLINE=nodirect` turns it off; `docs/decisions.md` "Record drives in compiled code"). On the reproducer of #1110 a whole-record or aggregate assignment of a changing record is 16 to 20 percent faster; aggregate assignment is now as fast as field by field, whole-record copies (`s1 <= s0`) are still 5 to 8 percent slower, the cost of reading the record in the host. The LLVM tier does not use the cells.
+
 ## Whole-record reads and drives in Cranelift frame-mode code
 
 `SigGather` and `SigScatter` run through the signal callback instead of the generic step, as in the LLVM tier (`yavs-clift`; `docs/decisions.md` "Whole-record reads and drives in Cranelift frame-mode code"). Forced compiled windows execute 0.5 to 0.9 percent fewer instructions.

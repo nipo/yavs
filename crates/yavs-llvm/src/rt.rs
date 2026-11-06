@@ -51,6 +51,8 @@ pub const FAST_FAT_ROOT: u32 = 3;
 pub const FAST_DEREF: u32 = 4;
 pub const DRIVE_BIT: &str = "yavs_rt_drive_bit";
 pub const DRIVE_F: &str = "yavs_rt_drive_f";
+pub const SCATTER: &str = "yavs_rt_scatter";
+pub const GATHER: &str = "yavs_rt_gather";
 pub const GATE_CHECK: &str = "yavs_rt_gate_check";
 pub const IMAGE_CHECK: &str = "yavs_rt_image_check";
 
@@ -977,6 +979,56 @@ pub unsafe extern "C" fn yavs_rt_drive_f(
         return GO;
     }
     drive_f_rest(mem, pc, driver, lo, wave, lf)
+}
+
+/// A whole zero-delay `SigScatter` at `pc` through driver slot `driver` whose plan compares no
+/// more: the `lf & 0xffff_ffff` bytes at `data` driven by `d`, the cell's
+/// `yavs_interp::DirectScatter`, on the kernel itself, else the instruction through
+/// `yavs_rt_signal`; bit 32 of `lf`: inertial.
+pub unsafe extern "C" fn yavs_rt_scatter(
+    mem: *mut Mem,
+    pc: u32,
+    driver: u32,
+    data: *const u8,
+    lf: u64,
+    d: u64,
+) -> u32 {
+    cb(Cb::Record);
+    // SAFETY: compiled code checked the `lf` bytes at `data`; `d` is the address the host wrote
+    // in the machine's cell, of a box the machine keeps as long as it lives.
+    if let Some((c, ds, _)) = unsafe { direct(&(*mem).fr) } {
+        let data = unsafe { std::slice::from_raw_parts(data, (lf & 0xffff_ffff) as usize) };
+        let d = unsafe { &*(d as *const yavs_interp::DirectScatter) };
+        if yavs_interp::direct_scatter(c, ds, driver, d, data, lf >> 32 & 1 != 0) {
+            return GO;
+        }
+    }
+    let env = unsafe { env_or(std::ptr::null_mut(), mem) };
+    unsafe { yavs_rt_signal(env, std::ptr::null_mut(), mem, pc, 0) }
+}
+
+/// A whole `SigGather` at `pc` whose plan has no image: the `size` bytes at `out` read by `d`,
+/// the cell's `yavs_interp::DirectGather`, on the kernel itself, else the instruction through
+/// `yavs_rt_signal`.
+pub unsafe extern "C" fn yavs_rt_gather(
+    mem: *mut Mem,
+    pc: u32,
+    out: *mut u8,
+    size: u64,
+    d: u64,
+) -> u32 {
+    cb(Cb::Record);
+    // SAFETY: compiled code checked the `size` writable bytes at `out`; `d` as in
+    // `yavs_rt_scatter`.
+    if let Some((c, _, _)) = unsafe { direct(&(*mem).fr) } {
+        let out = unsafe { std::slice::from_raw_parts_mut(out, size as usize) };
+        let d = unsafe { &*(d as *const yavs_interp::DirectGather) };
+        if yavs_interp::direct_gather(c, d, out) {
+            return GO;
+        }
+    }
+    let env = unsafe { env_or(std::ptr::null_mut(), mem) };
+    unsafe { yavs_rt_signal(env, std::ptr::null_mut(), mem, pc, 0) }
 }
 
 /// Whether the `avail` bytes of `yavs_rt_drive_f` (bits 33 and up of `lf`) do not hold the

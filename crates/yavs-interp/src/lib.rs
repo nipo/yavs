@@ -20,6 +20,7 @@ mod env;
 mod exec;
 mod foreign;
 mod gather;
+pub use gather::{DirectGather, DirectScatter, direct_gather, direct_scatter};
 mod pmemo;
 mod pre;
 mod scan;
@@ -1049,7 +1050,8 @@ pub const GATHER_CELLS: usize = 64;
 /// zero-delay scatter that holds what the image holds, with no call (`gather.rs`,
 /// `docs/decisions.md` "Record images in compiled code"): `TierFrame::cells`, a gather at
 /// `tab % GATHER_CELLS`, a scatter through driver slot `k` at `GATHER_CELLS + k`. No image: the host
-/// does it. Written by the host, but for `left`.
+/// does it, unless `direct` names the plan, which then has no image. Written by the host, but for
+/// `left`.
 #[repr(C)]
 pub struct ImageCell {
     /// The address of the record image.
@@ -1063,6 +1065,10 @@ pub struct ImageCell {
     pub size: u32,
     /// Skips left before the host must look: it counts them and reviews the image.
     pub left: std::sync::atomic::AtomicU32,
+    /// No image: the address of the [`DirectGather`] or [`DirectScatter`] of the plan, for
+    /// [`direct_gather`] or [`direct_scatter`] (`docs/decisions.md` "Record drives in compiled
+    /// code"); 0 for none.
+    pub direct: u64,
 }
 
 impl ImageCell {
@@ -1074,6 +1080,7 @@ impl ImageCell {
             tab: 0,
             size: 0,
             left: 0.into(),
+            direct: 0,
         }
     }
 }

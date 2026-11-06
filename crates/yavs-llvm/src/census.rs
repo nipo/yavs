@@ -27,11 +27,13 @@ pub(crate) enum Cb {
     Memo,
     Region,
     Eloop,
+    /// `yavs_rt_gather`, `yavs_rt_scatter`: a whole record read or drive with no image.
+    Record,
     /// Not a callback: an activation that skipped the table's tags (`rt::enter`, `lean`).
     Lean,
 }
 
-const NAMES: [&str; 20] = [
+const NAMES: [&str; 21] = [
     "step",
     "signal",
     "deopt",
@@ -51,11 +53,12 @@ const NAMES: [&str; 20] = [
     "memo",
     "region",
     "eloop",
+    "record",
     "lean",
 ];
 
 #[cfg(any(debug_assertions, feature = "op-census"))]
-static COUNTS: [AtomicU64; 20] = [const { AtomicU64::new(0) }; 20];
+static COUNTS: [AtomicU64; 21] = [const { AtomicU64::new(0) }; 21];
 
 #[inline(always)]
 pub(crate) fn cb(c: Cb) {

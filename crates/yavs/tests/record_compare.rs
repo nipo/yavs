@@ -758,3 +758,204 @@ end;
     let d = inline_design("record_cells_review", text, "top");
     compiled_cells_change_nothing(&d, 3000, 1000);
 }
+
+/// Records that change in every leaf at every clock: past the review the plans have no image, and
+/// compiled code reads and drives them on the kernel itself (`yavs_rt_gather`, `yavs_rt_scatter`,
+/// `docs/decisions.md` "Record drives in compiled code"). Nested records, an array field, integer,
+/// enumeration, real and null leaves, a field sized by a generic, transport, a delay, a guarded
+/// target, a port of resolved fields with two drivers, `'event`, `'active`, `'last_value`. Output,
+/// kernel counters and waves are the interpreter's, also at 4 threads.
+#[cfg(feature = "clift")]
+#[test]
+fn the_direct_records_change_nothing() {
+    let d = inline_design("record_direct", DIRECT, "top");
+    let interp = counted(&d, &[], &["--tier=interp", "--no-cache"]);
+    assert_eq!(interp.0, Some(0), "{}", interp.2);
+    let nodirect = counted(&d, &[("YAVS_IMAGE_INLINE", "nodirect")], FORCED);
+    let direct = counted(&d, &[], FORCED);
+    for (what, r) in [("nodirect", &nodirect), ("direct", &direct)] {
+        assert_eq!((&interp.0, &interp.1), (&r.0, &r.1), "{what}: {}", r.2);
+        for name in [
+            "cycles",
+            "process_runs",
+            "wakes",
+            "events",
+            "update_fast",
+            "update_timed",
+            "update_general",
+            "direct_codes",
+            "direct_planes",
+            "direct_bytes",
+            "general_assigns",
+            "gathers_copied",
+            "gathers_read",
+            "scatter_spared",
+            "images",
+        ] {
+            assert_eq!(
+                counter(&interp.2, name),
+                counter(&r.2, name),
+                "{name}: the interpreter against {what}"
+            );
+        }
+    }
+    // The callbacks are counted in debug builds.
+    if cfg!(debug_assertions) {
+        let n = counter(&direct.2, "cb_record");
+        assert!(n >= 40_000, "only {n} direct reads and drives");
+        assert_eq!(counter(&nodirect.2, "cb_record"), 0, "nodirect");
+    }
+    let waves = |tier: &str, more: &[&str]| {
+        let f = d.dir.join(format!("{}.fst", more.len()));
+        let wave = format!("--wave={}", f.display());
+        let mut args = vec![tier, "--no-cache", &wave];
+        args.extend(more);
+        let r = counted(&d, &[], &args);
+        assert_eq!(r.0, Some(0), "{tier} {more:?}: {}", r.2);
+        (r.1, std::fs::read(&f).unwrap())
+    };
+    let one = waves("--tier=interp", &[]);
+    assert!(one.1.len() > 1000);
+    assert!(waves("--tier=clift", &[]) == one, "waves or output differ");
+    assert!(
+        waves("--tier=clift", &["--threads=4", "--shuffle=11"]) == one,
+        "waves or output differ at 4 threads"
+    );
+}
+
+#[cfg(feature = "clift")]
+const DIRECT: &str = r#"
+library ieee; use ieee.std_logic_1164.all; use ieee.numeric_std.all;
+package p is
+  type words is array (0 to 1) of std_ulogic_vector(7 downto 0);
+  type inner is record
+    w : words;
+    k : integer;
+    s : std_ulogic;
+  end record;
+  type state is (idle, busy, held);
+  type rec is record
+    re, im : signed(17 downto 0);
+    n : inner;
+    st : state;
+    z : std_ulogic_vector(0 downto 1);
+    x : real;
+  end record;
+  constant init : rec := (to_signed(5, 18), to_signed(-6, 18), ((x"01", x"02"), 3, '0'), idle, "", 0.5);
+  type bus_t is record
+    a : std_logic;
+    v : std_logic_vector(5 downto 0);
+  end record;
+  function step (r : rec; i : integer) return rec;
+  function sum (r : rec) return integer;
+end;
+package body p is
+  function step (r : rec; i : integer) return rec is
+    variable v : rec := r;
+  begin
+    v.re := r.im + 1;
+    v.im := r.re - i;
+    v.n.w := (std_ulogic_vector(unsigned(r.n.w(1)) + 3), not r.n.w(0));
+    v.n.k := (r.n.k * 5 + i) mod 1000;
+    v.n.s := not r.n.s;
+    v.st := state'val((state'pos(r.st) + 1) mod 3);
+    v.x := r.x + 0.25;
+    return v;
+  end;
+  function sum (r : rec) return integer is
+  begin
+    return to_integer(r.re) - to_integer(r.im) + to_integer(unsigned(r.n.w(0))) + 3 * to_integer(unsigned(r.n.w(1)))
+      + r.n.k + state'pos(r.st) * 7 + integer(r.x * 4.0) + r.z'length + std_ulogic'pos(r.n.s);
+  end;
+end;
+
+library ieee; use ieee.std_logic_1164.all; use ieee.numeric_std.all;
+use work.p.all;
+entity unit is
+  generic (seed : integer; w : positive);
+  port (clk : in std_ulogic; q : out integer; b : inout bus_t);
+end;
+architecture a of unit is
+  signal s0 : rec := init;
+  signal s1, s2, s3, t, d, g, l : rec := init;
+  signal e1, a2, ev : natural := 0;
+  type sized is record v : std_ulogic_vector(w - 1 downto 0); c : integer; end record;
+  signal z0, z1 : sized := ((others => '0'), 0);
+begin
+  process (clk)
+    variable i : integer := seed;
+  begin
+    if rising_edge(clk) then
+      i := i + 1;
+      s0 <= step(s0, i);
+      s1 <= s0;
+      s2 <= (re => s1.im, im => s1.re, n => s1.n, st => s1.st, z => s1.z, x => s1.x);
+      t <= transport s1;
+      d <= s2 after 3 ns;
+      if i mod 3 /= 0 then
+        s3 <= t;
+      end if;
+      l <= s2'last_value;
+      z0 <= (v => not z0.v(0) & z0.v(w - 1 downto 1), c => z0.c + i);
+      z1 <= z0;
+    end if;
+  end process;
+  blk : block (clk = '1') is
+  begin
+    g <= guarded s3;
+  end block;
+  -- Two drivers of a record of resolved fields, each 'Z' half of the time.
+  process (clk)
+    variable n : natural := 0;
+  begin
+    if rising_edge(clk) then
+      n := n + 1;
+      if (n + seed) mod 2 = 0 then
+        b <= (a => '1', v => std_logic_vector(to_unsigned((n + seed) mod 64, 6)));
+      else
+        b <= (a => 'Z', v => (others => 'Z'));
+      end if;
+    end if;
+  end process;
+  process (s2)
+  begin
+    if s2'event then
+      e1 <= e1 + 1;
+    end if;
+  end process;
+  process (s3, t)
+  begin
+    if s3'active then
+      a2 <= a2 + 1;
+    end if;
+    if t.n'event then
+      ev <= ev + 1;
+    end if;
+  end process;
+  q <= sum(s3) + sum(d) - sum(g) + sum(l) + e1 + 2 * a2 + 3 * ev + z1.c mod 1000
+    + to_integer(unsigned(z1.v(w - 1 downto w - 2)));
+end;
+
+library ieee; use ieee.std_logic_1164.all; use ieee.numeric_std.all;
+use work.p.all;
+entity top is end;
+architecture a of top is
+  signal clk : std_ulogic := '0';
+  signal n : natural := 0;
+  type qs is array (0 to 1) of integer;
+  signal q : qs;
+  signal b : bus_t := ('Z', (others => 'Z'));
+begin
+  clk <= not clk after 5 ns when n < 1300 else '0';
+  process (clk) begin if rising_edge(clk) then n <= n + 1; end if; end process;
+  u0 : entity work.unit generic map (seed => 7, w => 5) port map (clk, q(0), b);
+  u1 : entity work.unit generic map (seed => 1000, w => 9) port map (clk, q(1), b);
+  process (n)
+  begin
+    if n mod 50 = 0 then
+      report integer'image(n) & " " & integer'image(q(0)) & " " & integer'image(q(1)) & " " & std_logic'image(b.a)
+        & " " & to_hstring(b.v);
+    end if;
+  end process;
+end;
+"#;

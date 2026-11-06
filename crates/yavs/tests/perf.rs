@@ -1778,6 +1778,15 @@ mod clift {
             ("cb_signal", Min(230)),
         ]
     );
+    // Records that change in every leaf at every clock: once the review has let their images go,
+    // compiled code reads and drives them through `yavs_rt_gather` and `yavs_rt_scatter`, on the
+    // kernel itself, not the signal callback and the host's plan (#1110).
+    clift_case!(
+        rec_direct,
+        "rec_direct",
+        "q=0028F00281",
+        [("cb_record", Min(1500)), ("cb_signal", Max(7000))]
+    );
     clift_case!(
         reg_planes,
         "reg_planes",

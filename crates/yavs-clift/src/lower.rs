@@ -116,7 +116,7 @@ pub struct Jit {
     deopt_slots: ClifId,
     deopt_end: ClifId,
     /// The kernel-facing callbacks of `rt.rs`, in the order of `KERNEL`.
-    kernel: [ClifId; 25],
+    kernel: [ClifId; 27],
     /// `yavs_rt_host` and the `Deref` of `yavs_rt_fast` through stubs that keep every register
     /// (`cold_stub`).
     cold_host: ClifId,
@@ -514,6 +514,8 @@ impl Jit {
             (DRIVE, yavs_rt_drive as *const u8),
             (DRIVE_BIT, yavs_rt_drive_bit as *const u8),
             (DRIVE_F, yavs_rt_drive_f as *const u8),
+            (SCATTER, yavs_rt_scatter as *const u8),
+            (GATHER, yavs_rt_gather as *const u8),
             (GATE_CHECK, yavs_rt_gate_check as *const u8),
             (IMAGE_CHECK, yavs_rt_image_check as *const u8),
             (ELOOP_EXEC, yavs_rt_eloop_exec as *const u8),
@@ -608,6 +610,8 @@ impl Jit {
             )?,
             imp(IMAGE_CHECK, &[I64, I32, I32], None)?,
             imp(ELOOP_EXEC, &[I64; 8], Some(I64))?,
+            imp(SCATTER, &[I64, I32, I32, I64, I64, I64], Some(I32))?,
+            imp(GATHER, &[I64, I32, I64, I64, I64], Some(I32))?,
         ];
         let hold_check = imp(HOLD_CHECK, &[I64, I64, I64, I64, I64, I32, I64, I64], None)?;
         let mut stubs = Vec::new();
@@ -1554,6 +1558,12 @@ impl Jit {
             eloop_exec: self
                 .module
                 .declare_func_in_func(self.kernel[24], &mut ctx.func),
+            scatter: self
+                .module
+                .declare_func_in_func(self.kernel[25], &mut ctx.func),
+            gather: self
+                .module
+                .declare_func_in_func(self.kernel[26], &mut ctx.func),
             tables: tabs,
             consts: cons,
             natives,
@@ -1699,6 +1709,12 @@ struct Imports {
     gate_check: FuncRef,
     /// `yavs_rt_image_check(mem, pc, kept)`: a whole record skip or copy against the full test.
     image_check: FuncRef,
+    /// `yavs_rt_scatter(mem, pc, driver, data, len_inertial, direct) -> u32`: a whole record drive
+    /// whose plan compares no more.
+    scatter: FuncRef,
+    /// `yavs_rt_gather(mem, pc, out, size, direct) -> u32`: a whole record read whose plan has no
+    /// image.
+    gather: FuncRef,
     tables: HashMap<Vec<u8>, GlobalValue>,
     /// Copies of the constants (up to 4 KiB of bytes) the function takes the address of, which
     /// never change: reads of them need no lookup.
@@ -1730,8 +1746,9 @@ fn inlcmp_mode() -> InlCmp {
 }
 
 /// A whole record gather copied from its image and a whole record scatter compared with it in the
-/// generated code (`YAVS_IMAGE_INLINE=off`, `=noread`: scatters only, `=nodrive`: gathers only;
-/// `YAVS_IMAGE_CHECK` asks the full test at every one, always in debug builds).
+/// generated code (`YAVS_IMAGE_INLINE=off`, `=noread`: scatters only, `=nodrive`: gathers only,
+/// `=nodirect`: no `yavs_rt_scatter`; `YAVS_IMAGE_CHECK` asks the full test at every one, always
+/// in debug builds).
 fn image_inline() -> Result<&'static str, ()> {
     static WHICH: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
     WHICH
@@ -4145,11 +4162,11 @@ fn gen_func(
                 tab,
                 driver,
                 ops,
+                mode,
                 has: 0,
-                ..
             } if g.nat.is_none() => {
                 let after = f.regs(ops).and_then(|o| o.first().copied());
-                g.scatter(pc, prog, driver, src, desc, tab, after);
+                g.scatter(pc, prog, driver, src, desc, tab, after, mode);
             }
             Inst::SigGather {
                 dst,
@@ -9153,24 +9170,40 @@ impl Gen<'_> {
         self.b.switch_to_block(cmp);
     }
 
-    /// The tests of an [`yavs_interp::ImageCell`], the `k`th, for table `tab`: on to `slow` unless it
-    /// names an image and may be used now. The cell, the image, `left` and the value's size.
-    fn image_cell(
+    /// `yavs_rt_gather` or `yavs_rt_scatter` (`mem` first), then `done`: the deferred registers are
+    /// stored for the interpreter but stay deferred, as a slow path's are, so the way that makes no
+    /// call stores nothing.
+    fn call_stored(&mut self, f: FuncRef, rest: &[Value], done: Block) {
+        let rs = self.pend_live(self.pc);
+        self.store_regs(&rs);
+        let mut args = vec![self.mem];
+        args.extend_from_slice(rest);
+        let call = self.b.ins().call(f, &args);
+        let r = self.b.inst_results(call)[0];
+        let go = self
+            .b
+            .ins()
+            .icmp_imm_s(IntCC::Equal, r, i64::from(GO as i32));
+        self.b
+            .ins()
+            .brif(go, done, &[], self.exit, &[BlockArg::Value(r)]);
+    }
+
+    /// The `k`th [`yavs_interp::ImageCell`], on to `slow` unless it is for table `tab` and
+    /// descriptor `desc`.
+    fn cell_of(
         &mut self,
         k: usize,
         tab: yavs_ir::ConstId,
         desc: Option<Reg>,
         slow: Block,
-    ) -> (Value, Value, Value, Value) {
+    ) -> Value {
         type C = yavs_interp::ImageCell;
         let t = MemFlagsData::trusted();
         let cells = self.mem_ld(MEM_CELLS);
         let some = self.b.ins().icmp_imm_s(IntCC::NotEqual, cells, 0);
         self.guard(some, slow);
         let cell = self.b.ins().iadd_imm_s(cells, (k * size_of::<C>()) as i64);
-        let image = self.b.ins().load(I64, t, cell, offset_of!(C, image) as i32);
-        let there = self.b.ins().icmp_imm_s(IntCC::NotEqual, image, 0);
-        self.guard(there, slow);
         let at = self.b.ins().uload32(t, cell, offset_of!(C, tab) as i32);
         let is = self.b.ins().icmp_imm_s(IntCC::Equal, at, i64::from(tab.0));
         self.guard(is, slow);
@@ -9180,11 +9213,7 @@ impl Gen<'_> {
             let is = self.b.ins().icmp(IntCC::Equal, want, d);
             self.guard(is, slow);
         }
-        let left = self.b.ins().uload32(t, cell, offset_of!(C, left) as i32);
-        let some = self.b.ins().icmp_imm_s(IntCC::NotEqual, left, 0);
-        self.guard(some, slow);
-        let size = self.b.ins().uload32(t, cell, offset_of!(C, size) as i32);
-        (cell, image, left, size)
+        cell
     }
 
     /// One use of the cell made.
@@ -9209,36 +9238,72 @@ impl Gen<'_> {
     }
 
     /// A whole `SigGather`: a copy of the record image of the machine's cell, and no call
-    /// (`docs/decisions.md` "Record images in compiled code"). Anything else goes through
+    /// (`docs/decisions.md` "Record images in compiled code"); with no image but a plan the cell
+    /// names, `yavs_rt_gather` ("Record drives in compiled code"). Anything else goes through
     /// `yavs_rt_signal`, which looks after the cell.
     fn gather(&mut self, pc: u32, prog: &Program, dst: Reg, desc: Reg, tab: yavs_ir::ConstId) {
+        type C = yavs_interp::ImageCell;
         let has = Self::tab_desc(prog, tab);
-        let on = image_mode() != InlCmp::Off && image_inline() != Ok("noread");
-        let (Some(has), true) = (has, on) else {
+        let on = image_mode() != InlCmp::Off;
+        let copy = on && image_inline() != Ok("noread");
+        let direct = on && image_inline() != Ok("nodirect");
+        let (Some(has), true) = (has, copy || direct) else {
             self.signal(pc, 0);
             return;
         };
         let (slow, join) = self.slow_signal(pc, 0);
+        let t = MemFlagsData::trusted();
         let k = tab.0 as usize % yavs_interp::GATHER_CELLS;
-        let (cell, image, left, size) = self.image_cell(k, tab, has.then_some(desc), slow);
+        let cell = self.cell_of(k, tab, has.then_some(desc), slow);
+        let size = self.b.ins().uload32(t, cell, offset_of!(C, size) as i32);
         let a = self.ld(dst);
         let p = self.host(a, Some(dst), Op::C(0), Op::V(size), true, slow);
-        self.b.ins().call(self.imp.mov, &[p, image, size]);
-        if image_mode() == InlCmp::Check {
-            let (pcv, kept) = (self.c32(pc), self.c32(0));
-            self.b
+        let image = self.b.ins().load(I64, t, cell, offset_of!(C, image) as i32);
+        let (with, without, done) = (
+            self.b.create_block(),
+            self.b.create_block(),
+            self.b.create_block(),
+        );
+        self.b.ins().brif(image, with, &[], without, &[]);
+        self.b.switch_to_block(without);
+        if direct {
+            let d = self
+                .b
                 .ins()
-                .call(self.imp.image_check, &[self.mem, pcv, kept]);
+                .load(I64, t, cell, offset_of!(C, direct) as i32);
+            self.guard(d, slow);
+            let pcv = self.c32(pc);
+            self.call_stored(self.imp.gather, &[pcv, p, size, d], done);
+        } else {
+            self.b.ins().jump(slow, &[]);
         }
-        self.image_used(cell, left);
+        self.b.switch_to_block(with);
+        if copy {
+            let left = self.b.ins().uload32(t, cell, offset_of!(C, left) as i32);
+            let some = self.b.ins().icmp_imm_s(IntCC::NotEqual, left, 0);
+            self.guard(some, slow);
+            self.b.ins().call(self.imp.mov, &[p, image, size]);
+            if image_mode() == InlCmp::Check {
+                let (pcv, kept) = (self.c32(pc), self.c32(0));
+                self.b
+                    .ins()
+                    .call(self.imp.image_check, &[self.mem, pcv, kept]);
+            }
+            self.image_used(cell, left);
+            self.b.ins().jump(done, &[]);
+        } else {
+            self.b.ins().jump(slow, &[]);
+        }
+        self.b.switch_to_block(done);
         self.clear();
         self.join(join);
     }
 
     /// A whole zero-delay `SigScatter` through driver slot `driver`: the value against the record
     /// image of the machine's cell, and on a hit no call (`docs/decisions.md` "Record images in
-    /// compiled code"). Anything else goes through `yavs_rt_signal`, which compares again and
-    /// looks after the cell.
+    /// compiled code"); with no image but a plan that compares no more, `yavs_rt_scatter`
+    /// ("Record drives in compiled code"). Anything else goes through `yavs_rt_signal`, which
+    /// compares again and looks after the cell.
     #[allow(clippy::too_many_arguments)]
     fn scatter(
         &mut self,
@@ -9249,50 +9314,81 @@ impl Gen<'_> {
         desc: Reg,
         tab: yavs_ir::ConstId,
         after: Option<Reg>,
+        mode: yavs_ir::DriveMode,
     ) {
+        type C = yavs_interp::ImageCell;
         let now = after.is_some_and(|a| {
             let v = self.ld(a);
             self.const_of(v) == Some(0)
         });
         let has = Self::tab_desc(prog, tab);
-        let on = now && image_mode() != InlCmp::Off && image_inline() != Ok("nodrive");
-        let (Some(has), true) = (has, on) else {
+        let on = now && image_mode() != InlCmp::Off;
+        let cmp = on && image_inline() != Ok("nodrive");
+        let direct = on && image_inline() != Ok("nodirect");
+        let (Some(has), true) = (has, cmp || direct) else {
             self.signal(pc, 0);
             return;
         };
         let (slow, join) = self.slow_signal(pc, 0);
         let t = MemFlagsData::trusted();
         let k = yavs_interp::GATHER_CELLS + driver as usize;
-        let (cell, image, left, size) = self.image_cell(k, tab, has.then_some(desc), slow);
-        let g = self.mem_ld(MEM_GATE);
-        let word = self.b.ins().load(I64, t, g, 8);
-        let mask = self.b.ins().load(
-            I64,
-            t,
-            cell,
-            offset_of!(yavs_interp::ImageCell, mask) as i32,
-        );
-        let open = self.b.ins().band(word, mask);
-        let open = self.b.ins().icmp_imm_s(IntCC::NotEqual, open, 0);
-        self.guard(open, slow);
+        let cell = self.cell_of(k, tab, has.then_some(desc), slow);
+        let size = self.b.ins().uload32(t, cell, offset_of!(C, size) as i32);
         let a = self.ld(src);
         let p = self.host(a, Some(src), Op::C(0), Op::V(size), false, slow);
-        let call = self.b.ins().call(self.imp.memeq, &[p, image, size]);
-        let same = self.b.inst_results(call)[0];
-        self.guard(same, slow);
-        if image_mode() == InlCmp::Check {
-            let pcv = self.c32(pc);
-            let kept = match self.batch {
-                Some(bt) => self.b.use_var(bt.count),
-                None => self.c32(0),
-            };
-            self.b
+        let image = self.b.ins().load(I64, t, cell, offset_of!(C, image) as i32);
+        let (with, without, done) = (
+            self.b.create_block(),
+            self.b.create_block(),
+            self.b.create_block(),
+        );
+        self.b.ins().brif(image, with, &[], without, &[]);
+        self.b.switch_to_block(without);
+        if direct {
+            let d = self
+                .b
                 .ins()
-                .call(self.imp.image_check, &[self.mem, pcv, kept]);
+                .load(I64, t, cell, offset_of!(C, direct) as i32);
+            self.guard(d, slow);
+            let (pcv, drv) = (self.c32(pc), self.c32(driver));
+            let inertial = i64::from(mode == yavs_ir::DriveMode::Inertial);
+            let lf = self.b.ins().bor_imm_s(size, inertial << 32);
+            self.call_stored(self.imp.scatter, &[pcv, drv, p, lf, d], done);
+        } else {
+            self.b.ins().jump(slow, &[]);
         }
-        self.image_used(cell, left);
-        let one = self.c64(1);
-        self.b.ins().store(t, one, self.mem, MEM_SKIPPED as i32);
+        self.b.switch_to_block(with);
+        if cmp {
+            let left = self.b.ins().uload32(t, cell, offset_of!(C, left) as i32);
+            let some = self.b.ins().icmp_imm_s(IntCC::NotEqual, left, 0);
+            self.guard(some, slow);
+            let g = self.mem_ld(MEM_GATE);
+            let word = self.b.ins().load(I64, t, g, 8);
+            let mask = self.b.ins().load(I64, t, cell, offset_of!(C, mask) as i32);
+            let open = self.b.ins().band(word, mask);
+            let open = self.b.ins().icmp_imm_s(IntCC::NotEqual, open, 0);
+            self.guard(open, slow);
+            let call = self.b.ins().call(self.imp.memeq, &[p, image, size]);
+            let same = self.b.inst_results(call)[0];
+            self.guard(same, slow);
+            if image_mode() == InlCmp::Check {
+                let pcv = self.c32(pc);
+                let kept = match self.batch {
+                    Some(bt) => self.b.use_var(bt.count),
+                    None => self.c32(0),
+                };
+                self.b
+                    .ins()
+                    .call(self.imp.image_check, &[self.mem, pcv, kept]);
+            }
+            self.image_used(cell, left);
+            let one = self.c64(1);
+            self.b.ins().store(t, one, self.mem, MEM_SKIPPED as i32);
+            self.b.ins().jump(done, &[]);
+        } else {
+            self.b.ins().jump(slow, &[]);
+        }
+        self.b.switch_to_block(done);
         self.clear();
         self.join(join);
     }
