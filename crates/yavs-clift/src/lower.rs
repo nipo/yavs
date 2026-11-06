@@ -2069,6 +2069,47 @@ fn quiet(i: &Inst) -> bool {
     }
 }
 
+/// The `LayoutOf`s of a static layout whose one use is the load of the size (its first word)
+/// right after it, in the same block: the register that load defines (`Fx::size_of`).
+fn static_sizes(prog: &Program, f: &Func, enters: &[bool]) -> Vec<Option<Reg>> {
+    let mut uses = vec![0u32; f.reg_ty.len()];
+    for inst in &f.code {
+        inst.visit(&mut |r, role, _| {
+            if role == yavs_ir::Role::Use
+                && let Some(u) = uses.get_mut(r.0 as usize)
+            {
+                *u = u.saturating_add(1);
+            }
+        });
+    }
+    for &r in &f.operands {
+        if let Some(u) = uses.get_mut(r.0 as usize) {
+            *u = u.saturating_add(1);
+        }
+    }
+    (0..f.code.len())
+        .map(|pc| {
+            let Inst::LayoutOf { dst, ty, .. } = f.code[pc] else {
+                return None;
+            };
+            match f.code.get(pc + 1) {
+                Some(&Inst::Load {
+                    dst: d,
+                    addr,
+                    w: Width::B8,
+                }) if addr == dst
+                    && uses.get(dst.0 as usize) == Some(&1)
+                    && !enters.get(pc + 1).copied().unwrap_or(true)
+                    && static_layout(prog, ty).is_some() =>
+                {
+                    Some(d)
+                }
+                _ => None,
+            }
+        })
+        .collect()
+}
+
 /// Zero-delay scalar logic drives (`yavs_interp::ScalarDrive`, `batched_drives`) are not handed to
 /// the kernel one by one: the process appends `(signal reference, driver | code | pc)` to
 /// `entries` (`yavs_interp::DRIVE_BATCH` of them, `count` in use) and `Gen::batch_flush` hands them
@@ -2730,6 +2771,7 @@ fn gen_func(
         };
     // `LayoutOf`s whose one word read is a call of the layout memo, and the last pc made with it.
     let fuse = fuse_layout(prog, f, &leader, &fixed, false);
+    let sizes = static_sizes(prog, f, &leader);
     // Multiplications by a constant that only feed the `Index` after them (`index_muls`): one test
     // of the operand, and that `Index` tests the sum only (`fused_mul`, its pc).
     let imuls = index_muls(f, &fixed);
@@ -3383,6 +3425,21 @@ fn gen_func(
             Inst::LayoutOf { ty, desc, .. } if let Some(fu) = fuse[i] => {
                 g.layout_word(prog, pc, ty, desc, fu);
                 fused_to = Some(fu.last);
+            }
+            // Only the size is read: its word in the register, no layout in memory.
+            Inst::LayoutOf { ty, desc, .. }
+                if let (Some(d), Some(sl)) = (sizes[i], static_layout(prog, ty)) =>
+            {
+                // (A failed test leaves at this pc: the interpreter makes the layout and the load.)
+                let (out, go) = (g.b.create_block(), g.b.create_block());
+                g.b.set_cold_block(out);
+                let words = g.layout_words(&sl, desc, out);
+                g.b.ins().jump(go, &[]);
+                g.b.switch_to_block(out);
+                g.leave_at(pc);
+                g.b.switch_to_block(go);
+                g.st(d, words[0]);
+                fused_to = Some(i + 1);
             }
             Inst::LayoutOf { dst, ty, desc, .. } => match static_layout(prog, ty) {
                 Some(sl) => {

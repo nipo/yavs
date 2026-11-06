@@ -14409,5 +14409,31 @@ whole-signal read, the call, the result's check and copy, the wide drive).
   of that descriptor as a constant** (`Gen::const_dim`, both modes): `l1 <= reduce(t)` checked the result's length
   against the 7 of `l1` by reading and measuring `l1`'s descriptor at every call, 51 instructions; the result's side
   and the slow path are as before. `G_MODE=2`: 420.23 G to 418.81 G instructions at `--tier=clift`, 423.2 G to
-  419.3 G at the default tier (whose process copies have more such targets); wall 22.66 s to 22.26 s and 23.39 s to
+  419.3 G at the default tier; wall 22.66 s to 22.26 s and 23.39 s to
   22.02 s, ranges overlapping. Leaving the inline check out makes `length_checks_of_call_results_fail_alike_on_every_tier` fail.
+- **Decision: a `LayoutOf` of a static layout whose one use is the load of its size right after it is the size in a
+  register** (`static_sizes`, `Gen::layout_words`; a failed test leaves at the `LayoutOf`, which the interpreter runs
+  with the load): `Fx::size_of` of the local `r` allocated the four layout words in the temporary area, stored them
+  and loaded the first, about 60 instructions per call. `G_MODE=2`: 418.81 G to 416.93 G instructions at
+  `--tier=clift`, 419.3 G to 417.5 G at the default tier; wall 22.26 s to 22.03 s and 22.02 s to 22.28 s, ranges
+  overlapping. Of the `tools/bench` designs under `--tier=clift --no-cache` (this and the two decisions above), none
+  runs more instructions (`rtl_ram` 3.4 percent fewer, `ff_rtl` 1.2) and none has more machine code (`rec_pair`
+  27 KB less, `protected_queue` 8 KB). Storing the alignment word instead of the size fails both
+  `compiled_vectors` tests above and `elements_of_array_operands_in_subprograms_match_the_interpreter`.
+- **Together** (`G_MODE=2` against the loop in the process, `G_MODE=1`, same runs): 1.119 to 1.110 times the loop's
+  instructions at `--tier=clift` (375.94 G to 375.45 G for the loop) and 1.125 to 1.108 at the default tier (376.6 G
+  both); wall 23.26 s against 20.99 s to 22.03 s against 20.64 s, and 23.43 s against 21.34 s to 22.28 s against
+  21.47 s. The loop and the procedure form (`G_MODE=0`, 465.63 G to 465.14 G, default 464.8 G both) run the same or
+  fewer instructions, as do the record and shift testbenches of #1110 and #1118 at `--tier=clift` (the default
+  tier within its run-to-run spread of about 0.1 percent).
+- **Tried and dropped:**
+  - A `SigRead` of a known count of 65 to 256 logic elements that starts on a plane block copied inline instead of
+    `yavs_rt_planes`: 0.55 percent fewer instructions at `--tier=clift`, but 0.07 percent more at the default tier
+    with ranges apart (419.57 G to 419.66 G against 419.21 G to 419.39 G), so it was left out.
+  - Leaving out the `Zero` of a frame temporary right before a `SigRead` into it that writes every block: about 10
+    instructions per call (0.1 percent), and no test can see a break of it, since nothing reads the bytes it
+    would leave.
+- **Left** (about 900 instructions per call): the native entry and return, the local's descriptor and `NewFrame`
+  with its zeroing call, the descriptor copy and pair of the result, the whole-signal read of the operand, the copy
+  of the result into the waveform and the wide drive. Per element the function runs about 550 instructions of
+  compiled code against about 325 in the loop, which drives each element on its own (about 220 more in the host).
