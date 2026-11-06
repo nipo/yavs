@@ -1622,7 +1622,10 @@ impl SimControl {
         }
         sim.settle().map_err(SimError::new)?;
         sim.live = true;
-        sim.signals.iter_mut().for_each(|s| s.live = true);
+        sim.signals.iter_mut().for_each(|s| {
+            s.live = true;
+            s.set_lean_words();
+        });
         Ok(sim)
     }
 

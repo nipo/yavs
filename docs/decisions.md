@@ -14347,3 +14347,17 @@ result, three host calls of the local's `NewFrame`, and the drive of a result of
   frame, the descriptor copies of the result (`Alloc` and `Copy` twice in the callee, `SubtypeCheck` and `Copy` in
   the caller) and the whole-signal read of the operand. Without the call (an inliner at the IR level that takes a
   callee with temporaries and statements, so the process copy's facts apply) the function would be the loop.
+
+## Kernel commit and update of registers (yavs-kernel, #1118, 2026-11-06)
+
+- **A register is finished as one word** (`Signal::finish_word_lean`): a lean signal with no codes and no activity
+  stamps of at most 64 elements takes its one pending word straight, not the bus loop over a list of words and not
+  the whole-signal compare and copy of a bus with no history (`bare_whole`), which cost more than the loop for one
+  word (an iterator pair and a `memcpy` call). It notes the runs as the loop does, so with `Config::count_runs` off
+  `Stats::events` counts the runs of such a register instead of one per update (nothing reads it then). What
+  `finish_pend` asks of the signal that cannot change during the run (lean, inactive, no codes, plane storage) is
+  `Signal::lean_words`, set when `SimControl::new` ends, after `settle` (the codes of a bus depend on its drivers);
+  debug builds compare it with the full test at every use. Per changed register of 18 bits on Cranelift, about 296
+  instructions of finish and copy become 192; instructions 0.89 on a register chain of flat signals, 0.93 on a
+  record pipeline, 0.95 with waves on. A test compares a lean register with one that keeps every element's history,
+  with no waiter, a whole-signal waiter and waiters of parts.

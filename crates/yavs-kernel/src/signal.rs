@@ -754,6 +754,8 @@ pub(crate) struct Signal {
     pub skip_ok: bool,
     /// What `plain` asks that never changes after the build (`SimControl::new`).
     pub static_plain: bool,
+    /// `lean_words_now`, set when the run starts.
+    lean_words: bool,
     /// The segment the last `compute_driving` started in: the next dirty range is usually there
     /// or in the next one.
     seg_hint: usize,
@@ -1097,6 +1099,7 @@ impl Signal {
             callouts: Vec::new(),
             skip_ok: false,
             static_plain: false,
+            lean_words: false,
             seg_hint: 0,
             codes: Vec::new(),
             no_codes: false,
@@ -2303,17 +2306,20 @@ impl Signal {
             self.spill_pend_one();
         }
         // A lean bus that keeps no codes and no activity stamps: the words in one pass.
-        if plain
-            && self.lean
-            && self.inactive
-            && self.codes.is_empty()
-            && matches!(
-                (&self.cur, &self.driving, &self.last_value),
-                (Buf::Planes { .. }, Buf::Planes { .. }, Buf::Planes { .. })
-            )
-        {
+        debug_assert_eq!(
+            self.lean_words,
+            self.lean_words_now(),
+            "`lean_words` of `{}`",
+            self.name
+        );
+        if plain && self.lean_words {
             if self.pend_words.is_empty() {
                 return None;
+            }
+            // A register of at most 64 elements: its one word, nothing to order.
+            if self.ty.len <= 64 {
+                self.pend_words.clear();
+                return Some(self.finish_word_lean(now, cycle));
             }
             let mut words = std::mem::take(&mut self.pend_words);
             // Runs are listed in element order for the waiters of parts (cells are sorted and
@@ -2579,6 +2585,72 @@ impl Signal {
         any
     }
 
+    /// `finish_words_lean` of a signal of at most 64 elements: its one word, with no loop, no
+    /// whole-signal copy and the runs noted as there.
+    #[inline(always)]
+    fn finish_word_lean(&mut self, now: Time, cycle: u64) -> bool {
+        let pm = std::mem::take(&mut self.pend[0]);
+        let (Buf::Planes { b: cur, .. }, Buf::Planes { b: drv, .. }, Buf::Planes { b: last, .. }) =
+            (&mut self.cur, &self.driving, &mut self.last_value)
+        else {
+            return false;
+        };
+        let (x, y) = (cur[0], drv[0]);
+        let m = block_diff(&x, &y) & pm;
+        if m == 0 {
+            return false;
+        }
+        cur[0] = std::array::from_fn(|p| x[p] & !m | y[p] & m);
+        let t = stamp(now);
+        if self.bare {
+            self.bare_last = (cycle, t);
+        } else {
+            let l = last[0];
+            last[0] = std::array::from_fn(|p| l[p] & !m | x[p] & m);
+            if let Some(r) = self.blk_last.first_mut() {
+                if r.cycle == cycle {
+                    r.mask |= m;
+                } else {
+                    *r = EvRec {
+                        cycle,
+                        time: t,
+                        mask: m,
+                    };
+                }
+            }
+        }
+        let runs = u64::from((m & !(m << 1)).count_ones());
+        if self.watched && self.fine {
+            let mut v = m;
+            while v != 0 {
+                let s = v.trailing_zeros();
+                let run = (v >> s).trailing_ones();
+                note_run(
+                    &mut self.changed,
+                    &mut self.nruns,
+                    true,
+                    true,
+                    s as usize,
+                    run,
+                );
+                v &= !(nmask(run as usize) << s);
+            }
+        } else if self.watched {
+            let lo = m.trailing_zeros();
+            let hi = 64 - m.leading_zeros();
+            cover(
+                &mut self.changed,
+                &mut self.nruns,
+                lo as usize,
+                hi - lo,
+                runs,
+            );
+        } else {
+            self.nruns += runs;
+        }
+        true
+    }
+
     /// `finish_pend` of the elements `m` of word `w`.
     #[inline(always)]
     fn finish_word(&mut self, w: usize, m: u64, now: Time, cycle: u64, plain: bool) -> bool {
@@ -2729,6 +2801,23 @@ impl Signal {
             && self.guard.is_none()
             && self.port_in.is_none()
             && matches!(self.resolution, None | Some(Resolution::StdLogic));
+    }
+
+    /// `lean_words` once the codes and `inactive` are settled (the end of `SimControl::new`).
+    pub(crate) fn set_lean_words(&mut self) {
+        self.lean_words = self.lean_words_now();
+    }
+
+    /// What `finish_pend` asks of a signal for `finish_words_lean`, beside `plain`: none of it
+    /// changes during the run.
+    fn lean_words_now(&self) -> bool {
+        self.lean
+            && self.inactive
+            && self.codes.is_empty()
+            && matches!(
+                (&self.cur, &self.driving, &self.last_value),
+                (Buf::Planes { .. }, Buf::Planes { .. }, Buf::Planes { .. })
+            )
     }
 
     /// A byte signal with no layer, group, guard or resolution function to wait for: a sole
@@ -3945,6 +4034,7 @@ mod tests {
             if whole {
                 s.finish_whole();
             }
+            s.set_lean_words();
             s
         };
         let mut sigs = [mk(false, false), mk(true, false), mk(true, true)];
