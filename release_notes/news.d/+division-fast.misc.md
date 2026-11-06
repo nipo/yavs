@@ -1,1 +1,0 @@
-The `/`, `rem` and `mod` of `numeric_std` vectors, and of a vector and an integer in either order, run much faster, in compiled code as well as in the interpreter, also for vectors of more than 64 elements.

@@ -1,1 +1,0 @@
-The arithmetic operators, comparisons, `conv_integer` and the `conv_*` conversions of `std_logic_arith`, `std_logic_unsigned` and `std_logic_signed` now run as native operations, and compiled code computes them in place on short vectors, so designs written with these packages simulate faster.
