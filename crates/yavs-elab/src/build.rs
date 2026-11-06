@@ -109,6 +109,9 @@ impl Elaborated {
                     b.lean_events(id);
                     b.no_history(id);
                 }
+                if (a.0..z.0).all(|l| self.no_codes.get(l as usize) == Some(&true)) {
+                    b.no_codes(id);
+                }
                 continue;
             }
             let i = a.index();

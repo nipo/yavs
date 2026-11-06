@@ -87,7 +87,7 @@ whole pack. So leaves join a pack only when all of these hold for every leaf:
 | resolution none or `std_logic` (`resolved`) | one resolution per kernel signal; an unresolved leaf has at most one source per element (elaboration checks LRM 14.7.2 before the build), and `std_logic` resolution of one source is the identity, so both behave the same in a `std_logic` pack. A leaf with a user resolution function (the verification libraries' resolved transaction records) or in a composite resolved as a whole stays alone |
 | no guard, not implicit, not the prefix of an implicit signal, not a force/release target | signal-wide in the kernel (`guard`, `inactive`, the dirty-range path of a forced cycle) |
 | the same port situation: no port edge at all, or (step 3) the same edges' kind and peer objects | `independent`, `skip_ok` and port levels are per signal; a mixed pack would lose the direct path for its port-free leaves |
-| total at most 64 elements; a leaf of more than 64 elements stays alone | one plane block: codes always kept (`sync_codes`), element stamps offered to compiled code, `vquick`/`OutV` of one block, no `blk_active`/`blk_event`/lean machinery; a 233-leaf record of mostly scalars is four or five packs |
+| total at most 64 elements; a leaf of more than 64 elements stays alone | one plane block: codes kept (`sync_codes`) unless no leaf of the pack keeps them (#1119), element stamps offered to compiled code, `vquick`/`OutV` of one block, no `blk_active`/`blk_event`/lean machinery; a 233-leaf record of mostly scalars is four or five packs |
 
 A record of identical type on both sides of a port gets identical packs (the rules depend on the
 type, the constraints and the per-leaf facts), so its per-leaf port edges coalesce (step 3).
@@ -138,7 +138,8 @@ elements.
 - Interpreter: `InstSig::off` carries the base; reads (`elem_code`, `read_into`), edges, waits and
   drives are unchanged. `InstSig::ty` must carry the leaf's length, not the pack's.
 - Compiled tier: `TierSig` carries `off` and the pack's codes, planes and stamps (offered because a
-  pack has at most 64 elements), so compiled single-field reads, `'event` and edges stay inline.
+  pack has at most 64 elements), so compiled single-field reads, `'event` and edges stay inline. A pack
+  that keeps no codes (#1119) offers none (`codes` 0); its fields are read from the planes.
 
 ### 3.5 Waves, VHPI, DAP, coverage, diagnostics
 

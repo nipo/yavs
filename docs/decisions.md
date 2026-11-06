@@ -8817,8 +8817,8 @@ the run; cycles as the minimum of 7 interleaved runs on one core claimed with `t
 - **How**: `Db::facts()` has `elem_reads` (the signal objects with a scalar index, selection or alias of a part in an expression that is not an
   assignment, force or release target) and `elem_reads_all` (an element read through a signal parameter or an external name: any signal may be
   it). `yavs-elab` `keep_codes.rs` maps them to leaves like `lean.rs`: a leaf keeps its codes when it is one element, when an object that holds
-  it has an element read (a port collapsed into its actual marks the actual's leaf), when that object has a record in it (`SigGather` reads
-  the scalar leaves of a record one element at a time), for implicit signals and packs; all of them when `elem_reads_all`. The others get
+  it has an element read (a port collapsed into its actual marks the actual's leaf), when it is a scalar field of a record inside an array
+  (`SigGather` reads those one element at a time, a cost choice; #1119 below), for implicit signals; all of them when `elem_reads_all`. The others get
   `Builder::no_codes`. Port-map actuals such as `v(3)` count as reads (not told apart from other uses of the name): a safe over-count.
   `YAVS_CODES=all` keeps every signal's codes (test aid); the `no_code_signals` counter shows how many signals keep none.
 - **Without codes** a one-element read comes from the planes (`Ctx::first_code`, and compiled code through `TierSig` with `codes = 0`: its
@@ -8831,6 +8831,15 @@ the run; cycles as the minimum of 7 interleaved runs on one core claimed with `t
   `c(i-1)`) and keep their codes, so this decision cannot save their refresh: instructions 1.000 / 1.004 / 1.005 (code layout; their paths are
   unchanged), cycles level within the noise of a shared host. `neorv32_single_min` and `grlib_leon3mp` level.
 - **Width condition kept (user, 2026-10-26)**: with the element-read rule alone `fletcher_bufferwriter_512` lost 5% instructions (3% wall interp, 7% auto) because its wide buses have element reads. A leaf now keeps codes only with element reads AND, above 64 elements, narrow sources (the #519 rule, unchanged in `Signal::sync_codes`). `fletcher_bufferwriter_512` is level again: instructions 51.12 G to 51.17 G (interp), 49.44 G to 49.16 G (auto), cpu 3.98 s both. The skip test on the planes (`held`) is new for buses and signals without codes, so `mixed_entries` counts fewer direct entries (floors 1230 and 260).
+- **Records (#1119, 2026-11-06)**: a vector field of a record no longer keeps its codes for being in a record, and a record pack keeps none when
+  none of its leaves keeps them (`Elaborated::build_res`). The codes are a cache: every reader of a record's values reads the planes or falls
+  back to them without codes (`SigGather`/`SigScatter` in the interpreter and in compiled code, `Ctx::elem_code`, `first_code`, `cur_code`,
+  the `TierSig` reads of both compiled tiers, waves, reports, VHPI, the debugger, force and deposit, resolution, port conversions, the hang
+  report), so results do not depend on this choice. The scalar field of a record inside an array keeps them by cost, not for correctness: a
+  gather of a part reads each element of it through `Ctx::elem_code`, which without codes decodes the planes. A record whose fields have a
+  read of one element keeps them as before. On the record pipeline of 16 units, 1 M cycles (medians of 7 interleaved runs), the time went to
+  0.88 to 0.89 of before at `--tier=clift` and 0.86 to 0.89 at the default tier in every coding of the assignment (whole, aggregate, field by
+  field); the same design with flat signals runs the same instructions.
 - **Precise facts** (#734, 2026-10-26, next section): port-map actuals, sensitivity entries and signal parameters no longer count as
   element reads or ask for every signal.
 
