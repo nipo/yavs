@@ -1788,3 +1788,12 @@ fn guards_on_signal_attributes_match_the_interpreter() {
         .replace("guard_signal_attributes", "y");
     all_tiers_match("compiled_guard_attributes", &src);
 }
+
+/// Guards evaluated again when a signal of the condition is active with no event (`s <= s;`), on
+/// a whole signal, an element, a record field and a port, beside drives compiled code may skip.
+#[test]
+fn guards_on_activity_match_the_interpreter() {
+    let src = include_str!("../../../tests/corpus/delta/guard_activity.vhd")
+        .replace("guard_activity", "y");
+    all_tiers_match("compiled_guard_activity", &src);
+}

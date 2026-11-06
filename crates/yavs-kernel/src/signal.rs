@@ -796,8 +796,9 @@ pub(crate) struct Signal {
     /// A deposit made the driving value differ from the drivers: direct commits write the driver
     /// value too, as before.
     pub exact: bool,
-    /// Nothing reads the activity of this signal (`Config::skip_unchanged`, and no implicit
-    /// signal has it as its prefix): `finish_pend` leaves the activity stamps alone.
+    /// Nothing reads the activity of this signal (`Config::skip_unchanged`, no implicit signal
+    /// has it as its prefix and no guard condition reads it): `finish_pend` leaves the activity
+    /// stamps alone.
     pub inactive: bool,
     /// The element and code of the last `commit_code`.
     last_commit: (u32, u8),

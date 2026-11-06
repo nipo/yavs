@@ -1,0 +1,8 @@
+== 2008
+note: RES guard=false at 0 fs
+note: RES y=0
+note: RES guard=true at 1000000 fs
+note: RES y=1
+note: RES guard=false at 2000000 fs
+note: RES guard=true at 4000000 fs
+note: RES y=3

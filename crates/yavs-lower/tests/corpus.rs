@@ -176,6 +176,8 @@ const PASS: &[&str] = &[
     "delta/delta_chain",
     "delta/delta_order",
     "delta/event_attrs",
+    "delta/guard_activity",
+    "delta/guard_activity_attr",
     "delta/guard_initial_value",
     "delta/guard_signal_attributes",
     "delta/record_wake",

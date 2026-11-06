@@ -1,0 +1,3 @@
+exit	0
+diag	note	0	0	:guard_activity_attr:b:_p0	guard=false
+diag	note	1000000	0	:guard_activity_attr:b:_p0	guard=true

@@ -194,3 +194,84 @@ fn guard_init_gives_the_initial_value() {
         );
     }
 }
+
+/// A guard runs in every cycle in which a signal part of its condition is active (LRM 14.7.4),
+/// also for a transaction that keeps the value: GUARD on `s(0)'event` turns FALSE at `s(0) <= s(0)`,
+/// and a held transaction on `s(1)`, which the condition does not read, changes nothing; also
+/// where the kernel skips unchanged assignments that nothing can see.
+#[test]
+fn guard_runs_when_a_signal_of_its_condition_is_active() {
+    for skip_unchanged in [false, true] {
+        guard_on_activity(skip_unchanged);
+    }
+}
+
+fn guard_on_activity(skip_unchanged: bool) {
+    let mut b = Builder::new();
+    let (e0, e1) = (Range::new(0, 1), Range::new(1, 1));
+    let s = b.signal(
+        "s",
+        SignalType::logic(2),
+        &LogicVec::new(2, StdULogic::Zero),
+    );
+    let g = b.signal(
+        "g",
+        SignalType::logic(1),
+        &LogicVec::new(1, StdULogic::Zero),
+    );
+    let (ds, dg) = (b.driver(s), b.driver(g));
+    let one = StdULogic::One as u8;
+    let mut step = 0;
+    b.process(
+        "stim",
+        NONE,
+        &[ds],
+        p(move |c| {
+            // 1 ns: s(0) <= '1' (an event); 2 ns: s(0) <= '1' (held); 3 ns: s(1) <= '0' (held).
+            if step > 0 {
+                let (r, code) = [(e0, one), (e0, one), (e1, StdULogic::Zero as u8)][step - 1];
+                // The direct path where it is taken, which keeps no activity nothing reads.
+                if !c.assign_code_now(ds, r, code) {
+                    c.assign_code(ds, Some(r), Time::ZERO, code, DelayMode::INERTIAL)?;
+                }
+            }
+            step += 1;
+            if step < 4 {
+                c.wait_for(ns(1))?;
+            }
+            Ok(())
+        }),
+    );
+    let pg = b.process(
+        "_guard",
+        NONE,
+        &[dg],
+        p(move |c| {
+            let code = if c.event(s.slice(0, 1))? {
+                one
+            } else {
+                StdULogic::Zero as u8
+            };
+            c.assign_code_now(dg, Range::new(0, 1), code);
+            c.wait_on(s.slice(0, 1))
+        }),
+    );
+    b.guard_process(pg, &[(s, e0)]);
+    b.guard_init(pg);
+    let cfg = Config {
+        skip_unchanged,
+        ..Config::default()
+    };
+    let (mut sim, trace) = build(b, cfg);
+    sim.run_until(ns(5)).unwrap();
+    let g: Vec<String> = trace
+        .take()
+        .into_iter()
+        .filter(|l| l.contains("g["))
+        .collect();
+    assert_eq!(
+        g,
+        ["1 ns +1 g[0..1]=\"1\"", "2 ns +1 g[0..1]=\"0\""],
+        "skip_unchanged {skip_unchanged}"
+    );
+}

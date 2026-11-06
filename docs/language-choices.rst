@@ -88,8 +88,9 @@ yavs, with what to do about each.
      - Accepted. GUARD starts as the condition on the values before time 0 (``'event`` FALSE,
        ``'last_event`` TIME'HIGH), with no event of its own, and keeps its value until a signal of
        the condition is active again (LRM 2008 14.7.4, 14.7.5.2), also one the condition reads only
-       through ``'last_value`` or ``'last_event``. One reference simulator rejects these attributes
-       in a guard, and the other does not evaluate the guard again for ``'last_value``.
+       through ``'last_value`` or ``'last_event``, and also for a transaction that keeps the value
+       (``s <= s;``). One reference simulator rejects these attributes in a guard, and the other
+       evaluates the guard again only on an event.
      - Nothing; for code that must run elsewhere too, write the clocked process out.
    * - An index constraint whose discrete range has another type than its index:
        ``type nv is array (natural range <>) of bit; signal s : nv(color);`` or

@@ -212,8 +212,8 @@ pub struct ProcInst {
     /// (`yavs_kernel::Builder::idle_skip`).
     pub idle: Option<Vec<IdleRead>>,
     /// The `_guard` process of a guarded block: the signal parts its condition reads. The kernel
-    /// runs it in the update phase of the cycle in which one of them has an event, so GUARD
-    /// changes in that cycle (LRM 11.2; `yavs_kernel::Builder::guard_process`).
+    /// runs it in the update phase of the cycle in which one of them is active, so GUARD
+    /// changes in that cycle (LRM 11.2, 14.7.4; `yavs_kernel::Builder::guard_process`).
     pub guard: Option<Vec<(LeafId, yavs_kernel::Range)>>,
     /// The `_guard` process of a guarded block: what it assigns at initialisation is GUARD's
     /// initial value (`yavs_kernel::Builder::guard_init`, LRM 14.7.5.2).

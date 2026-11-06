@@ -3400,7 +3400,7 @@ user's performance priority:
   unchanged. A later assignment of the same run to that driver first puts the skipped ones
   back as real transactions (`Ctx::flush_phantoms`), so preemption is exactly the old one.
 - Allowed signals: not guarded, not resolved by a user function, not in a composite group, not
-  the source of an implicit signal, and not connected through ports to a signal that breaks one
+  the source of an implicit signal, not read by a guard condition (#1120), and not connected through ports to a signal that breaks one
   of these or through a conversion function (activity passes through ports and calls
   conversions and resolution functions). Static facts only, so the choice does not depend on
   `--threads`.
@@ -5116,7 +5116,8 @@ the next round does not repeat it.
 
 ## GUARD changes in the cycle of its condition (yavs-kernel, yavs-elab, #464, 2026-10-23)
 
-LRM 11.2 and 14.7.5: the implicit GUARD signal is updated in the cycle where a signal of its condition has an event. The
+LRM 11.2 and 14.7.5: the implicit GUARD signal is updated in the cycle where a signal of its condition has an event (since
+#1120: is active, "A block guard runs when a signal of its condition is active" below). The
 `_guard` process of a block drove it with a zero-delay assignment, which matures a delta later (the references report
 `guard=false` once, in the cycle of the event; yavs reported `guard=true` then `false` a delta later).
 
@@ -14140,3 +14141,27 @@ signal parameter were `E2106`, and `clk'stable` read as FALSE.
   attributes and `'event` in a guard (`guard-event-attribute`). Tests: `tests/corpus/delta/guard_signal_attributes.vhd` (reference output),
   `crates/yavs-kernel/tests/guard.rs` `guard_init_gives_the_initial_value`, `compiled_vectors.rs`
   `guards_on_signal_attributes_match_the_interpreter`.
+
+## A block guard runs when a signal of its condition is active (yavs-kernel, #1120, 2026-11-06)
+
+LRM 14.7.4 updates GUARD in every simulation cycle in which a signal its guard condition references is active, not only when
+one has an event. `run_guards` took the guards to run from `changed_sigs`, so a transaction that keeps the value (`s <= s;`)
+left GUARD as it was: `block (s'event)` stayed TRUE and its guarded assignments took the next value, `block (a'active)` never
+turned TRUE.
+
+- **`run_guards` asks the activity of each part a guard reads** (`Signal::active_in` of the ranges `Builder::guard_process`
+  gives, per guard), so an element or field of a composite counts only where the condition reads it. The guards that read a
+  GUARD just assigned, or a signal it changed through a port, run again in the same cycle, as before. A prefix of an attribute
+  (`s'last_event`, a signal parameter) is read like the signal, an implicit signal (`s'quiet`) by its own activity (#1114).
+- **The signals a guard condition reads keep their activity**: they are not `Signal::inactive` and allow no skipped assignment
+  (`mark_skippable`), like the sources of implicit signals; otherwise the transaction that keeps the value leaves no trace. Cost:
+  only designs with a guarded block. Their guard-read signals lose `skip_ok`, so the processes that drive them lose the idle skip,
+  and `run_guards` looks at every guard's reads in each cycle (a scan per guard; the reads could be grouped by signal if many
+  guarded blocks on one clock ever show up). A design with no guarded block runs none of this (`guard_procs` empty).
+- References: one evaluates a guard again only on an event and never for the prefix of `'last_event`, the other rejects these
+  attributes in a guard (`guard-held-transaction`). Tests: `crates/yavs-kernel/tests/guard.rs`
+  `guard_runs_when_a_signal_of_its_condition_is_active` (with and without skipped assignments), corpus `delta/guard_activity` and
+  `delta/guard_activity_attr` (`ref=hand`), `compiled_vectors.rs` `guards_on_activity_match_the_interpreter`.
+- A `_guard` process whose condition reads a name `Walker::guard_reads` cannot resolve stays a normal process, woken by
+  events only, so it would still miss a held transaction; no such condition was found (external names, a signal parameter and
+  a dynamic index all resolve).

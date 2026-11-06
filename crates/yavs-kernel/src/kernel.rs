@@ -1043,9 +1043,11 @@ pub struct SimControl {
     /// `skip_n` of `skip_wake`.
     skip_wake: [u32; SKIP_MAX],
     skip_n: usize,
-    /// The `_guard` processes of guarded blocks (`Builder::guard_process`) and, per signal, the
-    /// ones whose conditions read it. Their `ProcMeta::ready` stays true, so no wake queues them.
+    /// The `_guard` processes of guarded blocks (`Builder::guard_process`), ascending, the signal
+    /// parts each condition reads and, per signal, the guards that read it. Their
+    /// `ProcMeta::ready` stays true, so no wake queues them.
     guard_procs: Vec<u32>,
+    guard_reads: Vec<Vec<(u32, Range)>>,
     /// The processes that drive implicit GUARD signals (`Builder::guard_init`), ascending.
     guard_inits: Vec<u32>,
     guard_readers: HashMap<u32, SmallVec<[u32; 2]>>,
@@ -1328,6 +1330,10 @@ impl SimControl {
                     signals[s.0 as usize].inactive = false;
                 }
             }
+            // A guard runs when a signal of its condition is active (`run_guards`).
+            for (s, _) in guards.iter().flatten().flatten() {
+                signals[s.0 as usize].inactive = false;
+            }
         }
         for s in &mut signals {
             s.set_static_plain();
@@ -1434,10 +1440,12 @@ impl SimControl {
         }
         // The guard processes of guarded blocks, by the signals their conditions read.
         let mut guard_procs = Vec::new();
+        let mut guard_reads = Vec::new();
         let mut guard_readers: HashMap<u32, SmallVec<[u32; 2]>> = HashMap::new();
         for (p, reads) in guards.iter().enumerate() {
             let Some(reads) = reads else { continue };
             guard_procs.push(p as u32);
+            guard_reads.push(reads.iter().map(|&(s, r)| (s.0, r)).collect());
             // Never woken by its waiters: it runs in `run_guards`.
             procs[p].ready = true;
             for (s, _) in reads {
@@ -1475,6 +1483,7 @@ impl SimControl {
         };
         let mut sim = SimControl {
             guard_procs,
+            guard_reads,
             guard_inits,
             guard_readers,
             guard_due: Vec::new(),
@@ -2211,16 +2220,38 @@ impl SimControl {
         }
     }
 
-    /// The `_guard` processes whose conditions read a signal with an event in this update run now,
-    /// before anything is woken: GUARD changes in the cycle of the event (LRM 11.2, 14.7.5.3), and
-    /// so do the processes that wait for it. A guard whose condition reads another GUARD runs
-    /// again after that one.
+    /// The `_guard` processes whose conditions read a signal active in this update run now, before
+    /// anything is woken: GUARD changes in that cycle (LRM 11.2, 14.7.4), and so do the processes
+    /// that wait for it. A guard whose condition reads another GUARD runs again after that one.
     fn run_guards(&mut self) -> Result<(), SimError> {
-        let mut seen = 0;
-        loop {
-            let mut due = std::mem::take(&mut self.guard_due);
-            for i in seen..self.changed_sigs.len() {
-                if let Some(l) = self.guard_readers.get(&self.changed_sigs[i]) {
+        let cycle = self.cycle;
+        let mut due = std::mem::take(&mut self.guard_due);
+        // ponytail: every guard's reads per cycle; group them by signal if many guards share one.
+        for (i, reads) in self.guard_reads.iter().enumerate() {
+            if reads
+                .iter()
+                .any(|&(s, r)| self.signals[s as usize].active_in(r, cycle))
+            {
+                due.push(self.guard_procs[i]);
+            }
+        }
+        let mut seen = self.changed_sigs.len();
+        while !due.is_empty() {
+            self.run_batch(due.clone(), false, false)?;
+            for &g in &due {
+                self.procs[g as usize].ready = true;
+            }
+            due.clear();
+            // The GUARDs just assigned, and a port they changed.
+            let mut fresh = self.direct_sigs.clone();
+            self.finish_direct().map_err(|k| self.err(k))?;
+            fresh.extend_from_slice(&self.changed_sigs[seen..]);
+            seen = self.changed_sigs.len();
+            for s in fresh {
+                let sig = &self.signals[s as usize];
+                if let Some(l) = self.guard_readers.get(&s)
+                    && sig.active_in(sig.full(), cycle)
+                {
                     for &g in l {
                         if !due.contains(&g) {
                             due.push(g);
@@ -2228,20 +2259,10 @@ impl SimControl {
                     }
                 }
             }
-            seen = self.changed_sigs.len();
-            if due.is_empty() {
-                self.guard_due = due;
-                return Ok(());
-            }
             due.sort_unstable();
-            self.run_batch(due.clone(), false, false)?;
-            self.finish_direct().map_err(|k| self.err(k))?;
-            for &g in &due {
-                self.procs[g as usize].ready = true;
-            }
-            due.clear();
-            self.guard_due = due;
         }
+        self.guard_due = due;
+        Ok(())
     }
 
     /// LRM 14.7.5.2 d: each implicit GUARD signal is set to its guard expression before the

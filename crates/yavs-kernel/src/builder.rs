@@ -469,8 +469,8 @@ impl Builder {
 
     /// Process `p` is the `_guard` process of a guarded block: `GUARD <= condition`, then a wait on
     /// the condition's signals `reads`. The kernel runs it in the update phase of the cycle in
-    /// which one of them has an event, so GUARD changes in that cycle (LRM 11.2), instead of
-    /// waking it like a process (GUARD would change a delta later).
+    /// which one of them is active, so GUARD changes in that cycle (LRM 11.2, 14.7.4), instead of
+    /// waking it like a process (GUARD would change a delta later, and only on an event).
     pub fn guard_process(&mut self, p: ProcId, reads: &[(SignalId, Range)]) {
         match self.procs.get_mut(p.0 as usize) {
             Some(d) => d.guard = Some(reads.to_vec()),
@@ -737,8 +737,9 @@ impl Builder {
 impl Builder {
     /// Set `Signal::skip_ok` on the signals whose activity nothing can observe (R2b): those
     /// that are not guarded, not resolved by a user function, not in a composite group, not
-    /// the source of an implicit signal, and not connected through ports to such a signal or
-    /// through a conversion (activity passes through ports and runs conversions).
+    /// the source of an implicit signal or read by a guard process (`guard_process`), and not
+    /// connected through ports to such a signal or through a conversion (activity passes through
+    /// ports and runs conversions).
     fn mark_skippable(&mut self) {
         fn root(p: &mut [usize], mut i: usize) -> usize {
             while p[i] != i {
@@ -760,6 +761,9 @@ impl Builder {
             for s in std::iter::once(&im.src).chain(im.more.iter().map(|(s, _)| s)) {
                 bad[s.0 as usize] = true;
             }
+        }
+        for (s, _) in self.procs.iter().flat_map(|p| p.guard.iter().flatten()) {
+            bad[s.0 as usize] = true;
         }
         for p in &self.ports {
             let ids: Vec<usize> = (p.formal.iter().chain(&p.actual))
