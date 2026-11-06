@@ -235,8 +235,8 @@
        157
       ],
       "delta": [
-       14,
-       14
+       17,
+       17
       ],
       "env": [
        16,
@@ -271,8 +271,8 @@
        2
       ],
       "process": [
-       46,
-       46
+       47,
+       47
       ],
       "protected": [
        27,
@@ -340,8 +340,8 @@
        157
       ],
       "delta": [
-       14,
-       14
+       17,
+       17
       ],
       "env": [
        16,
@@ -376,8 +376,8 @@
        2
       ],
       "process": [
-       46,
-       46
+       47,
+       47
       ],
       "protected": [
        27,
@@ -445,8 +445,8 @@
        157
       ],
       "delta": [
-       14,
-       14
+       17,
+       17
       ],
       "env": [
        16,
@@ -481,8 +481,8 @@
        2
       ],
       "process": [
-       46,
-       46
+       47,
+       47
       ],
       "protected": [
        27,
@@ -537,7 +537,7 @@
    }
   },
   "discrepancies": {
-   "cases": 266,
+   "cases": 271,
    "output_tail": "",
    "yavs_matches_expected": true
   },
@@ -546,9 +546,10 @@
     "classes": {
      "analysis": 23,
      "elab": 7,
-     "oracle": 26,
+     "oracle": 25,
      "pass": 1014,
-     "skip": 403
+     "skip": 403,
+     "timeout": 1
     },
     "pass_list": 995,
     "pass_list_regressions": [],
@@ -625,9 +626,9 @@
   }
  },
  "generated": {
-  "commit": "b182690c5f",
+  "commit": "5a461d96aa",
   "commit_date": "2026-11-06",
-  "version": "0.15.1"
+  "version": "0.16.0"
  },
  "local": {
   "records": {
@@ -2727,6 +2728,13 @@
     "yavs": "OK"
    },
    {
+    "case": "process-constant-attribute-driver-index",
+    "decided": "user, 2026-11-06 (L186)",
+    "kind": "LRM ambiguity",
+    "lrm": "9.4.3, 8.1, 14.7.2",
+    "yavs": "OK"
+   },
+   {
     "case": "aggregate-piece-context-direction",
     "decided": "agent, 2026-10-19 (#230, L84)",
     "kind": "LRM ambiguity",
@@ -3228,6 +3236,34 @@
     "decided": "agent, 2026-10-28 (#815)",
     "kind": "LRM clear",
     "lrm": "10.6.2.1",
+    "yavs": "OK"
+   },
+   {
+    "case": "guard-event-attribute",
+    "decided": "agent, 2026-11-06 (#1114)",
+    "kind": "LRM clear",
+    "lrm": "11.2, 11.6, 14.7.4, 16.2",
+    "yavs": "OK"
+   },
+   {
+    "case": "guard-initial-history",
+    "decided": "user, 2026-11-06 (#1114)",
+    "kind": "LRM clear",
+    "lrm": "14.7.5.2, 16.2",
+    "yavs": "OK"
+   },
+   {
+    "case": "guard-attribute-function-prefix",
+    "decided": "agent, 2026-11-06 (#1114)",
+    "kind": "LRM clear",
+    "lrm": "14.7.4",
+    "yavs": "OK"
+   },
+   {
+    "case": "guard-held-transaction",
+    "decided": "agent, 2026-11-06 (#1120)",
+    "kind": "LRM clear",
+    "lrm": "11.6, 14.7.4",
     "yavs": "OK"
    },
    {
