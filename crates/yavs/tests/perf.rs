@@ -1925,6 +1925,20 @@ mod clift {
         ]
     );
 
+    // Elements of an array of `signed` in a function (#1122): the copies of the operands and of
+    // the result are inline, the local starts zeroed with no fill, the parameter's region in the
+    // caller's frame is found at the entry without a call.
+    clift_case!(
+        elem_ops,
+        "clift_elem_ops",
+        "sum=",
+        [
+            ("cb_lcopy", Max(0)),
+            ("cb_xstep", Max(1)),
+            ("cb_region", Max(0))
+        ]
+    );
+
     // `perf/ieee_paths.vhd` compiled: native calls per key (`cb_native` of `YAVS_COUNTERS=pc`), an
     // unlisted key 0 (computed in place on every call); the in-place ops are listed for their calls
     // on more than 64 elements. A new path updates this table in the same commit.

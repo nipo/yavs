@@ -333,6 +333,7 @@ pub const MEM_TEMP_BASE: u64 = std::mem::offset_of!(Mem, fr.temp_base) as u64;
 pub const MEM_UP: u64 = std::mem::offset_of!(Mem, fr.up) as u64;
 pub const MEM_UP_SLOTS: u64 = std::mem::offset_of!(Mem, fr.up_slots) as u64;
 pub const MEM_ROOT_SLOTS: u64 = std::mem::offset_of!(Mem, fr.root_slots) as u64;
+pub const MEM_ROOT_LEN: u64 = std::mem::offset_of!(Mem, fr.root_len) as u64;
 pub const MEM_UP_LEN: u64 = std::mem::offset_of!(Mem, fr.up_len) as u64;
 pub const MEM_INST: u64 = std::mem::offset_of!(Mem, fr.inst) as u64;
 pub const MEM_INST_LEN: u64 = std::mem::offset_of!(Mem, fr.inst_len) as u64;

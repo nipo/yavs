@@ -1975,3 +1975,207 @@ end;
 fn predefined_match_in_compiled_code_matches_the_interpreter() {
     all_tiers_match("compiled_pmatch", PREDEFINED_MATCH);
 }
+
+/// Elements of arrays of logic arrays in subprograms: the operands and targets of native
+/// operations on elements of unconstrained parameters (ascending, descending, non-zero bounds)
+/// and of locals sized from them, 12-bit elements that cross a plane block, nested calls, a
+/// target that is also an operand, parameters that alias each other, locals left at their
+/// default (`U`, `X`, `'0'`), called from several processes.
+const ELEMS: &str = r#"library ieee; use ieee.std_logic_1164.all; use ieee.numeric_std.all;
+package ep is
+  type t_arr is array (natural range <>) of signed(11 downto 0);
+  type x01v is array (natural range <>) of X01;
+  type x_arr is array (natural range <>) of x01v(4 downto 0);
+  type b_arr is array (natural range <>) of bit_vector(4 downto 0);
+  function reduce (src : t_arr) return t_arr;
+  function pairs (src : t_arr) return t_arr;
+  function partial (src : t_arr; n : natural) return t_arr;
+  function xdef (n : positive) return x_arr;
+  function bdef (n : positive) return b_arr;
+  procedure acc (a : inout t_arr; b : in t_arr);
+  function fixed (a : t_arr) return t_arr;
+  function img (a : t_arr) return string;
+  function str (v : x01v) return string;
+end;
+
+package body ep is
+  -- One stage of an adder tree on a 0-based operand.
+  function reduce (src : t_arr) return t_arr is
+    variable r : t_arr(0 to (src'length + 1) / 2 - 1);
+  begin
+    for k in r'range loop
+      if 2 * k + 1 <= src'high then
+        r(k) := src(2 * k) + src(2 * k + 1);
+      else
+        r(k) := src(2 * k);
+      end if;
+    end loop;
+    return r;
+  end;
+  -- Pairs in the operand's own order, any bounds; the target is an operand too.
+  function pairs (src : t_arr) return t_arr is
+    variable r : t_arr((src'length + 1) / 2 - 1 downto 0);
+    variable k : integer := r'high;
+    variable odd : boolean := false;
+  begin
+    for i in src'range loop
+      if not odd then
+        r(k) := src(i);
+      else
+        r(k) := r(k) - src(i);
+        k := k - 1;
+      end if;
+      odd := not odd;
+    end loop;
+    return r;
+  end;
+  -- Every third element stays at its default.
+  function partial (src : t_arr; n : natural) return t_arr is
+    variable r : t_arr(src'range);
+  begin
+    for i in src'range loop
+      if i mod 3 /= n then
+        r(i) := src(i) xor src(src'left);
+      end if;
+    end loop;
+    return r;
+  end;
+  function xdef (n : positive) return x_arr is
+    variable r : x_arr(1 to n);
+  begin
+    r(1) := "10X01";
+    return r;
+  end;
+  function bdef (n : positive) return b_arr is
+    variable r : b_arr(n downto 1);
+  begin
+    r(n) := "10101";
+    return r;
+  end;
+  procedure acc (a : inout t_arr; b : in t_arr) is
+  begin
+    for i in a'range loop
+      a(i) := a(i) + b(b'low + (i - a'low) mod b'length);
+    end loop;
+  end;
+  -- Elements at constant positions of a local of static bounds, one across a plane block.
+  function fixed (a : t_arr) return t_arr is
+    variable r : t_arr(0 to 5);
+  begin
+    r(5) := a(a'left);
+    r(0) := r(5) + 1;
+    r(2) := r(0);
+    return r;
+  end;
+  function img (a : t_arr) return string is
+    variable s : string(1 to 4 * a'length);
+    variable p : positive := 1;
+  begin
+    for i in a'range loop
+      s(p to p + 3) := to_hstring(a(i)) & " ";
+      p := p + 4;
+    end loop;
+    return s;
+  end;
+  function str (v : x01v) return string is
+    variable s : string(1 to v'length);
+    variable p : positive := 1;
+  begin
+    for i in v'range loop
+      s(p) := std_ulogic'image(v(i))(2);
+      p := p + 1;
+    end loop;
+    return s;
+  end;
+end;
+
+library ieee; use ieee.std_logic_1164.all; use ieee.numeric_std.all;
+use work.ep.all;
+entity y is
+end;
+architecture a of y is
+  signal t : t_arr(0 to 12) := (others => (others => '0'));
+  signal d : t_arr(9 downto 3) := (others => (others => '0'));
+  signal u : t_arr(5 to 17) := (others => (others => '0'));
+  signal l1 : t_arr(0 to 6) := (others => (others => '0'));
+  signal l2 : t_arr(0 to 3) := (others => (others => '0'));
+begin
+  process is
+  begin
+    for c in 1 to 120 loop
+      for k in t'range loop
+        t(k) <= t(k) + to_signed(37 * k + c, 12);
+      end loop;
+      for k in d'range loop
+        d(k) <= d(k) - to_signed(5 * k + 3 * c, 12);
+      end loop;
+      for k in u'range loop
+        u(k) <= u(k) + to_signed(11 * k - c, 12);
+      end loop;
+      wait for 1 ns;
+    end loop;
+    wait;
+  end process;
+
+  process (t) is
+  begin
+    l1 <= reduce(t);
+    l2 <= reduce(l1);
+    report "t " & img(l2) & img(reduce(reduce(t))) & img(pairs(d)) & img(pairs(u))
+      & img(partial(u, 1)) & img(fixed(d));
+  end process;
+
+  process is
+    variable v : t_arr(4 to 11) := (others => to_signed(1, 12));
+    variable w : t_arr(7 downto 0);
+  begin
+    for c in 1 to 100 loop
+      wait for 1 ns;
+      v := pairs(v & t(0 to 7));
+      acc(v, v);
+      w := partial(t(0 to 7), c mod 3);
+      acc(w, l1);
+      report "v " & img(v) & img(w) & img(partial(d, c mod 3)) & str(xdef(3)(1))
+        & str(xdef(3)(2)) & to_string(bdef(2)(1)) & to_string(bdef(2)(2));
+      -- The defaults of the element subtypes' left bounds.
+      assert str(xdef(3)(2)) = "XXXXX" and bdef(2)(1) = "00000"
+        and to_string(partial(w, 0)(0)) = "UUUUUUUUUUUU"
+        report "default" severity failure;
+    end loop;
+    wait;
+  end process;
+end;
+"#;
+
+#[test]
+fn elements_of_array_operands_in_subprograms_match_the_interpreter() {
+    all_tiers_match("compiled_elem_operands", ELEMS);
+    let dir = tempdir("compiled_elem_operands_threads");
+    std::fs::write(dir.join("y.vhd"), ELEMS).expect("write");
+    let a = yavs(
+        &dir,
+        &["analyze", "--std=2008", "--work=work:work", "y.vhd"],
+    );
+    assert!(a.status.success(), "{a:?}");
+    let go = |flags: &[&str]| {
+        let mut args = vec!["run", "--std=2008", "--work=work:work"];
+        args.extend_from_slice(flags);
+        args.push("y");
+        let o = yavs(&dir, &args);
+        (
+            o.status.code(),
+            String::from_utf8_lossy(&o.stdout).into_owned(),
+        )
+    };
+    let want = go(&["--tier=interp"]);
+    for flags in [
+        #[cfg(feature = "clift")]
+        vec!["--tier=clift", "--threads=4"],
+        #[cfg(feature = "clift")]
+        vec!["--tier=clift-auto", "--tier-heat=1,0,0", "--threads=4"],
+        #[cfg(feature = "llvm")]
+        vec!["--tier=auto", "--tier-heat=1,0,0", "--threads=4"],
+    ] {
+        assert_eq!(go(&flags), want, "{flags:?}");
+    }
+}

@@ -14230,3 +14230,24 @@ work counter. Three guards, all exact and host independent:
 - **Rule: a new `ieee` path updates the row, `IEEE_GENERAL` and `IEEE_NATIVE_CALLS` in the same commit** (root
   `AGENTS.md` section 4). Not done: timing ratios per operation in `tools/bench` (section 4 item 4 of #1108).
 
+
+## Elements of arrays of logic arrays in compiled subprograms (yavs-clift, yavs-lower, #1122, 2026-11-06)
+
+Written by Claude. One stage of an adder tree as a function (`r(k) := src(2 * k) + src(2 * k + 1)` on an array of `signed`) ran 1.25 times as long as the same loop in the process.
+
+- **Finding: the copies are not the difference.** An array of logic arrays is one set of bit planes, so an element is a bit offset into them, not an address: in the process the operands of `+` are read into temporaries too (`Alloc`, `SigRead`) and the result is copied into the waveform. A native operand at a plane offset would change the native convention of every tier for no work saved. What differed was how the tier lowers the copies and the call.
+- **Decision: an `LCopy` of a constant count of up to 64 elements is inline in every function** (`lcopy_const`, `lcopy_inline`), not only in processes. In the function each element read and each element write called `yavs_rt_lcopy`; a run-time count keeps the call. Cold compile of `perf/ieee_paths.vhd` under `--tier=clift --no-cache`: +0.05 percent instructions. Of the `tools/bench` designs under `--tier=clift --no-cache`, only `std_logic_1164.to_hstring` grows (3.4 KB in both bodies), so `rtl_ram` and `rec_pair` run 6.5 M instructions more, the compile (+0.9 percent of `rtl_ram`'s 0.74 G); every other design is within 0.4 percent, and at the default tier `rtl_ram` and `rec_pair` are unchanged.
+- **Decision: the root frame by its own address is held inline** (`hold_resolve`: `TierFrame::root_slots` and `root_len`, what `Mem::region` answers). A process passes a function a copy it made in its own frame, and each call resolved it through `yavs_rt_region`.
+- **Decision: an array of logic arrays whose innermost element starts at code 0 has a zero default** (`zero_default`): the local is allocated zeroed (`NewFill` of a zero byte), not filled by an `LFill` that compiled code stepped through `yavs_rt_xstep` at every call.
+- **Tests.** `compiled_vectors.rs` `elements_of_array_operands_in_subprograms_match_the_interpreter` (ascending, descending and non-zero bounds, 12-bit elements across a plane block, nested calls, `r(k) := r(k) - src(i)`, an `inout` parameter aliasing an `in` one, defaults `U`, `X`, `'0'` asserted in VHDL; every tier and `--threads=4`) failed with each change broken once; `perf.rs` `clift::elem_ops` bounds `cb_lcopy`, `cb_xstep` and `cb_region` (5781, 201, 400 before).
+- **Numbers** (`--features clift` bench builds, 16 units, 1 M cycles, `YAVS_NO_PMEMO=1`, 7 interleaved runs per row on one core, medians, simulation instructions and cycles of `perf stat`, user):
+
+  | | `--tier=clift` mode 1 | mode 2 | ratio | default tier mode 1 | mode 2 | ratio |
+  |---|---:|---:|---:|---:|---:|---:|
+  | before, wall | 20.79 s | 25.98 s | 1.25 | 21.16 s | 26.01 s | 1.23 |
+  | after, wall | 20.14 s | 22.61 s | 1.12 | 20.97 s | 23.66 s | 1.13 |
+  | before, instructions | 375.7 G | 475.6 G | | 375.5 G | 477.1 G | |
+  | after, instructions | 375.7 G | 429.1 G | | 375.5 G | 430.6 G | |
+
+  The process loop (mode 1) and the #1110 and #1118 testbenches run the same instructions.
+- **Left (half the gap):** the native-frame call (prologue, slot registration, the parameter's region), the whole-signal read the call needs, and three plane copies per element where the process has two signal reads. Inlining the function (`YAVS_CLIFT_INLINE=50000`) does not pay: the inlined body keeps the callee's frame in memory (its slots registered for the runtime), so nothing of the constant arguments folds, and the caller grows (96.4 to 99.5 G instructions per 200 k cycles before, 87.0 to 89.0 G after).

@@ -1246,12 +1246,18 @@ impl Fx<'_, '_> {
     }
 
     /// The default value of an array of subtype `st` (IR type `tid`) is all zero bytes: scalar
-    /// elements whose left bound has code 0 and whose planes need no bias.
+    /// elements whose left bound has code 0 and whose planes need no bias. A logic array of
+    /// arrays is one set of planes: its innermost element decides.
     pub(crate) fn zero_default(&mut self, st: SubtypeId, tid: TyId, span: Span) -> R<bool> {
         let db = self.db;
-        let Some((elem, _)) = ty::array_of(db, db.base(st)) else {
+        let Some((mut elem, _)) = ty::array_of(db, db.base(st)) else {
             return Ok(false);
         };
+        if self.logic(tid) {
+            while let Some((e, _)) = ty::array_of(db, db.base(elem)) {
+                elem = e;
+            }
+        }
         let pt = db.base(elem);
         if !matches!(self.fb.program().types().get(tid), Some(Ty::Array { .. }))
             || matches!(db.types[pt].kind, TypeKind::Protected { .. })

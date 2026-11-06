@@ -3957,7 +3957,7 @@ fn gen_func(
                     let (sb, db) = (so / 64 * 32, d / 64 * 32);
                     let ps = g.host(sa, Some(src), Op::C(sb), Op::C(ns * 32), false, slow);
                     let pd = g.host(da, Some(dst), Op::C(db), Op::C(nd * 32), true, slow);
-                    if f.kind == FuncKind::Process && k <= 64 {
+                    if k <= 64 {
                         g.lcopy_const(pd, d0, ps, s0, k);
                     } else {
                         let [vnd, vd0, vns, vs0, vk] = [nd, d0, ns, s0, k].map(|v| g.c64(v as i64));
@@ -4013,11 +4013,10 @@ fn gen_func(
                 let (sa, da) = (g.ld(src), g.ld(dst));
                 let ps = g.host(sa, Some(src), Op::V(sb), Op::V(sn), false, slow);
                 let pd = g.host(da, Some(dst), Op::V(db), Op::V(dn), true, slow);
-                // Up to 64 elements: at most two blocks each side, shifted in registers. In a
-                // process, whose copy count is a constant and an offset is not (a subprogram's
-                // body is not worth the code it saves a call for, nor is it for a count known at
-                // run time only: the 128-bit shifts cost more than the call).
-                if f.kind == FuncKind::Process && g.kint(n).is_some_and(|v| v <= 64) {
+                // Up to 64 elements: at most two blocks each side, shifted in registers, when the
+                // count is a constant and an offset is not (an element of an array of logic
+                // arrays); a count known at run time only keeps the call.
+                if g.kint(n).is_some_and(|v| v <= 64) {
                     let few = g.b.ins().icmp_imm_s(IntCC::UnsignedLessThanOrEqual, k, 64);
                     let (inl, call) = (g.b.create_block(), g.b.create_block());
                     g.brif_split(few, inl, call);
@@ -4782,14 +4781,23 @@ impl Gen<'_> {
         let len = self.b.ins().load(I64, MemFlagsData::trusted(), ent, 8);
         self.hold_store(h, ptr, len, done);
         self.b.switch_to_block(rest);
-        // The root frame by its own address is the callback's, and whatever a stable activation
-        // holds besides.
+        // The root frame by its own address: its slots when the view has them (`Mem::region`), else
+        // the callback's, as is whatever a stable activation holds besides.
         let root_hi = self.b.ins().icmp_imm_s(IntCC::Equal, hi, 0);
         let (none, nb) = (self.b.create_block(), self.b.create_block());
         if stable {
             self.b.ins().jump(call, &[]);
         } else {
-            self.brif_split(root_hi, call, none);
+            let root = self.b.create_block();
+            self.brif_split(root_hi, root, none);
+            self.b.switch_to_block(root);
+            let len = self.mem_ld(MEM_ROOT_LEN);
+            let has = self.b.ins().icmp_imm_s(IntCC::NotEqual, len, 0);
+            let slots = self.b.create_block();
+            self.brif_split(has, slots, call);
+            self.b.switch_to_block(slots);
+            let ptr = self.mem_ld(MEM_ROOT_SLOTS);
+            self.hold_store(h, ptr, len, done);
         }
         self.b.switch_to_block(none);
         let z = self.c64(0);
