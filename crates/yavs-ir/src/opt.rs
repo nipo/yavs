@@ -342,8 +342,7 @@ fn optimize_func_with(
                 .get(c)
                 .is_some_and(|c| c.flags.contains(FuncFlags::MAY_SUSPEND))
         });
-        #[cfg(debug_assertions)]
-        {
+        if crate::build::eager_verify() {
             let mut errs = Vec::new();
             crate::verify::verify_func(prog, id, &f, &mut errs);
             assert!(errs.is_empty(), "inlining broke {}: {errs:?}", f.name);
@@ -370,8 +369,7 @@ fn optimize_func_with(
                 .get(c)
                 .is_some_and(|c| c.flags.contains(FuncFlags::MAY_SUSPEND))
         });
-        #[cfg(debug_assertions)]
-        {
+        if crate::build::eager_verify() {
             let mut errs = Vec::new();
             crate::verify::verify_func(prog, id, &f, &mut errs);
             assert!(errs.is_empty(), "optimiser broke {}: {errs:?}", f.name);
@@ -518,8 +516,7 @@ fn optimize_body_with(
             .get(c)
             .is_some_and(|c| c.flags.contains(FuncFlags::MAY_SUSPEND))
     });
-    #[cfg(debug_assertions)]
-    {
+    if crate::build::eager_verify() {
         let mut errs = Vec::new();
         crate::verify::verify_func(prog, id, &f, &mut errs);
         assert!(

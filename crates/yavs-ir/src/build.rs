@@ -375,7 +375,8 @@ impl ProgramBuilder {
 /// Whether [`ProgramBuilder::finish`] verifies every function: debug builds (and so the
 /// tests) and runs with `YAVS_VERIFY_IR` set. Other builds verify a function when
 /// [`Program::func`] first hands it out (`Program::optimized`), so the functions a run never
-/// calls cost nothing (#479).
+/// calls cost nothing (#479). The same switch adds the reads-before-writes check to the verifier
+/// and a verify after inlining and after optimising each function.
 pub(crate) fn eager_verify() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| cfg!(debug_assertions) || std::env::var_os("YAVS_VERIFY_IR").is_some())
