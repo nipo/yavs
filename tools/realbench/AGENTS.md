@@ -54,7 +54,7 @@ Categories (`--category`): `rtl-datapath`, `fsm`, `numeric`, `memory`, `records`
 
 ## 4. Invariants and pitfalls
 
-- Time only binaries from `tools/build-bench.sh` (64-byte aligned functions, #576); a plain release build shifts the cycles of single tests by up to 30 percent with identical instructions when unrelated code moves. Use the same build for both sides of `--compare`.
+- Time only binaries from `tools/build-bench.sh` (64-byte aligned functions, #576); a plain release build shifts the cycles of single tests by up to 30 percent with identical instructions when unrelated code moves. Use the same build for both sides of `--compare`: profile-guided bench builds (`tools/build-bench.sh --pgo OUT`, after an A/A) for a runtime change, plain ones for a generated-code change (`tools/bench/AGENTS.md` section 7).
 - Never put a tool name, path or licence value into `tests.toml`, the results or this file; labels only.
 - `tests.toml` changes invalidate earlier result files: say so in the commit. Pick generics as the project's own test setup does
   (its Python or script), not at random; the defaults of a testbench are often invalid combinations.
