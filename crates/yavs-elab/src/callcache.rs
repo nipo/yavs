@@ -12,7 +12,7 @@ use crate::eval::Val;
 
 /// The stage entry's kind and part.
 const KIND: &str = "ecall";
-const PART: &[u8] = b"v1";
+const PART: &[u8] = b"v2";
 /// What one entry keeps (the newest calls win): a design sweeping its generics would otherwise grow it.
 const MAX_CALLS: usize = 8192;
 const MAX_BYTES: usize = 4 << 20;
@@ -37,6 +37,9 @@ pub(crate) fn count(hit: bool) {
 pub(crate) struct Hit {
     pub val: Val,
     pub reports: Vec<(u8, String)>,
+    /// The call ran in the session: a hit lowers and logs it there too, so that it leaves the
+    /// program the storing run left (same function ids, same lowering key).
+    pub session: bool,
 }
 
 /// Loaded on the first call of an elaboration, written back by `flush` when it learnt something.

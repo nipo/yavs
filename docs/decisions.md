@@ -6065,6 +6065,13 @@ every elaboration, and again for every instance. Decisions:
   with it the key of the entry; a `Db` that grew since the analysis (instantiation) has no entry and looks nothing
   up. Nothing is stored across closures: the library-prefix caches are not used, because a function of a prefix can
   read a constant of a later unit only through the closure. Tests: `crates/yavs/tests/elabcache.rs`.
+- **A hit leaves the session as the storing run left it** (2026-11-06). A call that ran in the session (a pure
+  function reading package state) is lowered there and logged, so the design's lowering resumes from that program and
+  its key names the call. A hit that skipped both gave the first run with hits another program, other function ids
+  and a lowering key of its own: it lowered and compiled the whole design again (`uvvm_axistream_vvc`: run 3 at
+  50 G instructions, 20 G once fixed). So a hit on such a call (`Hit::session`, entry part `v2`) still lowers
+  the function into the session (`Session::needs`) and logs the call with the stored value; only the run is saved.
+  Tests: `the_first_hit_*` in `crates/yavs/tests/elabcache.rs`.
 - **Measured** (`tools/realbench`, phase elab, P-cores 2 and 3, wall and instructions, docs/STATUS.md "Elaboration-time
   call cache"). Ideas from the reference simulator (read, nothing copied): it too does not run a unit's constant
   evaluation again for an unchanged unit; yavs keeps the results of calls, not of units, because its elaboration is

@@ -784,6 +784,19 @@ impl Session {
         Ok(result)
     }
 
+    /// Log a call of `f` answered from the call cache, as [`Session::call`] logged it when it
+    /// ran (`f` already lowered by [`Session::needs`]).
+    pub(crate) fn log_hit(&mut self, db: &Db, f: DeclId, args: Vec<Val>, result: Val) {
+        self.log.push(Call {
+            func: f,
+            name: db.decls[f].name.to_string(),
+            args,
+            result,
+            fill: None,
+            expr: None,
+        });
+    }
+
     /// Call `f`, declared in a region, with `args` and the objects of the region it reads
     /// (`items`, for what [`Session::needs`] returned), and log the call with the shared
     /// variables created for it.
