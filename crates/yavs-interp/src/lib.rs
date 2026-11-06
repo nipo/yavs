@@ -1509,7 +1509,7 @@ pub struct NativeFlags {
     /// Per function, the native frames of it that left to the interpreter (`materialised`).
     left_native: Box<[std::sync::atomic::AtomicU64]>,
     /// What the count rule did, for `YAVS_COUNTERS` (`CountStat`).
-    count_stat: [std::sync::atomic::AtomicU64; CountStat::Withdrawn as usize + 1],
+    count_stat: [std::sync::atomic::AtomicU64; CountStat::FrameLater as usize + 1],
 }
 
 /// What the count rule of `--tier=auto` did in a run (`YAVS_COUNTERS`), so a test sees it stop.
@@ -1524,6 +1524,10 @@ pub enum CountStat {
     Copies,
     /// Native-frame code taken back because it leaves to the interpreter too often.
     Withdrawn,
+    /// Asked-for functions with a loop compiled as native-frame code alone, and of them the ones
+    /// whose frame-mode code was made later, once a native frame of them was left to the interpreter.
+    FrameDeferred,
+    FrameLater,
 }
 
 impl NativeFlags {
@@ -1556,7 +1560,7 @@ impl NativeFlags {
     }
 
     /// What the count rule did so far, by `CountStat`.
-    pub fn count_stats(&self) -> [u64; CountStat::Withdrawn as usize + 1] {
+    pub fn count_stats(&self) -> [u64; CountStat::FrameLater as usize + 1] {
         std::array::from_fn(|i| self.count_stat[i].load(Ordering::Relaxed))
     }
 
