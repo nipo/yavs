@@ -879,6 +879,77 @@ fn guarded_blocks_and_bus_signals() {
     assert_eq!(obj.name.key.as_str(), "guard");
 }
 
+/// Every form of guard condition has its signal parts, so its guard runs on their activity
+/// (LRM 14.7.4): aliases, elements, slices and fields of records and arrays, run-time indices,
+/// function calls in generates, implicit signals of implicit signals, an outer GUARD, package
+/// signals, external names (also of an instance elaborated after the block) and a part no
+/// evaluation reaches (`v(n)` with `n` outside the range).
+#[test]
+fn every_guard_condition_has_its_reads() {
+    let src = "library ieee; use ieee.std_logic_1164.all;
+      package gp is signal psig : bit := '0'; end package;
+      entity inner is port (q : in bit); end;
+      architecture a of inner is signal deep : bit := '0'; begin deep <= q; end;
+      library ieee; use ieee.std_logic_1164.all; use work.gp.all;
+      entity t is generic (n : natural := 5); end;
+      architecture a of t is
+        type ra is record f : bit_vector(0 to 1); n : integer; end record;
+        type ar is array (0 to 1) of ra;
+        type ar2 is array (0 to 1, 0 to 1) of bit;
+        function ev(signal x : bit) return boolean is begin return x'event; end;
+        function evv(signal x : bit_vector) return boolean is begin return x'event; end;
+        signal s : bit := '0';
+        signal v : bit_vector(0 to 3) := \"0000\";
+        signal r : ra := (\"00\", 0);
+        signal arr : ar := (others => (\"00\", 0));
+        signal m2 : ar2 := (others => (others => '0'));
+        signal idx : integer range 0 to 3 := 0;
+        signal sl : std_logic := '0';
+        signal slv : std_logic_vector(0 to 3) := (others => '0');
+        alias as_v1 is v(1);
+        alias as_sl is v(1 to 2);
+        alias as_arr is arr(1).f(0);
+        alias as_al is as_v1;
+      begin
+        inn : entity work.inner port map (q => s);
+        g : for i in 0 to 1 generate
+          bgf : block (ev(v(i))) begin end block;
+          bgs : block (evv(v(i to i + 1))) begin end block;
+          bgr : block (arr(i).f(0)'event) begin end block;
+        end generate;
+        b1 : block (as_v1'event and as_sl'event and as_arr'event and as_al'event) begin end block;
+        b2 : block (s'delayed(1 ns)'event and s'stable'stable and s'transaction'event) begin end block;
+        b3 : block (v(idx) = '1' and v(idx to idx) = \"1\" and m2(1, idx) = '1') begin end block;
+        b4 : block (r.f(1)'event and arr(1).f'event and arr(idx).f(1) = '1') begin end block;
+        b5 : block (psig'event and rising_edge(sl) and slv(0 to 1) = \"00\") begin end block;
+        b6 : block (s'event) begin
+          b6i : block (guard and v(0) = '1') begin end block;
+        end block;
+        wrap : block is
+          alias ext is <<signal .t.inn.deep : bit>>;
+        begin
+          b7 : block (ext'event and <<signal .t.inn.deep : bit>>'stable) begin end block;
+        end block;
+        b8 : block (<<signal .t.inn2.deep : bit>>'active) begin end block;
+        gl : for i in 0 to 1 generate
+          b9 : block (ev(<<signal .t.inn2.deep : bit>>)) begin end block;
+        end generate;
+        b10 : block ((n < 4 and v(n)'event) or s'active) begin end block;
+        inn2 : entity work.inner port map (q => s);
+      end;";
+    let (_, e) = elab("guard_reads", src, "t", &[]);
+    let guards: Vec<_> = e
+        .procs
+        .iter()
+        .filter(|p| e.hier.path_name(p.scope, Case::Lrm).ends_with(":_guard:"))
+        .collect();
+    assert_eq!(guards.len(), 18);
+    for p in guards {
+        let path = e.hier.path_name(p.scope, Case::Lrm);
+        assert!(p.guard.as_ref().is_some_and(|r| !r.is_empty()), "{path}");
+    }
+}
+
 /// #77: user functions called during elaboration run in the interpreter.
 #[test]
 fn elaboration_calls_user_functions() {

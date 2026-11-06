@@ -387,6 +387,11 @@ end;
 
 /// Runs `src` (entity `y`) on every compiled tier of this build and compares with `--tier=interp`.
 fn all_tiers_match(name: &str, src: &str) {
+    tiers_match(name, src, 70);
+}
+
+/// `all_tiers_match` for a run of at least `min` lines of output.
+fn tiers_match(name: &str, src: &str, min: usize) {
     let dir = tempdir(name);
     std::fs::write(dir.join("y.vhd"), src).expect("write");
     let a = yavs(
@@ -406,7 +411,7 @@ fn all_tiers_match(name: &str, src: &str) {
     };
     let want = go(&["--tier=interp"]);
     assert_eq!(want.0, Some(0), "{want:?}");
-    assert!(want.1.lines().count() >= 70, "{}", want.1);
+    assert!(want.1.lines().count() >= min, "{}", want.1);
     for flags in [
         #[cfg(feature = "llvm")]
         vec!["--tier=llvm"],
@@ -1796,6 +1801,15 @@ fn guards_on_activity_match_the_interpreter() {
     let src = include_str!("../../../tests/corpus/delta/guard_activity.vhd")
         .replace("guard_activity", "y");
     all_tiers_match("compiled_guard_activity", &src);
+}
+
+/// Guards that read a signal of an instance elaborated after them, through an external name, and
+/// a signal beside a part no evaluation reaches, each on transactions that keep the value.
+#[test]
+fn late_guard_reads_match_the_interpreter() {
+    let src = include_str!("../../../tests/corpus/delta/guard_activity_late.vhd")
+        .replace("guard_activity_late", "y");
+    tiers_match("compiled_guard_activity_late", &src, 16);
 }
 
 /// `+` and `-` with a `std_ulogic` operand and the unary `+`, `-` and `abs` of the Synopsys

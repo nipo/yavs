@@ -32,6 +32,7 @@ An element of a signal parameter whose elements are arrays is read as that eleme
 ### Guards follow activity (#1120, 2026-11-06)
 
 A block guard is evaluated again in every cycle in which a signal part its condition reads is active (LRM 14.7.4), also for a transaction that keeps the value: `block (s'event)` turns FALSE at `s <= s;`, `block (a'active)` turns TRUE. Signals a guard reads allow no skipped assignment. Corpus `delta/guard_activity`, `delta/guard_activity_attr` (`ref=hand`) on every tier at 1 and 4 threads; catalogue `guard-held-transaction`.
+Every guard condition has its reads, also one that names an instance elaborated after the block through an external name or holds a part no evaluation reaches (corpus `delta/guard_activity_late`, `ref=hand`).
 
 ### Guards on signal attributes (#1114, 2026-11-06)
 

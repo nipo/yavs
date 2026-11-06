@@ -5151,7 +5151,7 @@ LRM 11.2 and 14.7.5: the implicit GUARD signal is updated in the cycle where a s
 
 - **The kernel runs the guard process in the update phase** (`Builder::guard_process`, `SimControl::run_guards`): the elaborator
   gives the `_guard` process of a block the signal parts its condition reads (`Walker::guard_reads`: the sem `reads` of the
-  condition, resolved like any name; when one cannot be resolved the process stays a normal one). Its `ProcMeta::ready` stays true,
+  condition, resolved like any name; see the last item of "A block guard runs when a signal of its condition is active"). Its `ProcMeta::ready` stays true,
   so no wake queues it. In `cycle`, right after the update, the guards whose condition signals are in `changed_sigs` run as a
   batch (`run_batch`, so its waits are registered as before), `finish_direct` makes GUARD's event, and the loop looks at the
   new changes for the guards that read another GUARD (nested blocks). The notification of observers, the wake of GUARD's
@@ -14190,9 +14190,17 @@ turned TRUE.
   attributes in a guard (`guard-held-transaction`). Tests: `crates/yavs-kernel/tests/guard.rs`
   `guard_runs_when_a_signal_of_its_condition_is_active` (with and without skipped assignments), corpus `delta/guard_activity` and
   `delta/guard_activity_attr` (`ref=hand`), `compiled_vectors.rs` `guards_on_activity_match_the_interpreter`.
-- A `_guard` process whose condition reads a name `Walker::guard_reads` cannot resolve stays a normal process, woken by
-  events only, so it would still miss a held transaction; no such condition was found (external names, a signal parameter and
-  a dynamic index all resolve).
+- **Every guard condition has its reads; none falls back to a process woken by events** (2026-11-06). Two forms did, and so
+  missed a held transaction: an external name of an object elaborated after the block (`block (<<signal .t.u.a : bit>>'active)`
+  before `u`), and a part no evaluation reaches (`(n < 4 and v(n)'event) or s'active` with `n` outside the range of `v`). The
+  first is resolved with the drivers of external names once the hierarchy is complete (`Walker::late_guards`, `bind_late`), the
+  second reads nothing for that part, which names no element (an evaluation that reaches it is a run-time error; reading
+  the whole object would run the guard on the activity of other elements, against the per-part rule above). A condition
+  whose reads still cannot be resolved after that is an internal error. Tried and resolving as before: aliases (of elements, slices, fields, aliases,
+  external names), elements and slices of records of arrays and arrays of records, run-time indices, function calls with signal
+  parameters in generates, implicit signals of implicit signals, an outer GUARD, package signals. Tests: `yavs-elab`
+  `every_guard_condition_has_its_reads`, corpus `delta/guard_activity_late` (`ref=hand`), `compiled_vectors.rs`
+  `late_guard_reads_match_the_interpreter`.
 
 ## Guards for the paths of the `ieee` natives (yavs-interp, yavs-llvm, yavs-clift, yavs, #1108, 2026-11-06)
 
