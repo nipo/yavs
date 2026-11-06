@@ -2669,6 +2669,13 @@ impl Ctx<'_> {
         self.assign_planes_fast(d, r, Time::ZERO, planes, None, DelayMode::Transport)
     }
 
+    /// `assign_planes_now` of more than 64 elements, the plane blocks as `assign_blocks` takes
+    /// them: the fast case only, false (nothing done) where `assign_blocks` must run.
+    #[inline]
+    pub fn assign_wide_now(&mut self, d: DriverId, r: Option<Range>, blocks: &[u8]) -> bool {
+        self.assign_wide_fast(d, r, Time::ZERO, blocks, DelayMode::Transport)
+    }
+
     /// `assign` of a logic value of at most 64 elements given as the plane blocks `read_into`
     /// produces for it: four little-endian `u64` planes (`blocks` is exactly 32 bytes for up to
     /// 64 elements, 32 per 64 more), unused bits zero. No `LogicVec` or `Value` is needed.

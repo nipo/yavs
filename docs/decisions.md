@@ -14282,3 +14282,59 @@ the same loops in the process. Three causes, each fixed where every caller goes 
   `'last_value` of an element, one package procedure from two processes, a resolved signal driven through it by two
   processes, a procedure that waits, forces; every tier and `--threads 4`); `perf.rs` `sigparam_tree` (`ops` and, under
   `clift`, `cb_xstep`, `cb_step`, `cb_signal`, `cb_deopt` and the new `cb_planes`, `yavs_rt_planes` calls in debug builds).
+
+## A function on an array, the call's fixed cost (yavs-clift, yavs-llvm `rt`, yavs-interp, yavs-kernel, #1122, 2026-11-06)
+
+Written by Claude. After the entry "Elements of arrays of logic arrays in compiled subprograms" the adder-tree function
+ran about as many instructions per element as the loop in the process (about 425 each); the rest of the gap was the
+fixed cost of each call, about 1300 instructions: the native frame's entry and return, the descriptor copies of the
+result, three host calls of the local's `NewFrame`, and the drive of a result of more than 64 elements through the host.
+
+- **Decision: a `NewFrame` of a native frame copies a descriptor of up to 64 bytes as words and leaves the fill of a
+  zero byte of the constant pool to `temp_alloc`, which zeroed the object already** (`Gen::new_frame`, `const_byte`).
+  Each call made a `memmove` of 24 bytes, a `clift_fill` and its `memset`. Every `NewFrame` with `fill: 1` the
+  lowering makes today carries a zero byte (`zero_default`), so the byte test only guards another producer and no
+  test can see it go.
+- **Decision: `yavs_rt_drive` of more than 64 logic elements at zero delay goes to the kernel without the host**
+  (`drive_wide_direct`, `yavs_interp::direct_drive_wide`, `Ctx::assign_wide_now`: the kernel's fast case only, as
+  `assign_planes_now` for up to 64 elements), as the narrow forms do since round 8. A delay, a byte signal, a driver
+  that is not direct and idle, and every error go to the host as before, which runs the general path under its
+  `catch_unwind`. A 112-element result went through `yavs_rt_drive_slow`, a copy of the planes, `Mem::sync`,
+  `catch_unwind` and `Host::drive_wide` at every call. The wide branch is a function of its own: inline in
+  `yavs_rt_drive` it changed the code of the narrow forms (the process loop ran 0.6 percent fewer instructions and,
+  at the default tier, 1 to 2 percent more cycles in two sets of runs).
+- **Tried and dropped** (instructions at 200 k cycles, the function form at 84.90 G with the `NewFrame` change):
+  - A closed frame for a function whose only other use of a frame address is the descriptor of a `DopeLen` or
+    `Pos`, those words read from slot variables: no `Mem::nslots` entry and no zeroing, but 85.45 G, since the bounds
+    held in variables were spilled across the loop.
+  - The same with Cranelift's inliner forced (`YAVS_CLIFT_INLINE=6000`, and the symbol check made on the
+    instructions, since a declared constant alone keeps every function with an `AddrOf Const` a call): 87.0 G and
+    20 percent more cycles. The constant arguments fold, but the inlined body adds spills to the large process body.
+  - Zeroing a run-time temporary of up to 128 bytes by stores instead of `memset`: 85.26 G.
+- **Tests.** `compiled_vectors.rs` `elements_of_array_operands_in_subprograms_match_the_interpreter` drives a reduced
+  result of 84 elements into part of a wider signal and after a transport delay, and checks a local of a character
+  subtype (its `Fill` and `NewFrame` of fill 0); a descriptor copy one word short, a dropped data copy and a direct wide
+  drive that ignored the delay each failed it. `perf.rs` `clift::elem_ops_wide_drives`: the `cb_drive_wide.Drive`
+  host calls of `clift_elem_ops` under `YAVS_COUNTERS=kinds` are none (200 before).
+- **Numbers** (`--features clift` bench builds of `f2e5fb83` and this change, 16 units, 1 M cycles,
+  `YAVS_NO_PMEMO=1`, interleaved runs, medians with the range; mode 1 at the default tier 9 runs alone on one core,
+  the other rows 7 runs, three at a time on cores of their own):
+
+  | | `--tier=clift` mode 1 | mode 2 | default tier mode 1 | mode 2 |
+  |---|---:|---:|---:|---:|
+  | before, wall | 19.51 s (19.00 to 19.98) | 21.65 s (21.37 to 22.54) | 19.72 s (18.90 to 20.17) | 22.19 s (21.79 to 22.86) |
+  | after, wall | 19.58 s (19.29 to 20.01) | 20.82 s (20.37 to 21.62) | 19.83 s (18.86 to 20.55) | 22.01 s (21.53 to 22.32) |
+  | before, cycles | 96.0 G | 106.8 G | 97.0 G | 108.7 G |
+  | after, cycles | 96.8 G | 102.8 G | 96.7 G | 107.9 G |
+  | before, instructions | 375.7 G | 429.1 G | 375.5 G | 430.6 G |
+  | after, instructions | 374.9 G | 419.8 G | 374.7 G | 421.3 G |
+
+  The function form over the loop: 1.11 to 1.06 in wall time and 1.14 to 1.12 in instructions at `--tier=clift`,
+  1.13 to 1.11 and 1.15 to 1.12 at the default tier. An earlier set with all four rows at once gave the default tier
+  21.89 s to 21.02 s for mode 2. The #1110 and #1118 testbenches run the same instructions (within 0.1 percent); of
+  the `tools/bench` designs under `--tier=clift --no-cache` the code is the same or smaller (`rec_pair`, `rtl_ram` 240
+  bytes) and the instructions within 0.4 percent.
+- **Left:** the instructions the call costs beyond the loop, about 1000 per call: the entry and return of the native
+  frame, the descriptor copies of the result (`Alloc` and `Copy` twice in the callee, `SubtypeCheck` and `Copy` in
+  the caller) and the whole-signal read of the operand. Without the call (an inliner at the IR level that takes a
+  callee with temporaries and statements, so the process copy's facts apply) the function would be the loop.

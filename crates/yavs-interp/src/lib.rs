@@ -1155,6 +1155,33 @@ pub fn direct_drive_now(
     c.assign_planes_now(d.id, Some(r), block)
 }
 
+/// [`direct_drive_now`] of a logic target of more than 64 elements: `planes` holds the plane
+/// blocks of the one waveform element, 32 bytes per 64 elements. Zero delay and the kernel's fast
+/// case only; false, nothing done, where the host must run (which also reports every error).
+#[inline]
+pub fn direct_drive_wide(
+    c: &mut Ctx<'_>,
+    drivers: &[ProcDriver],
+    sigs: &[TierSig],
+    driver: u32,
+    target: [u64; 2],
+    delay: i64,
+    planes: &[u8],
+) -> bool {
+    if delay != 0 || target[1] <= 64 || planes.len() as u64 != target[1].div_ceil(64) * 32 {
+        return false;
+    }
+    let (Some(d), Some(s)) = (
+        drivers.get(driver as usize),
+        sigs.get((target[0] >> 32) as usize),
+    ) else {
+        return false;
+    };
+    // Codes or planes are offered for logic signals only.
+    let r = Range::new(s.off as u32 + target[0] as u32, target[1] as u32);
+    s.bytes == 0 && s.codes | s.planes != 0 && c.assign_wide_now(d.id, Some(r), planes)
+}
+
 /// [`direct_drive_now`] where the waveform element is read once the target signal's kind is
 /// known: `read(bytes)` gives its delay and its first block (the cell of a byte signal in word 0).
 #[inline(always)]

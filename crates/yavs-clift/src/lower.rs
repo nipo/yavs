@@ -6810,6 +6810,17 @@ impl Gen<'_> {
         ok.then_some((l, r, dir))
     }
 
+    /// The byte `r` points to when that is in the constant pool.
+    fn const_byte(&self, r: Reg) -> Option<u8> {
+        let Some(Some(Known::Const(k, o))) = self.known.get(r.0 as usize).copied() else {
+            return None;
+        };
+        match self.prog.consts.get(k) {
+            Some(yavs_ir::ConstData::Bytes(bytes)) => bytes.get(usize::try_from(o).ok()?).copied(),
+            _ => None,
+        }
+    }
+
     /// The position of `i` in a dimension. One arm per direction: up (0), l <= i <= r, position
     /// i - l; down (1), r <= i <= l, position l - i; any other direction word, and an empty range,
     /// are the interpreter's error.
@@ -8523,6 +8534,8 @@ impl Gen<'_> {
             okc = self.b.ins().band(okc, rz);
         }
         self.guard(okc, slow);
+        // A fill of a zero byte of the constant pool is the zeroing `temp_alloc` does already.
+        let zero_fill = fill == 1 && self.const_byte(data) == Some(0);
         // The sources before the allocation: a failure leaves nothing changed.
         let pdesc = (dsize != 0).then(|| {
             let dv = self.ld(desc);
@@ -8540,21 +8553,37 @@ impl Gen<'_> {
         } else {
             Op::C(u64::from(fill))
         };
-        let dv = self.ld(data);
-        let psrc = self.host(dv, Some(data), Op::C(0), n_src, false, slow);
+        let psrc = (!zero_fill).then(|| {
+            let dv = self.ld(data);
+            self.host(dv, Some(data), Op::C(0), n_src, false, slow)
+        });
         let total = self.b.ins().iadd_imm_s(sz, i64::from(dsize));
         let (at, p) = self.temp_alloc(total, slow);
         if let Some(pd) = pdesc {
-            let ds = self.c64(i64::from(dsize));
-            self.b.ins().call(self.imp.mov, &[p, pd, ds]);
+            if dsize <= 64 && dsize.is_multiple_of(8) {
+                // A few words: loads, then stores (the new object overlaps nothing).
+                let words: Vec<Value> = (0..dsize / 8)
+                    .map(|k| self.b.ins().load(I64, self.gf, pd, k as i32 * 8))
+                    .collect();
+                for (k, w) in words.into_iter().enumerate() {
+                    self.b.ins().store(self.gf, w, p, k as i32 * 8);
+                }
+            } else {
+                let ds = self.c64(i64::from(dsize));
+                self.b.ins().call(self.imp.mov, &[p, pd, ds]);
+            }
         }
         let val = self.b.ins().iadd_imm_s(p, i64::from(dsize));
-        if fill == 0 {
-            self.b.ins().call(self.imp.mov, &[val, psrc, sz]);
-        } else {
-            let count = self.b.ins().udiv_imm_u(sz, i64::from(fill));
-            let fv = self.c64(i64::from(fill));
-            self.b.ins().call(self.imp.fill, &[val, psrc, count, fv]);
+        match psrc {
+            None => {}
+            Some(ps) if fill == 0 => {
+                self.b.ins().call(self.imp.mov, &[val, ps, sz]);
+            }
+            Some(ps) => {
+                let count = self.b.ins().udiv_imm_u(sz, i64::from(fill));
+                let fv = self.c64(i64::from(fill));
+                self.b.ins().call(self.imp.fill, &[val, ps, count, fv]);
+            }
         }
         // The frame's own statements must not free the object.
         if let Some(TempBase::Cell(cell)) = self.nat.as_ref().map(|n| n.temp_base) {

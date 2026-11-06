@@ -945,8 +945,36 @@ pub unsafe extern "C" fn yavs_rt_drive(
         } else if unsafe { (*envp).host.drive_now(driver, [lo, len], delay, block) } {
             return GO;
         }
+    } else if unsafe { drive_wide_direct(mem, driver, lo, len, wave) } {
+        return GO;
     }
     yavs_rt_drive_slow(env, regs, mem, pc, driver, lo, len, wave, flags)
+}
+
+/// The `Drive` of more than 64 logic elements of `yavs_rt_drive` on the kernel without the host:
+/// the time, then the planes (the caller checked 8 + 32 bytes per 64 elements at `wave`). Apart,
+/// so the code of the narrow forms stays as it was.
+///
+/// # Safety
+/// As `yavs_rt_drive`.
+#[inline(never)]
+unsafe fn drive_wide_direct(
+    mem: *mut Mem,
+    driver: u32,
+    lo: u64,
+    len: u64,
+    wave: *const u8,
+) -> bool {
+    // SAFETY: `mem` is the running activation's; the kernel reads the planes, nothing writes them
+    // meanwhile.
+    unsafe {
+        let Some((c, ds, ss)) = direct(&(*mem).fr) else {
+            return false;
+        };
+        let delay = std::ptr::read_unaligned(wave.cast::<i64>());
+        let planes = std::slice::from_raw_parts(wave.add(8), (len.div_ceil(64) * 32) as usize);
+        yavs_interp::direct_drive_wide(c, ds, ss, driver, [lo, len], delay, planes)
+    }
 }
 
 /// `yavs_rt_drive` for a `Drive` of one waveform element at a constant reference of 1 to 64

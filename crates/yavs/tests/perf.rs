@@ -2205,6 +2205,32 @@ mod clift {
         ),
     ];
 
+    // The whole drives of the 112-element `l1` of `clift_elem_ops` are the kernel's from compiled
+    // code (`yavs_interp::direct_drive_wide`), none through the host (200 before).
+    #[test]
+    fn elem_ops_wide_drives() {
+        let d = tempdir("clift_elem_ops_kinds");
+        let r = run_design_env(
+            &d,
+            "clift_elem_ops",
+            include_str!("perf/clift_elem_ops.vhd"),
+            "clift",
+            &[],
+            &[("YAVS_COUNTERS", "kinds")],
+        );
+        assert_eq!(r.code, 0, "clift_elem_ops: {}", r.all());
+        assert!(
+            r.counters.contains_key("cb_drive_bit.Drive"),
+            "{:?}",
+            r.counters
+        );
+        assert_eq!(
+            r.counters.get("cb_drive_wide.Drive"),
+            None,
+            "wide drives through the host"
+        );
+    }
+
     #[test]
     fn ieee_paths() {
         let d = tempdir("clift_ieee_paths");

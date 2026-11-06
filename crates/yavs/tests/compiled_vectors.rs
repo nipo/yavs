@@ -1980,13 +1980,18 @@ fn predefined_match_in_compiled_code_matches_the_interpreter() {
 /// operations on elements of unconstrained parameters (ascending, descending, non-zero bounds)
 /// and of locals sized from them, 12-bit elements that cross a plane block, nested calls, a
 /// target that is also an operand, parameters that alias each other, locals left at their
-/// default (`U`, `X`, `'0'`), called from several processes.
+/// default (`U`, `X`, `'0'`), called from several processes. Results of more than 64 elements
+/// are driven whole, into part of a wider signal and after a delay; a local of characters
+/// starts at its subtype's `'a'`.
 const ELEMS: &str = r#"library ieee; use ieee.std_logic_1164.all; use ieee.numeric_std.all;
 package ep is
   type t_arr is array (natural range <>) of signed(11 downto 0);
   type x01v is array (natural range <>) of X01;
   type x_arr is array (natural range <>) of x01v(4 downto 0);
   type b_arr is array (natural range <>) of bit_vector(4 downto 0);
+  subtype lc is character range 'a' to 'z';
+  type lcv is array (natural range <>) of lc;
+  function lcs (n : positive) return string;
   function reduce (src : t_arr) return t_arr;
   function pairs (src : t_arr) return t_arr;
   function partial (src : t_arr; n : natural) return t_arr;
@@ -2039,6 +2044,16 @@ package body ep is
       end if;
     end loop;
     return r;
+  end;
+  function lcs (n : positive) return string is
+    variable v : lcv(1 to n);
+    variable s : string(1 to n);
+  begin
+    v(n) := 'z';
+    for i in v'range loop
+      s(i) := v(i);
+    end loop;
+    return s;
   end;
   function xdef (n : positive) return x_arr is
     variable r : x_arr(1 to n);
@@ -2099,6 +2114,8 @@ architecture a of y is
   signal u : t_arr(5 to 17) := (others => (others => '0'));
   signal l1 : t_arr(0 to 6) := (others => (others => '0'));
   signal l2 : t_arr(0 to 3) := (others => (others => '0'));
+  signal wide : t_arr(0 to 13) := (others => (others => '1'));
+  signal late : t_arr(0 to 6) := (others => (others => '0'));
 begin
   process is
   begin
@@ -2121,6 +2138,8 @@ begin
   begin
     l1 <= reduce(t);
     l2 <= reduce(l1);
+    wide(3 to 9) <= reduce(t);
+    late <= transport reduce(t) after 2 ns;
     report "t " & img(l2) & img(reduce(reduce(t))) & img(pairs(d)) & img(pairs(u))
       & img(partial(u, 1)) & img(fixed(d));
   end process;
@@ -2135,11 +2154,11 @@ begin
       acc(v, v);
       w := partial(t(0 to 7), c mod 3);
       acc(w, l1);
-      report "v " & img(v) & img(w) & img(partial(d, c mod 3)) & str(xdef(3)(1))
+      report "v " & img(v) & img(w) & img(wide) & img(late) & img(partial(d, c mod 3)) & str(xdef(3)(1))
         & str(xdef(3)(2)) & to_string(bdef(2)(1)) & to_string(bdef(2)(2));
       -- The defaults of the element subtypes' left bounds.
       assert str(xdef(3)(2)) = "XXXXX" and bdef(2)(1) = "00000"
-        and to_string(partial(w, 0)(0)) = "UUUUUUUUUUUU"
+        and to_string(partial(w, 0)(0)) = "UUUUUUUUUUUU" and lcs(c mod 4 + 1) = (1 to c mod 4 => 'a') & "z"
         report "default" severity failure;
     end loop;
     wait;
