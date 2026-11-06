@@ -26,6 +26,7 @@ for an agent that tunes performance or measures a performance change on real tes
 | `window.py` | Short-window A/B on Cranelift against sim1: minutes, not hours (section 8) |
 | `perfguard.py` | Guard run by hand: window instructions of a commit against a stored reference, pass or fail per test (section 8a) |
 | `replay.py`, `replay/record.c` | Process replay: one hot process's instance alone, driven by its recorded inputs per delta (a VHPI recorder plugin), in seconds; `--check` validates it against the full run (section 8b) |
+| `sweep.py BIN [--jobs N] [--filter RE]` | The verifier sweep of an optimiser or lowering change: every test compiled whole and run to 1 ns with `YAVS_VERIFY_IR=1` (on a binary with debug assertions, the gate), exit 1 when a function is reported broken; tests whose source is missing are listed as not run |
 | `cpu/` | The harness's own VHDL and C for the CPU workloads: the Microwatt console, JTAG-socket and testbench replacements and its CoreMark port (source id `@harness` in `tests.toml`), and the stored console of the short Microwatt CoreMark (`coremark_short.expected`, section 7a) |
 
 `YAVS_BENCH_TIERFLAGS` (extra arguments after `--tier=` of every yavs run cell, e.g. `--tier-heat=1,0,0` to compile every function at its first call) is not part of the cell name: set it for both binaries of a `--compare`.
