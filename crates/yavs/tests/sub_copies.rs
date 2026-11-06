@@ -306,3 +306,53 @@ fn an_error_in_a_copy_has_its_own_text() {
         );
     }
 }
+
+/// Native frames hold the id of their copy, and copy ids follow the order copies are made: stored
+/// code is not linked for a copy with another id (the pre-key check of a debug build aborted the
+/// third run, where one copy per subprogram moves the ids of the later copies).
+#[test]
+fn compiled_copies_of_subprograms_are_not_linked_under_another_id() {
+    let d = tempdir("sub_copies_ids");
+    let src = include_str!("../../../tests/corpus/composite/subcopy_shapes.vhd");
+    std::fs::write(d.join("t.vhd"), src).expect("write");
+    let work = format!("work:{}", d.join("lib").display());
+    let a = yavs(
+        &d,
+        &[],
+        &["analyze", "--std=2008", "--work", &work, "t.vhd"],
+    );
+    assert_eq!(a.0, 0, "{}", a.2);
+    let tier = ["--tier=clift-auto", "--tier-heat=1,0,0"];
+    let args = |d: &Path, env: &[(&str, &str)]| {
+        let mut args = vec!["run", "--std=2008", "--work", &work];
+        args.extend(tier);
+        args.extend(["--threads", "1", "subcopy_shapes"]);
+        yavs(d, env, &args)
+    };
+    let want = yavs(
+        &d,
+        &[NO_SUBS],
+        &[
+            "run",
+            "--std=2008",
+            "--work",
+            &work,
+            "--tier=interp",
+            "--no-cache",
+            "--threads",
+            "1",
+            "subcopy_shapes",
+        ],
+    );
+    assert_eq!(want.0, 0, "{}", want.2);
+    let all = [SPEC, ("YAVS_SPEC_ALL", "1")];
+    let one = [SPEC, ("YAVS_SPEC_ALL", "1"), ("YAVS_SUB_PER", "1")];
+    for env in [&all[..], &all[..], &one[..], &one[..], &all[..]] {
+        let got = args(&d, env);
+        assert_eq!(
+            (&want.0, &want.1, &want.2),
+            (&got.0, &got.1, &got.2),
+            "{env:?}"
+        );
+    }
+}

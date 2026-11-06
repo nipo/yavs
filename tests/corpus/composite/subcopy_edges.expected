@@ -1,0 +1,28 @@
+exit	0
+diag	note	5000000	0	:subcopy_edges:_p1	m0x has no rows
+diag	note	5000000	0	:subcopy_edges:_p1	1 39492
+diag	note	15000000	0	:subcopy_edges:_p1	2 39602
+diag	note	25000000	0	:subcopy_edges:g(1):_p0	g1 2671
+diag	note	25000000	0	:subcopy_edges:g(2):_p0	g2 5415
+diag	note	25000000	0	:subcopy_edges:g(3):_p0	g3 11832
+diag	note	25000000	0	:subcopy_edges:_p1	3 39679
+diag	note	35000000	0	:subcopy_edges:_p1	4 39390
+diag	note	45000000	0	:subcopy_edges:_p1	m0x has no rows
+diag	note	45000000	0	:subcopy_edges:_p1	5 39507
+diag	note	55000000	0	:subcopy_edges:g(1):_p0	g1 2671
+diag	note	55000000	0	:subcopy_edges:g(2):_p0	g2 5415
+diag	note	55000000	0	:subcopy_edges:g(3):_p0	g3 11832
+diag	note	55000000	0	:subcopy_edges:_p1	6 39579
+diag	note	65000000	0	:subcopy_edges:_p1	7 39692
+diag	note	75000000	0	:subcopy_edges:_p1	8 39402
+diag	note	85000000	0	:subcopy_edges:g(1):_p0	g1 2671
+diag	note	85000000	0	:subcopy_edges:g(2):_p0	g2 5415
+diag	note	85000000	0	:subcopy_edges:g(3):_p0	g3 11832
+diag	note	85000000	0	:subcopy_edges:_p1	m0x has no rows
+diag	note	85000000	0	:subcopy_edges:_p1	9 39479
+out	m23 2x3 1 2 3 4 5 6
+out	m0x 0x4
+out	m23 2x3 1 2 3 4 5 6
+out	m0x 0x4
+out	m23 2x3 1 2 3 4 5 6
+out	m0x 0x4

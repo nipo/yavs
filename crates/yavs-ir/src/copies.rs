@@ -640,6 +640,16 @@ impl Program {
         self.copies.get(f).map_or(f, |c| c.base)
     }
 
+    /// The id a compiled tier keys the code of `f` by across runs: a process copy's process (its
+    /// own id is in no code it has), else `f`, since a copy of a subprogram runs on native frames,
+    /// which hold the id of their function, and its id differs between runs.
+    pub fn code_key_id(&self, f: FuncId) -> FuncId {
+        match self.copies.get(f) {
+            Some(c) if c.digest != SUB_DIGEST => c.base,
+            _ => f,
+        }
+    }
+
     /// A number that names the copy `f` by what it is for, the same in every run: a hash of its
     /// process and masked instance data (`None` for any other function). Copy ids depend on
     /// which process switched first, so compiled code is named and keyed by this.

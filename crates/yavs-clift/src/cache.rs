@@ -174,7 +174,8 @@ pub(crate) struct PreInputs<'a> {
     pub switches: &'a str,
     /// The program: its types, constants, tables and other functions, ids and all.
     pub identity: &'a str,
-    /// The function, or the process a copy is of: a copy's own id is in no code it has.
+    /// `Program::code_key_id`: the function, or the process a process copy is of (its own id is
+    /// in no code it has); a copy of a subprogram by its own id, which its native frames hold.
     pub base: u32,
     /// Native-frame variant or frame-mode code.
     pub native: bool,

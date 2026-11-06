@@ -1,0 +1,9 @@
+exit	1
+diag	note	5000000	0	:subcopy_nested:_p1	1 89 21 49672 31325 843
+diag	note	15000000	0	:subcopy_nested:_p1	2 86 39 3759 35514 1092
+diag	note	25000000	0	:subcopy_nested:_p1	3 92 63 23367 61082 783
+diag	note	35000000	0	:subcopy_nested:_p1	4 92 107 38073 47531 996
+diag	note	45000000	0	:subcopy_nested:_p1	5 89 95 38130 16159 1200
+diag	note	55000000	0	:subcopy_nested:_p1	6 95 119 38187 52740 856
+diag	note	65000000	0	:subcopy_nested:_p1	7 95 137 38244 31909 843
+diag	fatal	65000000	0	:subcopy_nested:_p1	value length 3 does not match target length 2
