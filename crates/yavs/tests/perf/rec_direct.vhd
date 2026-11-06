@@ -1,6 +1,6 @@
 -- A pipeline of record registers that changes in every leaf at every clock (#1110): past the
--- review of the record images, compiled code reads and drives each whole record on the kernel
--- itself (`yavs_rt_gather`, `yavs_rt_scatter`), not through the signal callback.
+-- review of the record images, compiled code drives each whole record on the kernel
+-- itself (`yavs_rt_scatter`), not through the signal callback, and reads it in place.
 library ieee; use ieee.std_logic_1164.all; use ieee.numeric_std.all;
 entity rec_direct is generic (CYC : natural := 1300); end;
 architecture a of rec_direct is

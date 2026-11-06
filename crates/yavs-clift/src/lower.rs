@@ -9238,15 +9238,19 @@ impl Gen<'_> {
     }
 
     /// A whole `SigGather`: a copy of the record image of the machine's cell, and no call
-    /// (`docs/decisions.md` "Record images in compiled code"); with no image but a plan the cell
-    /// names, `yavs_rt_gather` ("Record drives in compiled code"). Anything else goes through
-    /// `yavs_rt_signal`, which looks after the cell.
+    /// (`docs/decisions.md` "Record images in compiled code"); with no image, the leaves read in
+    /// place when the plan is known now (`static_leaves`), else, with a plan the cell names,
+    /// `yavs_rt_gather` ("Record drives in compiled code"). Anything else goes through
+    /// `yavs_rt_signal`, which looks after the cell (and reviews an image compiled code copies).
     fn gather(&mut self, pc: u32, prog: &Program, dst: Reg, desc: Reg, tab: yavs_ir::ConstId) {
         type C = yavs_interp::ImageCell;
         let has = Self::tab_desc(prog, tab);
         let on = image_mode() != InlCmp::Off;
         let copy = on && image_inline() != Ok("noread");
         let direct = on && image_inline() != Ok("nodirect");
+        let leaves = (direct && has == Some(false))
+            .then(|| self.static_leaves(prog, tab))
+            .flatten();
         let (Some(has), true) = (has, copy || direct) else {
             self.signal(pc, 0);
             return;
@@ -9266,7 +9270,10 @@ impl Gen<'_> {
         );
         self.b.ins().brif(image, with, &[], without, &[]);
         self.b.switch_to_block(without);
-        if direct {
+        if let Some(plan) = &leaves {
+            self.read_leaves(plan, p, slow);
+            self.b.ins().jump(done, &[]);
+        } else if direct {
             let d = self
                 .b
                 .ins()
@@ -9297,6 +9304,73 @@ impl Gen<'_> {
         self.b.switch_to_block(done);
         self.clear();
         self.join(join);
+    }
+
+    /// The plan of a whole `SigGather` compiled code reads in place, made when the code is (the
+    /// caller checked that its type has no descriptor): a record of at most 8 logic vector leaves
+    /// of 1 to 64 elements. `None` for any other.
+    fn static_leaves(
+        &self,
+        prog: &Program,
+        tab: yavs_ir::ConstId,
+    ) -> Option<yavs_ir::gather::Plan> {
+        let Some(yavs_ir::ConstData::Bytes(t)) = prog.consts.get(tab) else {
+            return None;
+        };
+        let plan = yavs_ir::gather::plan(&prog.types, &prog.consts, t, &[]).ok()?;
+        let fits = |l: &yavs_ir::gather::Leaf| {
+            l.kind == yavs_ir::gather::LeafKind::LogicVec
+                && (1..=64).contains(&l.len)
+                && l.insts == 1
+                && l.vsize == 32
+                && l.sig <= self.sig_max
+        };
+        (self.nat.is_none()
+            && self.sig_ok
+            && plan.count == 1
+            && plan.leaves.len() <= 8
+            && plan.leaves.iter().all(fits))
+        .then_some(plan)
+    }
+
+    /// The leaves of `plan` (`static_leaves`) read into the value at `p`, each from its signal's
+    /// planes as a `SigRead` of it is (`sig_read_word`): no call, as reading the fields one by one.
+    fn read_leaves(&mut self, plan: &yavs_ir::gather::Plan, p: Value, slow: Block) {
+        let tab = self
+            .b
+            .ins()
+            .load(I64, self.mf.with_readonly(), self.mem, MEM_SIGTAB as i32);
+        let t = MemFlagsData::trusted();
+        for l in &plan.leaves {
+            let ent = self.b.ins().iadd_imm_s(tab, i64::from(l.sig) * SIG_ENT);
+            let blocks = self.ent_ld(ent, SIG_PLANES);
+            let has = self.b.ins().icmp_imm_s(IntCC::NotEqual, blocks, 0);
+            let plen = self.ent_ld(ent, SIG_PLEN);
+            let all =
+                self.b
+                    .ins()
+                    .icmp_imm_s(IntCC::UnsignedGreaterThanOrEqual, plen, i64::from(l.len));
+            let first = self.ent_ld(ent, SIG_OFF);
+            let sh = self.b.ins().band_imm_s(first, 63);
+            let end = self.b.ins().iadd_imm_s(sh, i64::from(l.len));
+            let one = self
+                .b
+                .ins()
+                .icmp_imm_s(IntCC::UnsignedLessThanOrEqual, end, 64);
+            let ok = self.b.ins().band(has, all);
+            let ok = self.b.ins().band(ok, one);
+            self.guard(ok, slow);
+            let w = self.b.ins().ushr_imm_s(first, 6);
+            let w0 = self.b.ins().ishl_imm_s(w, 5);
+            let at = self.b.ins().iadd(blocks, w0);
+            let mask = (u64::MAX >> (64 - l.len)) as i64;
+            for k in 0..4 {
+                let v = self.b.ins().load(I64, t, at, 8 * k);
+                let v = self.b.ins().ushr(v, sh);
+                let v = self.b.ins().band_imm_s(v, mask);
+                self.b.ins().store(self.gf, v, p, l.voff as i32 + 8 * k);
+            }
+        }
     }
 
     /// A whole zero-delay `SigScatter` through driver slot `driver`: the value against the record

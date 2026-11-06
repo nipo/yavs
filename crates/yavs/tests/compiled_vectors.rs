@@ -423,6 +423,97 @@ fn all_tiers_match(name: &str, src: &str) {
     }
 }
 
+/// Whole reads of records of logic vectors, which compiled code reads leaf by leaf in place: a
+/// record pack read through an `in` port (a leaf that starts inside a plane word), a leaf that
+/// crosses a plane word (the general path), leaves of 1 and 64 elements, metavalues, a read
+/// after a drive in the same activation, a forced and released record; before and after the
+/// review lets the record images go.
+const RECORD_READS: &str = r#"library ieee; use ieee.std_logic_1164.all; use ieee.numeric_std.all;
+package rp is
+  type pair is record
+    re, im : signed(17 downto 0);
+  end record;
+  type wide is record
+    a, b : std_logic_vector(39 downto 0);
+  end record;
+  type edge is record
+    x : std_logic_vector(0 downto 0);
+    y : unsigned(63 downto 0);
+  end record;
+end;
+
+library ieee; use ieee.std_logic_1164.all; use ieee.numeric_std.all;
+use work.rp.all;
+entity sub is
+  port (i : in pair; o : out pair);
+end;
+architecture a of sub is
+begin
+  process (i) is
+    variable v : pair;
+  begin
+    v := i;
+    o <= (re => v.im, im => v.re);
+  end process;
+end;
+
+library ieee; use ieee.std_logic_1164.all; use ieee.numeric_std.all;
+use work.rp.all;
+entity y is
+end;
+architecture a of y is
+  signal p0, p1, p2 : pair := (to_signed(3, 18), to_signed(-4, 18));
+  signal q : pair;
+  signal w0, w1 : wide := (others => (others => '0'));
+  signal e0, e1 : edge := ("0", (others => '1'));
+  function h (p : pair) return string is
+  begin
+    return to_hstring(p.re) & ":" & to_hstring(p.im);
+  end;
+begin
+  u : entity work.sub port map (i => p1, o => q);
+  process is
+    variable v, s : pair;
+    variable w : wide;
+    variable e : edge;
+  begin
+    for k in 1 to 1300 loop
+      wait for 1 ns;
+      v := p0;
+      p0 <= (re => v.im + k, im => v.re - 1);
+      p1 <= p0;
+      -- Read again after the drive: still the old value.
+      s := p0;
+      p2 <= s;
+      w := w0;
+      w1 <= w;
+      w0 <= (a => std_logic_vector(to_unsigned(k * 7, 36)) & "XZUW", b => std_logic_vector(to_unsigned(k * 13 + 2 ** 20, 40)));
+      e := e0;
+      e1 <= e;
+      e0 <= (x => std_logic_vector(to_unsigned(k mod 2, 1)), y => e.y - k);
+      if k = 30 or k = 1250 then
+        p2 <= force (to_signed(7, 18), to_signed(8, 18));
+      elsif k = 40 or k = 1260 then
+        p2 <= release;
+      end if;
+      -- Past the review of the record images (1 024 copies) the reads are in place.
+      if k mod 13 = 0 or k > 1240 then
+        report integer'image(k) & " " & h(v) & " " & h(s) & " " & h(p1) & " " & h(p2) & " " & h(q) & " "
+        & to_hstring(w.b) & " " & to_string(w1.a) & " " & to_hstring(e.x) & to_hstring(e.y) & " "
+        & to_hstring(e1.y);
+      end if;
+    end loop;
+    report "done";
+    wait;
+  end process;
+end;
+"#;
+
+#[test]
+fn whole_record_reads_in_compiled_code_match_the_interpreter() {
+    all_tiers_match("compiled_record_reads", RECORD_READS);
+}
+
 #[test]
 fn unary_minus_in_compiled_code_matches_the_interpreter() {
     all_tiers_match("compiled_neg", NEG);
