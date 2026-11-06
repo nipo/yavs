@@ -129,16 +129,17 @@ fn dominators(prog: &Program, f: &crate::Func) -> Option<Vec<Vec<u64>>> {
         d[0] = 1;
     }
     let mut changed = true;
+    let mut x = vec![!0u64; w];
     while changed {
         changed = false;
         for b in 1..nb {
-            let mut x = vec![!0u64; w];
+            x.fill(!0);
             for &p in &pred[b] {
                 x.iter_mut().zip(&dom[p]).for_each(|(a, c)| *a &= c);
             }
             x[b / 64] |= 1 << (b % 64);
             if x != dom[b] {
-                dom[b] = x;
+                dom[b].copy_from_slice(&x);
                 changed = true;
             }
         }

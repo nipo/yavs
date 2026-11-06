@@ -86,13 +86,15 @@ impl Opt<'_> {
             let mut live_in: Vec<Bits> = uses.clone();
             let mut live_out: Vec<Bits> = vec![vec![0; w]; nb];
             let mut again = true;
+            // (Buffers kept across blocks and rounds: no allocation per block.)
+            let (mut out, mut inn) = (vec![0u64; w], vec![0u64; w]);
             while again {
                 again = false;
                 for b in (0..nb).rev() {
                     if !reach[b] {
                         continue;
                     }
-                    let mut out = vec![0u64; w];
+                    out.fill(0);
                     let mut k = 0;
                     while let Some(s) = self.succ(b, k) {
                         k += 1;
@@ -100,12 +102,12 @@ impl Opt<'_> {
                             *o |= *i;
                         }
                     }
-                    let inn: Bits = (0..w)
-                        .map(|x| uses[b][x] | (out[x] & !defs[b][x]))
-                        .collect();
+                    for (x, v) in inn.iter_mut().enumerate() {
+                        *v = uses[b][x] | (out[x] & !defs[b][x]);
+                    }
                     if inn != live_in[b] || out != live_out[b] {
-                        live_in[b] = inn;
-                        live_out[b] = out;
+                        live_in[b].copy_from_slice(&inn);
+                        live_out[b].copy_from_slice(&out);
                         again = true;
                     }
                 }

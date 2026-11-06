@@ -166,10 +166,12 @@ fn live_out(f: &crate::Func, succ: &[Vec<usize>]) -> Vec<Vec<u64>> {
     let mut live_in = vec![vec![0u64; w]; nb];
     let mut out = vec![vec![0u64; w]; nb];
     let mut changed = true;
+    // (Buffers kept across blocks and rounds: no allocation per block.)
+    let (mut o, mut inn) = (vec![0u64; w], vec![0u64; w]);
     while changed {
         changed = false;
         for b in (0..nb).rev() {
-            let mut o = vec![0u64; w];
+            o.fill(0);
             for &s in &succ[b] {
                 if s < nb {
                     for k in 0..w {
@@ -177,10 +179,12 @@ fn live_out(f: &crate::Func, succ: &[Vec<usize>]) -> Vec<Vec<u64>> {
                     }
                 }
             }
-            let inn: Vec<u64> = (0..w).map(|k| gen_[b][k] | (o[k] & !kill[b][k])).collect();
+            for (k, v) in inn.iter_mut().enumerate() {
+                *v = gen_[b][k] | (o[k] & !kill[b][k]);
+            }
             if inn != live_in[b] || o != out[b] {
-                live_in[b] = inn;
-                out[b] = o;
+                live_in[b].copy_from_slice(&inn);
+                out[b].copy_from_slice(&o);
                 changed = true;
             }
         }
