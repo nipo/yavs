@@ -3885,15 +3885,26 @@ impl<'a> Fx<'a, '_> {
                 dst
             }
             _ => {
+                let sym = yavs_sem::mangle::implicit_native(db, op);
+                // `?=` and `?/=` of `std_ulogic(_vector)` have an `ieee` native: arrays as values.
+                let ieee = (!self.cx.opts.no_native_ieee)
+                    .then(|| yavs_ir::ieee::implicit_native(&sym))
+                    .flatten();
                 let mut cells = Vec::new();
                 for &e in &ex {
                     match self.expr(e)? {
                         V::S(r) => cells.push(r),
+                        V::A(d, p) if ieee.is_some() => {
+                            let (l, r, dir) = self.dope_bounds(p);
+                            cells.extend([d, l, r, dir]);
+                        }
                         V::A(d, p) => cells.push(self.make_fat(d, p)),
                     }
                 }
+                if let Some(s) = ieee {
+                    return self.native(&s, None, &cells, res, span);
+                }
                 let tid = self.ty(t, span)?;
-                let sym = yavs_sem::mangle::implicit_native(db, op);
                 return self.native(&sym, Some(tid), &cells, res, span);
             }
         };

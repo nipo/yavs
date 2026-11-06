@@ -237,6 +237,13 @@ pub enum Op {
     },
     /// `std_match` of two vectors; a null array and unequal lengths warn in the native.
     Match,
+    /// The predefined `?=` (`ne` false) and `?/=` of two `std_ulogic` or two `std_ulogic_vector`
+    /// (`vec`; LRM 9.2.3, from [`implicit_native`]): the AND of the element matches, so a
+    /// mismatch beats `U`, which beats `X`; unequal lengths are the native's error.
+    MatchEq {
+        ne: bool,
+        vec: bool,
+    },
     ToInteger {
         signed: bool,
     },
@@ -294,6 +301,15 @@ pub fn parse(key: &str) -> Option<Op> {
         _ => None,
     };
     match (pkg, name, params.as_slice(), ret) {
+        // (Before the gates, whose arm takes every name of this shape.)
+        ("std_logic_1164", n @ ("?=" | "?/="), [a, b], "std_ulogic")
+            if a == b && matches!(*a, "std_ulogic" | "std_ulogic_vector") =>
+        {
+            Some(Op::MatchEq {
+                ne: n == "?/=",
+                vec: *a == "std_ulogic_vector",
+            })
+        }
         ("std_logic_1164", n, ["std_ulogic", "std_ulogic"], "std_ulogic") => gate(n).map(Op::Gate),
         ("std_logic_1164", n, ["std_ulogic_vector", "std_ulogic_vector"], "std_ulogic_vector") => {
             gate(n).map(Op::VecGate)
@@ -758,6 +774,21 @@ pub fn native_symbol(mangled: &str) -> Option<String> {
     parse(&k).map(|_| format!("yavs.ieee.{k}"))
 }
 
+/// The families of `yavs.implicit.` symbols [`implicit_native`] maps, with their operator.
+pub const IMPLICIT_NATIVES: [(&str, &str); 2] = [("meq", "?="), ("mneq", "?/=")];
+
+/// The native (`yavs.ieee.<key>`) of the predefined operation with this `yavs.implicit.` symbol,
+/// if there is one: `?=` and `?/=` of `std_ulogic` and `std_ulogic_vector` ([`Op::MatchEq`]).
+/// `std_logic_1164` declares no subprogram with these keys, so no body is replaced. Only keys
+/// [`parse`] takes, so each is an [`Op`].
+pub fn implicit_native(symbol: &str) -> Option<String> {
+    let (fam, ty) = symbol.strip_prefix("yavs.implicit.")?.split_once('.')?;
+    let (_, op) = IMPLICIT_NATIVES.iter().find(|(f, _)| *f == fam)?;
+    let t = ty.strip_prefix("ieee.std_logic_1164.")?;
+    let k = format!("std_logic_1164.\"{op}\"({t},{t})std_ulogic");
+    parse(&k).map(|_| format!("yavs.ieee.{k}"))
+}
+
 /// The key of a symbol made by [`native_symbol`].
 pub fn symbol_key(symbol: &str) -> Option<&str> {
     symbol.strip_prefix("yavs.ieee.")
@@ -783,6 +814,32 @@ mod tests {
     }
 
     #[test]
+    fn predefined_matching() {
+        let s = implicit_native("yavs.implicit.mneq.ieee.std_logic_1164.std_ulogic_vector");
+        assert_eq!(
+            s.as_deref().and_then(symbol_key).and_then(parse),
+            Some(Op::MatchEq {
+                ne: true,
+                vec: true
+            })
+        );
+        let s = implicit_native("yavs.implicit.meq.ieee.std_logic_1164.std_ulogic");
+        assert_eq!(
+            s.as_deref().and_then(symbol_key).and_then(parse),
+            Some(Op::MatchEq {
+                ne: false,
+                vec: false
+            })
+        );
+        // Ordering forms and other array types keep the implicit native.
+        assert_eq!(
+            implicit_native("yavs.implicit.mlt.ieee.std_logic_1164.std_ulogic"),
+            None
+        );
+        assert_eq!(implicit_native("yavs.implicit.meq.work.p.my_vec"), None);
+    }
+
+    #[test]
     fn argument_registers() {
         // Four registers per array, one per scalar; the 1993 `std_logic_vector` is an array too.
         for (k, n) in [
@@ -799,6 +856,11 @@ mod tests {
                 5,
             ),
             ("std_logic_1164.rising_edge(std_ulogic)boolean", 1),
+            (
+                "std_logic_1164.\"?=\"(std_ulogic_vector,std_ulogic_vector)std_ulogic",
+                8,
+            ),
+            ("std_logic_1164.\"?/=\"(std_ulogic,std_ulogic)std_ulogic", 2),
             ("math_real.uniform(integer,integer,real)", 3),
         ] {
             assert_eq!(arg_regs(k), n, "{k}");

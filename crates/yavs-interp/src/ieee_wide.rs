@@ -296,6 +296,39 @@ pub(crate) fn qeq_code(w: [u64; 3]) -> u64 {
     }
 }
 
+/// The code of the AND of the element matches (the predefined `?=`, LRM 9.2.3) for the words of
+/// [`qeq_block`]: a mismatch before `U` before `X`, else a match.
+pub(crate) fn and_code(w: [u64; 3]) -> u64 {
+    if w[2] != 0 {
+        2
+    } else if w[0] != 0 {
+        0
+    } else if w[1] != 0 {
+        1
+    } else {
+        3
+    }
+}
+
+/// The predefined `?=` of two vectors of one length (up to [`MAX_BITS`]): the code of
+/// [`and_code`]; unequal lengths take the general path.
+pub(crate) fn match_eq(m: &Machine, a: &[u64]) -> Option<u64> {
+    let ((n, p), (k, q)) = (planes(m, a, 0)?, planes(m, a, A1)?);
+    if n != k {
+        return None;
+    }
+    let mut acc = [0u64; 3];
+    for b in 0..n.div_ceil(64) {
+        for (t, v) in acc
+            .iter_mut()
+            .zip(qeq_block(block(p, b), block(q, b), low(n - b * 64)))
+        {
+            *t |= v;
+        }
+    }
+    Some(and_code(acc))
+}
+
 /// `?=` of `numeric_std` where a vector is longer than 64 elements (forms as in [`add`]): the
 /// code of [`qeq_code`]. Any element value is taken; null arrays, an integer that does not fit
 /// and more than [`MAX_BITS`] elements take the general path.

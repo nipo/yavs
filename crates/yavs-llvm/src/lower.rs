@@ -7102,6 +7102,7 @@ impl Gen {
             let plane_op = matches!(
                 op,
                 Op::Match
+                    | Op::MatchEq { .. }
                     | Op::QCompare {
                         cmp: Cmp::Eq | Cmp::Ne,
                         ..
@@ -7243,12 +7244,20 @@ impl Gen {
                     Out::Vector(n, mul(x, y), false)
                 }
                 // `?=` / `?/=` of operands of one length, any element value: the body's fold as
-                // `U` (a `U` not against `-`), else `X`, else a mismatch (`'0'`, `'1'` for `?/=`).
+                // `U` (a `U` not against `-`), else `X`, else a mismatch (`'0'`, `'1'` for `?/=`);
+                // the predefined ones (`MatchEq`) AND the matches: a mismatch, else `U`, else `X`.
                 Op::QCompare {
-                    cmp: k @ (Cmp::Eq | Cmp::Ne),
-                    signed,
-                    form,
-                } => {
+                    cmp: Cmp::Eq | Cmp::Ne,
+                    ..
+                }
+                | Op::MatchEq { vec: true, .. } => {
+                    let (k, signed, form, all) = match op {
+                        Op::QCompare { cmp, signed, form } => (cmp, signed, form, false),
+                        Op::MatchEq { ne, .. } => {
+                            (if ne { Cmp::Ne } else { Cmp::Eq }, false, Form::Vv, true)
+                        }
+                        _ => return Err("not a native computed in place".into()),
+                    };
                     let (n, _, mask) = arrs[0];
                     let (p, q) = match form {
                         Form::Vv => {
@@ -7269,9 +7278,21 @@ impl Gen {
                     let xx = and(and(live, not(u)), not(both));
                     let mis = and(and(live, both), xor(p[0], q[0]));
                     let (m_val, e_val) = if k == Cmp::Ne { (3, 2) } else { (2, 3) };
-                    let r = pick(cmp(LLVMIntNE, mis, c0), self.c64(m_val), self.c64(e_val));
-                    let r = pick(cmp(LLVMIntNE, xx, c0), c1, r);
-                    Out::Scalar(pick(cmp(LLVMIntNE, un, c0), c0, r))
+                    let (tm, tx, tu) = (
+                        cmp(LLVMIntNE, mis, c0),
+                        cmp(LLVMIntNE, xx, c0),
+                        cmp(LLVMIntNE, un, c0),
+                    );
+                    let (cm, ce) = (self.c64(m_val), self.c64(e_val));
+                    Out::Scalar(if all {
+                        let r = pick(tx, c1, ce);
+                        let r = pick(tu, c0, r);
+                        pick(tm, cm, r)
+                    } else {
+                        let r = pick(tm, cm, ce);
+                        let r = pick(tx, c1, r);
+                        pick(tu, c0, r)
+                    })
                 }
                 // `ieee::fast_div`: the magnitudes divided, the signs applied as the bodies do. A
                 // zero divisor goes to the callback, which hands the call to the body. An integer

@@ -3385,3 +3385,70 @@ fn native_div_small_numeric_bit_matches_bodies() {
     let src = format!("{BIT_HEAD}{body}    wait;\n  end process;\nend architecture;\n");
     diff_run("div_small_bit", &src, "t", "2008", 1500);
 }
+
+/// The predefined `?=` and `?/=` of `std_ulogic` and `std_ulogic_vector` (LRM 9.2.3, the AND of
+/// the element matches): every pair of element values alone and as two pairs (a mismatch beats
+/// `U`, which beats `X`), lengths 63, 64, 65, 128 and 1030 with the values in each word, weak
+/// bits, both directions, non-zero bounds, null operands; `pairs` false leaves out the two pairs.
+fn predefined_match(pairs: bool) -> String {
+    let all = "UX01ZWLH-";
+    let mut body = String::new();
+    let mut put = |x: &str, y: &str, lx: i64, ly: i64| {
+        for op in ["?=", "?/="] {
+            let _ = writeln!(
+                body,
+                "    report img(sv(\"{x}\", {lx}, false) {op} sv(\"{y}\", {ly}, true));"
+            );
+        }
+    };
+    for a in all.chars() {
+        for b in all.chars() {
+            put(&a.to_string(), &b.to_string(), 0, 3);
+            for c in "UX01-".chars().filter(|_| pairs) {
+                for d in "UX01-".chars() {
+                    put(&format!("{a}{c}"), &format!("{b}{d}"), 7, 2);
+                }
+            }
+        }
+    }
+    for n in [63usize, 64, 65, 128, 1030] {
+        let alt: String = (0..n).map(|i| if i % 2 == 0 { '1' } else { 'L' }).collect();
+        put(&alt, &alt, n as i64 - 1, n as i64);
+        put(&alt, &alt.replace('1', "H"), n as i64 + 5, n as i64 + 2);
+        for at in [0, n / 2, n - 1] {
+            for (a, b) in [('X', '1'), ('U', '1'), ('0', '1'), ('-', '0'), ('W', 'U')] {
+                let mut x = alt.clone().into_bytes();
+                x[at] = a as u8;
+                let mut y = alt.clone().into_bytes();
+                y[n - 1 - at] = b as u8;
+                let (x, y) = (String::from_utf8_lossy(&x), String::from_utf8_lossy(&y));
+                put(&x, &y, n as i64 - 1, n as i64 + 1);
+            }
+        }
+    }
+    put("", "", 0, 5);
+    // The scalar forms through a function, so nothing folds.
+    for a in all.chars() {
+        for b in all.chars() {
+            for op in ["?=", "?/="] {
+                let _ = writeln!(body, "    report img(cv('{a}') {op} cv('{b}'));");
+            }
+        }
+    }
+    body
+}
+
+#[test]
+fn native_predefined_match_matches_bodies() {
+    diff_run("pmatch", &tb(&predefined_match(true)), "t", "2008", 4400);
+    diff_run("pmatch", &tb(&predefined_match(false)), "t", "2019", 450);
+    // Different lengths, one of them null: the error of the operator.
+    for (x, y) in [("10", "101"), ("", "1"), ("1", "")] {
+        for op in ["?=", "?/="] {
+            let body = format!(
+                "    report \"before\";\n    report img(sv(\"{x}\", 3, false) {op} sv(\"{y}\", 2, true));\n    report \"after\";\n"
+            );
+            assert_eq!(diff_run("pmatch_len", &tb(&body), "t", "2008", 1), Some(1));
+        }
+    }
+}

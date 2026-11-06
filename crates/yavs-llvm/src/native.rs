@@ -476,7 +476,9 @@ pub fn ieee_layout(op: yavs_ir::ieee::Op) -> Option<&'static [Arg]> {
         },
         Op::ToUnsigned | Op::ToSigned => &[Arg::Int, Arg::Int],
         Op::Resize { .. } | Op::Shift(_) | Op::ShiftFn(_) | Op::To01 => &[Arg::Arr, Arg::Int],
-        Op::NumGate(_) | Op::VecGate(_) | Op::Match => &[Arg::Arr, Arg::Arr],
+        Op::NumGate(_) | Op::VecGate(_) | Op::Match | Op::MatchEq { vec: true, .. } => {
+            &[Arg::Arr, Arg::Arr]
+        }
         _ => return None,
     })
 }

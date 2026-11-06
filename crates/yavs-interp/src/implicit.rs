@@ -753,12 +753,7 @@ fn matching(m: &mut Machine, t: Option<TyId>, a: &[u64], r: Rel) -> R<Option<u64
         let (_, sc, _) = array_ty(m, t)?;
         let (p, q) = (read_arr(m, t, x)?, read_arr(m, t, y)?);
         if p.el.len() != q.el.len() {
-            return rt_err(format!(
-                "operands of \"{}\" have different lengths ({} and {})",
-                if r == Rel::Eq { "?=" } else { "?/=" },
-                p.el.len(),
-                q.el.len()
-            ));
+            return match_lengths(r == Rel::Ne, p.el.len(), q.el.len());
         }
         let v = if logic_of(sc) == Some(LogicKind::StdULogic) {
             let mut acc = StdULogic::One;
@@ -777,6 +772,14 @@ fn matching(m: &mut Machine, t: Option<TyId>, a: &[u64], r: Rel) -> R<Option<u64
         Sc::Enum(_, Some(LogicKind::StdULogic)) => match_sul(sul(x)?, sul(y)?, r).map(Some),
         _ => Ok(Some(u64::from(r.holds(bit(x)?.cmp(&bit(y)?))))),
     }
+}
+
+/// The error of `?=` (`ne` false) or `?/=` on arrays of different lengths.
+pub(crate) fn match_lengths<T>(ne: bool, n: usize, k: usize) -> R<T> {
+    let op = if ne { "?/=" } else { "?=" };
+    rt_err(format!(
+        "operands of \"{op}\" have different lengths ({n} and {k})"
+    ))
 }
 
 fn sul(v: u64) -> R<StdULogic> {

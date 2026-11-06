@@ -7452,6 +7452,7 @@ impl Gen<'_> {
         let plane_op = matches!(
             op,
             Op::Match
+                | Op::MatchEq { .. }
                 | Op::QCompare {
                     cmp: Cmp::Eq | Cmp::Ne,
                     ..
@@ -7613,12 +7614,20 @@ impl Gen<'_> {
                 Out::Vector(n, self.b.ins().imul(x, y), false)
             }
             // `?=` / `?/=` of operands of one length, any element value: the body's fold as
-            // `U` (a `U` not against `-`), else `X`, else a mismatch (`'0'`, `'1'` for `?/=`).
+            // `U` (a `U` not against `-`), else `X`, else a mismatch (`'0'`, `'1'` for `?/=`);
+            // the predefined ones (`MatchEq`) AND the matches: a mismatch, else `U`, else `X`.
             Op::QCompare {
-                cmp: k @ (Cmp::Eq | Cmp::Ne),
-                signed,
-                form,
-            } => {
+                cmp: Cmp::Eq | Cmp::Ne,
+                ..
+            }
+            | Op::MatchEq { vec: true, .. } => {
+                let (k, signed, form, and) = match op {
+                    Op::QCompare { cmp, signed, form } => (cmp, signed, form, false),
+                    Op::MatchEq { ne, .. } => {
+                        (if ne { Cmp::Ne } else { Cmp::Eq }, false, Form::Vv, true)
+                    }
+                    _ => return Err("not a native computed in place".into()),
+                };
                 let (n, _, mask) = arrs[0];
                 let (p, q) = match form {
                     Form::Vv => {
@@ -7655,12 +7664,18 @@ impl Gen<'_> {
                 let mis = self.b.ins().band(lb, diff);
                 let (m_val, e_val) = if k == Cmp::Ne { (3, 2) } else { (2, 3) };
                 let (cm, ce, cx) = (self.c64(m_val), self.c64(e_val), self.c64(1));
-                let t = self.b.ins().icmp_imm_s(IntCC::NotEqual, mis, 0);
-                let r = self.b.ins().select(t, cm, ce);
-                let t = self.b.ins().icmp_imm_s(IntCC::NotEqual, xx, 0);
-                let r = self.b.ins().select(t, cx, r);
-                let t = self.b.ins().icmp_imm_s(IntCC::NotEqual, un, 0);
-                Out::Scalar(self.b.ins().select(t, c0, r))
+                let tm = self.b.ins().icmp_imm_s(IntCC::NotEqual, mis, 0);
+                let tx = self.b.ins().icmp_imm_s(IntCC::NotEqual, xx, 0);
+                let tu = self.b.ins().icmp_imm_s(IntCC::NotEqual, un, 0);
+                Out::Scalar(if and {
+                    let r = self.b.ins().select(tx, cx, ce);
+                    let r = self.b.ins().select(tu, c0, r);
+                    self.b.ins().select(tm, cm, r)
+                } else {
+                    let r = self.b.ins().select(tm, cm, ce);
+                    let r = self.b.ins().select(tx, cx, r);
+                    self.b.ins().select(tu, c0, r)
+                })
             }
             // `ieee::fast_div`: the magnitudes divided, the signs applied as the bodies do. A zero
             // divisor goes to the callback, which hands the call to the body. An integer wider than

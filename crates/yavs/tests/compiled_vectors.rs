@@ -1903,3 +1903,75 @@ fn synopsys_bit_and_unary_operators_in_compiled_code_match_the_interpreter() {
     all_tiers_match("compiled_syn_bit_s", &syn_bit_src("signed"));
     all_tiers_match("compiled_syn_bit_u", &syn_bit_src("unsigned"));
 }
+
+/// The predefined `?=` and `?/=` of `std_logic_vector` and `std_logic`: every element value at
+/// 1 to 70 elements (one word and the native above 64), a mismatch with `U` or `X` elsewhere,
+/// both directions, non-zero bounds, null operands, and a loop that compiled code runs.
+const PREDEFINED_MATCH: &str = r#"library ieee;
+use ieee.std_logic_1164.all;
+entity y is end;
+architecture a of y is
+  function pick(i : natural; k : natural) return std_logic is
+  begin
+    if k > 0 and i mod k = 0 then return std_logic'val((i / k + k) mod 9); end if;
+    case (i * 5 + i / 3) mod 4 is
+      when 0 => return '0';
+      when 1 => return '1';
+      when 2 => return 'L';
+      when others => return 'H';
+    end case;
+  end function;
+  function down(n : natural; k : natural) return std_logic_vector is
+    variable r : std_logic_vector(n + 4 downto 5);
+  begin
+    for i in r'range loop r(i) := pick(i - 5, k); end loop;
+    return r;
+  end function;
+  function up(n : natural; k : natural) return std_logic_vector is
+    variable r : std_logic_vector(3 to n + 2);
+  begin
+    for i in r'range loop r(i) := pick(n + 2 - i, k); end loop;
+    return r;
+  end function;
+  function m(x, y : std_logic_vector) return string is
+  begin
+    return std_ulogic'image(x ?= y) & std_ulogic'image(x ?/= y);
+  end function;
+begin
+  process
+    constant ks : integer_vector := (0, 1, 3, 7, 13, 64);
+    variable n : integer := 0;
+    variable v, w : std_logic_vector(31 downto 0);
+    variable s : string(1 to 81);
+  begin
+    for len in 0 to 70 loop
+      for i in ks'range loop
+        report integer'image(len) & "/" & integer'image(ks(i)) & ": " &
+               m(down(len, ks(i)), up(len, ks(i))) & m(down(len, 0), up(len, ks(i))) &
+               m(up(len, ks(i)), down(len, 0)) & m(down(len, ks(i)), down(len, ks(i)));
+      end loop;
+    end loop;
+    report m("U0", "01") & m("X1", "0-") & m("UX", "-1") & m("", "");
+    for a in std_logic loop
+      for b in std_logic loop
+        s(std_logic'pos(a) * 9 + std_logic'pos(b) + 1) := std_ulogic'image(a ?= b)(2);
+      end loop;
+      report std_ulogic'image(a) & " " & s(std_logic'pos(a) * 9 + 1 to std_logic'pos(a) * 9 + 9) &
+             " " & std_ulogic'image(a ?/= '1') & std_ulogic'image('-' ?/= a);
+    end loop;
+    v := x"0000_0001";
+    for k in 0 to 2000 loop
+      w := v xor std_logic_vector'(31 downto 8 => '0') & std_logic_vector'(down(8, k mod 5));
+      n := (n * 7 + std_ulogic'pos(v ?= w) * 3 + std_ulogic'pos(v ?/= w)) mod 1000003;
+      v := v(30 downto 0) & v(31);
+    end loop;
+    report "done " & integer'image(n);
+    wait;
+  end process;
+end;
+"#;
+
+#[test]
+fn predefined_match_in_compiled_code_matches_the_interpreter() {
+    all_tiers_match("compiled_pmatch", PREDEFINED_MATCH);
+}

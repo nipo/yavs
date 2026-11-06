@@ -588,6 +588,14 @@ pub fn code_table(symbol: &str) -> Option<Vec<u8>> {
         Op::Not => all().map(|x| x.not() as u8).collect(),
         Op::Conv(k, false) => all().map(|x| conv_of(k, x) as u8).collect(),
         Op::Truthy => all().map(|x| u8::from(x.is_true())).collect(),
+        Op::MatchEq { ne, vec: false } => all()
+            .flat_map(|x| {
+                all().map(move |y| {
+                    let c = x.match_eq(y);
+                    (if ne { c.not() } else { c }) as u8
+                })
+            })
+            .collect(),
         _ => return None,
     })
 }
@@ -1530,6 +1538,30 @@ fn std_match(m: &mut Machine, ctx: Cx<'_, '_, '_>, _: Option<TyId>, a: &[u64]) -
             || known(x) && known(y) && one(x) == one(y)
     });
     Ok(Some(u64::from(ok)))
+}
+
+/// The predefined `?=` (`NE` false) and `?/=` of two `std_ulogic` or two `std_ulogic_vector`
+/// (`VEC`, LRM 9.2.3): the AND of the element matches; unequal lengths are an error.
+fn match_eq<const NE: bool, const VEC: bool>(
+    m: &mut Machine,
+    _: Cx<'_, '_, '_>,
+    _: Option<TyId>,
+    a: &[u64],
+) -> Ret {
+    if let Some(r) = fast_match_eq::<NE, VEC>(m, a) {
+        return Ok(Some(r));
+    }
+    general(m);
+    let c = if VEC {
+        let (l, r) = (vh(m, a, 0)?.v, vh(m, a, A1)?.v);
+        if l.len() != r.len() {
+            return crate::implicit::match_lengths(NE, l.len(), r.len());
+        }
+        l.match_eq(&r)
+    } else {
+        sul(a, 0)?.match_eq(sul(a, 1)?)
+    };
+    Ok(Some((if NE { c.not() } else { c }) as u64))
 }
 
 fn mul<const SIGNED: bool, const FORM: u8>(
@@ -2819,6 +2851,27 @@ fn fast_match(m: &mut Machine, a: &[u64]) -> Option<u64> {
     Some(u64::from(!ok & low(n) == 0))
 }
 
+/// [`match_eq`] of any element values: up to 64 elements in one word, up to `wide::MAX_BITS` in
+/// `wide::match_eq`; unequal lengths go to the native's error.
+fn fast_match_eq<const NE: bool, const VEC: bool>(m: &mut Machine, a: &[u64]) -> Option<u64> {
+    let c = if !VEC {
+        let (x, y) = (cell(a, 0)?, cell(a, 1)?);
+        let sc = |v: i64| {
+            (0..=8)
+                .contains(&v)
+                .then(|| StdULogic::from_code_pub(v as u8))
+        };
+        sc(x)?.match_eq(sc(y)?) as u64
+    } else {
+        match (block_of(m, a), block_of(m, a.get(A1..)?)) {
+            (Some((n, p)), Some((k, q))) if n == k => wide::and_code(wide::qeq_block(p, q, low(n))),
+            _ => wide::match_eq(m, a)?,
+        }
+    };
+    // `?/=` is the negation: `U` and `X` stay.
+    Some(if NE && c >= 2 { 5 - c } else { c })
+}
+
 fn fast_to_integer<const SIGNED: bool>(m: &mut Machine, a: &[u64]) -> Option<u64> {
     let high = m.rt.revision.integer_bounds().high as u64;
     let Some(v) = small(m, a, 0) else {
@@ -3206,6 +3259,12 @@ pub(crate) fn lookup(symbol: &str) -> Option<NativeFn> {
             form: f,
         } => pick3!(minmax, max, signed, form(f)),
         Op::Match => std_match,
+        Op::MatchEq { ne, vec } => match (ne, vec) {
+            (false, false) => match_eq::<false, false>,
+            (false, true) => match_eq::<false, true>,
+            (true, false) => match_eq::<true, false>,
+            (true, true) => match_eq::<true, true>,
+        },
         Op::ToInteger { signed: false } => to_integer::<false>,
         Op::ToInteger { signed: true } => to_integer::<true>,
         Op::ToUnsigned => to_unsigned::<false>,
@@ -3412,6 +3471,12 @@ pub(crate) fn lookup_fast(symbol: &str) -> Option<FastFn> {
             form: f,
         } => pick3_fast!(fast_minmax, max, signed, form(f)),
         Op::Match => fast_match,
+        Op::MatchEq { ne, vec } => match (ne, vec) {
+            (false, false) => fast_match_eq::<false, false>,
+            (false, true) => fast_match_eq::<false, true>,
+            (true, false) => fast_match_eq::<true, false>,
+            (true, true) => fast_match_eq::<true, true>,
+        },
         Op::To01 => fast_to_01,
         Op::Div {
             kind,

@@ -578,9 +578,9 @@ const IEEE_GENERAL: &[(&str, u64)] = &[
 
 /// What `perf/ieee_paths.vhd` reports: a checksum per width of every result.
 const IEEE_PATHS_SAYS: [&str; 4] = [
-    "W=128 sum=000000011EB213D5009266C30264A1AB 480000064DDE232F87E48E73C10E2C63 712444",
-    "W=65 sum=15B4689C2C156FFE8 F9BD46E713B1ADF50 383049",
-    "W=8 sum=86 F9 746273",
+    "W=128 sum=000000011EB213D5009266C302699A5C 480000064DDE232F87E48E73C10317F2 472738",
+    "W=65 sum=15B4689C2C156CFB5 F9BD46E713B1AEF13 591689",
+    "W=8 sum=D3 B6 796088",
     "W=128 syn sum=3FFFFFFFFFFFFFFF00000000007C6E92 568056",
 ];
 
@@ -2013,6 +2013,14 @@ mod clift {
         ("numeric_std.to_integer(unsigned)integer", 60),
         ("numeric_std.to_signed(integer,integer)signed", 60),
         ("numeric_std.to_unsigned(integer,integer)unsigned", 118),
+        (
+            r#"std_logic_1164."?/="(std_ulogic_vector,std_ulogic_vector)std_ulogic"#,
+            60,
+        ),
+        (
+            r#"std_logic_1164."?="(std_ulogic_vector,std_ulogic_vector)std_ulogic"#,
+            60,
+        ),
         (
             r#"std_logic_1164."and"(std_ulogic_vector,std_ulogic_vector)std_ulogic_vector"#,
             60,

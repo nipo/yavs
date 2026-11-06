@@ -5,7 +5,7 @@
 // Each includer reads a part of it.
 #![allow(dead_code)]
 
-use yavs_ir::ieee::{Op, Opd, Syn, parse};
+use yavs_ir::ieee::{IMPLICIT_NATIVES, Op, Opd, Syn, implicit_native, parse, symbol_key};
 
 /// A one-word path in the interpreter (`lookup_fast` has an arm).
 pub const FAST: bool = true;
@@ -58,6 +58,9 @@ rows! {
     "QCompare": Op::QCompare { .. } => FAST, IN_PLACE;
     "MinMax": Op::MinMax { .. } => FAST, IN_PLACE;
     "Match": Op::Match => FAST, IN_PLACE;
+    // The predefined `?=` and `?/=` (`implicit_native`); the scalar form is a code table.
+    "MatchEq vec": Op::MatchEq { vec: true, .. } => FAST, IN_PLACE;
+    "MatchEq": Op::MatchEq { vec: false, .. } => FAST, CALL;
     "ToInteger": Op::ToInteger { .. } => FAST, IN_PLACE;
     "ToUnsigned": Op::ToUnsigned => FAST, IN_PLACE;
     "ToSigned": Op::ToSigned => FAST, IN_PLACE;
@@ -84,8 +87,8 @@ rows! {
 }
 
 /// Every op `parse` returns for keys spelled from the packages, designators and types it
-/// matches, with one key each. A designator or type missing here shows as a row of [`NAMES`]
-/// no op reaches.
+/// matches, and every op `implicit_native` names for its families, with one key each. A
+/// designator or type missing here shows as a row of [`NAMES`] no op reaches.
 pub fn every_op() -> Vec<(Op, String)> {
     const PKGS: [&str; 8] = [
         "std_logic_1164",
@@ -211,6 +214,26 @@ pub fn every_op() -> Vec<(Op, String)> {
                 }
             }
         }
+    }
+    for (fam, _) in IMPLICIT_NATIVES {
+        let mut found = false;
+        for t in TYPES {
+            let Some(sym) =
+                implicit_native(&format!("yavs.implicit.{fam}.ieee.std_logic_1164.{t}"))
+            else {
+                continue;
+            };
+            let key = symbol_key(&sym).expect("an `ieee` symbol").to_string();
+            let op = parse(&key).expect("`implicit_native` names `parse` keys");
+            found = true;
+            if !out.iter().any(|(o, _)| *o == op) {
+                out.push((op, key));
+            }
+        }
+        assert!(
+            found,
+            "implicit family `{fam}`: no type of `every_op` has a native"
+        );
     }
     out
 }

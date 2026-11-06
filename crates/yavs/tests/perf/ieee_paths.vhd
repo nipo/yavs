@@ -80,6 +80,8 @@ begin
       vu := (std_logic_vector(au) and std_logic_vector(bu)) or not std_logic_vector(a);
       s := s xor unsigned(v) xor unsigned(vu) xor to_01(a) xor to_01(au) xor unsigned(to_x01(v));
       mix(is_x(vu)); mix(xor a); mix(and sau);
+      -- The predefined ?= and ?/= of std_ulogic_vector and std_ulogic.
+      mix(v ?= vu); mix(std_logic_vector(au) ?/= std_logic_vector(bu)); mix(a(0) ?= b(k)); mix(au(1) ?/= bu(0));
       bv := to_bitvector(v); mix(bv(0) = '1');
       wait for 1 ns;
     end loop;

@@ -3291,6 +3291,17 @@ user's performance priority:
   `to_unsigned`, `to_signed`, `resize` and the local `xsll`..`xror` the shift and rotate
   functions call. Everything else (string conversions, `numeric_bit`,
   Synopsys packages) still runs from VHDL.
+- **The predefined `?=` and `?/=` of `std_ulogic` and `std_ulogic_vector`** (LRM 9.2.3, no body
+  in `std_logic_1164`) are lowered as the `ieee` native `Op::MatchEq` under a key no package
+  declares (`yavs_ir::ieee::implicit_native`), so the interpreter's `CallIeee` and the in-place
+  arms of compiled code take them like `numeric_std`'s `?=`; `YAVS_NO_NATIVE_IEEE` keeps the
+  implicit native, the reference of the tests. Their fold is the AND of the element matches (a
+  mismatch before `U` before `X`), not `numeric_std`'s (`U` before `X` before a mismatch), and
+  unequal lengths are the implicit native's error. Arrays of `std_ulogic` of a user type and the
+  ordering forms `?<` .. `?>=` of `std_ulogic` (a `-` is an error, which a code table cannot
+  give) keep the implicit native (#1108). `implicit_native` names only keys `parse` takes, and
+  `every_op` of the path table walks its families (`IMPLICIT_NATIVES`) over every type, so each
+  op it names has a row by construction ("Guards for the paths of the `ieee` natives").
 - **Same results by construction of the test, not by fallback:** each native ports its body,
   including metavalue handling (a metavalue anywhere gives an all-`X` result), result bounds
   (`(n-1 downto 0)`, `(1 to n)`, the null constants `(0 downto 1)`) and warning texts, severities
