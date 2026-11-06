@@ -1,0 +1,1 @@
+A process driving an element of an unresolved signal indexed by an array attribute of a constant, such as `s(c'length + i)`, now drives only that element, instead of being reported as a second source of the whole signal.

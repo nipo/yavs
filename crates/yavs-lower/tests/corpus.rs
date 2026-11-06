@@ -385,6 +385,7 @@ const PASS: &[&str] = &[
     "process/signal_param_records",
     "process/signal_param_slices",
     "process/local_procedure_drivers",
+    "process/driver_constant_attr_index",
     "process/loops_exit_next",
     "process/named_return_2019",
     "process/named_return_generic_2019",
