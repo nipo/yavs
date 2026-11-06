@@ -909,6 +909,8 @@ impl Jit {
                 id,
                 f.name
             );
+            // The IR the variant was lowered from: a native-only body has no frame dump.
+            eprint!("{}", prog.dump_func(id));
         }
         Some(Rc::new(NatInfo {
             id: cid,
