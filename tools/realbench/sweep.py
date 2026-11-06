@@ -25,7 +25,7 @@ def one(t, B, key, worlds):
     n = t["name"]
     d = worlds / n
     try:
-        if t.get("image"):
+        if t.get("image") and "image_dir" not in t:
             t["image_dir"] = str(R.P.build(t["image"]))
         R.check_sources([t])
         R.make_pristine(t, "yavs", B, key, d)
@@ -54,12 +54,14 @@ def main():
     B = str(Path(a.bin).resolve())
     key = R.B.binary_key(B)
     tests = [t for t in R.load_tests() if re.search(a.filter, t["name"])]
-    for t in tests:  # libraries one at a time: tests share them
+    for t in tests:  # libraries and program images one at a time: tests share them
         try:
+            if t.get("image"):
+                t["image_dir"] = str(R.P.build(t["image"]))
             for m in t["corpus"]:
                 R.ensure_base("yavs", m, B, key)
         except (R.Fail, R.P.Fail) as e:
-            print(f"{t['name']}: libraries not built: {str(e).splitlines()[-1][:200]}", flush=True)
+            print(f"{t['name']}: libraries or image not built: {str(e).splitlines()[-1][:200]}", flush=True)
     worlds = R.CACHE / "sweep" / str(os.getpid())
     worlds.mkdir(parents=True)
     rows = []
