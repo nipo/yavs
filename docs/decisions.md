@@ -14370,3 +14370,38 @@ result, three host calls of the local's `NewFrame`, and the drive of a result of
   value (`'driving_value`, the skip tests, `sync_drivers`, the gate checks and the driver reads of `Hook` read it)
   while `cur` still holds the old one, so a fused path would still write both; what it could save is the second
   lookup of the signal, smaller than the two paths above.
+
+## A function on an array, the call's fixed cost, round 2 (yavs-lower, yavs-clift, #1122, #1121, 2026-11-06)
+
+Written by Claude. After the entry "A function on an array, the call's fixed cost" the adder-tree function (`G_MODE=2` of
+the reproducer) ran about 940 instructions per call more than the loop in the process. A trace of one call (`gdb`
+stepping, `YAVS_CLIFT_CODEDIR` source maps) put about 410 of them in the callee before its loop (the native entry, the
+local's descriptor, its `LayoutOf` and `NewFrame`), 156 in its return and about 500 in the caller (the operand's
+whole-signal read, the call, the result's check and copy, the wide drive).
+
+- **Finding: the default tier does not lag `--tier=clift` on the procedure form (#1121).** On main, 16 units, 1 M
+  cycles, `G_MODE=0` runs 464.9 G instructions at the default tier and 465.6 G at `--tier=clift`, cycles within the
+  spread. No frame is materialised (`materialised=0`); the calls compiled code steps (`cb_step.Call`, about 25 k) and
+  the hand-overs to the tier's loop (`retiers`, about 4 k) are the same at 20 k and 100 k cycles, so they are the
+  warm-up. The figures of the earlier entry (1.08 against 1.2) came from runs four at a time; the procedure is about
+  1.23 times the loop on both tiers. What differs between the tiers is that only the default tier makes process
+  copies (`spec_copies` 9 of 16 for `G_MODE=0`, 7 for `G_MODE=2`, the rest `spec_capped`), with the same
+  instructions; the L1 instruction cache misses are under 0.1 percent of the cycles in both, so they are not the
+  cause of the cycle differences seen, which stay inside the spread of a loaded host.
+- **Decision: a function result whose subtype adds no constraint keeps the value's descriptor**
+  (`composite::open_subtype`, the test `param_dope` already made for a formal; `return_`). `return r` of
+  `return t_arr`, an array of `signed`, copied the local's descriptor and checked the local against that copy: two
+  instructions that can never fail and one copy, in every tier (LRM 10.13: the conversion to an unconstrained type
+  mark keeps the bounds; the element subtype is the type's own). A constrained result subtype keeps its check.
+  On the reproducer (16 units, 1 M cycles, `YAVS_NO_PMEMO=1`, `--features clift` bench builds, 7 interleaved runs, 4 on
+  core 12 and 3 on core 13 whose SMT sibling was busy, medians and range): `G_MODE=2` 420.84 G to 420.23 G
+  instructions at `--tier=clift`, 423.8 G to 423.2 G at the default tier; wall 23.26 s (20.41
+  to 23.86) to 22.66 s (21.08 to 24.18) and 23.43 s to 23.39 s, inside the spread of a host at load 20 to 28. A
+  trace of one call: its return went from 156 to 78 instructions, and Cranelift's allocation of the loop moved by
+  13 instructions an iteration, so the net is about 13 per call.
+- **Tests.** `compiled_vectors.rs` `calls_of_functions_on_arrays_match_the_interpreter` (unconstrained results with
+  the local's ascending, descending and non-zero bounds, a constrained result, targets of either direction, locals
+  sized at run time, whole signal operands of 65 to 272 logic elements, metavalues; every tier and `--threads 4`)
+  and `length_checks_of_call_results_fail_alike_on_every_tier` (a constrained result of the wrong length, a target of
+  the wrong length: the same message and exit in every tier). Dropping every return check made the second fail.
+  `perf.rs` `ops` does not see the change (the same 88 500 with it broken), so there is no counter for it.

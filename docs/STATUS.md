@@ -27,7 +27,7 @@
 
 ### Signal parameters of array types in compiled code (#1121, 2026-11-06)
 
-An element of a signal parameter whose elements are arrays is read as that element of the actual, and the bounds attributes of a signal parameter come from the actual's descriptor (no read of the whole signal); Cranelift code slices the reference inline and reads the element in place, and a native frame's zero-delay drive goes to the kernel straight. A procedure written as one adder-tree stage went from twice the time of the same loops in the process to 1.08 times under `--tier=clift` and 1.2 times under the default tier (1 M cycles); the call's own cost is what is left (`docs/decisions.md` "Signal parameters of array types").
+An element of a signal parameter whose elements are arrays is read as that element of the actual, and the bounds attributes of a signal parameter come from the actual's descriptor (no read of the whole signal); Cranelift code slices the reference inline and reads the element in place, and a native frame's zero-delay drive goes to the kernel straight. A procedure written as one adder-tree stage went from twice the time of the same loops in the process to about 1.23 times under both `--tier=clift` and the default tier (1 M cycles, instructions; an earlier 1.08 against 1.2 came from runs four at a time); the call's own cost is what is left (`docs/decisions.md` "Signal parameters of array types").
 
 ### Guards follow activity (#1120, 2026-11-06)
 

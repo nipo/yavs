@@ -145,6 +145,16 @@ pub(crate) fn array_ty(
     Ok(id)
 }
 
+/// Whether `st` adds no constraint to its type: a value of the type is a value of `st` with its
+/// own descriptor, so there is nothing to check (an unconstrained formal or result, LRM 5.3.2.2).
+pub(crate) fn open_subtype(db: &Db, st: SubtypeId) -> bool {
+    match &db.subtypes[st].constraint {
+        Constraint::None => true,
+        Constraint::Array { dims: None, elem } => matches!(**elem, Constraint::None),
+        _ => false,
+    }
+}
+
 fn dir_cell(d: Direction) -> i64 {
     match d {
         Direction::To => 0,
@@ -336,11 +346,7 @@ impl Fx<'_, '_> {
         span: Span,
     ) -> R<Reg> {
         let db = self.db;
-        let open = match &db.subtypes[st].constraint {
-            Constraint::None => true,
-            Constraint::Array { dims: None, elem } => matches!(**elem, Constraint::None),
-            _ => false,
-        };
+        let open = open_subtype(db, st);
         let t = db.base(st);
         let tid = self.ty(t, span)?;
         if open || !Ty::needs_desc(self.fb.program().types(), tid) {

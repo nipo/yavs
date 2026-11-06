@@ -2508,3 +2508,215 @@ fn signal_parameters_in_compiled_code_match_the_interpreter() {
     #[cfg(feature = "clift")]
     assert_eq!(go("--tier=clift", "4"), want);
 }
+
+/// The fixed cost of a call of a function on arrays (#1122): results of an unconstrained subtype
+/// with the local's own bounds (ascending, descending, not from 0), a constrained result, targets
+/// of either direction with bounds of the constant pool, local arrays sized at run time, whole
+/// signal operands of 65 to 272 logic elements, one that starts inside a plane block, metavalues
+/// among the elements.
+const CALLS: &str = r#"library ieee; use ieee.std_logic_1164.all; use ieee.numeric_std.all;
+use std.textio.all;
+entity y is end;
+architecture a of y is
+  type t_arr is array (natural range <>) of signed(15 downto 0);
+  subtype t4 is t_arr(0 to 3);
+  type v100 is array (natural range <>) of std_logic_vector(99 downto 0);
+  function pick (src : t_arr; lo : natural) return t_arr is
+    variable r : t_arr(lo to lo + (src'length + 1) / 2 - 1);
+  begin
+    for k in r'range loop
+      r(k) := src(src'low + 2 * (k - lo)) - k;
+    end loop;
+    return r;
+  end;
+  function down (src : t_arr) return t_arr is
+    variable r : t_arr(src'length - 1 downto 0);
+  begin
+    for k in r'range loop
+      r(k) := src(src'high - k) + 1;
+    end loop;
+    return r;
+  end;
+  function four (src : t_arr) return t4 is
+    variable c : t_arr(0 to src'length - 1) := src;
+  begin
+    return c(0 to 3);
+  end;
+  function img (a : t_arr) return string is
+    variable s : line;
+  begin
+    write(s, integer'image(a'left) & ":" & integer'image(a'right) & " ");
+    for k in a'range loop
+      write(s, to_hstring(a(k)));
+    end loop;
+    return s.all;
+  end;
+  function fold (v : std_logic_vector) return std_logic_vector is
+    variable r : std_logic_vector(15 downto 0) := (others => '0');
+  begin
+    for k in 0 to v'length - 1 loop
+      r(k mod 16) := r(k mod 16) xor v(v'low + k);
+    end loop;
+    return r;
+  end;
+  signal t : t_arr(0 to 12) := (others => (others => '0'));
+  signal m : t_arr(0 to 16) := (others => (others => '0'));
+  signal l1 : t_arr(6 downto 0) := (others => (others => '0'));
+  signal l2 : t_arr(0 to 3) := (others => (others => '0'));
+  signal l3 : t_arr(4 to 12) := (others => (others => '0'));
+  signal w65 : std_logic_vector(64 downto 0) := (others => '0');
+  signal w128 : std_logic_vector(127 downto 0) := (others => '1');
+  signal w256 : std_logic_vector(255 downto 0) := (others => '0');
+  signal w257 : std_logic_vector(256 downto 0) := (others => '0');
+  signal a2 : v100(0 to 2) := (others => (others => '0'));
+begin
+  process is
+    variable u : t4;
+  begin
+    for k in 1 to 90 loop
+      wait for 1 ns;
+      for i in t'range loop
+        t(i) <= t(i) + to_signed(7 * i + k, 16);
+      end loop;
+      for i in m'range loop
+        m(i) <= m(i) - to_signed(3 * i + k, 16);
+      end loop;
+      if k mod 7 = 0 then
+        t(3) <= "01XZ01UW01-H01L0";
+      end if;
+      l1 <= pick(t, 0);
+      l2 <= four(down(l1));
+      l3 <= pick(m, 4);
+      u := four(down(m));
+      w65 <= w65(63 downto 0) & w65(64) xor std_logic_vector(to_unsigned(k, 65));
+      w128 <= w128(0) & w128(127 downto 1);
+      w256 <= std_logic_vector(unsigned(w256) + k * 977);
+      w257 <= w257(255 downto 0) & not w257(256);
+      a2(1) <= std_logic_vector(to_unsigned(k * 31, 100));
+      a2(2) <= a2(1);
+      if k = 40 then
+        w128(70) <= 'X';
+        w256(255) <= 'Z';
+      end if;
+      report integer'image(k) & " " & img(l1) & " " & img(l2) & " " & img(l3) & " " & img(u) & " "
+        & img(down(t)) & " " & to_hstring(fold(w65)) & to_hstring(fold(w128)) & " "
+        & to_hstring(fold(w256)) & to_hstring(fold(w257)) & " " & to_hstring(fold(a2(1)))
+        & to_hstring(fold(a2(2)));
+    end loop;
+    report "done";
+    wait;
+  end process;
+end;
+"#;
+
+#[test]
+fn calls_of_functions_on_arrays_match_the_interpreter() {
+    all_tiers_match("compiled_calls", CALLS);
+    let dir = tempdir("compiled_calls_threads");
+    std::fs::write(dir.join("y.vhd"), CALLS).expect("write");
+    let a = yavs(
+        &dir,
+        &["analyze", "--std=2008", "--work=work:work", "y.vhd"],
+    );
+    assert!(a.status.success(), "{a:?}");
+    let go = |flags: &[&str]| {
+        let mut args = vec!["run", "--std=2008", "--work=work:work"];
+        args.extend_from_slice(flags);
+        args.push("y");
+        let o = yavs(&dir, &args);
+        (
+            o.status.code(),
+            String::from_utf8_lossy(&o.stdout).into_owned(),
+        )
+    };
+    let want = go(&["--tier=interp"]);
+    assert_eq!(go(&["--tier=interp", "--threads=4"]), want);
+    #[cfg(feature = "clift")]
+    assert_eq!(go(&["--tier=clift", "--threads=4"]), want);
+}
+
+/// A result of the wrong length for a constrained result subtype (LRM 10.13) and for the target
+/// of a signal assignment (LRM 10.5.2.1) fails the same way in every tier.
+#[test]
+fn length_checks_of_call_results_fail_alike_on_every_tier() {
+    let body = |stmt: &str| {
+        format!(
+            r#"library ieee; use ieee.std_logic_1164.all; use ieee.numeric_std.all;
+entity y is end;
+architecture a of y is
+  type t_arr is array (natural range <>) of signed(15 downto 0);
+  subtype t4 is t_arr(0 to 3);
+  function four (src : t_arr) return t4 is
+  begin
+    return src(src'low to src'low + 2);
+  end;
+  function half (src : t_arr) return t_arr is
+    variable r : t_arr(0 to src'length / 2 - 1);
+  begin
+    return r;
+  end;
+  signal t : t_arr(0 to 12) := (others => (others => '0'));
+  signal l1 : t_arr(6 downto 0);
+  signal l4 : t4;
+begin
+  process is
+  begin
+    for k in 1 to 3 loop
+      wait for 1 ns;
+      report "k=" & integer'image(k);
+      if k = 3 then
+        {stmt}
+      end if;
+    end loop;
+    wait;
+  end process;
+end;
+"#
+        )
+    };
+    for (name, stmt, what) in [
+        (
+            "compiled_call_result_len",
+            "l4 <= four(t);",
+            "length 3 does not match the result of four",
+        ),
+        (
+            "compiled_call_target_len",
+            "l1 <= half(t);",
+            "length 6 does not match signal L1",
+        ),
+    ] {
+        let dir = tempdir(name);
+        std::fs::write(dir.join("y.vhd"), body(stmt)).expect("write");
+        let a = yavs(
+            &dir,
+            &["analyze", "--std=2008", "--work=work:work", "y.vhd"],
+        );
+        assert!(a.status.success(), "{a:?}");
+        let go = |flags: &[&str]| {
+            let mut args = vec!["run", "--std=2008", "--work=work:work"];
+            args.extend_from_slice(flags);
+            args.push("y");
+            let o = yavs(&dir, &args);
+            (
+                o.status.code(),
+                String::from_utf8_lossy(&o.stdout).into_owned(),
+                String::from_utf8_lossy(&o.stderr).into_owned(),
+            )
+        };
+        let want = go(&["--tier=interp"]);
+        assert_ne!(want.0, Some(0), "{name}: {want:?}");
+        assert!(want.1.contains("k=3"), "{name}: {want:?}");
+        assert!(want.2.contains(what), "{name}: {want:?}");
+        for flags in [
+            #[cfg(feature = "llvm")]
+            vec!["--tier=llvm"],
+            #[cfg(feature = "clift")]
+            vec!["--tier=clift"],
+            #[cfg(feature = "clift")]
+            vec!["--tier=clift-auto", "--tier-heat=1,0,0"],
+        ] {
+            assert_eq!(go(&flags), want, "{name} {flags:?}");
+        }
+    }
+}
