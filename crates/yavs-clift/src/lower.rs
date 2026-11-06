@@ -170,7 +170,7 @@ pub struct Jit {
     /// bodies defined and not yet listed at `finalize`.
     last_cov: Option<(DataId, Vec<crate::blockcov::BlockInfo>)>,
     cov_n: u32,
-    covs: Vec<(String, DataId, Vec<crate::blockcov::BlockInfo>)>,
+    covs: Vec<(String, String, DataId, Vec<crate::blockcov::BlockInfo>)>,
 }
 
 /// The native-frame variant `n<id>` of a function, in the calling convention of the LLVM tier
@@ -1177,7 +1177,8 @@ impl Jit {
             .map_err(|e| e.to_string())?;
         if let Some((did, blocks)) = cov {
             let name = self.symbol_of(fid);
-            self.covs.push((name, did, blocks));
+            let key = crate::blockcov::key(prog, id, native);
+            self.covs.push((name, key, did, blocks));
         }
         // `YAVS_CLIFT_ASM=<function id>`: the machine code of that function (variant) on stderr.
         let asm = std::env::var("YAVS_CLIFT_ASM")
@@ -1616,6 +1617,7 @@ impl Jit {
             id,
             native,
             cov.map(|c| c.1).zip(Some(&mut blocks)),
+            crate::blockcov::cold(&crate::blockcov::key(prog, id, native)),
         )?;
         if let Some((did, _)) = cov {
             let mut dd = DataDescription::new();
@@ -1661,9 +1663,9 @@ impl Jit {
         self.module
             .finalize_definitions()
             .map_err(|e| e.to_string())?;
-        for (name, did, blocks) in std::mem::take(&mut self.covs) {
+        for (name, key, did, blocks) in std::mem::take(&mut self.covs) {
             let (at, _) = self.module.get_finalized_data(did);
-            crate::blockcov::register(name, at as usize, blocks);
+            crate::blockcov::register(name, key, at as usize, blocks);
         }
         if let Some(list) = self.perfmap.take() {
             // With `PERF_BUILDID_DIR` set (`perf record` sets it) the JIT module lists every
@@ -2395,6 +2397,7 @@ fn gen_func(
     id: FuncId,
     native: bool,
     cov: Option<(GlobalValue, &mut Vec<crate::blockcov::BlockInfo>)>,
+    cold: Option<&std::collections::HashSet<u32>>,
 ) -> Result<Vec<String>, String> {
     let mut cov = cov;
     let mut b = FunctionBuilder::new(&mut ctx.func, fctx);
@@ -2999,6 +3002,9 @@ fn gen_func(
                 }
             }
             g.b.switch_to_block(bb);
+            if cold.is_some_and(|c| c.contains(&pc)) {
+                g.b.set_cold_block(bb);
+            }
             if let Some((gv, blocks)) = cov.as_mut() {
                 // One byte store per lowered block entry (`blockcov.rs`).
                 let flags = MemFlagsData::new()

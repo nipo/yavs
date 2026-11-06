@@ -1,10 +1,12 @@
 //! `YAVS_CLIFT_BLOCKCOV=<dir>` (a measurement switch): generated code stores one byte into a
 //! per-body table at the entry of every block it lowers, and the run writes which blocks ran
-//! (`cov-<pid>.tsv`: body symbol, IR pc, IR block id or `-`, 0 or 1). The code differs from the
-//! normal code, so byte sizes come from a run without the switch (`YAVS_CLIFT_CODEDIR`).
+//! (`cov-<pid>.tsv`: body symbol, IR pc, IR block id or `-`, 0 or 1, `key`). The code differs from
+//! the normal code, so byte sizes come from a run without the switch (`YAVS_CLIFT_CODEDIR`).
+//! `YAVS_CLIFT_COLD=<cov tsv>` (a lab switch) marks the blocks that file lists as never run cold.
 
+use std::collections::{HashMap, HashSet};
 use std::io::Write;
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Mutex, OnceLock, PoisonError};
 
 /// One block of a body: the pc it starts at and the IR block that starts there, if any (the
 /// others are entries after a call).
@@ -12,6 +14,7 @@ pub type BlockInfo = (u32, Option<u32>);
 
 struct Table {
     name: String,
+    key: String,
     /// The address of the body's table, one byte per block, in module data that is never freed.
     at: usize,
     blocks: Vec<BlockInfo>,
@@ -22,15 +25,61 @@ static TABLES: Mutex<Vec<Table>> = Mutex::new(Vec::new());
 /// A body and its blocks, whether each ran.
 pub struct BodyCov {
     pub name: String,
+    pub key: String,
     pub blocks: Vec<(BlockInfo, bool)>,
 }
 
 /// List a finalized body's table.
-pub(crate) fn register(name: String, at: usize, blocks: Vec<BlockInfo>) {
+pub(crate) fn register(name: String, key: String, at: usize, blocks: Vec<BlockInfo>) {
     TABLES
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
-        .push(Table { name, at, blocks });
+        .push(Table {
+            name,
+            key,
+            at,
+            blocks,
+        });
+}
+
+/// The name of a body that is the same in every run of a program: `f` or `n` with the function
+/// id, or for a copy of a process its `Program::copy_tag` (a copy's id follows the order copies
+/// were made in).
+pub(crate) fn key(prog: &yavs_ir::Program, id: yavs_ir::FuncId, native: bool) -> String {
+    let kind = if native { "n" } else { "f" };
+    match prog.copy_tag(id) {
+        Some(t) => format!("{kind}c{t:x}"),
+        None => format!("{kind}{}", id.0),
+    }
+}
+
+/// `YAVS_CLIFT_COLD`: the pcs of the blocks of body `key` that file lists as never run.
+pub(crate) fn cold(key: &str) -> Option<&'static HashSet<u32>> {
+    static LIST: OnceLock<HashMap<String, HashSet<u32>>> = OnceLock::new();
+    LIST.get_or_init(|| {
+        let Some(path) = std::env::var_os("YAVS_CLIFT_COLD") else {
+            return HashMap::new();
+        };
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+            eprintln!(
+                "error: YAVS_CLIFT_COLD: cannot read {}: {e}",
+                path.to_string_lossy()
+            );
+            std::process::exit(2)
+        });
+        let mut out: HashMap<String, HashSet<u32>> = HashMap::new();
+        for line in text.lines() {
+            let f: Vec<&str> = line.split('\t').collect();
+            let (Some(pc), Some(&"0"), Some(key)) = (f.get(1), f.get(3), f.get(4)) else {
+                continue;
+            };
+            if let Ok(pc) = pc.parse() {
+                out.entry(key.to_string()).or_default().insert(pc);
+            }
+        }
+        out
+    })
+    .get(key)
 }
 
 /// Every body made so far with the blocks that ran until now.
@@ -40,6 +89,7 @@ pub fn snapshot() -> Vec<BodyCov> {
         .iter()
         .map(|t| BodyCov {
             name: t.name.clone(),
+            key: t.key.clone(),
             blocks: t
                 .blocks
                 .iter()
@@ -68,7 +118,13 @@ pub fn write() {
         for body in snapshot() {
             for ((pc, ir), ran) in body.blocks {
                 let ir = ir.map_or("-".to_string(), |b| b.to_string());
-                writeln!(out, "{}\t{pc}\t{ir}\t{}", body.name, u8::from(ran))?;
+                writeln!(
+                    out,
+                    "{}\t{pc}\t{ir}\t{}\t{}",
+                    body.name,
+                    u8::from(ran),
+                    body.key
+                )?;
             }
         }
         out.flush()

@@ -441,8 +441,13 @@ Compiled tiers: Cranelift
      - unset
      - ``run``
    * - ``YAVS_CLIFT_BLOCKCOV``
-     - Measurement: generated code marks every block it enters; the run writes ``cov-<pid>.tsv`` (body, IR pc, IR block, ran) into that directory. The code differs from the normal code, and inlining stops.
+     - Measurement: generated code marks every block it enters; the run writes ``cov-<pid>.tsv`` (body, IR pc, IR block, ran, a body key that is the same in every run) into that directory. The code differs from the normal code, and inlining stops.
      - a directory
+     - unset
+     - ``run``
+   * - ``YAVS_CLIFT_COLD``
+     - Measurement: the blocks a ``YAVS_CLIFT_BLOCKCOV`` file lists as never run are laid out as cold code (after the rest of their function). Compiled code is made again, not found by its key before it is made.
+     - a ``cov-<pid>.tsv`` file
      - unset
      - ``run``
    * - ``YAVS_CLIFT_CLIF``

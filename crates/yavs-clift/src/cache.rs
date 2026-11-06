@@ -130,8 +130,9 @@ pub(crate) const KEYED: [&str; 14] = [
 
 /// With one of these set a run has no pre-keys: they want the code made (dumps, source locations)
 /// or make it depend on what was compiled before (`YAVS_CLIFT_NATIVE_MAX`).
-pub(crate) const NO_PRE: [&str; 6] = [
+pub(crate) const NO_PRE: [&str; 7] = [
     "YAVS_CLIFT_BLOCKCOV",
+    "YAVS_CLIFT_COLD",
     "YAVS_CLIFT_DUMP",
     "YAVS_CLIFT_CLIF",
     "YAVS_CLIFT_ASM",

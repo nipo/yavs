@@ -170,8 +170,12 @@ fn the_dump_lists_every_block() {
     let text = std::fs::read_to_string(file).unwrap();
     let rows: Vec<_> = text.lines().filter(|l| l.contains("_cov_dump\t")).collect();
     assert!(rows.len() >= 5, "{rows:?}");
+    // Body, pc, IR block, ran, and the body's key for `YAVS_CLIFT_COLD`.
     assert!(
-        rows.iter().all(|r| r.ends_with("\t0")),
+        rows.iter().all(|r| {
+            let f: Vec<&str> = r.split('\t').collect();
+            f.len() == 5 && f[3] == "0" && f[4] == &f[0][..2]
+        }),
         "nothing ran: {rows:?}"
     );
 }
