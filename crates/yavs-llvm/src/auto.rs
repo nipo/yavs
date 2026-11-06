@@ -1437,6 +1437,14 @@ struct Trace {
     refused: std::collections::HashSet<FuncId>,
 }
 
+/// `YAVS_AUTO_TRACE`: the compile in flight, for the line `stop` prints when the run ends during it.
+static IN_FLIGHT: Mutex<Option<(String, std::time::Instant)>> = Mutex::new(None);
+
+fn in_flight(what: Option<String>) {
+    *IN_FLIGHT.lock().unwrap_or_else(PoisonError::into_inner) =
+        what.map(|w| (w, std::time::Instant::now()));
+}
+
 impl Trace {
     fn ms(&self) -> u128 {
         self.t0.elapsed().as_millis()
@@ -3152,10 +3160,20 @@ impl Worker {
         let t0 = std::time::Instant::now();
         let cpu0 = self.trace.as_ref().and_then(|_| cpu_thread());
         let hits = gen_.cache_hits();
+        if self.trace.is_some() && refused.is_none() {
+            in_flight(Some(format!(
+                "{id} `{}` ({} IR) {level:?} {part:?}",
+                f.name,
+                f.code.len()
+            )));
+        }
         let r = match refused {
             Some(why) => Err(why),
             None => gen_.compile(&self.prog, id, f, level, part),
         };
+        if self.trace.is_some() {
+            in_flight(None);
+        }
         match r {
             // Native-frame code that came to nothing: the generator refused the function or a
             // callee it must call directly. Nothing was compiled, so nothing is charged or
@@ -3966,6 +3984,19 @@ impl AutoTier {
             let _ = q.send(Msg::Looks(Vec::new()));
         }
         self.write_profile(cpu);
+        if std::env::var_os("YAVS_AUTO_TRACE").is_some()
+            && let Some((what, t0)) = &*IN_FLIGHT.lock().unwrap_or_else(PoisonError::into_inner)
+        {
+            eprintln!(
+                "trace: the run ends while compiling {what}, {} ms in; {}",
+                t0.elapsed().as_millis(),
+                if wait {
+                    "waits for it"
+                } else {
+                    "it is not finished"
+                }
+            );
+        }
         if !wait && self.shared.busy.load(Ordering::SeqCst) {
             return false;
         }

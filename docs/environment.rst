@@ -589,7 +589,7 @@ Compiled tiers: when to compile
      - on
      - ``run``
    * - ``YAVS_AUTO_TRACE``
-     - Prints the timeline of the compile thread on standard error.
+     - Prints the timeline of the compile thread on standard error, and at the end of the run the function it was still compiling.
      - any value
      - unset
      - ``run``
