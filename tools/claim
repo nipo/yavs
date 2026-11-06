@@ -12,6 +12,7 @@
 `who` is <harness>/<agent>, e.g. cc-host1/kern23. Claims are issue comments (GitHub is the
 source of truth); core/build locks are flock files and protect THIS HOST only.
 `list` and `stale` read GitHub's label index, which lags by up to ~10 s after a take.
+Claim times are GitHub's; `stale` compares them with this host's clock, `list` shows all.
 Env: YAVS_REPO (default ru551n/yavs), YAVS_LOCK_DIR (default ~/.cache/yavs-agents/locks).
 """
 import fcntl, json, os, re, shutil, subprocess, sys, time
@@ -43,14 +44,18 @@ def api(path, method="GET", **fields):
     return json.loads(out) if out.strip() else None
 
 
-def comments(n):
+def pages(path):
     res, page = [], 1
     while True:
-        got = api(f"issues/{n}/comments?per_page=100&page={page}")
+        got = api(f"{path}{'&' if '?' in path else '?'}per_page=100&page={page}")
         res += got
         if len(got) < 100:
             return res
         page += 1
+
+
+def comments(n):
+    return pages(f"issues/{n}/comments")
 
 
 def now():
@@ -83,9 +88,14 @@ def ensure_label():
 def take(n, who):
     held = active(comments(n))
     if held:
-        die(f"#{n} already claimed by {held[0][1]} since {held[0][2]}", 1)
+        die(f"#{n} already claimed by {held[0][1]} since {held[0][2]} (GitHub's time)", 1)
     ensure_label()
-    mine = post(n, who, f"CLAIM {who} {now()}")["id"]
+    stamp = now()
+    got = post(n, who, f"CLAIM {who} {stamp}")
+    mine = got["id"]
+    skew = (datetime.fromisoformat(stamp) - datetime.fromisoformat(got["created_at"])).total_seconds()
+    if abs(skew) > 60:  # the body time is this host's clock, the claim time GitHub's
+        print(f"claim: this host's clock is {skew:+.0f} s off GitHub's", file=sys.stderr)
     api(f"issues/{n}/labels", "POST", **{"labels[]": LABEL})
     first = active(comments(n))[0]
     if first[0] != mine:
@@ -108,11 +118,12 @@ def release(n, who, note=""):
     print(f"released #{n} as {who}")
 
 
-def claims(hours=0):
-    cut = time.time() - hours * 3600
-    for i in api(f"issues?labels={LABEL}&state=open&per_page=100"):
+def claims(hours=None):
+    """Active claims; with hours, only those older than that by this host's clock."""
+    cut = None if hours is None else time.time() - hours * 3600
+    for i in pages(f"issues?labels={LABEL}&state=open"):
         for _, who, since in active(comments(i["number"])):
-            if datetime.fromisoformat(since).timestamp() <= cut:
+            if cut is None or datetime.fromisoformat(since).timestamp() <= cut:
                 yield i["number"], who, since, i["title"]
 
 
@@ -197,6 +208,42 @@ def selftest():
     finally:
         api, comments = saved
     assert st["labels"] == {LABEL} and [w for _, w, _ in active(st["cs"])] == ["b/y"], st
+    # list shows every claim, also one GitHub dated ahead of this host's clock, past one page.
+    issues = [{"number": i, "title": "t"} for i in range(1, 152)]
+    when = {1: "2099-01-01T00:00:00Z", 151: "2000-01-01T00:00:00Z"}
+
+    def fake_list(path, method="GET", **f):
+        page = int(re.search(r"page=(\d+)$", path)[1])
+        if path.startswith("issues?"):
+            return issues[(page - 1) * 100 : page * 100]
+        n = int(path.split("/")[1])
+        return [{"id": n, "body": f"CLAIM w/{n} t", "created_at": when.get(n, "2026-01-01T00:00:00Z")}]
+
+    api = fake_list
+    try:
+        assert [r[0] for r in claims()] == list(range(1, 152))
+        assert [r[0] for r in claims(24)] == list(range(2, 152))
+    finally:
+        api = saved[0]
+    # take warns when the body time (this host's clock) and GitHub's differ by over a minute.
+    import contextlib, io
+    for created, warned in [(None, False), ("2000-01-01T00:00:00Z", True)]:
+        st = {"cs": []}
+
+        def fake_take(path, method="GET", **f):
+            if method == "POST" and path.endswith("/comments"):
+                st["cs"].append(c(1, f["body"]))
+                return {"id": 1, "created_at": created or now()}
+            return {}
+
+        api, comments = fake_take, lambda n: st["cs"]
+        err = io.StringIO()
+        try:
+            with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+                take(1, "a/x")
+        finally:
+            api, comments = saved
+        assert ("clock is" in err.getvalue()) == warned, err.getvalue()
     print("selftest ok")
 
 

@@ -170,6 +170,9 @@ pub(crate) struct Elab<'d> {
     /// Processes whose drivers are rooted at external names: their drivers are elaborated
     /// once the whole hierarchy is (#93).
     deferred: Vec<(ProcIdx, ScopeId, Vec<Lsp>)>,
+    /// `_guard` processes whose condition names an external object not elaborated yet: their
+    /// reads are resolved once the whole hierarchy is.
+    late_guards: Vec<(ProcIdx, ScopeId, DeclId, Span)>,
     /// Aliases of the external names used in package subprograms, by package (#255).
     pkg_uses: Vec<(UnitId, DeclId)>,
     /// How many units were loaded when the package bodies were last loaded (`load_new_bodies`).
@@ -541,6 +544,7 @@ pub(crate) fn elaborate(
         idle_cache: HashMap::new(),
         idle_dead: false,
         deferred: Vec::new(),
+        late_guards: Vec::new(),
         pkg_uses,
         units_seen: 0,
         parts_memo: None,
@@ -2145,11 +2149,14 @@ impl Elab<'_> {
                         span,
                     };
                     self.process_refs(b, st, name, false, vec![(o, Vec::new(), span)])?;
+                    let idx = ProcIdx(self.procs.len() as u32 - 1);
                     let reads = self.guard_reads(b, g);
-                    if let Some(p) = self.procs.last_mut() {
-                        p.guard = reads;
-                        p.guard_init = true;
+                    if reads.is_none() {
+                        self.late_guards.push((idx, b, g, span));
                     }
+                    let p = &mut self.procs[idx.index()];
+                    p.guard = reads;
+                    p.guard_init = true;
                 }
                 let mut c = 0;
                 self.stmts(b, &body, bcfg.as_ref(), &mut c, depth)
@@ -3102,8 +3109,8 @@ impl Elab<'_> {
         })
     }
 
-    /// The signal parts the condition of the guard `g` of block `b` reads; `None` when one of
-    /// them cannot be resolved here (the `_guard` process then wakes as any process).
+    /// The signal parts the condition of the guard `g` of block `b` reads; `None` while one is
+    /// not elaborated yet (an external name of a later instance: `bind_late` asks again).
     fn guard_reads(&mut self, b: ScopeId, g: DeclId) -> Option<Vec<(LeafId, yavs_kernel::Range)>> {
         let db: &Db = self.db;
         let DeclKind::Object(o) = &db.decls[g].kind else {
@@ -3119,7 +3126,14 @@ impl Elab<'_> {
                 l.root = ObjRoot::Decl(d);
             }
             let (o, sels) = self.m.lsp_ref(db, &l, b).ok()?;
-            for (leaf, r) in self.m.nets.select(o, &sels).ok()?.0 {
+            let parts = match self.m.nets.select(o, &sels) {
+                Ok((p, _)) => p,
+                // An index or slice outside its range (`n < 4 and v(n)'event`, n = 5) names no
+                // element: nothing to read (an evaluation that reaches it is a run-time error).
+                Err(m) if m.contains(" outside ") => continue,
+                Err(_) => return None,
+            };
+            for (leaf, r) in parts {
                 if !out.contains(&(leaf, r)) {
                     out.push((leaf, r));
                 }
@@ -4604,6 +4618,15 @@ impl Elab<'_> {
                 refs.push((o, sels, l.span));
             }
             self.set_drivers(idx, refs)?;
+        }
+        for (idx, b, g, span) in std::mem::take(&mut self.late_guards) {
+            let Some(reads) = self.guard_reads(b, g) else {
+                return Err(Box::new(ice(
+                    span,
+                    "the signals of a guard condition were not found",
+                )));
+            };
+            self.procs[idx.index()].guard = Some(reads);
         }
         Ok(())
     }

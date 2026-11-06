@@ -726,6 +726,101 @@ fn a_lean_wide_bus_wakes_and_changes_like_one_with_full_history() {
     assert_eq!(wide_registers_with(true, true, four).0, lean);
 }
 
+/// A register of 40 elements driven in two parts through direct entries, with the waiters
+/// `watch` names (none, all of it, or all of it and three parts): each driver reports the value,
+/// and unless `bare`, the `'last_value` and `'last_event` it reads; each waiter, when it wakes,
+/// its part and `'event`. `bare` keeps no history of a lean register (`Builder::no_history`).
+fn lean_register(lean: bool, bare: bool, watch: usize) -> (Vec<String>, Stats) {
+    let mut b = Builder::new();
+    let w = b.signal("w", SignalType::logic(40), &LogicVec::new(40, StdULogic::U));
+    if lean {
+        b.lean_events(w);
+        b.no_codes(w);
+        if bare {
+            b.no_history(w);
+        }
+    }
+    for (k, (off, len)) in [(0u32, 25u32), (25, 15)].into_iter().enumerate() {
+        let d = b.driver(w.slice(off, len));
+        let mut t = 0u32;
+        b.process(
+            &format!("p{k}"),
+            NONE,
+            &[d],
+            p(move |c| {
+                t += 1;
+                let mut line = format!("p{k} {:?}", c.logic(w)?);
+                if !bare {
+                    line += &format!(" last {} at {:?}", c.last_value(w)?, c.last_event(w)?);
+                }
+                c.report(Severity::Note, line);
+                // Whole, a part, whole again with every third value the same as before.
+                let (r, n) = match t % 3 {
+                    1 => (Some(Range::new(off + 2, len - 4)), len - 4),
+                    _ => (Some(Range::new(off, len)), len),
+                };
+                let v = pattern(k as u32, t - t % 3 / 2, n);
+                c.assign_blocks(d, r, Time::ZERO, &blocks_of(&v), DelayMode::INERTIAL)?;
+                c.wait_for(ns(1))
+            }),
+        );
+    }
+    for (name, off, len) in [
+        ("all", 0, 40),
+        ("part", 10, 20),
+        ("edge", 24, 2),
+        ("e23", 23, 1),
+    ]
+    .into_iter()
+    .take(watch)
+    {
+        let r = w.slice(off, len);
+        b.process(
+            name,
+            NONE,
+            &[],
+            p(move |c| {
+                let e = if bare {
+                    String::new()
+                } else {
+                    format!(" event={}", c.event(r)?)
+                };
+                c.report(Severity::Note, format!("{name} woke{e} {:?}", c.logic(r)?));
+                c.wait_on(r)
+            }),
+        );
+    }
+    let mut sim = b
+        .build(Config {
+            skip_unchanged: true,
+            ..Config::default()
+        })
+        .unwrap();
+    let t = Trace::default();
+    sim.subscribe(Box::new(ReportsOnly(t.clone())));
+    sim.run_until(ns(30)).unwrap();
+    let mut lines = t.take();
+    lines.push(format!("final {}", sim.value(w).unwrap()));
+    (lines, sim.stats())
+}
+
+/// A lean register of at most 64 elements is finished as one word (`finish_word_lean`): the
+/// same values, history, wake-ups and events as with every element's history, whatever waits.
+#[test]
+fn a_lean_register_wakes_and_changes_like_one_with_full_history() {
+    for watch in [0, 1, 4] {
+        // `bare` on a signal that is not lean only leaves the history out of the reports.
+        for bare in [false, true] {
+            let (full, st_full) = lean_register(false, bare, watch);
+            let (lean, st) = lean_register(true, bare, watch);
+            assert_eq!(st.lean_signals, 1);
+            assert_eq!(lean, full, "watch {watch}, bare {bare}");
+            assert_eq!(st.events, st_full.events, "watch {watch}, bare {bare}");
+            assert!(lean.iter().filter(|l| l.contains(" woke")).count() >= 10 * watch);
+        }
+    }
+}
+
 /// A wide bus that processes wait on parts of lists its changes per cell between the waited
 /// ranges, not per run: the same processes wake at the same times, with the value changes
 /// observed (exact runs) or not, on both update paths, lean or not, at 1 and 4 threads.

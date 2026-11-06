@@ -14,6 +14,11 @@ pub fn command_line(c: &std::process::Command) -> String {
         .join(" ")
 }
 
+/// A port nothing listens on, for a refused connection: a port freed by dropping a listener can
+/// go to another test's listener before yavs connects, and no test can take privileged port 1.
+#[allow(dead_code)]
+pub const NO_LISTENER: u16 = 1;
+
 /// A scratch directory under the system temp dir, removed when dropped (also when the test
 /// panics). `name` only makes a leftover after a killed run recognisable.
 pub struct Tmp(tempfile::TempDir);

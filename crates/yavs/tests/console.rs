@@ -1138,13 +1138,8 @@ fn hook_errors_are_e0703_at_the_start() {
         assert_eq!(o.status.code(), Some(2), "{v}");
         assert!(stderr(&o).contains("E0703"), "{}", stderr(&o));
     }
-    // Nobody listens on this port any more.
-    let port = TcpListener::bind("127.0.0.1:0")
-        .expect("bind")
-        .local_addr()
-        .expect("addr")
-        .port();
-    let o = bad(&format!("{port}:x"));
+    // Nobody listens on this port.
+    let o = bad(&format!("{}:x", common::NO_LISTENER));
     assert_eq!(o.status.code(), Some(2));
     assert!(stderr(&o).contains("E0703"), "{}", stderr(&o));
     assert!(!stderr(&o).contains(":x"), "the secret is not printed");

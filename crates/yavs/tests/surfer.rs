@@ -390,12 +390,10 @@ fn refresh_options() {
 fn errors_at_the_start_are_e0130() {
     let d = setup("err");
     // Nobody listens.
-    let port = TcpListener::bind("127.0.0.1:0")
-        .expect("bind")
-        .local_addr()
-        .expect("addr")
-        .port();
-    let o = run(&d, &[&format!("--surfer=127.0.0.1:{port}")]);
+    let o = run(
+        &d,
+        &[&format!("--surfer=127.0.0.1:{}", common::NO_LISTENER)],
+    );
     assert_eq!(o.status.code(), Some(2));
     assert!(stderr(&o).contains("E0130"), "{}", stderr(&o));
     assert_eq!(stdout(&o), "");

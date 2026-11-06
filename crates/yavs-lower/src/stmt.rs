@@ -3082,7 +3082,10 @@ impl Fx<'_, '_> {
                 let t = db.base(ret);
                 let tid = self.ty(t, span)?;
                 let mut dope = dope;
-                if let Some(want) = self.desc_of(ret, Some(dope), span)? {
+                // A result subtype that constrains nothing keeps the value's descriptor.
+                if !crate::composite::open_subtype(db, ret)
+                    && let Some(want) = self.desc_of(ret, Some(dope), span)?
+                {
                     self.check_desc(
                         t,
                         tid,

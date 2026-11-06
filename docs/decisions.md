@@ -4648,7 +4648,8 @@ has no process body. Output is unchanged at any thread count and with `--shuffle
   per element) are committed with one lookup of the signal and its storage (`commit_codes`, `commit_planes_run`).
 - **Wake at finish** (`SimControl::wake_sole`): one changed element with one resident waiter without an edge
   trigger is woken in `finish_direct`, without the changed list and the scan in `cycle`; not with an observer of
-  value changes.
+  value changes. A signal no process ever waited for leaves there too, its readers armed, images written and
+  events counted (#1118: register chains 3 to 4 percent fewer instructions).
 - **A batch of one process** (`SimControl::run_one`): no order, batch loop, late list or unwind guard around a loop;
   the clocked commit takes the direct entries from the process's own lists (`commit_rest` is the old tail).
 - **Lists**: the per-process wait, waveform and schedule lists, a driver's pending transactions and
@@ -5151,7 +5152,7 @@ LRM 11.2 and 14.7.5: the implicit GUARD signal is updated in the cycle where a s
 
 - **The kernel runs the guard process in the update phase** (`Builder::guard_process`, `SimControl::run_guards`): the elaborator
   gives the `_guard` process of a block the signal parts its condition reads (`Walker::guard_reads`: the sem `reads` of the
-  condition, resolved like any name; when one cannot be resolved the process stays a normal one). Its `ProcMeta::ready` stays true,
+  condition, resolved like any name; see the last item of "A block guard runs when a signal of its condition is active"). Its `ProcMeta::ready` stays true,
   so no wake queues it. In `cycle`, right after the update, the guards whose condition signals are in `changed_sigs` run as a
   batch (`run_batch`, so its waits are registered as before), `finish_direct` makes GUARD's event, and the loop looks at the
   new changes for the guards that read another GUARD (nested blocks). The notification of observers, the wake of GUARD's
@@ -14195,9 +14196,17 @@ turned TRUE.
   attributes in a guard (`guard-held-transaction`). Tests: `crates/yavs-kernel/tests/guard.rs`
   `guard_runs_when_a_signal_of_its_condition_is_active` (with and without skipped assignments), corpus `delta/guard_activity` and
   `delta/guard_activity_attr` (`ref=hand`), `compiled_vectors.rs` `guards_on_activity_match_the_interpreter`.
-- A `_guard` process whose condition reads a name `Walker::guard_reads` cannot resolve stays a normal process, woken by
-  events only, so it would still miss a held transaction; no such condition was found (external names, a signal parameter and
-  a dynamic index all resolve).
+- **Every guard condition has its reads; none falls back to a process woken by events** (2026-11-06). Two forms did, and so
+  missed a held transaction: an external name of an object elaborated after the block (`block (<<signal .t.u.a : bit>>'active)`
+  before `u`), and a part no evaluation reaches (`(n < 4 and v(n)'event) or s'active` with `n` outside the range of `v`). The
+  first is resolved with the drivers of external names once the hierarchy is complete (`Walker::late_guards`, `bind_late`), the
+  second reads nothing for that part, which names no element (an evaluation that reaches it is a run-time error; reading
+  the whole object would run the guard on the activity of other elements, against the per-part rule above). A condition
+  whose reads still cannot be resolved after that is an internal error. Tried and resolving as before: aliases (of elements, slices, fields, aliases,
+  external names), elements and slices of records of arrays and arrays of records, run-time indices, function calls with signal
+  parameters in generates, implicit signals of implicit signals, an outer GUARD, package signals. Tests: `yavs-elab`
+  `every_guard_condition_has_its_reads`, corpus `delta/guard_activity_late` (`ref=hand`), `compiled_vectors.rs`
+  `late_guard_reads_match_the_interpreter`.
 
 ## Guards for the paths of the `ieee` natives (yavs-interp, yavs-llvm, yavs-clift, yavs, #1108, 2026-11-06)
 
@@ -14343,3 +14352,93 @@ result, three host calls of the local's `NewFrame`, and the drive of a result of
   frame, the descriptor copies of the result (`Alloc` and `Copy` twice in the callee, `SubtypeCheck` and `Copy` in
   the caller) and the whole-signal read of the operand. Without the call (an inliner at the IR level that takes a
   callee with temporaries and statements, so the process copy's facts apply) the function would be the loop.
+
+## Kernel commit and update of registers (yavs-kernel, #1118, 2026-11-06)
+
+- **A register is finished as one word** (`Signal::finish_word_lean`): a lean signal with no codes and no activity
+  stamps of at most 64 elements takes its one pending word straight, not the bus loop over a list of words and not
+  the whole-signal compare and copy of a bus with no history (`bare_whole`), which cost more than the loop for one
+  word (an iterator pair and a `memcpy` call). It notes the runs as the loop does, so with `Config::count_runs` off
+  `Stats::events` counts the runs of such a register instead of one per update (nothing reads it then). What
+  `finish_pend` asks of the signal that cannot change during the run (lean, inactive, no codes, plane storage) is
+  `Signal::lean_words`, set when `SimControl::new` ends, after `settle` (the codes of a bus depend on its drivers);
+  debug builds compare it with the full test at every use. Per changed register of 18 bits on Cranelift, about 296
+  instructions of finish and copy become 192; instructions 0.89 on a register chain of flat signals, 0.93 on a
+  record pipeline, 0.95 with waves on. A test compares a lean register with one that keeps every element's history,
+  with no waiter, a whole-signal waiter and waiters of parts.
+- **A register entry commits with one mask** (`Signal::commit_planes`): an entry within one plane word of a signal
+  whose driving value lags, with its pending bits allocated and no `pend_one`, blends the driving word and sets the
+  pending bits inline; the driver write of an `exact` signal, a held one-element entry, the first entry of a signal
+  and an entry across two words go to `commit_planes_slow`, the code as it was. Instructions 0.97 on the shift and
+  record pipeline testbenches, 0.96 on flat signals, the scalar case equal.
+- **Not done: a fused commit and update.** Between the commit and the next update the driving value must hold the new
+  value (`'driving_value`, the skip tests, `sync_drivers`, the gate checks and the driver reads of `Hook` read it)
+  while `cur` still holds the old one, so a fused path would still write both; what it could save is the second
+  lookup of the signal, smaller than the two paths above.
+
+## A function on an array, the call's fixed cost, round 2 (yavs-lower, yavs-clift, #1122, #1121, 2026-11-06)
+
+Written by Claude. After the entry "A function on an array, the call's fixed cost" the adder-tree function (`G_MODE=2` of
+the reproducer) ran about 940 instructions per call more than the loop in the process. A trace of one call (`gdb`
+stepping, `YAVS_CLIFT_CODEDIR` source maps) put about 410 of them in the callee before its loop (the native entry, the
+local's descriptor, its `LayoutOf` and `NewFrame`), 156 in its return and about 500 in the caller (the operand's
+whole-signal read, the call, the result's check and copy, the wide drive).
+
+- **Finding: the default tier does not lag `--tier=clift` on the procedure form (#1121).** On main, 16 units, 1 M
+  cycles, `G_MODE=0` runs 464.9 G instructions at the default tier and 465.6 G at `--tier=clift`, cycles within the
+  spread. No frame is materialised (`materialised=0`); the calls compiled code steps (`cb_step.Call`, about 25 k) and
+  the hand-overs to the tier's loop (`retiers`, about 4 k) are the same at 20 k and 100 k cycles, so they are the
+  warm-up. The figures of the earlier entry (1.08 against 1.2) came from runs four at a time; the procedure is about
+  1.23 times the loop on both tiers. What differs between the tiers is that only the default tier makes process
+  copies (`spec_copies` 9 of 16 for `G_MODE=0`, 7 for `G_MODE=2`, the rest `spec_capped`), with the same
+  instructions; the L1 instruction cache misses are under 0.1 percent of the cycles in both, so they are not the
+  cause of the cycle differences seen, which stay inside the spread of a loaded host.
+- **Decision: a function result whose subtype adds no constraint keeps the value's descriptor**
+  (`composite::open_subtype`, the test `param_dope` already made for a formal; `return_`). `return r` of
+  `return t_arr`, an array of `signed`, copied the local's descriptor and checked the local against that copy: two
+  instructions that can never fail and one copy, in every tier (LRM 10.13: the conversion to an unconstrained type
+  mark keeps the bounds; the element subtype is the type's own). A constrained result subtype keeps its check.
+  On the reproducer (16 units, 1 M cycles, `YAVS_NO_PMEMO=1`, `--features clift` bench builds, 7 interleaved runs, 4 on
+  core 12 and 3 on core 13 whose SMT sibling was busy, medians and range): `G_MODE=2` 420.84 G to 420.23 G
+  instructions at `--tier=clift`, 423.8 G to 423.2 G at the default tier; wall 23.26 s (20.41
+  to 23.86) to 22.66 s (21.08 to 24.18) and 23.43 s to 23.39 s, inside the spread of a host at load 20 to 28. A
+  trace of one call: its return went from 156 to 78 instructions, and Cranelift's allocation of the loop moved by
+  13 instructions an iteration, so the net is about 13 per call.
+- **Tests.** `compiled_vectors.rs` `calls_of_functions_on_arrays_match_the_interpreter` (unconstrained results with
+  the local's ascending, descending and non-zero bounds, a constrained result, targets of either direction, locals
+  sized at run time, whole signal operands of 65 to 272 logic elements, metavalues; every tier and `--threads 4`)
+  and `length_checks_of_call_results_fail_alike_on_every_tier` (a constrained result of the wrong length, a target of
+  the wrong length: the same message and exit in every tier). Dropping every return check made the second fail.
+  `perf.rs` `ops` does not see the change (the same 88 500 with it broken), so there is no counter for it.
+- **Decision: in Cranelift code a `SubtypeCheck` against a descriptor of the constant pool compares with the length
+  of that descriptor as a constant** (`Gen::const_dim`, both modes): `l1 <= reduce(t)` checked the result's length
+  against the 7 of `l1` by reading and measuring `l1`'s descriptor at every call, 51 instructions; the result's side
+  and the slow path are as before. `G_MODE=2`: 420.23 G to 418.81 G instructions at `--tier=clift`, 423.2 G to
+  419.3 G at the default tier; wall 22.66 s to 22.26 s and 23.39 s to
+  22.02 s, ranges overlapping. Leaving the inline check out makes `length_checks_of_call_results_fail_alike_on_every_tier` fail.
+- **Decision: a `LayoutOf` of a static layout whose one use is the load of its size right after it is the size in a
+  register** (`static_sizes`, `Gen::layout_words`; a failed test leaves at the `LayoutOf`, which the interpreter runs
+  with the load): `Fx::size_of` of the local `r` allocated the four layout words in the temporary area, stored them
+  and loaded the first, about 60 instructions per call. `G_MODE=2`: 418.81 G to 416.93 G instructions at
+  `--tier=clift`, 419.3 G to 417.5 G at the default tier; wall 22.26 s to 22.03 s and 22.02 s to 22.28 s, ranges
+  overlapping. Of the `tools/bench` designs under `--tier=clift --no-cache` (this and the two decisions above), none
+  runs more instructions (`rtl_ram` 3.4 percent fewer, `ff_rtl` 1.2) and none has more machine code (`rec_pair`
+  27 KB less, `protected_queue` 8 KB). Storing the alignment word instead of the size fails both
+  `compiled_vectors` tests above and `elements_of_array_operands_in_subprograms_match_the_interpreter`.
+- **Together** (`G_MODE=2` against the loop in the process, `G_MODE=1`, same runs): 1.119 to 1.110 times the loop's
+  instructions at `--tier=clift` (375.94 G to 375.45 G for the loop) and 1.125 to 1.108 at the default tier (376.6 G
+  both); wall 23.26 s against 20.99 s to 22.03 s against 20.64 s, and 23.43 s against 21.34 s to 22.28 s against
+  21.47 s. The loop and the procedure form (`G_MODE=0`, 465.63 G to 465.14 G, default 464.8 G both) run the same or
+  fewer instructions, as do the record and shift testbenches of #1110 and #1118 at `--tier=clift` (the default
+  tier within its run-to-run spread of about 0.1 percent).
+- **Tried and dropped:**
+  - A `SigRead` of a known count of 65 to 256 logic elements that starts on a plane block copied inline instead of
+    `yavs_rt_planes`: 0.55 percent fewer instructions at `--tier=clift`, but 0.07 percent more at the default tier
+    with ranges apart (419.57 G to 419.66 G against 419.21 G to 419.39 G), so it was left out.
+  - Leaving out the `Zero` of a frame temporary right before a `SigRead` into it that writes every block: about 10
+    instructions per call (0.1 percent), and no test can see a break of it, since nothing reads the bytes it
+    would leave.
+- **Left** (about 900 instructions per call): the native entry and return, the local's descriptor and `NewFrame`
+  with its zeroing call, the descriptor copy and pair of the result, the whole-signal read of the operand, the copy
+  of the result into the waveform and the wide drive. Per element the function runs about 550 instructions of
+  compiled code against about 325 in the loop, which drives each element on its own (about 220 more in the host).

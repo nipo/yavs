@@ -1,0 +1,9 @@
+exit	0
+diag	note	0	0	:guard_activity_late:be:_p0	be guard=false
+diag	note	0	0	:guard_activity_late:g(0):bf:_p0	bf guard=false
+diag	note	0	0	:guard_activity_late:g(1):bf:_p0	bf guard=false
+diag	note	0	0	:guard_activity_late:bo:_p0	bo guard=false
+diag	note	1000000	1	:guard_activity_late:be:_p0	be guard=true
+diag	note	1000000	1	:guard_activity_late:g(0):bf:_p0	bf guard=true
+diag	note	1000000	1	:guard_activity_late:g(1):bf:_p0	bf guard=true
+diag	note	4000000	1	:guard_activity_late:bo:_p0	bo guard=true

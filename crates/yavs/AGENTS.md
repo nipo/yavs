@@ -116,6 +116,8 @@ into `docs/cli-contract.md` (root `AGENTS.md` rule 24).
 - Tests run the built binary (`env!("CARGO_BIN_EXE_yavs")`); scratch dirs come from
   `tests/common` `tempdir` (system temp dir, removed on drop, panics included). Never a fixed or pid-named
   directory that a failing test would leave behind.
+- A test that needs a refused connection uses `common::NO_LISTENER`, never the port of a listener it
+  dropped: the system can give that port to another test's listener before yavs connects (#1088).
 
 ## 5. How to work here
 
