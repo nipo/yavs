@@ -2168,6 +2168,35 @@ impl Signal {
         len: u32,
         planes: [u64; 4],
     ) -> bool {
+        let (w, sh) = (elem as usize / 64, elem % 64);
+        // Within one plane word of a lagging signal (a register): one mask for the blend and the
+        // pending bits.
+        if !self.exact
+            && !self.pend_one
+            && sh + len <= 64
+            && let (Buf::Planes { b, .. }, Some(p)) = (&mut self.driving, self.pend.get_mut(w))
+            && let Some(x) = b.get_mut(w)
+        {
+            let m = nmask(len as usize) << sh;
+            for (x, p) in x.iter_mut().zip(planes) {
+                *x = *x & !m | p << sh & m;
+            }
+            self.lag = true;
+            self.last_commit.0 = u32::MAX;
+            let first = self.pend_words.is_empty();
+            if *p == 0 {
+                self.pend_words.push(w as u32);
+            }
+            *p |= m;
+            return first;
+        }
+        self.commit_planes_slow(slot, elem, len, planes)
+    }
+
+    /// `commit_planes` of anything else: the driver too, a pending one element, a first entry,
+    /// two plane words.
+    #[inline(never)]
+    fn commit_planes_slow(&mut self, slot: u32, elem: u32, len: u32, planes: [u64; 4]) -> bool {
         if self.exact {
             let d = &mut self.drivers[slot as usize];
             d.put_planes((elem - d.range.offset) as usize, len as usize, planes);

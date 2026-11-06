@@ -14361,3 +14361,12 @@ result, three host calls of the local's `NewFrame`, and the drive of a result of
   instructions of finish and copy become 192; instructions 0.89 on a register chain of flat signals, 0.93 on a
   record pipeline, 0.95 with waves on. A test compares a lean register with one that keeps every element's history,
   with no waiter, a whole-signal waiter and waiters of parts.
+- **A register entry commits with one mask** (`Signal::commit_planes`): an entry within one plane word of a signal
+  whose driving value lags, with its pending bits allocated and no `pend_one`, blends the driving word and sets the
+  pending bits inline; the driver write of an `exact` signal, a held one-element entry, the first entry of a signal
+  and an entry across two words go to `commit_planes_slow`, the code as it was. Instructions 0.97 on the shift and
+  record pipeline testbenches, 0.96 on flat signals, the scalar case equal.
+- **Not done: a fused commit and update.** Between the commit and the next update the driving value must hold the new
+  value (`'driving_value`, the skip tests, `sync_drivers`, the gate checks and the driver reads of `Hook` read it)
+  while `cur` still holds the old one, so a fused path would still write both; what it could save is the second
+  lookup of the signal, smaller than the two paths above.
