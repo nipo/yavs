@@ -295,6 +295,20 @@ case!(
     bare_bus,
     "parts=",
     &[],
+    [("bare_signals", Min(4)), ("lean_signals", Min(4))]
+);
+// Narrow registers nothing asks the history of keep none (#1111); `sq`, only the prefix of
+// implicit signals, is lean and keeps its history.
+case!(
+    narrow_history,
+    "dev=7 ded=4 k=165",
+    &[],
+    [("bare_signals", Min(9)), ("lean_signals", Min(10))]
+);
+case!(
+    narrow_history_ext,
+    "n=27 q=4006",
+    &[],
     [("bare_signals", Min(2)), ("lean_signals", Min(2))]
 );
 case!(
@@ -303,7 +317,7 @@ case!(
     &[],
     [
         ("cycles", Max(312)),
-        ("lean_signals", Min(2)),
+        ("lean_signals", Min(4)),
         ("update_general", Max(2)),
         ("ops", Max(13570)),
     ]
@@ -1090,7 +1104,8 @@ fn no_history_changes_nothing() {
     assert!(on.stdout.contains("parts="), "{}", on.all());
     assert_eq!(off.stdout, on.stdout);
     assert_eq!(off.counters["bare_signals"], 0);
-    assert_eq!(on.counters["bare_signals"], 2, "{:?}", on.counters);
+    // The two buses, and `n` and `done`, narrow (#1111).
+    assert_eq!(on.counters["bare_signals"], 4, "{:?}", on.counters);
     assert_eq!(off.counters["events"], on.counters["events"]);
     // Coverage observes the run: every signal keeps its history.
     let cov = run_design_env(&d, "bare_bus", src, "interp", &["--cov=sbt"], &[]);
@@ -1118,7 +1133,8 @@ fn lean_events_change_nothing() {
     assert!(on.stdout.contains("events="), "{}", on.all());
     assert_eq!(off.stdout, on.stdout);
     assert_eq!(off.counters["lean_signals"], 0);
-    assert_eq!(on.counters["lean_signals"], 2, "{:?}", on.counters);
+    // `a` and `b`, and the narrow `n` and `done`, which nothing asks the history of (#1111).
+    assert_eq!(on.counters["lean_signals"], 4, "{:?}", on.counters);
     // Coverage observes the run: every signal keeps its history.
     let cov = run_design_env(&d, "lean_events", src, "interp", &["--cov=sbt"], &[]);
     assert_eq!(cov.code, 0, "{}", cov.all());

@@ -185,6 +185,33 @@ are rare on a bus.
   are claimed. Reference simulator idea used: one compare per net (sim1); ours differs in keeping per-element history wherever anything
   can read it.
 
+## Narrow signals nothing asks the history of (#1111, 2026-11-06)
+
+Lean event bookkeeping (#519) and no history (the section above) were for leaves of more than 64 elements only, so every narrow
+register kept two stamps per changed element that nothing read: about half of `SimControl::finish_direct` on a design of 18-bit
+register chains (reported by an outside contributor, malles030).
+
+- **Decision.** `lean::bare` decides for every width; `lean::leaves` stays at more than 64 elements. A narrow leaf is lean only when
+  it is bare (`Elaborated::lean |= bare`), or the kernel took its history back (`keep_history`: edge triggers, prefixes of implicit
+  signals), which keeps it lean with exact answers from `blk_last` for the whole signal and `'last_value` of an element.
+- **Why the limit was there.** `blk_event`, the per-block list that #519 replaced, existed only above 64 elements, and compiled
+  code (Cranelift and LLVM `sig_event`, `edge`) reads `stamps[e] == cycle` of a signal of at most 64 elements directly
+  (`Signal::event_view`). The lean word path writes `blk_last`, not the stamps, so the contributor's proposal (no width condition
+  anywhere) made `d(3)'event` and `rising_edge(d(5))` of a narrow vector false in compiled code when the process was not woken
+  by that very edge (`crates/yavs/tests/narrow_history.rs`; the interpreter, which asks `event_in`, was right).
+- **Backstop.** `event_view` offers no stamps of a lean signal, so compiled code takes the kernel's exact path, and debug builds
+  and `history-check` fail there at a read of a signal that keeps none. With that alone the proposal gives right answers too;
+  narrow `leaves` is still not taken, since the facts it uses do not see `'event` or edge tests, and a lean clock or vector whose
+  edges compiled code tests would leave the stamp read for a host call.
+- **Records.** Leaves of a record pack (#686) are never lean whatever the analysis says (`build.rs` makes the pack before it
+  asks), which is why a record pipeline gains nothing; the record exclusion of `bare` only matters for record leaves that are not
+  packed (ports, guards, implicit signals, non-logic fields). Lean packs would need answers per field (`hang.rs` names the fields,
+  and `'last_event` of a field is a part of the pack); not done.
+- **Measured** (bench builds with `--features clift`, baseline `origin/main` cb69a57da, cores 12 to 14, A and B interleaved on one
+  core, 5 runs each, the issue's testbenches at 300000 cycles): 10 chained 18-bit registers per unit 0.80 of the time (default
+  tier and `--tier=clift`), 1 per unit 0.975, a 4-stage pipeline of flat 18-bit signals 0.92 to 0.93, the chain with `'last_event`
+  of three of its ten signals 0.90 (the seven others are lean); reports equal.
+
 ## Waveform writer: wavefst (yavs-wave)
 
 - **Choice:** the `wavefst` crate (0.4.0, MIT) for FST output, with `default-features = false`,

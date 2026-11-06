@@ -1694,13 +1694,13 @@ fn prepare(
     let others_free = !a.debugged() && a.vhpi.is_empty();
     let observed_free = a.cov.is_none() && others_free;
     let cov_counters = lowering_counters;
-    // Wide signals nothing asks the history of keep only each block's last event, unless
+    // Signals nothing asks the history of keep only each block's last event, unless
     // something observes the run; hidden test aid: `YAVS_LEAN_EVENTS=off` keeps all histories.
     if !observed_free || std::env::var("YAVS_LEAN_EVENTS").is_ok_and(|v| v == "off") {
         e.lean.clear();
         e.bare.clear();
     }
-    // Hidden test aid: `YAVS_NO_HISTORY=off` keeps the history of every wide signal that is lean.
+    // Hidden test aid: `YAVS_NO_HISTORY=off` keeps the history of every signal that is lean.
     if std::env::var("YAVS_NO_HISTORY").is_ok_and(|v| v == "off") {
         e.bare.clear();
     }

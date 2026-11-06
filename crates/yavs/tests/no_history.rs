@@ -57,6 +57,11 @@ fn a_bus_with_no_history_runs_as_one_that_keeps_it() {
             "wide_level",
             include_str!("../../../tests/corpus/sigassign/wide_level.vhd"),
         ),
+        ("narrow_history", include_str!("perf/narrow_history.vhd")),
+        (
+            "narrow_history_ext",
+            include_str!("perf/narrow_history_ext.vhd"),
+        ),
     ];
     for (top, src) in designs {
         let file = format!("{top}.vhd");

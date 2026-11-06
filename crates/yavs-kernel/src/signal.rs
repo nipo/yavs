@@ -1252,11 +1252,11 @@ impl Signal {
     }
 
     /// The cycle number of the last event of each element (`event_in`) of a signal of at most 64
-    /// elements, which compiled code compares with the current cycle for `'event` (a wider signal
-    /// also keeps event records per block). The address stays for the whole simulation; the
-    /// numbers change only while no process runs.
+    /// elements that is not lean, which compiled code compares with the current cycle for `'event`
+    /// (a wider or lean signal also keeps event records per block, which only the kernel reads).
+    /// The address stays for the whole simulation; the numbers change only while no process runs.
     pub fn event_view(&self) -> Option<*const u64> {
-        (self.ty.len <= 64).then(|| self.stamps.as_ptr())
+        (self.ty.len <= 64 && !self.lean).then(|| self.stamps.as_ptr())
     }
 
     /// The plane blocks of the current value of a logic signal and its number of elements, for
@@ -2868,7 +2868,7 @@ impl Signal {
     }
 
     /// The event records of block `k` (at most one when lean), `None` for a signal of up to 64
-    /// elements.
+    /// elements that is not lean.
     #[inline]
     fn block_recs(&self, k: usize) -> Option<&[EvRec]> {
         if self.lean {
@@ -2883,7 +2883,7 @@ impl Signal {
         }
     }
 
-    /// Whether the signal keeps records per block (more than 64 elements).
+    /// Whether the signal keeps records per block (more than 64 elements, or lean).
     #[inline]
     fn has_blocks(&self) -> bool {
         !(self.blk_event.is_empty() && self.blk_last.is_empty())
@@ -2922,11 +2922,11 @@ impl Signal {
             || self.stamps[n..2 * n][r.elems()].contains(&cycle)
     }
 
-    /// Keep only the last event of each block of 64 elements (`lean`), for a signal of more
-    /// than 64 elements nothing asks the history of single elements of (`'last_event`, and
-    /// `'last_value` of more than one element, of a part of a block). Before the first event.
+    /// Keep only the last event of each block of 64 elements (`lean`), for a signal nothing asks
+    /// the history of single elements of (`'last_event`, and `'last_value` of more than one
+    /// element, of a part of a block). Before the first event; `event_view` is then not offered.
     pub fn set_lean_events(&mut self) {
-        if self.ty.len > 64 && !self.lean {
+        if !self.lean {
             self.lean = true;
             self.blk_event = Vec::new();
             self.blk_last = vec![EvRec::default(); (self.ty.len as usize).div_ceil(64)];
@@ -3780,15 +3780,57 @@ mod tests {
                 assert_eq!(a.code(0), b.code(0), "cycle {c} element {e}");
             }
         }
-        // A signal of up to 64 elements is not lean: it keeps its stamps.
-        let mut small = Signal::new(
-            "t".into(),
-            SignalType::logic(64),
-            Buf::zeroed(Elem::Logic, 64),
-            None,
-        );
-        small.set_lean_events();
-        assert!(!small.is_lean());
+    }
+
+    /// A lean narrow signal (one block, #1111) answers like one that keeps its stamps, for the
+    /// whole signal and every element, and offers compiled code no stamps, which it no longer
+    /// writes on the word path.
+    #[test]
+    fn lean_events_of_a_narrow_signal() {
+        for n in [1usize, 18, 64] {
+            let ty = SignalType::logic(n as u32);
+            let mk = |lean: bool| {
+                let mut s = Signal::new("s".into(), ty, Buf::zeroed(ty.elem, n), None);
+                if lean {
+                    s.set_lean_events();
+                }
+                s
+            };
+            let (mut full, mut lean) = (mk(false), mk(true));
+            assert!(lean.is_lean() && lean.event_view().is_none());
+            assert!(full.event_view().is_some());
+            let mut x = 0x2545_f491_4f6c_dd1du64;
+            for c in 1..60u64 {
+                let now = Time::ns(c);
+                for e in 0..n {
+                    x ^= x << 13;
+                    x ^= x >> 7;
+                    x ^= x << 17;
+                    if e % 7 != 3 && x.is_multiple_of(3) {
+                        for s in [&mut full, &mut lean] {
+                            let v = if s.driving.code(e) == 2 { 3 } else { 2 };
+                            s.driving.put_code(e, v);
+                        }
+                    }
+                }
+                let r = Range::new(0, n as u32);
+                assert_eq!(
+                    full.update_effective(r, now, c),
+                    lean.update_effective(r, now, c)
+                );
+                assert!(lean.history_exact(r, false));
+                assert_eq!(lean.event_in(r, c), full.event_in(r, c));
+                assert_eq!(lean.last_event(r, now), full.last_event(r, now), "{n}");
+                let (a, b) = (lean.last_value_of(r), full.last_value_of(r));
+                assert!((0..n).all(|i| a.code(i) == b.code(i)), "{n} cycle {c}");
+                for e in 0..n as u32 {
+                    let r = Range::new(e, 1);
+                    assert_eq!(lean.event_in(r, c), full.event_in(r, c), "{n} element {e}");
+                    assert_eq!(lean.last_value_of(r).code(0), full.last_value_of(r).code(0));
+                    assert_eq!(lean.history_exact(r, false), n == 1);
+                }
+            }
+        }
     }
 
     /// `commit_copy` against `commit_planes_run` of the same elements in blocks: the same driving

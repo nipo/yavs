@@ -236,8 +236,8 @@ impl Builder {
         }
     }
 
-    /// Keep only the last event of each block of 64 elements of `s` (more than 64 elements), not
-    /// the history of its single elements: cheaper updates of a wide bus. `'last_event` and
+    /// Keep only the last event of each block of 64 elements of `s`, not the history of its
+    /// single elements: cheaper updates of a bus. Compiled code then reads no event stamps of `s`. `'last_event` and
     /// `'last_value` of a range that is not whole blocks then fail with an internal error, so
     /// call it only for a signal that no process asks those of. Everything else is exact.
     pub fn lean_events(&mut self, s: SignalId) {

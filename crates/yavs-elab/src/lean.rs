@@ -1,7 +1,7 @@
 //! Signals whose event history nothing asks for (#519). The kernel keeps each element's last
-//! event of a signal of more than 64 elements (`yavs_kernel::Builder::lean_events` says when
-//! it need not); only `'last_event` and `'last_value` of something other than whole signals
-//! ask for that, and the analysis facts (`yavs_sem::Facts`) say where they occur.
+//! event of a signal (`yavs_kernel::Builder::lean_events` says when it need not); only
+//! `'last_event` and `'last_value` of something other than whole signals ask for that, and the
+//! analysis facts (`yavs_sem::Facts`) say where they occur.
 
 use std::collections::{HashMap, HashSet};
 
@@ -12,7 +12,8 @@ use crate::hier::{NetGraph, ObjId, ObjKind, ScopeId, Shape};
 /// Per leaf: whether it is wide (more than 64 elements) and no `'last_event` or `'last_value`
 /// in the design can ask for the history of a part of it. All false when one is applied to
 /// something the elaborator cannot trace to signal objects (a signal parameter, an external
-/// name): any signal may be its actual.
+/// name): any signal may be its actual. A narrow leaf is lean only through `bare`
+/// (`docs/decisions.md` "Narrow signals nothing asks the history of").
 pub(crate) fn leaves(db: &Db, nets: &NetGraph) -> Vec<bool> {
     let f = db.facts();
     if f.history_all {
@@ -34,7 +35,7 @@ pub(crate) fn leaves(db: &Db, nets: &NetGraph) -> Vec<bool> {
     lean
 }
 
-/// Per leaf: whether it is wide and nothing in the design can ask any event history or
+/// Per leaf, of any width (#1111): whether nothing in the design can ask any event history or
 /// `'last_value` of it. `history` is what the lowered code says (`Func::sig_history_uses`, as
 /// declarations; `None`: one could not be named), so a reader the lowerer adds is seen by
 /// construction; the kernel takes its own readers back (`SimControl::new`). A field of a record
@@ -50,7 +51,7 @@ pub(crate) fn bare(
     let Some(history) = history.filter(|_| db.facts().forces.is_empty()) else {
         return vec![false; nets.leaves.len()];
     };
-    let mut bare: Vec<bool> = nets.leaves.iter().map(|l| l.ty.len > 64).collect();
+    let mut bare = vec![true; nets.leaves.len()];
     let asked: HashSet<_> = history.iter().copied().collect();
     // By the objects the lowered code's names denote in a region: an external alias is the object
     // it names, not a declaration of its own.

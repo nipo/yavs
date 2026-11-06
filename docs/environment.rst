@@ -403,12 +403,12 @@ Each one turns a fast path off or changes its threshold, to compare a run with a
      - unset
      - ``run``
    * - ``YAVS_LEAN_EVENTS``
-     - ``off`` keeps the event history of every wide signal.
+     - ``off`` keeps the event history of every signal.
      - ``off``
      - on
      - ``run``
    * - ``YAVS_NO_HISTORY``
-     - ``off`` keeps the event records and ``'last_value`` of a wide signal nothing asks them of.
+     - ``off`` keeps the event records and ``'last_value`` of a signal nothing asks them of.
      - ``off``
      - on
      - ``run``
