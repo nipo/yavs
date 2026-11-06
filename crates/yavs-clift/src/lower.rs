@@ -3559,6 +3559,16 @@ fn gen_func(
                 let (d, w) = (g.ld(dope), g.ld(want));
                 for k in 0..u64::from(dims) {
                     let (a, oka) = g.dim_len(d, dope, k * 24, slow);
+                    // A target of the constant pool (static bounds): its length is a constant.
+                    let fixed = g.const_dim(want, k as u32).and_then(|(l, r, dir)| {
+                        i64::try_from(yavs_ir::dim_len(l, r, dir == 1)?).ok()
+                    });
+                    if let Some(n) = fixed {
+                        let eq = g.b.ins().icmp_imm_s(IntCC::Equal, a, n);
+                        let okv = g.b.ins().band(oka, eq);
+                        g.guard(okv, slow);
+                        continue;
+                    }
                     let (b, okb) = g.dim_len(w, want, k * 24, slow);
                     let eq = g.b.ins().icmp(IntCC::Equal, a, b);
                     let okv = g.b.ins().band(oka, okb);

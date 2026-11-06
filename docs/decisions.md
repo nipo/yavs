@@ -14405,3 +14405,9 @@ whole-signal read, the call, the result's check and copy, the wide drive).
   and `length_checks_of_call_results_fail_alike_on_every_tier` (a constrained result of the wrong length, a target of
   the wrong length: the same message and exit in every tier). Dropping every return check made the second fail.
   `perf.rs` `ops` does not see the change (the same 88 500 with it broken), so there is no counter for it.
+- **Decision: in Cranelift code a `SubtypeCheck` against a descriptor of the constant pool compares with the length
+  of that descriptor as a constant** (`Gen::const_dim`, both modes): `l1 <= reduce(t)` checked the result's length
+  against the 7 of `l1` by reading and measuring `l1`'s descriptor at every call, 51 instructions; the result's side
+  and the slow path are as before. `G_MODE=2`: 420.23 G to 418.81 G instructions at `--tier=clift`, 423.2 G to
+  419.3 G at the default tier (whose process copies have more such targets); wall 22.66 s to 22.26 s and 23.39 s to
+  22.02 s, ranges overlapping. Leaving the inline check out makes `length_checks_of_call_results_fail_alike_on_every_tier` fail.
