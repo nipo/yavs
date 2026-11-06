@@ -120,6 +120,8 @@ def venv_zig():
     zig = Path(run([py, "-c", "import ziglang, os; print(os.path.dirname(ziglang.__file__))"], None, "locating zig").strip()) / "zig"
     if not zig.is_file():
         raise Fail(f"the ziglang wheel in {venv} has no {zig}")
+    if not os.access(zig, os.X_OK):  # some pip installs drop the wheel's executable bit (seen on a CI runner)
+        zig.chmod(zig.stat().st_mode | 0o111)
     return str(zig)
 
 
