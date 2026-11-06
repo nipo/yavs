@@ -3147,9 +3147,31 @@ fn a_bus_with_no_history_attribute_keeps_no_history() {
         )),
         ABR
     );
-    // A field of a record: a report asks it by part.
-    let rec = "type rt is record w : std_logic_vector(99 downto 0); end record; signal q : rt;";
-    assert_eq!(bare_leaves(&wide_design(rec, "null;")), ABR);
+    // Records and arrays of records, as any signal (#1117): asked through a field, an element or
+    // the whole, all of the object keeps its history.
+    let rec = "type rt is record w : std_logic_vector(99 downto 0); n : std_logic; end record;
+        type ra is array (0 to 3) of rt; signal q : rt; signal m : ra;";
+    let all = [
+        "t.a", "t.b", "t.i", "t.m.n", "t.m.w", "t.q.n", "t.q.w", "t.r",
+    ];
+    assert_eq!(bare_leaves(&wide_design(rec, "null;")), all);
+    assert_eq!(
+        bare_leaves(&wide_design(rec, "v(0) := q.n; w := m(2).w;")),
+        all
+    );
+    let no_q = ["t.a", "t.b", "t.i", "t.m.n", "t.m.w", "t.r"];
+    let no_m = ["t.a", "t.b", "t.i", "t.q.n", "t.q.w", "t.r"];
+    for (stmts, want) in [
+        ("e := q.n'event;", &no_q[..]),
+        ("t1 := q'last_event;", &no_q),
+        ("e := rising_edge(q.n);", &no_q),
+        ("w := q.w'last_value;", &no_q),
+        ("e := m(1)'active;", &no_m),
+        ("t1 := m(2).w'last_active;", &no_m),
+        ("t1 := m'last_event;", &no_m),
+    ] {
+        assert_eq!(bare_leaves(&wide_design(rec, stmts)), want, "{stmts}");
+    }
     // A narrow signal, as a wide one: asked by an attribute or an edge, it keeps its history.
     for stmts in ["t1 := i'last_event;", "e := i'event;"] {
         assert_eq!(

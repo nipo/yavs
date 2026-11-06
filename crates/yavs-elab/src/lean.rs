@@ -38,10 +38,10 @@ pub(crate) fn leaves(db: &Db, nets: &NetGraph) -> Vec<bool> {
 /// Per leaf, of any width (#1111): whether nothing in the design can ask any event history or
 /// `'last_value` of it. `history` is what the lowered code says (`Func::sig_history_uses`, as
 /// declarations; `None`: one could not be named), so a reader the lowerer adds is seen by
-/// construction; the kernel takes its own readers back (`SimControl::new`). A field of a record
-/// never qualifies (a report asks those by part, see `kernel/hang.rs`), nor does anything in a
-/// design with a force. The kernel then keeps no event records and no `'last_value` for such a bus
-/// (`yavs_kernel::Builder::no_history`). Such a leaf is lean too, whatever `history_all` says.
+/// construction; the kernel takes its own readers back (`SimControl::new`). Nothing in a design
+/// with a force qualifies, nor an implicit signal. The kernel then keeps no event records and no
+/// `'last_value` for such a bus (`yavs_kernel::Builder::no_history`); a record pack is bare when all
+/// its leaves are (#1117, `build.rs`). Such a leaf is lean too, whatever `history_all` says.
 pub(crate) fn bare(
     db: &Db,
     nets: &NetGraph,
@@ -62,7 +62,7 @@ pub(crate) fn bare(
         }
     }
     for o in &nets.objs {
-        if o.kind == ObjKind::Implicit || !crate::keep_codes::elements_only(&o.shape) {
+        if o.kind == ObjKind::Implicit {
             bare[o.leaves.0.index()..o.leaves.1.index()].fill(false);
         }
     }

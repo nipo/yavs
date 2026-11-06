@@ -65,7 +65,18 @@ fn clean(o: &Output) -> String {
 
 /// Run and compare stderr with `snapshot.stderr`.
 fn snapshot(name: &str, extra: &[&str], snapshot: &str, code: i32) -> String {
-    let o = run(name, extra);
+    snapshot_env(name, extra, &[], snapshot, code)
+}
+
+/// `snapshot` with environment variables set for the run.
+fn snapshot_env(
+    name: &str,
+    extra: &[&str],
+    env: &[(&str, &str)],
+    snapshot: &str,
+    code: i32,
+) -> String {
+    let o = run_env(name, extra, env);
     assert_eq!(o.status.code(), Some(code), "{}", clean(&o));
     let err = clean(&o);
     let path = dir().join(format!("{snapshot}.stderr"));
@@ -425,12 +436,32 @@ fn sigint_ends_spin(tier: Option<&str>) {
 }
 
 /// The fields of a record pack (#686) are reported one by one: the field waited on has no driver
-/// and no event, though another field of the same kernel signal has both.
+/// and no event, though another field of the same kernel signal has both. With every history
+/// kept; a record that keeps none has the last event of the whole record (#1117).
 #[test]
 fn a_field_of_a_record_is_reported_alone() {
-    let e = snapshot("stuck_record", &["--hang-report"], "stuck_record", 0);
+    let off = [("YAVS_LEAN_EVENTS", "off")];
+    let e = snapshot_env("stuck_record", &["--hang-report"], &off, "stuck_record", 0);
     assert!(e.contains("waits for an event on stuck_record.r.b"), "{e}");
     assert!(e.contains("never had an event; it has no driver"), "{e}");
+    let e = snapshot("stuck_record", &["--hang-report"], "stuck_record_lean", 0);
+    assert!(e.contains("waits for an event on stuck_record.r.b"), "{e}");
+    assert!(
+        e.contains("last event of the record stuck_record.r at 0 fs; it has no driver"),
+        "{e}"
+    );
+}
+
+/// A delta loop through the fields of one record pack: a record that keeps no history is named
+/// once as still changing, one that keeps it by field (#1117).
+#[test]
+fn a_delta_loop_through_record_fields() {
+    let e = snapshot("stuck_record_loop", &[], "stuck_record_loop", 1);
+    assert!(e.contains("stuck_record_loop.r still changes"), "{e}");
+    assert!(!e.contains("stuck_record_loop.r.a still changes"), "{e}");
+    let off = [("YAVS_LEAN_EVENTS", "off")];
+    let e = snapshot_env("stuck_record_loop", &[], &off, "stuck_record_loop_full", 1);
+    assert!(e.contains("stuck_record_loop.r.a still changes"), "{e}");
 }
 
 #[test]

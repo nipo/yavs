@@ -203,7 +203,7 @@ register chains (reported by an outside contributor, malles030).
   and `history-check` fail there at a read of a signal that keeps none. With that alone the proposal gives right answers too;
   narrow `leaves` is still not taken, since the facts it uses do not see `'event` or edge tests, and a lean clock or vector whose
   edges compiled code tests would leave the stamp read for a host call.
-- **Records.** Leaves of a record pack (#686) are never lean whatever the analysis says (`build.rs` makes the pack before it
+- **Records** (superseded by the next section, #1117). Leaves of a record pack (#686) are never lean whatever the analysis says (`build.rs` makes the pack before it
   asks), which is why a record pipeline gains nothing; the record exclusion of `bare` only matters for record leaves that are not
   packed (ports, guards, implicit signals, non-logic fields). Lean packs would need answers per field (`hang.rs` names the fields,
   and `'last_event` of a field is a part of the pack); not done.
@@ -211,6 +211,38 @@ register chains (reported by an outside contributor, malles030).
   core, 5 runs each, the issue's testbenches at 300000 cycles): 10 chained 18-bit registers per unit 0.80 of the time (default
   tier and `--tier=clift`), 1 per unit 0.975, a 4-stage pipeline of flat 18-bit signals 0.92 to 0.93, the chain with `'last_event`
   of three of its ten signals 0.90 (the seven others are lean); reports equal.
+
+## Records nothing asks the history of (#1117, 2026-11-06)
+
+Every leaf of a record signal kept its event and activity stamps, though nothing read them: `lean::bare` left out fields of records
+and arrays of records, and a record pack (#686) was never lean, for the sake of the hang and delta loop reports, which ask a pack
+field by field (`kernel/hang.rs`).
+
+- **Decision.** `lean::bare` treats records and arrays of records as any signal: an object is bare unless the lowered code asks some
+  history of it, through a field, an element or the whole (`sig_history_uses` sees every `SigVal` of a leaf, so a reader of one
+  field marks the object). A pack is lean and bare when all its leaves are bare (`build.rs`); it is never lean through
+  `lean::leaves`, since `'last_event` of a field or of the whole record asks a part of the pack, which a lean signal answers
+  exactly for whole blocks only. `lean::leaves` keeps its exclusion of arrays of composites for the same reason: the interpreter
+  asks `'last_event` and `'last_value` of such a whole one element at a time, a real language reader (`comp_attr`, `read_leaves`).
+- **Reports** (maintainer, 2026-11-06). A lean pack keeps no event times per field, so for a lean record the reports give the
+  whole record's: the delta cycle limit names the record once as still changing (no value: a record has no short literal), and
+  a stuck field of it reports the record's last event ("last event of the record R at T", "the record R never had an event");
+  per-field timing is dropped. Waits, drivers and values stay per field, as they ask no history (`Parts::timing`,
+  `StuckSignal::last_event_of`). `YAVS_LEAN_EVENTS=off` gives the per-field report (`tests/cli/stuck_record*.stderr`,
+  `stuck_record_loop*.stderr`).
+- **Tests.** `perf/record_history.vhd`: `'event`, `'active`, `'last_event`, `'last_value`, `'last_active` and edges of fields, elements
+  and whole records and arrays of records, a signal parameter and an external name of fields, a whole record as a signal parameter,
+  a record `in` port asked only in the child and an `out` port, beside records nothing asks; the same
+  report with every history kept, on four threads and under every compiled tier (`narrow_history.rs`), without counters, waves
+  and the hang report (`no_history.rs`), floors on `lean_signals` and `bare_signals` (`perf.rs`).
+- **Measured** (bench builds with `--features clift`, baseline `origin/main` abceb8e5 from its own checkout, YAVS_NO_PMEMO=1,
+  cores 8 to 11, A and B interleaved on one core, 7 runs each after a warm-up; the issue's testbench, 16 units of a 4-stage pipeline
+  of a record of two `signed(17 downto 0)`, 1 M cycles): whole-record assignment 10.15 to 7.88 s at `--tier=clift` (0.78), 9.91 to
+  7.84 s at the default tier (0.79); field by field 9.27 to 7.55 s (0.81) and 9.50 to 7.78 s (0.82). Ranges did not overlap;
+  checksums equal. The same design as flat signals does the same work (equal counters) and its times are within the spread
+  (0.99 at `--tier=clift`, 1.01 to 1.03 at the default tier in four sets with overlapping ranges; instructions at the default tier
+  equal to 0.01 percent, cycles 0.97 to 1.01). The differential corpus passes with a debug
+  build (which fails at a read of a history not kept) at `--tier=interp` and `--tier=clift`, one and four threads.
 
 ## Waveform writer: wavefst (yavs-wave)
 

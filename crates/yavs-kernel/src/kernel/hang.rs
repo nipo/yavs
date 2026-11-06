@@ -187,6 +187,9 @@ pub struct StuckSignal {
     pub fed_by: Vec<SignalId>,
     /// Time of its last event, `None` if it never had one.
     pub last_event: Option<Time>,
+    /// The record whose last event `last_event` is, for a field of a lean record pack: its
+    /// fields keep no times of their own (`Signal::lean`).
+    pub last_event_of: Option<String>,
 }
 
 /// A signal that behaved like a clock and cannot toggle again.
@@ -249,6 +252,17 @@ impl Parts {
 
     fn all(&self, s: u32) -> std::ops::Range<u32> {
         self.start[s as usize]..self.start[s as usize + 1]
+    }
+
+    /// The elements and name to take the event times of part `k` from: those of the whole
+    /// signal when it is lean and has named parts (a record pack, `Signal::lean`).
+    fn timing<'a>(&'a self, k: usize, g: &'a Signal) -> (Range, &'a str, bool) {
+        let (s, r, name) = &self.of[k];
+        if g.is_lean() && self.all(*s).len() > 1 {
+            (Range::new(0, g.ty.len), &g.name, true)
+        } else {
+            (*r, name, false)
+        }
     }
 }
 
@@ -373,16 +387,20 @@ impl SimControl {
     pub(super) fn still_changing(&self) -> Vec<ChangingSignal> {
         let since = self.cycle.saturating_sub(LOOP_WINDOW);
         let parts = self.parts();
-        parts
-            .of
-            .iter()
-            .filter(|(s, r, _)| self.signals[*s as usize].event_since(*r, since))
-            .map(|(s, r, name)| ChangingSignal {
-                id: SignalId(*s),
-                name: name.clone(),
-                value: short_value(&self.signals[*s as usize], *r),
-            })
-            .collect()
+        let mut out: Vec<ChangingSignal> = Vec::new();
+        for (k, &(s, _, _)) in parts.of.iter().enumerate() {
+            let g = &self.signals[s as usize];
+            // A lean record is named once, as a whole, with no value (no record literal).
+            let (r, name, whole) = parts.timing(k, g);
+            if (!whole || parts.start[s as usize] == k as u32) && g.event_since(r, since) {
+                out.push(ChangingSignal {
+                    id: SignalId(s),
+                    name: name.to_string(),
+                    value: (!whole).then(|| short_value(g, r)).flatten(),
+                });
+            }
+        }
+        out
     }
 
     /// Per part the processes that wait on it, per process the parts it drives (both
@@ -569,8 +587,8 @@ impl SimControl {
             v
         };
         let last_event = |k: usize| {
-            let (s, r, _) = &parts.of[k];
-            let since = self.signals[*s as usize].last_event(*r, now);
+            let g = &self.signals[parts.of[k].0 as usize];
+            let since = g.last_event(parts.timing(k, g).0, now);
             (since != Time::MAX).then(|| now.since(since))
         };
         // The signals the stuck processes wait on and nothing can change.
@@ -594,6 +612,10 @@ impl SimControl {
                     drivers: driven_by(s),
                     fed_by: fed_by(s),
                     last_event: last_event(s as usize),
+                    last_event_of: match parts.timing(s as usize, g) {
+                        (_, name, true) => Some(name.to_string()),
+                        _ => None,
+                    },
                 }
             })
             .collect();

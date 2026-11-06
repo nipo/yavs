@@ -103,6 +103,12 @@ impl Elaborated {
                     false => b.signal(&name, ty, &init),
                 };
                 debug_assert_eq!(id.0 as usize, k, "kernel signals in pack order");
+                // Lean only when nothing asks any history of a leaf: `'last_event` of a field is
+                // a part of the pack, which a lean signal answers exactly for whole blocks only.
+                if (a.0..z.0).all(|l| self.bare.get(l as usize) == Some(&true)) {
+                    b.lean_events(id);
+                    b.no_history(id);
+                }
                 continue;
             }
             let i = a.index();

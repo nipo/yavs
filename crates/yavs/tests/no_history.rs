@@ -62,6 +62,7 @@ fn a_bus_with_no_history_runs_as_one_that_keeps_it() {
             "narrow_history_ext",
             include_str!("perf/narrow_history_ext.vhd"),
         ),
+        ("record_history", include_str!("perf/record_history.vhd")),
     ];
     for (top, src) in designs {
         let file = format!("{top}.vhd");

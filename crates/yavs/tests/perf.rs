@@ -311,6 +311,13 @@ case!(
     &[],
     [("bare_signals", Min(2)), ("lean_signals", Min(2))]
 );
+// The records nothing asks the history of keep none (#1117): `p`, `po` and the packs of `pm`.
+case!(
+    record_history,
+    "n=37663 m=4165 g=2400 p=377 e=6060 o=1944",
+    &[],
+    [("bare_signals", Min(9)), ("lean_signals", Min(9))]
+);
 case!(
     lean_events,
     "events=",

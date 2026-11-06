@@ -154,7 +154,8 @@ All name objects and fields by the logical model, so only the lookups change, th
 - kernel names: a pack's kernel name is the path of the innermost record holding its leaves; the
   elaborator names its fields as parts (`SimControl::name_parts`), and the hang, stuck and delta
   loop reports work per part (waits, drivers, values and events of the field), so they read as
-  before packs (#704). Kernel errors that print a signal's name do not reach a pack (they are
+  before packs (#704). A pack nothing asks the history of keeps none (#1117): its fields have no
+  event times of their own, so the reports give the record's. Kernel errors that print a signal's name do not reach a pack (they are
   about user resolution functions, guards and ports with several sources, which do not pack).
 
 ### 3.6 Bulk access: what gather and scatter map onto (#677)

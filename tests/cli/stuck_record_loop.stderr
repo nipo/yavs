@@ -1,0 +1,19 @@
+error[E3002]: delta cycle limit 10000 exceeded; active processes: stuck_record_loop.p
+  --> $DIR/stuck_record_loop.vhd:15:5
+   |
+11 |   signal r : rec := ('0', '0');
+   |          - stuck_record_loop.r still changes
+...
+15 |     r.a <= not r.b;
+   |     ^^^^^^^^^^^^^^^ `stuck_record_loop.p` assigns stuck_record_loop.r.a, which wakes `stuck_record_loop.q`
+...
+19 |     r.b <= r.a;
+   |     ----------- `stuck_record_loop.q` assigns stuck_record_loop.r.b, which wakes `stuck_record_loop.p`
+   |
+   = note: at 0 fs, delta 10000
+   = note: processes `stuck_record_loop.p` and `stuck_record_loop.q` wake each other through stuck_record_loop.r.a and stuck_record_loop.r.b with no delay
+   = help: break the loop: give an assignment on it a delay (`after 1 ns`), or let the processes wait on a clock instead of on each other's outputs
+   = help: if the design needs more delta cycles at one time, raise the limit with `--max-deltas=N`
+
+error: aborting due to 1 previous error
+

@@ -2964,7 +2964,7 @@ impl Signal {
         let n = self.ty.len as usize;
         let own = elapsed(now, &self.stamps[2 * n..3 * n][r.elems()]);
         let mut blk: SmallVec<[u64; 8]> = self.block_events(r).map(|x| x.time).collect();
-        // No history: the signal's last event (reports only; such a signal has one part).
+        // No history: the signal's last event (reports only, asked for the whole: `Parts::timing`).
         if self.bare {
             blk.push(self.bare_last.1);
         }

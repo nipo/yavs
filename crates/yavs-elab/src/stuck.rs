@@ -500,12 +500,12 @@ fn stuck_signal(r: &StuckReport, s: &StuckSignal) -> String {
     if let Some(v) = &s.value {
         t.push_str(&format!(" is {v}"));
     }
-    t.push_str(match s.last_event {
-        Some(_) => "",
-        None => " and never had an event",
-    });
-    if let Some(e) = s.last_event {
-        t.push_str(&format!(", last event at {e}"));
+    // A field of a lean record has the record's last event.
+    match (s.last_event, &s.last_event_of) {
+        (Some(e), None) => t.push_str(&format!(", last event at {e}")),
+        (Some(e), Some(r)) => t.push_str(&format!(", last event of the record {r} at {e}")),
+        (None, Some(r)) => t.push_str(&format!(" and the record {r} never had an event")),
+        (None, None) => t.push_str(" and never had an event"),
     }
     match (s.drivers.as_slice(), s.fed_by.as_slice()) {
         ([], []) => t.push_str("; it has no driver"),

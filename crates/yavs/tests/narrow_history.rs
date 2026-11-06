@@ -2,6 +2,7 @@
 //! answer exactly: the same report with every history kept (`YAVS_LEAN_EVENTS=off`), on four
 //! threads, and under each compiled tier the build has, whose `'event` and edge tests read the
 //! event stamps of a narrow signal that is not lean; the same events and the same wave file.
+//! Records too, through a field, an element or the whole (#1117).
 
 mod common;
 
@@ -10,7 +11,7 @@ use std::process::Command;
 
 use common::tempdir;
 
-const DESIGNS: [(&str, &str, &str); 2] = [
+const DESIGNS: [(&str, &str, &str); 3] = [
     (
         "narrow_history",
         include_str!("perf/narrow_history.vhd"),
@@ -20,6 +21,11 @@ const DESIGNS: [(&str, &str, &str); 2] = [
         "narrow_history_ext",
         include_str!("perf/narrow_history_ext.vhd"),
         "n=27 q=4006",
+    ),
+    (
+        "record_history",
+        include_str!("perf/record_history.vhd"),
+        "n=37663 m=4165 g=2400 p=377 e=6060 o=1944",
     ),
 ];
 
