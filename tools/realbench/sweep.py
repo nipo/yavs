@@ -5,7 +5,7 @@ has. Meant for a binary with debug assertions (the gate of an optimiser or lower
 on a plain build the switch runs the same verifier checks. A test whose source is not there
 (a private checkout, a program image that needs a cross compiler) is listed as not run.
 
-  tools/realbench/sweep.py BIN [--jobs 4] [--filter RE]
+  tools/realbench/sweep.py BIN [--jobs 4] [--filter RE] [--no-sandbox]
 
 Exit 1 when a run reports a broken function or panics, or exits with a status the run to
 1 ns does not explain. Stdlib only (the OSVVM driver tests need suites/requirements.txt).
@@ -17,6 +17,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import run as R  # noqa: E402
 
+NO_SANDBOX = False
 BAD = re.compile(r"broke |panicked|read before it is written|this is a bug in yavs")
 
 
@@ -29,9 +30,9 @@ def one(t, B, key, worlds):
         R.check_sources([t])
         R.make_pristine(t, "yavs", B, key, d)
         s = R.yavs_script(B, dict(t, quiet=False), d, "clift", stop="1ns", wrap="exec ")
-        p = subprocess.run(["timeout", "1500", "systemd-run", "--user", "--scope", "-q", "-p", "MemoryMax=8G",
-                            "--setenv=YAVS_VERIFY_IR=1", f"--setenv=YAVS_STD_CACHE={os.environ['YAVS_STD_CACHE']}",
-                            "bash", "-c", s], cwd=d, capture_output=True, text=True, errors="replace")
+        cap = [] if NO_SANDBOX else ["systemd-run", "--user", "--scope", "-q", "-p", "MemoryMax=8G"]
+        p = subprocess.run(["timeout", "1500", *cap, "bash", "-c", s], cwd=d, capture_output=True, text=True, errors="replace",
+                           env={**os.environ, "YAVS_VERIFY_IR": "1"})
         text = p.stdout + p.stderr + "".join((d / x).read_text(errors="replace") for x in (R.OUT, R.ERR) if (d / x).exists())
         bad = [l[:300] for l in text.splitlines() if BAD.search(l)]
         return n, ("broken" if bad else "ok"), p.returncode, bad[:3]
@@ -46,7 +47,10 @@ def main():
     ap.add_argument("bin")
     ap.add_argument("--jobs", type=int, default=4)
     ap.add_argument("--filter", default="")
+    ap.add_argument("--no-sandbox", action="store_true", help="no systemd-run memory cap (CI)")
     a = ap.parse_args()
+    global NO_SANDBOX
+    NO_SANDBOX = a.no_sandbox
     B = str(Path(a.bin).resolve())
     key = R.B.binary_key(B)
     tests = [t for t in R.load_tests() if re.search(a.filter, t["name"]) and t["category"] != "cpubench"]
