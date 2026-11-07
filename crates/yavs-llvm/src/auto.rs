@@ -626,21 +626,21 @@ fn cpu_thread() -> Option<Duration> {
     None
 }
 
-/// CLOCK_PROCESS_CPUTIME_ID, CLOCK_THREAD_CPUTIME_ID
-#[cfg(target_os = "linux")]
-const CPU_PROCESS: i32 = 2;
+/// CLOCK_THREAD_CPUTIME_ID
 #[cfg(target_os = "linux")]
 const CPU_THREAD: i32 = 3;
 
-/// CPU time of the simulation threads: that of the process less that of the calling thread (the
-/// compile thread, which sleeps during a trial). `None` where the platform has no such clock.
+/// The simulation CPU: the CPU time of the kernel thread (`clock`, `Shared::sim_clock`), not of
+/// the process, whose pool workers spin between batches. `None` where there is no such clock.
+// ponytail: a pooled batch's wait past the join spin sleeps uncounted; count the workers' busy
+// time if long pooled batches must weigh in full.
 #[cfg(target_os = "linux")]
-fn sim_cpu() -> Option<Duration> {
-    cpu_read(CPU_PROCESS)?.checked_sub(cpu_read(CPU_THREAD)?)
+fn sim_cpu(clock: i32) -> Option<Duration> {
+    if clock == 0 { None } else { cpu_read(clock) }
 }
 
 #[cfg(not(target_os = "linux"))]
-fn sim_cpu() -> Option<Duration> {
+fn sim_cpu(_: i32) -> Option<Duration> {
     None
 }
 
@@ -660,23 +660,6 @@ fn own_cpu_clock() -> i32 {
 #[cfg(not(target_os = "linux"))]
 fn own_cpu_clock() -> i32 {
     0
-}
-
-/// CPU time of the simulation threads as the sampler thread sees it: the process's less its own
-/// and the compile thread's (`compile_clock`, 0: none yet). `None` where there is no such clock.
-#[cfg(target_os = "linux")]
-fn sim_cpu_sampler(compile_clock: i32) -> Option<Duration> {
-    // (The three reads are not at one instant: a difference that comes out negative is zero.)
-    let rest = cpu_read(CPU_PROCESS)?.saturating_sub(cpu_read(CPU_THREAD)?);
-    if compile_clock == 0 {
-        return Some(rest);
-    }
-    Some(rest.saturating_sub(cpu_read(compile_clock)?))
-}
-
-#[cfg(not(target_os = "linux"))]
-fn sim_cpu_sampler(_: i32) -> Option<Duration> {
-    None
 }
 
 /// The wall clock and the pause between two reads of a trial's windows: the real ones, or a test's
@@ -991,14 +974,14 @@ struct Shared {
     busy: AtomicBool,
     /// A trial is running: its swaps would show as the code running, so the sampler sends no looks.
     trial: AtomicBool,
-    /// The CPU clock of the compile thread (`pthread_getcpuclockid`; 0 until it is set), which the
-    /// sampler subtracts from the process's to get the simulation's.
-    compile_clock: std::sync::atomic::AtomicI32,
+    /// The CPU clock of the kernel thread, the one that made the tier (`pthread_getcpuclockid`;
+    /// 0: none), whose CPU time is the simulation CPU (`sim_cpu`).
+    sim_clock: i32,
     /// Why the sampler counts CPU time and not instructions (`work::activate`), once it started;
     /// `None` while the work clock counts.
     clock_off: Mutex<Option<String>>,
     /// What the sampler has read so far, for the trace and the calibration of `work::INSTR_PER_US`:
-    /// CPU microseconds and instructions of the simulation threads.
+    /// the simulation CPU (`sim_cpu`, microseconds) and the instructions of the simulation threads.
     read_cpu_us: std::sync::atomic::AtomicU64,
     read_instr: std::sync::atomic::AtomicU64,
     /// Eager mode: per function, its compile (or the decision to leave it interpreted) is over,
@@ -1408,6 +1391,8 @@ struct Worker {
     gate: u64,
     count: u32,
     gate_cpu: u64,
+    /// `Shared::sim_clock`: the clock of the trials' windows.
+    sim_clock: i32,
     /// `Worker::guard`: the work at its last look, per function the frames it left by then and whether
     /// it was published then, the functions under trial, the ones found to gain, and its numbers
     /// (0: no guard).
@@ -1666,6 +1651,7 @@ impl Worker {
             gate: 0,
             count: 0,
             gate_cpu: COUNT_GATE_CPU,
+            sim_clock: 0,
             guard_at: 0,
             left_seen: vec![0; nfuncs],
             live: vec![false; nfuncs],
@@ -1771,7 +1757,7 @@ impl Worker {
             tr.line(format!(
                 "count gate open at {} us of work, simulation CPU {:?}",
                 self.total,
-                sim_cpu()
+                sim_cpu(self.sim_clock)
             ));
             self.gate = 0;
         }
@@ -2707,6 +2693,7 @@ impl Worker {
     /// compile thread waits meanwhile.
     fn trial(&mut self, id: FuncId, halt: &AtomicBool) {
         let k = id.0 as usize;
+        let clock = self.sim_clock;
         let Some(f) = self.prog.func(id) else {
             return;
         };
@@ -2773,7 +2760,7 @@ impl Worker {
             run_trial(
                 &mut swap,
                 &yavs_interp::sim_progress,
-                &sim_cpu,
+                &|| sim_cpu(clock),
                 &halted,
                 &pace,
                 &BY_RUNS,
@@ -2783,7 +2770,7 @@ impl Worker {
             let t = run_trial(
                 &mut swap,
                 &|| counts.entries(),
-                &sim_cpu,
+                &|| sim_cpu(clock),
                 &halted,
                 &pace,
                 &BY_ENTRIES,
@@ -3430,7 +3417,7 @@ fn sampler_loop(
             false
         }
     };
-    let clock = || sim_cpu_sampler(sh.compile_clock.load(Ordering::Acquire));
+    let clock = || sim_cpu(sh.sim_clock);
     let (mut last_cpu, mut last_wall) = (clock(), std::time::Instant::now());
     let mut last: Vec<(usize, u64)> = Vec::new();
     crate::work::per_thread(&mut last);
@@ -3652,6 +3639,8 @@ impl AutoTier {
             finished: (0..prog.funcs.len())
                 .map(|_| AtomicBool::new(false))
                 .collect(),
+            // (The tier is made on the kernel thread, the one that runs the simulation.)
+            sim_clock: own_cpu_clock(),
             ..Shared::default()
         });
         let ntab: Arc<[AtomicUsize]> = (0..prog.funcs.len()).map(|_| AtomicUsize::new(0)).collect();
@@ -3701,6 +3690,7 @@ impl AutoTier {
             note,
         );
         (w.counted, w.gate, w.count) = (counted, gate, count);
+        w.sim_clock = shared.sim_clock;
         if let Some(n) = std::env::var("YAVS_AUTO_WARM_GATE")
             .ok()
             .and_then(|v| v.parse().ok())
@@ -3715,7 +3705,6 @@ impl AutoTier {
                     // Nothing a run of a few milliseconds samples pays for a compile, and moving the
                     // thread, reading the cache's list and waking every millisecond cost a tenth of
                     // such a run: do none of it before `START_AFTER` (#426). `stop` ends the wait.
-                    sh.compile_clock.store(own_cpu_clock(), Ordering::Release);
                     let mut pending = Pending::default();
                     let mut looks: Vec<Look> = Vec::new();
                     let t0 = std::time::Instant::now();
@@ -3753,7 +3742,7 @@ impl AutoTier {
                         }
                     }
                     if let (Some(key), Some(store)) = (w.profile_key, w.store.clone()) {
-                        let cpu0 = sim_cpu().map_or(0, |c| u64::try_from(c.as_micros()).unwrap_or(0));
+                        let cpu0 = sim_cpu(sh.sim_clock).map_or(0, |c| u64::try_from(c.as_micros()).unwrap_or(0));
                         *sh.profile.lock().unwrap_or_else(PoisonError::into_inner) =
                             Some(ProfileJob {
                                 store,
@@ -4144,21 +4133,9 @@ impl AutoTier {
         true
     }
 
-    /// The CPU time of the simulation threads so far, in microseconds: the process's less the compile
-    /// thread's. `None` before the thread started or where there is no such clock.
-    #[cfg(target_os = "linux")]
+    /// The simulation CPU so far (`sim_cpu`), in microseconds; `None` where there is no such clock.
     fn sim_cpu_now(&self) -> Option<u64> {
-        let clock = self.shared.compile_clock.load(Ordering::Acquire);
-        if clock == 0 {
-            return None;
-        }
-        let c = cpu_read(CPU_PROCESS)?.saturating_sub(cpu_read(clock)?);
-        u64::try_from(c.as_micros()).ok()
-    }
-
-    #[cfg(not(target_os = "linux"))]
-    fn sim_cpu_now(&self) -> Option<u64> {
-        None
+        u64::try_from(sim_cpu(self.shared.sim_clock)?.as_micros()).ok()
     }
 
     /// Write the profile of this run (`profile::next`) from what the compile thread published, once:
@@ -4357,6 +4334,24 @@ impl Tier for AutoTier {
 
 #[cfg(test)]
 mod tests {
+    /// The simulation CPU is the kernel thread's: a pool worker that spins while the kernel
+    /// thread waits does not make the run look dearer to the policy.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_simulation_cpu_leaves_out_other_threads() {
+        use std::time::Duration;
+        let clock = super::own_cpu_clock();
+        let c0 = super::sim_cpu(clock).unwrap();
+        std::thread::spawn(|| {
+            let t0 = super::cpu_thread().unwrap();
+            while super::cpu_thread().unwrap() - t0 < Duration::from_millis(60) {}
+        })
+        .join()
+        .unwrap();
+        let spent = super::sim_cpu(clock).unwrap() - c0;
+        assert!(spent < Duration::from_millis(30), "{spent:?}");
+    }
+
     /// A worker of the count rule: no generator, so nothing compiles; the rule's decisions only.
     fn counted(prog: yavs_ir::Program, gate: u64) -> super::Worker {
         let rt = yavs_interp::Runtime::new(std::sync::Arc::new(prog), Default::default()).unwrap();

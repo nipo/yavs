@@ -14707,3 +14707,19 @@ the IR optimiser and lowering. Decisions:
   1.22) and one that does not ends sooner (neorv32 0.71, osvvm 0.77). Peak RSS is the same in every mode (GRLIB 357 to 359 MB, neorv32 145 to 177 MB): memory was
   not the cause; a compile thread adds no memory a waiting run does not. Main-thread instructions with nothing
   compiled (`--tier-heat=2000000000,0,16000`, and `--tier=interp`) are within 0.03 percent of old.
+
+## `--tier=auto` under `--threads`: the simulation CPU is the kernel thread's (yavs-llvm `auto.rs`, #884, 2026-11-07)
+
+- **Decision: the simulation CPU that `--tier=auto` judges by (the profile's `base` and its `better` verdict, the warm gate
+  `YAVS_AUTO_WARM_GATE`, the trials' windows, the sampler where the counters are refused) is the CPU time of the kernel
+  thread, the thread that makes the tier and runs the cycle, not the process's less the compile thread's** (agent). Why:
+  the pool workers of `--threads` spin between batches, so the process's CPU time measured the thread count, not the
+  work: a threaded `rtl_lfsr` stored 0.8 to 1.1 s at 0.15 s of simulate wall, `sc5_fifo_repack` 2.2 s at 0.8 s (now
+  0.15 and 0.8 s, as at one thread), and a run whose threads were on for fewer windows than the run before looked 3
+  percent better than it was. At one thread nothing changes but the sampler's own CPU, which is no longer counted. Ceiling: when a pooled
+  batch outlasts the kernel thread's join spin the kernel thread sleeps and the rest of the batch is not counted.
+- **Measured:** with the inflated `base` the warm runs of short threaded designs had passed the 400 ms warm gate that the
+  same design at one thread never reaches, and linked their cached code at once; with the fix they wait for the count
+  gate as at one thread, and threaded warm runs of `rtl_lfsr` read about 5 to 10 percent slower in simulate wall
+  (host noise of the same size: an A/A pair read 1.08). At one thread a warm gate of 100 ms made the warm runs of
+  `rtl_lfsr` 6 to 11 percent faster; the gate's value is the maintainer's to decide.

@@ -20,8 +20,8 @@ pub(crate) const EARLY_SPEEDUP: f64 = 1.4;
 /// is compiled early once its seen time summed over the runs repays its compile, #679.)
 pub(crate) const EARLY_RUNS: u64 = 4;
 
-/// A run is judged, and written to the profile, only when the simulation threads used this much CPU
-/// time (microseconds): host noise is a few percent of that.
+/// A run is judged, and written to the profile, only when it used this much simulation CPU (the kernel
+/// thread's CPU time, `auto::sim_cpu`; microseconds): host noise is a few percent of that.
 pub(crate) const JUDGE_MIN_US: u64 = 100_000;
 
 /// The names kept: the hottest functions, and the most recent losses.
