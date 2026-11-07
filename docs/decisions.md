@@ -14552,7 +14552,7 @@ whole-signal read, the call, the result's check and copy, the wide drive).
   the cap no longer has to protect the processor tests; a gaining one can use up to 8. `yavs.max_threads` and
   `--yavs-max-threads` take a number or `auto`.
 
-## Copies of subprograms by the descriptors of their arguments (`opt/subcopy.rs`, `copies.rs`, prototype on a side branch, 2026-11-03)
+## Copies of subprograms by the descriptors of their arguments (`opt/subcopy.rs`, `copies.rs`, 2026-11-03; landed with the maintainer's ruling of 2026-11-07)
 
 **Decision.** The last step of a specialised copy's optimisation asks, per `Call`, which `'dope` arguments have bytes it knows (the constant pool, instance data outside the parameters of `for` generates, package data the copy has, what the declarative part left in the frame, a descriptor the copy itself was made for) and calls the copy of the callee for those bytes, in a reserved slot (`Program::sub_copy`). The copy has them as `Opt::wf` facts, so its layouts, lengths, positions and checks fold, and it asks the same of its own calls.
 
