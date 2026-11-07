@@ -30,6 +30,9 @@ pub fn llvm_compiled(inline: usize, interpreted: usize, native_frames: usize) {
 
 /// Print the counters when `YAVS_COUNTERS` is set; `s` is the kernel's.
 pub fn report(s: yavs_kernel::Stats, rt: Option<&yavs_interp::Runtime>) {
+    // (A measurement switch of the Cranelift tier, `YAVS_CLIFT_BLOCKCOV`: writes the blocks that ran.)
+    #[cfg(feature = "clift")]
+    yavs_clift::blockcov_write();
     if std::env::var_os("YAVS_COUNTERS").is_none() {
         return;
     }
@@ -104,12 +107,15 @@ pub fn report(s: yavs_kernel::Stats, rt: Option<&yavs_interp::Runtime>) {
         rows.push(("spec_copy_ir", c.copy_ir));
         rows.push(("retiers", rt.native_flags().retiers()));
         rows.push(("materialised", rt.native_flags().materialised_all()));
-        let [asked, held, compiled, copies, withdrawn] = rt.native_flags().count_stats();
+        let [asked, held, compiled, copies, withdrawn, deferred, later] =
+            rt.native_flags().count_stats();
         rows.push(("count_asked", asked));
         rows.push(("count_held", held));
         rows.push(("count_compiled", compiled));
         rows.push(("count_copies", copies));
         rows.push(("count_withdrawn", withdrawn));
+        rows.push(("count_frame_deferred", deferred));
+        rows.push(("count_frame_later", later));
     }
     // The calls of each native `ieee` subprogram that ran its general path (every build).
     let ieee: Vec<(String, u64)> = rt

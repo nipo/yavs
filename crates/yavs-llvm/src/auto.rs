@@ -1323,6 +1323,9 @@ struct Worker {
     /// which its frame-mode code is compiled too (0: none). A native frame of it left to the
     /// interpreter goes on interpreted, which is what this time measures (#757).
     frame_at: Vec<u64>,
+    /// Functions with a loop the count asked for and got native-frame code alone (`asked_part`):
+    /// their frame-mode code is asked for once a native frame of one is left to the interpreter.
+    deferred: Vec<FuncId>,
 
     /// Microseconds the simulation threads were seen running, and the compile thread spent
     /// compiling.
@@ -1593,6 +1596,7 @@ impl Worker {
             group: vec![0; nfuncs],
             asked_for: vec![false; nfuncs],
             frame_at: vec![0; nfuncs],
+            deferred: Vec::new(),
             done: vec![[false; 2]; nfuncs],
             fast: vec![false; nfuncs],
             nat: vec![(0, false); nfuncs],
@@ -1762,6 +1766,22 @@ impl Worker {
             self.gate = 0;
         }
         let mut go = std::mem::take(&mut self.want);
+        if !self.deferred.is_empty() {
+            let mut deferred = std::mem::take(&mut self.deferred);
+            deferred.retain(|&i| {
+                let k = i.0 as usize;
+                if self.done[k][0] || self.lost[k] || self.nat[k].0 == 0 {
+                    return false;
+                }
+                if self.native.materialised(i) == 0 {
+                    return true;
+                }
+                self.native.count_stat(CountStat::FrameLater);
+                go.push(i);
+                false
+            });
+            self.deferred = deferred;
+        }
         if !self.waiting.is_empty() {
             let wait = std::mem::take(&mut self.waiting);
             let (stay, free): (Vec<_>, Vec<_>) = wait.into_iter().partition(|&i| self.waits(i));
@@ -1850,15 +1870,35 @@ impl Worker {
         }
     }
 
-    /// What the count compiles of `id`: native-frame code where it can run on one and has no loop,
-    /// the interpreter entering it there; else frame-mode code, and native-frame code too if it has.
+    /// `asked_part` of a function the count asked for, noting a frame-mode part it leaves for later.
+    fn ask(&mut self, id: FuncId) -> Part {
+        let part = self.asked_part(id);
+        if self.counted
+            && part == Part::Native
+            && self.prog.func(id).is_some_and(|f| loops(&self.prog, f))
+        {
+            self.deferred.push(id);
+            self.native.count_stat(CountStat::FrameDeferred);
+        }
+        part
+    }
+
+    /// What the count compiles of `id`: native-frame code where it can run on one, the interpreter
+    /// entering it there; else frame-mode code, and native-frame code too if it has. The frame-mode
+    /// code of one with a loop waits for a native frame of it left to the interpreter (`freed`),
+    /// unless its native-frame code exists already or there is no budget (`--tier-heat`).
     fn asked_part(&self, id: FuncId) -> Part {
         if !self.counted {
             return Part::Both;
         }
         match self.prog.func(id) {
-            Some(f) if f.parent.is_none() && self.native_ok(id) && !loops(&self.prog, f) => {
-                Part::Native
+            Some(f) if f.parent.is_none() && self.native_ok(id) => {
+                if loops(&self.prog, f) && (self.heat.budget == 0 || self.nat[id.0 as usize].0 != 0)
+                {
+                    Part::Both
+                } else {
+                    Part::Native
+                }
             }
             _ => Part::Both,
         }
@@ -3197,6 +3237,11 @@ impl Worker {
                         b if b != id => format!(", copy of {b}"),
                         _ => String::new(),
                     };
+                    let base = format!(
+                        "{base}{}{}",
+                        if f.parent.is_some() { ", nested" } else { "" },
+                        if loops(&self.prog, f) { ", loops" } else { "" }
+                    );
                     let leave = (f.kind == FuncKind::Process)
                         .then(|| callbacks(&self.prog, f, self.tune.wait_same))
                         .map_or(String::new(), |(o, t)| {
@@ -3717,7 +3762,7 @@ impl AutoTier {
                                 .or_else(|| {
                                     while let Some(id) = pending.asked.pop_front() {
                                         if !w.counted || !w.waits(id) {
-                                            return Some((vec![(id, w.asked_part(id))], false, false));
+                                            return Some((vec![(id, w.ask(id))], false, false));
                                         }
                                         if !w.held[id.0 as usize] {
                                             w.held[id.0 as usize] = true;
@@ -4267,6 +4312,35 @@ mod tests {
         assert!(!w.waits(callee));
         assert_eq!(w.freed(), [callee]);
         assert!(w.waiting.is_empty());
+    }
+
+    /// The count gives a function with a loop native-frame code alone; its frame-mode code (for the
+    /// interpreter to enter again where a native frame of it was left) is asked for once one was.
+    #[test]
+    fn frame_code_of_an_asked_loop_waits_for_a_left_frame() {
+        use super::{CountStat, Part};
+        let (prog, f) = padded_loop(100);
+        let mut w = counted(prog, 0);
+        assert_eq!(w.ask(f), Part::Native);
+        assert_eq!(w.deferred, [f]);
+        let k = f.0 as usize;
+        w.nat[k].0 = 64;
+        assert!(w.freed().is_empty());
+        assert_eq!(w.deferred, [f]);
+        w.native.note_left(f);
+        assert_eq!(w.freed(), [f]);
+        assert!(w.deferred.is_empty());
+        // Asked again: native-frame code exists, so the frame-mode code now.
+        assert_eq!(w.ask(f), Part::Both);
+        let stats = w.native.count_stats();
+        assert_eq!(stats[CountStat::FrameDeferred as usize], 1);
+        assert_eq!(stats[CountStat::FrameLater as usize], 1);
+        // Without a budget (`--tier-heat`) both parts at once, as for a sampled root.
+        let (prog, g) = padded_loop(100);
+        let mut h = counted(prog, 0);
+        h.heat.budget = 0;
+        assert_eq!(h.ask(g), Part::Both);
+        assert!(h.deferred.is_empty());
     }
 
     /// A warm run links what the cache lists before the gate only if its own last run was long: the
