@@ -73,7 +73,9 @@ designs of thousands of small processes on one clock got 93 to 102 percent of th
 ``--threads`` once the last run was remembered, and designs that do not gain ran within 1 percent of
 ``--threads=1``. The first run of a design, with nothing remembered, does worse on some: 89 and 80 percent on two
 designs with compiled processes, or 94 and 85 percent against fixed runs that were first runs too (the compiled tier
-keeps its own profile per command line). A test of a few milliseconds runs on one thread. The numbers are in
+keeps its own profile per command line). On 8 cores and their second hardware threads the first runs of three
+such designs reached 89 to 96 percent of the best fixed ``--threads``, measured against first runs too. A test of a few
+milliseconds runs on one thread. The numbers are in
 `parallel.md <https://github.com/ru551n/yavs/blob/main/docs/parallel.md>`__. Measure your own longest test if
 you depend on it (`How to decide`_).
 

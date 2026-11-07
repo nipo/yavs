@@ -11066,6 +11066,12 @@ thread. Not measured: hosts with more than 8 CPUs, Windows.
   fresh command line are also slower at one thread (the compiled tier's profile is per command line); against fresh
   fixed runs they reach 85 to 94 percent. Open: `--threads=N` still costs designs that never pool up to 2.8 percent of their instructions (#858). The
   token server's cost with `auto`: instructions within 0.8 percent of `--threads=1` on the designs that do not gain.
+- Round 3 (2026-11-07, `docs/parallel.md` "Round 3"): `--tier=auto` judges by the kernel thread's CPU time, not the
+  process's (pool workers spinning made threaded runs look up to six times dearer); `--threads=auto` looks at the
+  clock about once a millisecond (first runs of the gaining designs 89 to 96 percent of the best fixed count on 8
+  cores); a batch too small to pool is not estimated (#858: `rtl_ram` 1.012 to 1.004 of one thread's instructions,
+  `lfsr64` still 1.02). Not reproduced on this host: the fixed `--threads=8` raise trap, `sc5_fifo_repack` slower
+  with `auto` than on one thread.
 
 ## Copies of subprograms by descriptors
 A specialised copy calls a copy of a subprogram made for the descriptors of records and arrays of composites it knows at the call (`yavs-ir` `opt/subcopy.rs`, `docs/decisions.md` "Copies of subprograms by the descriptors of their arguments"). Stored copies name those calls by what they are for. Not on the eager `--tier=clift`, which has no copies; a descriptor a caller builds per call (a formal of a subtype with a non-static bound) is not known, and compiled-to-compiled calls are outside the debug check.

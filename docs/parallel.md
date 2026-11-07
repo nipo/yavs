@@ -271,6 +271,34 @@ server of 8 slots (`YAVS_TOKENS`, one client) 1.000 to 1.008; one thread of the 
 and the timed sample; not changed). Wall times of all of them are within the spread of the runs (bands of 5 to 30
 percent on this host).
 
+## Round 3 (2026-11-07)
+
+Three changes (`docs/decisions.md` "`--tier=auto` under `--threads`" and "`--threads=auto` round 3"): the compiled
+tier's simulation CPU is the kernel thread's (the process's had counted the pool workers spinning, so a threaded
+`rtl_lfsr` read six times its wall time and its warm runs took the warm path that one thread never takes); under
+`auto` the kernel looks at the clock about once a millisecond instead of every 256 delta cycles; a batch too small to
+pool at the dearest cost known is not estimated.
+
+Measured with bench builds (Cranelift) on CPUs 8-15 and 24-31 (8 cores and their second hardware threads, `auto`
+at most 8 threads), first runs on fresh command lines, 7 to 10 rounds, paired ratios per round. The host was busy
+throughout (other jobs ran on these CPUs: 1 to 7 s of their CPU time per run), so bands are
+wide.
+
+| Design | Tier | Best fixed (8) | `auto` first run before | `auto` first run now |
+|---|---|---|---|---|
+| rtl_fan | default | 2.61x | 2.26x, 87 % | 2.36x, 90 % |
+| rtl_ff | default | 1.94x | 1.65x, 85 % | 1.72x, 89 % |
+| rtl_lfsr | default | 1.58x | 1.36x, 86 % | 1.48x, 94 % |
+| rtl_fan | interpreter | | 88 % | 92 % |
+| rtl_ff | interpreter | | 90 % | 96 % |
+| rtl_lfsr | interpreter | | 90 % | 94 % |
+
+`sc5_fifo_repack` (default tier) gained 1.04x to 1.08x with `auto` on 8 and on 4 cores, so the round 2 reading of a
+first run slower than one thread did not reproduce. The fixed `--threads=8` raise trap of compiled `rtl_lfsr` did not
+reproduce in 37 runs on 8 or 4 cores (all 4920 batches pooled). The designs that never pool: instructions over one
+thread unchanged within 0.001 except `rtl_ram` (1.012 to 1.004); `lfsr64` keeps 2 percent, its batches are estimated
+just under the threshold.
+
 ## Details
 
 * **Why mid-size batches no longer slow down.** Handing a batch to the threads has a fixed cost of
