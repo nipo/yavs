@@ -362,6 +362,11 @@ Each one turns a fast path off or changes its threshold, to compare a run with a
      - a number
      - ``8``
      - ``run``
+   * - ``YAVS_COPY_SKIP``
+     - Leaves the first slots of copies empty, so every copy has another function id than in a run without it (a test aid: compiled code must not depend on copy ids).
+     - a number
+     - ``0``
+     - ``run``
    * - ``YAVS_SUB_SLOTS``
      - The most function slots kept for copies of subprograms.
      - a number

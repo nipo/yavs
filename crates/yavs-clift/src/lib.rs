@@ -19,7 +19,7 @@ mod hugearena;
 mod lower;
 
 #[cfg(feature = "clift")]
-pub use cache::{cache_stats, set_cache};
+pub use cache::{cache_stats, set_cache, sub_copy_stats};
 
 #[cfg(feature = "clift")]
 pub use lower::{BREAK, Error, Jit, compile};

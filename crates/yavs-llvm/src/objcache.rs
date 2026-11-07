@@ -220,8 +220,10 @@ pub(crate) fn check() -> bool {
 /// The key that names the object of function `f` (`id` of `prog`) before its code is generated
 /// (#785, maintainer 2026-10-27): the build (in every key), the optimiser switches, the target,
 /// the program's identity (`Program::identity`: its stage-cache entry, everything the generator
-/// reads of the program), `Program::code_key_id` of `id` (the process a process copy is of), the function as handed out (its
-/// optimised code: a copy's folded data among it) and `what` (level, `full`, part). `None` without
+/// reads of the program), `Program::code_key` of `id` (the process a process copy is of, a copy
+/// of a subprogram's tag: its code names its id by `lower::id_symbol`), the function as handed
+/// out (`Program::code_key_bytes`: its optimised code, a copy's folded data among it, copies it
+/// calls by what they are for) and `what` (level, `full`, part). `None` without
 /// a store, for a program not cached, or with a switch of `GEN_SWITCHES`.
 pub(crate) fn pre_key(
     prog: &yavs_ir::Program,
@@ -242,8 +244,8 @@ pub(crate) fn pre_key(
         .text(TARGET.get_or_init(crate::jit::target_id))
         .text(identity)
         .text(what)
-        .part(&prog.code_key_id(id).0.to_le_bytes())
-        .part(&postcard::to_stdvec(f).ok()?);
+        .part(&prog.code_key(id).to_le_bytes())
+        .part(&prog.code_key_bytes(f)?);
     Some(k.finish())
 }
 

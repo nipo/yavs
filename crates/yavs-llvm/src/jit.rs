@@ -791,6 +791,8 @@ pub struct Jit {
     /// With the perf map on (`perfmap::llvm_requested`): the size of each symbol of the objects
     /// added, from the object files themselves.
     sizes: std::collections::HashMap<String, usize>,
+    /// The absolute symbols defined after creation (`define_absolute`), by name.
+    defined: std::collections::HashMap<String, usize>,
 }
 
 extern "C" fn report_session_error(ctx: *mut c_void, err: LLVMErrorRef) {
@@ -798,6 +800,44 @@ extern "C" fn report_session_error(ctx: *mut c_void, err: LLVMErrorRef) {
     let errors = unsafe { &*(ctx as *const Mutex<Vec<String>>) };
     if let Err(e) = check(err) {
         errors.lock().unwrap_or_else(|p| p.into_inner()).push(e.0);
+    }
+}
+
+/// Define `symbols` as absolute addresses in the main dylib of `raw`.
+///
+/// # Safety
+/// `raw` is a live LLJIT.
+unsafe fn define(raw: LLVMOrcLLJITRef, symbols: &[(&str, usize)]) -> Result<()> {
+    if symbols.is_empty() {
+        return Ok(());
+    }
+    // SAFETY: AbsoluteSymbols takes the interned names, Define takes the MU on success.
+    unsafe {
+        let mut pairs: Vec<LLVMOrcCSymbolMapPair> = symbols
+            .iter()
+            .map(|&(name, addr)| {
+                let name = CString::new(name).expect("symbol name has NUL");
+                LLVMOrcCSymbolMapPair {
+                    Name: LLVMOrcLLJITMangleAndIntern(raw, name.as_ptr()),
+                    Sym: LLVMJITEvaluatedSymbol {
+                        Address: addr as u64,
+                        Flags: LLVMJITSymbolFlags {
+                            GenericFlags:
+                                LLVMJITSymbolGenericFlags::LLVMJITSymbolGenericFlagsExported as u8
+                                    | LLVMJITSymbolGenericFlags::LLVMJITSymbolGenericFlagsCallable
+                                        as u8,
+                            TargetFlags: 0,
+                        },
+                    },
+                }
+            })
+            .collect();
+        let mu = LLVMOrcAbsoluteSymbols(pairs.as_mut_ptr(), pairs.len());
+        let err = LLVMOrcJITDylibDefine(LLVMOrcLLJITGetMainJITDylib(raw), mu);
+        if !err.is_null() {
+            LLVMOrcDisposeMaterializationUnit(mu);
+        }
+        check(err)
     }
 }
 
@@ -831,41 +871,30 @@ impl Jit {
                 session_errors: Box::default(),
                 twins: Default::default(),
                 sizes: Default::default(),
+                defined: Default::default(),
             };
             LLVMOrcExecutionSessionSetErrorReporter(
                 LLVMOrcLLJITGetExecutionSession(raw),
                 report_session_error,
                 &*jit.session_errors as *const _ as *mut c_void,
             );
-            if !symbols.is_empty() {
-                let mut pairs: Vec<LLVMOrcCSymbolMapPair> = symbols
-                    .iter()
-                    .map(|&(name, addr)| {
-                        let name = CString::new(name).expect("symbol name has NUL");
-                        LLVMOrcCSymbolMapPair {
-                            Name: LLVMOrcLLJITMangleAndIntern(raw, name.as_ptr()),
-                            Sym: LLVMJITEvaluatedSymbol {
-                                Address: addr as u64,
-                                Flags: LLVMJITSymbolFlags {
-                                    GenericFlags: LLVMJITSymbolGenericFlags::LLVMJITSymbolGenericFlagsExported
-                                        as u8
-                                        | LLVMJITSymbolGenericFlags::LLVMJITSymbolGenericFlagsCallable
-                                            as u8,
-                                    TargetFlags: 0,
-                                },
-                            },
-                        }
-                    })
-                    .collect();
-                let mu = LLVMOrcAbsoluteSymbols(pairs.as_mut_ptr(), pairs.len());
-                let err = LLVMOrcJITDylibDefine(LLVMOrcLLJITGetMainJITDylib(raw), mu);
-                if !err.is_null() {
-                    LLVMOrcDisposeMaterializationUnit(mu);
-                }
-                check(err)?;
-            }
+            define(raw, symbols)?;
             Ok(jit)
         }
+    }
+
+    /// Defines `name` as the absolute address `addr` in the main dylib, once (the id symbols of
+    /// copies, `lower::id_symbol`); another address for a name defined before is an error.
+    pub fn define_absolute(&mut self, name: &str, addr: usize) -> Result<()> {
+        match self.defined.get(name) {
+            Some(&a) if a == addr => return Ok(()),
+            Some(&a) => return Err(Error(format!("{name} is {a:#x}, not {addr:#x}"))),
+            None => {}
+        }
+        // SAFETY: the JIT is live; `define` hands the unit to the dylib.
+        unsafe { define(self.raw, &[(name, addr)]) }?;
+        self.defined.insert(name.to_string(), addr);
+        Ok(())
     }
 
     /// Adds a module to the main dylib. Code is generated lazily, on the first
