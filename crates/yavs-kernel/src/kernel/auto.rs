@@ -332,6 +332,35 @@ mod tests {
         assert_eq!(a.limit, 3);
     }
 
+    /// Pooled batches on half the threads still teach the pool threshold (`learn_pooled`).
+    #[test]
+    fn batches_on_half_the_threads_learn_the_threshold() {
+        let mut b = crate::Builder::new();
+        for i in 0..64 {
+            let f = |c: &mut Ctx<'_>| c.wait_for(Time::ns(1));
+            b.process(&format!("p{i}"), crate::ProcFlags::default(), &[], f);
+        }
+        let cfg = Config {
+            threads: 8,
+            auto: true,
+            ..Config::default()
+        };
+        let mut sim = b.build(cfg).unwrap();
+        sim.set_threads_hint(Some(true));
+        let a = sim.auto.as_deref_mut().unwrap();
+        (a.counted, a.limit) = (true, 3);
+        // No window is judged (a slow machine could end one): inline first, so every process has
+        // a cost, then every batch pools.
+        sim.tick_mask = u64::MAX;
+        sim.pool_ns = u64::MAX;
+        sim.run_until(Time::ns(100)).unwrap();
+        sim.pool_ns = 0;
+        sim.run_until(Time::ns(400)).unwrap();
+        assert_eq!(sim.auto.as_ref().unwrap().limit, 3);
+        assert!(sim.stats().pooled_batches > 0, "{:?}", sim.stats());
+        assert_ne!(sim.pool_ratio, 512, "no pooled batch was learnt from");
+    }
+
     #[test]
     fn losing_windows_turn_the_threads_off() {
         let mut a = Auto::new(7, None);

@@ -2055,11 +2055,7 @@ impl SimControl {
         if self.pool.is_none() && self.auto.as_ref().is_some_and(|a| !a.counted) {
             self.auto_cpus();
         }
-        // `--threads=auto` may run a batch on fewer threads than the pool has (`Auto::limit`).
-        let n = self
-            .auto
-            .as_ref()
-            .map_or(self.workers, |a| a.limit.min(self.workers));
+        let n = self.cap();
         if let Some(t) = &self.tokens {
             self.token_idle = 0;
             if self.held < n {
@@ -2086,6 +2082,14 @@ impl SimControl {
             }
         }
         usable
+    }
+
+    /// The most workers a pooled batch may use: `--threads=auto` may run it on fewer than the
+    /// pool has (`Auto::limit`).
+    fn cap(&self) -> usize {
+        self.auto
+            .as_ref()
+            .map_or(self.workers, |a| a.limit.min(self.workers))
     }
 
     /// A batch that did not pool: after `TOKEN_IDLE` in a row the tokens go back.
@@ -4039,8 +4043,8 @@ impl SimControl {
             self.tokens_idle();
         }
         self.stats.pooled_batches += u64::from(pooled);
-        // A batch on fewer threads than the pool has teaches nothing about the threshold.
-        let full = self.workers == helpers;
+        // A batch on fewer threads than it may use (tokens) teaches nothing about the threshold.
+        let full = helpers == self.cap();
         let pooled_at = est
             .filter(|e| e.learn && full || self.auto.is_some())
             .map(|_| std::time::Instant::now());

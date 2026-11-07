@@ -14530,3 +14530,7 @@ whole-signal read, the call, the result's check and copy, the wide drive).
   pieces (by rayon's thread index): the fills of lines from other cores' caches (`ls_any_fills_from_sys.local_ccx`)
   did not drop and wall stayed within the noise; 8 pieces per thread instead of 4: a shorter tail but more busy time,
   no gain.
+- **Decision: a pooled batch teaches `learn_pooled` when it ran on all the threads it may use** (`SimControl::cap`:
+  under `--threads=auto` its `limit`), not only on all the pool's workers (agent). Why: on half the threads no batch was
+  ever learnt from (`helpers == workers` never held), so the threshold stayed where the last window on all threads left
+  it.
