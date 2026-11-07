@@ -11,8 +11,11 @@ Tiers
 -----
 
 * ``--tier=auto`` (the default in the release archives) starts the run in the interpreter and
-  compiles the functions that become hot on a background thread, with the bundled Cranelift code generator, while the
-  simulation goes on. A run of about half a second of simulation work or less compiles little: such a
+  compiles the functions that become hot, with the bundled Cranelift code generator. By default the simulation waits
+  while a function compiles (``--tier-compile=wait``), so a run keeps no more cores busy than ``--threads``, and
+  as many runs as cores leave the computer usable. ``--tier-compile=background`` compiles on a thread of its own
+  alongside the run instead, at the lowest priority of the system: with idle cores a run that compiles a lot ends
+  sooner, but each run then wants one core more while it compiles. A run of about half a second of simulation work or less compiles little: such a
   run would not get the compile time back. Longer runs compile the processes that keep waking up and
   what compiled code calls, and loops that run for long.
 * ``--tier=clift`` compiles everything before time 0. It can pay off for a long run of a

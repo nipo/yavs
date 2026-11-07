@@ -110,8 +110,17 @@ pub fn report(s: yavs_kernel::Stats, rt: Option<&yavs_interp::Runtime>) {
         rows.push(("spec_copy_ir", c.copy_ir));
         rows.push(("retiers", rt.native_flags().retiers()));
         rows.push(("materialised", rt.native_flags().materialised_all()));
-        let [asked, held, compiled, copies, withdrawn, deferred, later] =
-            rt.native_flags().count_stats();
+        let [
+            asked,
+            held,
+            compiled,
+            copies,
+            withdrawn,
+            deferred,
+            later,
+            waited,
+            alongside,
+        ] = rt.native_flags().count_stats();
         rows.push(("count_asked", asked));
         rows.push(("count_held", held));
         rows.push(("count_compiled", compiled));
@@ -119,6 +128,8 @@ pub fn report(s: yavs_kernel::Stats, rt: Option<&yavs_interp::Runtime>) {
         rows.push(("count_withdrawn", withdrawn));
         rows.push(("count_frame_deferred", deferred));
         rows.push(("count_frame_later", later));
+        rows.push(("tier_waited", waited));
+        rows.push(("tier_alongside", alongside));
     }
     // The calls of each native `ieee` subprogram that ran its general path (every build).
     let ieee: Vec<(String, u64)> = rt

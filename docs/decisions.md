@@ -14654,3 +14654,56 @@ the IR optimiser and lowering. Decisions:
   that command line (its profile is per command line): measured against fixed runs on fresh command lines the
   default-tier first runs reach 91, 94 and 85 percent, and `sc5_fifo_repack` compiled, which read 12 percent slower than
   a remembered `--threads=1`, is 0.96 of a fresh one.
+
+## `--tier-compile`: the run waits while a function compiles (yavs, yavs-llvm `auto.rs`, yavs-kernel, yavs-interp, vunit-yavs, #1123, 2026-11-07)
+
+- **Decision: `yavs run --tier-compile=wait|background`, default `wait`** (user, 2026-11-07: "Switch + low priority",
+  then the same day: the background thread off by default). Why: a user ran simulations on all cores and the computer
+  locked up. Under `--tier=auto` each run had one compile thread more than `--threads`, at the simulations' priority,
+  so N runs on N cores kept up to 2N threads busy. The name follows `--tier`, `--tier-max-size` and `--tier-heat`
+  (an option of the tier, not of the threads), and the values say what happens (the run waits, or the compile runs
+  in the background) rather than on/off: `wait` still has a tier-up thread.
+- **Decision: `wait` keeps the compile on the tier-up thread and stops the simulation while it compiles, instead of
+  compiling on the simulation thread** (agent). The compile thread raises a gate (`yavs_kernel::hold_simulation`) and
+  compiles once a simulation thread waits at a pause point (`pause_point`, one relaxed load: the start of every delta
+  cycle; `watch_tick`, the interpreter's look every 128 jumps back or calls in a long activation, out of line and
+  cold; the `RECHECK` look of the loop with the tier every 256 jumps; `Host::step`, where compiled code hands the
+  interpreter an instruction; the `SPIN_CHECK` trim of a process that never suspends); the gate drops before a trial, which needs the run going. Why: the policy's clocks count the
+  simulation threads only (the instructions they retire, or the process CPU less the sampler's and the compile
+  thread's), so a parked simulation adds nothing and compiling there distorts nothing; on the simulation thread a
+  compile would count as simulation work, and the generators (LLVM's static destructors, #625) would run on threads
+  that `--threads` hands batches to. What is left of the old thread is a sleeping decision thread and the sampler.
+  `Tier::hot`'s wait (eager `--tier-heat`, `YAVS_AUTO_SYNC`) is a pause point too, so those modes cannot deadlock, and
+  `stop` releases a compile thread that waits for the gate. Compiled code in a loop that never leaves it reaches no
+  pause point; a compile then waits for it (without the `RECHECK` and `Host::step` points, a compiled loop that
+  calls an interpreted function held back that function's compile for the whole run: `clift_natfall.rs`).
+- **Decision: in `wait` the compiles are paced: the model's compile time spent (`Worker::spent`) at most the
+  simulation time seen (`Worker::total`)** (agent; not under `--tier-heat` budget 0 or `YAVS_AUTO_SYNC`, whose runs
+  wait for the compile in `Tier::hot` and stop the sampler's clock). Why: the count rule compiles what it asks for
+  without a budget, and a background thread could only ever make as much as the run lasted; a waiting run has no such
+  limit. Unpaced, `osvvm_axi4_random` compiled all 107 functions the count asked for (1 to 4 before, the rest still
+  queued when the run ended) and ran 2.9 times as long; paced it compiles 5. Both are functions of the looks and the
+  model, as the rest of the policy (#670).
+- **Decision: the background thread lowers itself to the lowest OS priority at its first compile**
+  (`lowest_priority`: Linux `setpriority(PRIO_PROCESS, 0, 19)`, which sets the calling thread's nice value only;
+  Windows `SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_LOWEST)`; nothing on other systems, which have no
+  release build) (user, 2026-11-07). The priority is never raised again. Not in `wait`: the run waits on that thread,
+  and a low priority would stall it on a loaded host. A tier that `set_compile` was never called on (the crates' own
+  tests) compiles alongside at the usual priority, as before.
+- The sampler sends no look without work, and none timed by the wall clock (where there is no CPU clock: not Linux),
+  while the simulation is held, so batches end where they would with the compile on another core and the wall time
+  of a compile is never seen as simulation time; the counters `tier_waited` and `tier_alongside` (`YAVS_COUNTERS`) count the compiles of
+  each kind (`crates/yavs/tests/tier_compile.rs`).
+- The test runner package passes the sim option `yavs.tier_compile` as `--tier-compile` (user, 2026-11-07).
+- The policy's simulation clock never sees a compile: in both modes the compile runs on the tier-up thread, which the
+  clock leaves out, and a held simulation thread sleeps.
+- **Measured** (cold whole runs, 5 per cell, interleaved, Cranelift bench builds; "old" is the background thread at
+  the usual priority before this change; wall, median): with a second free core `wait` costs what the compiles took,
+  `background` is level with old: `grlib_leon3mp` 1.18 and 1.09 of old's 23.2 s, `neorv32_dual_full` 1.24 and 1.01
+  of 2.16 s, `osvvm_axi4_random` 1.50 and 1.01 of 0.82 s, `hdlm_lfsr`, `uvvm_func_cov`, `vunit_logging` 0.96 to
+  1.09. On one core shared by everything (the build before the last pause points) `wait` is level with old (GRLIB
+  1.00, neorv32 0.83, the small ones 0.93 to 1.12), and `background` at nice 19 gets almost no CPU to compile
+  (GRLIB 12 compiles for 155, neorv32 3 for 75), so a design that gains from compiled code runs interpreted (GRLIB
+  1.22) and one that does not ends sooner (neorv32 0.71, osvvm 0.77). Peak RSS is the same in every mode (GRLIB 357 to 359 MB, neorv32 145 to 177 MB): memory was
+  not the cause; a compile thread adds no memory a waiting run does not. Main-thread instructions with nothing
+  compiled (`--tier-heat=2000000000,0,16000`, and `--tier=interp`) are within 0.03 percent of old.

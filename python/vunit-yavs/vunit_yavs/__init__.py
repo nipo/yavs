@@ -60,6 +60,16 @@ class ThreadsOption(Option):
             raise ValueError(f"Option {self.name!r} must be an integer of at least 1 or \"auto\". Got {value!r}")
 
 
+class TierCompileOption(Option):
+    """
+    Must be "wait" or "background" (yavs run --tier-compile)
+    """
+
+    def validate(self, value):
+        if value not in ("wait", "background"):
+            raise ValueError(f"Option {self.name!r} must be \"wait\" or \"background\". Got {value!r}")
+
+
 def _debug_port(text):
     """argparse type of --yavs-debug: a TCP port, 0 for a free one"""
     if not text.isdigit() or int(text) > 65535:
@@ -234,6 +244,7 @@ class YavsInterface(SimulatorInterface):
         ListOfStringOption("yavs.elab_flags"),
         ListOfStringOption("yavs.sim_flags"),
         ThreadsOption("yavs.max_threads"),
+        TierCompileOption("yavs.tier_compile"),
         ListOfStringOption("yavs.cov_kind"),
         BooleanOption("yavs.cov_embed_sources"),
         # Files of console commands, sourced at the points VUnit sources its init files
@@ -726,6 +737,11 @@ class YavsInterface(SimulatorInterface):
             max_threads = "auto"
         if max_threads is not None and not elaborate_only and not debug:
             cmd += [f"--threads={max_threads}"]
+
+        # Before the raw flags too: a --tier-compile there wins.
+        tier_compile = config.sim_options.get("yavs.tier_compile")
+        if tier_compile is not None and not elaborate_only:
+            cmd += [f"--tier-compile={tier_compile}"]
 
         if not elaborate_only and (self._coverage.enabled or config.sim_options.get("enable_coverage", False)):
             if debug:

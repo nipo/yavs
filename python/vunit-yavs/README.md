@@ -31,6 +31,7 @@ or later (`pip install vunit-yavs` installs it, a pre-release) and yavs 0.16.1 o
 | `yavs.elab_flags` | `yavs run` and `elab` |
 | `yavs.sim_flags` | `yavs run`, such as `--assert-summary`, `--activity`, `--hang-report`, `--wave-include`: they pass through to the run |
 | `yavs.max_threads` (integer, at least 1, or `"auto"`) | `yavs run --threads=N`, the most threads of one simulation; `"auto"` is `--threads=auto`, more threads only while they make the run faster |
+| `yavs.tier_compile` (`"wait"` or `"background"`) | `yavs run --tier-compile=MODE`: `wait` (yavs's default) makes a simulation wait while a function compiles, `background` compiles alongside it on a thread at the lowest system priority |
 | `enable_coverage` (VUnit's option) | `yavs run --cov-file=<test output>/yavs/coverage.ycov --cov-test=<test name>` with the kinds below (coverage, below) |
 | `yavs.cov_kind` (list of strings) | `yavs run --cov-kind=LIST`: `statement`, `branch`, `toggle`, `condition`, `assert`, `expression`, `combination`, `fsm`. No kind is on by default |
 | `yavs.init_files.after_load` | Console command files sourced after each `vunit_load` |

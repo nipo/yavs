@@ -228,6 +228,11 @@ pub struct RunArgs {
     /// interpreted (compile time grows faster than their size).
     #[arg(long, value_name = "N", default_value = "50000")]
     tier_max_size: usize,
+    /// With `--tier=auto`: where the functions that become hot are compiled. `wait`: the run
+    /// waits while one compiles, so it keeps no more cores busy than `--threads`; `background`:
+    /// on a thread of its own, at the lowest priority of the system, alongside the run.
+    #[arg(long, value_enum, default_value = "wait")]
+    tier_compile: TierCompileArg,
     /// With `--tier=auto`: compile a function once the sampler (one sample every PERIOD
     /// microseconds) has seen the interpreter in it for BASE microseconds plus PER_INSTR
     /// nanoseconds per IR instruction it has; PERIOD 0: compile every function the interpreter
@@ -298,7 +303,7 @@ fn tier_help() -> String {
     let built = tiers_built();
     format!(
         "Execution tier: `interp` runs the interpreter alone; `auto` runs it and compiles the \
-         functions that become hot on a background thread; `clift` and `llvm` compile every \
+         functions that become hot (see `--tier-compile`); `clift` and `llvm` compile every \
          function before time 0; `clift-auto` is `auto` with Cranelift; `auto3` has Cranelift \
          compile warm functions and LLVM O2 those that stay hot. A tier needs its code generator \
          in the build (error E0120 otherwise): this yavs has {built}. Default: `auto` with a compiled tier, `interp` with \
@@ -572,15 +577,24 @@ pub enum TierArg {
     Interp,
     /// LLVM: every function before time 0 (the `llvm` feature).
     Llvm,
-    /// The interpreter, and the functions that become hot compiled on a background thread.
+    /// The interpreter, and the functions that become hot compiled during the run.
     Auto,
     /// Cranelift: every function before time 0 (the `clift` feature).
     Clift,
-    /// Cranelift: the functions that become hot, on a background thread.
+    /// Cranelift: the functions that become hot, during the run.
     CliftAuto,
     /// Three tiers: the interpreter, Cranelift for warm functions, LLVM O2 for those that stay
     /// hot (needs the `llvm` and `clift` features).
     Auto3,
+}
+
+#[cfg_attr(test, derive(Debug))]
+#[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum TierCompileArg {
+    /// The run waits while a function compiles.
+    Wait,
+    /// A thread of its own compiles alongside the run, at the lowest priority.
+    Background,
 }
 
 #[cfg_attr(test, derive(Debug))]
@@ -1393,6 +1407,21 @@ fn run_id() -> String {
 /// Set up the compiled tier (`--tier`): compile the program now or start tier-up, stopped when
 /// the returned guard drops.
 fn use_tier(
+    rt: Option<&yavs_interp::Runtime>,
+    a: &RunArgs,
+) -> Result<Option<StopTierUp>, Box<Diagnostic>> {
+    let t = tier_of(rt, a)?;
+    #[cfg(any(feature = "llvm", feature = "clift"))]
+    if let Some(StopTierUp::Llvm(t)) = &t {
+        t.set_compile(match a.tier_compile {
+            TierCompileArg::Wait => yavs_llvm::Compile::Wait,
+            TierCompileArg::Background => yavs_llvm::Compile::Background,
+        });
+    }
+    Ok(t)
+}
+
+fn tier_of(
     rt: Option<&yavs_interp::Runtime>,
     a: &RunArgs,
 ) -> Result<Option<StopTierUp>, Box<Diagnostic>> {

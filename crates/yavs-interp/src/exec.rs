@@ -283,6 +283,8 @@ const WATCH_CHUNK: u32 = 128;
 #[cold]
 #[inline(never)]
 fn watch_tick(rt: &Runtime, func: FuncId, pc: u32) -> bool {
+    // (A compile of `--tier-compile=wait` runs while the run waits here or between cycles.)
+    yavs_kernel::pause_point();
     if rt.native.tick(func.0) {
         rt.counted_out(func, true);
     }
@@ -4744,6 +4746,8 @@ impl Machine {
                         && let Some(c) = ctx.as_deref_mut()
                     {
                         c.trim_run();
+                        // (Compiled code of such a loop leaves here: a pause point.)
+                        yavs_kernel::pause_point();
                     }
                 }
             } else if let Some(fr) = self.frames.last()
@@ -6029,6 +6033,8 @@ impl Machine {
                     recheck -= 1;
                     if recheck == 0 {
                         recheck = RECHECK;
+                        // (A pause point of `--tier-compile=wait`, as `watch_tick` is.)
+                        yavs_kernel::pause_point();
                         native = ready!();
                     }
                 }
@@ -11937,6 +11943,8 @@ impl crate::TierHost for Host<'_, '_, '_> {
 
     fn step(&mut self, tf: &mut crate::TierFrame, at: u32) -> crate::Stepped {
         use crate::Stepped;
+        // (Compiled code that steps reaches a pause point of `--tier-compile=wait` here.)
+        yavs_kernel::pause_point();
         let (m, f) = (&mut *self.m, self.f);
         crate::tier_census::note("step", &f.name, at, f.code.get(at as usize));
         m.top().pc = at;

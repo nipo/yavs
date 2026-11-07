@@ -251,6 +251,13 @@ class TestPackage(unittest.TestCase):
                 self.factory.check_sim_option("yavs.max_threads", value)
         self.factory.check_sim_option("yavs.max_threads", "auto")
 
+    def test_tier_compile_option_is_validated(self):
+        self._vunit().get_simulator_name()
+        for value in ("wait", "background"):
+            self.factory.check_sim_option("yavs.tier_compile", value)
+        with self.assertRaisesRegex(ValueError, "yavs.tier_compile.*wait.*background"):
+            self.factory.check_sim_option("yavs.tier_compile", "on")
+
 
 class TestYavsInterface(unittest.TestCase):
     """
@@ -743,6 +750,15 @@ class TestYavsInterface(unittest.TestCase):
         config = make_config(sim_options={"yavs.max_threads": 5, "yavs.sim_flags": ["--threads=2"]})
         _, cmd, _ = self._simulate(config)
         self.assertEqual([arg for arg in cmd if arg.startswith("--threads")], ["--threads=5", "--threads=2"])
+
+    def test_tier_compile(self):
+        config = make_config(sim_options={"yavs.tier_compile": "background", "yavs.sim_flags": ["--tier-compile=wait"]})
+        _, cmd, _ = self._simulate(config)
+        self.assertEqual(
+            [arg for arg in cmd if arg.startswith("--tier-compile")], ["--tier-compile=background", "--tier-compile=wait"]
+        )
+        _, cmd, _ = self._simulate(make_config())
+        self.assertFalse(any(arg.startswith("--tier-compile") for arg in cmd))
 
     def test_no_max_threads_passes_no_thread_count(self):
         _, cmd, _ = self._simulate(make_config())

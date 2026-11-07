@@ -1008,6 +1008,8 @@ struct Shared {
     gens: Mutex<Vec<Box<dyn Generator>>>,
     /// The run-to-run profile of this run until `stop` writes it (`profile.rs`).
     profile: Mutex<Option<ProfileJob>>,
+    /// Where functions compile (`COMPILE_*`, `AutoTier::set_compile`).
+    compile: std::sync::atomic::AtomicU8,
 }
 
 /// The profile of a run in the making: where it goes, what the runs before left, the simulation CPU
@@ -3520,7 +3522,13 @@ fn sampler_loop(
                 None => last.push((i, c)),
             }
         }
-        if sh.trial.load(Ordering::SeqCst) {
+        // (Nor a look with no work while a compile holds the simulation, nor any look timed by the
+        // wall clock then: the batches end where they would with the compile on another core.)
+        let wall_timed = !work && cpu.is_none();
+        if sh.trial.load(Ordering::SeqCst)
+            || (yavs_interp::simulation_held()
+                && (wall_timed || look.running.iter().all(|r| r.2 == 0)))
+        {
             continue;
         }
         batch.push(look);
@@ -3560,6 +3568,47 @@ fn timer_slack_1us() {
 
 #[cfg(not(target_os = "linux"))]
 fn timer_slack_1us() {}
+
+/// The calling thread to the lowest OS priority (`--tier-compile=background`): a host with every
+/// core busy runs the simulations and the desktop first. A failure leaves the priority as it is.
+#[cfg(target_os = "linux")]
+fn lowest_priority() {
+    unsafe extern "C" {
+        fn setpriority(which: u32, who: u32, prio: i32) -> i32;
+    }
+    const PRIO_PROCESS: u32 = 0;
+    // SAFETY: with `who` 0 Linux sets the nice value of the calling thread only (it is per thread).
+    unsafe { setpriority(PRIO_PROCESS, 0, 19) };
+}
+
+#[cfg(windows)]
+fn lowest_priority() {
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetCurrentThread() -> *mut std::ffi::c_void;
+        fn SetThreadPriority(thread: *mut std::ffi::c_void, priority: i32) -> i32;
+    }
+    const THREAD_PRIORITY_LOWEST: i32 = -2;
+    // SAFETY: the pseudo handle of the calling thread needs no closing.
+    unsafe { SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_LOWEST) };
+}
+
+#[cfg(not(any(target_os = "linux", windows)))]
+fn lowest_priority() {}
+
+/// Where `--tier=auto` compiles (`AutoTier::set_compile`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Compile {
+    /// The simulation waits at its next pause point (`yavs_interp::pause_point`) while a function
+    /// compiles: the run keeps at most its own threads busy.
+    Wait,
+    /// Alongside the run, on the tier-up thread at the lowest OS priority.
+    Background,
+}
+
+/// `Shared::compile`: 0 not set (the tests: alongside the run at the usual priority), or a `Compile`.
+const COMPILE_WAIT: u8 = 1;
+const COMPILE_BACKGROUND: u8 = 2;
 
 impl AutoTier {
     /// Start the compile thread and make the tier the runtime's (`Runtime::set_tier`),
@@ -3745,11 +3794,14 @@ impl AutoTier {
                         inbox.push_back(std::mem::take(&mut looks));
                     }
                     let mut unfinished: Vec<FuncId> = Vec::new();
+                    let mut lowered = false;
+                    // `--tier-compile=wait` paces the compiles (below): wait for the next looks.
+                    let mut paced = false;
                     loop {
                         while let Ok(m) = rx.try_recv() {
                             route(m, &mut pending, &mut inbox);
                         }
-                        if inbox.is_empty() && pending.asked.is_empty() {
+                        if inbox.is_empty() && (pending.asked.is_empty() || paced) {
                             match rx.recv_timeout(period) {
                                 Ok(m) => route(m, &mut pending, &mut inbox),
                                 Err(RecvTimeoutError::Timeout) => {}
@@ -3768,6 +3820,16 @@ impl AutoTier {
                             publish(&w);
                             while let Ok(m) = rx.try_recv() {
                                 route(m, &mut pending, &mut inbox);
+                            }
+                            // A run that waits for its compiles gets no more of them than a thread
+                            // of their own could make: the compile time (the model's) at most the
+                            // simulation time seen. Not with a waiting `Tier::hot` (eager, sync).
+                            paced = sh.compile.load(Ordering::Relaxed) == COMPILE_WAIT
+                                && heat.budget != 0
+                                && !sync
+                                && w.spent > w.total;
+                            if paced {
+                                break;
                             }
                             let probe = if pending.asked.is_empty() {
                                 pending.probes.pop()
@@ -3818,6 +3880,27 @@ impl AutoTier {
                                 }
                                 break;
                             };
+                            // `--tier-compile=wait`: the compile (not a trial) runs while the run
+                            // waits at a pause point; `background`: alongside it, at low priority.
+                            let held = match sh.compile.load(Ordering::Relaxed) {
+                                COMPILE_WAIT => match yavs_interp::hold_simulation(&sh.halt) {
+                                    Some(h) => Some(h),
+                                    None => break,
+                                },
+                                COMPILE_BACKGROUND => {
+                                    if !lowered {
+                                        lowest_priority();
+                                        lowered = true;
+                                    }
+                                    None
+                                }
+                                _ => None,
+                            };
+                            w.native.count_stat(if held.is_some() {
+                                CountStat::Waited
+                            } else {
+                                CountStat::Alongside
+                            });
                             // `busy` before `halt` here and `halt` before `busy` in `stop` (both
                             // SeqCst): either this thread sees the halt or `stop` sees it busy.
                             sh.busy.store(true, Ordering::SeqCst);
@@ -3825,7 +3908,9 @@ impl AutoTier {
                                 break;
                             }
                             if let Some(id) = probe {
-                                if w.probe(id) {
+                                let linked = w.probe(id);
+                                drop(held);
+                                if linked {
                                     pending.cands.retain(|&c| c != id);
                                     sh.trial.store(true, Ordering::SeqCst);
                                     w.trial(id, &sh.halt);
@@ -3852,6 +3937,7 @@ impl AutoTier {
                                 }
                             }
                             w.early_root = false;
+                            drop(held);
                             if let (Some(id), true) = (first, w.counted && root_done && !sampled && !o2) {
                                 w.native.count_stat(CountStat::Compiled);
                                 if w.prog.base_of(id) != id {
@@ -4130,6 +4216,16 @@ impl AutoTier {
         Ok(())
     }
 
+    /// Where functions compile; the tier compiles alongside the run at the usual priority until
+    /// this is called (the tests).
+    pub fn set_compile(&self, compile: Compile) {
+        let v = match compile {
+            Compile::Wait => COMPILE_WAIT,
+            Compile::Background => COMPILE_BACKGROUND,
+        };
+        self.shared.compile.store(v, Ordering::Relaxed);
+    }
+
     /// The functions compiled so far.
     pub fn compiled(&self) -> usize {
         self.funcs.iter().filter(|f| f.get().is_some()).count()
@@ -4252,6 +4348,8 @@ impl Tier for AutoTier {
             if dead {
                 break;
             }
+            // (`--tier-compile=wait`: the compile this waits for holds the simulation.)
+            yavs_interp::pause_point();
             std::thread::sleep(Duration::from_micros(50));
         }
     }
@@ -5867,5 +5965,39 @@ mod tests {
         (w.time[k][0], w.group[k]) = (w.need(f), w.need(f));
         assert!(w.pick(&mut cands).is_some());
         assert!(cands.is_empty());
+    }
+
+    /// `--tier-compile=background` (#1123): the thread that calls `lowest_priority` runs at the
+    /// lowest priority, the others keep theirs.
+    #[test]
+    #[cfg(any(target_os = "linux", windows))]
+    fn lowest_priority_lowers_the_calling_thread_only() {
+        #[cfg(target_os = "linux")]
+        fn own() -> i32 {
+            unsafe extern "C" {
+                fn getpriority(which: u32, who: u32) -> i32;
+            }
+            // SAFETY: the nice value of the calling thread.
+            unsafe { getpriority(0, 0) }
+        }
+        #[cfg(windows)]
+        fn own() -> i32 {
+            #[link(name = "kernel32")]
+            unsafe extern "system" {
+                fn GetCurrentThread() -> *mut std::ffi::c_void;
+                fn GetThreadPriority(thread: *mut std::ffi::c_void) -> i32;
+            }
+            // SAFETY: the pseudo handle of the calling thread.
+            unsafe { GetThreadPriority(GetCurrentThread()) }
+        }
+        let before = std::thread::spawn(own).join().unwrap();
+        let lowered = std::thread::spawn(|| {
+            super::lowest_priority();
+            own()
+        })
+        .join()
+        .unwrap();
+        assert_eq!(lowered, if cfg!(windows) { -2 } else { 19 });
+        assert_eq!(own(), before);
     }
 }

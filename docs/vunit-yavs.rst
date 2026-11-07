@@ -35,6 +35,12 @@ as ``--name=value``.
        ``--threads=auto`` (more threads only while they make the run faster; the default with the token server).
        It overrides ``--yavs-max-threads`` for a test. Not passed under ``--yavs-debug`` or to
        ``elab``. A ``--threads`` in ``yavs.sim_flags`` comes after it and wins.
+   * - ``yavs.tier_compile``
+     - ``yavs run --tier-compile=MODE``: ``"wait"`` (yavs's default: a simulation waits while a function compiles,
+       so it keeps no more cores busy than its threads) or ``"background"`` (functions compile on a thread of their
+       own at the lowest system priority, alongside the run: a test that compiles a lot may end sooner when there are
+       idle cores) (:doc:`running-faster`). Not passed to ``elab``. A ``--tier-compile`` in ``yavs.sim_flags``
+       wins.
    * - ``yavs.cov_embed_sources``
      - ``yavs run --cov-embed-sources``: store the source text in the database, so the HTML report needs no
        checkout. The source text then travels with the database (:doc:`coverage`).

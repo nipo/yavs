@@ -348,6 +348,71 @@ pub fn progress() -> u64 {
     PROGRESS.load(Ordering::Relaxed)
 }
 
+/// `--tier-compile=wait`: the tier-up thread compiles only while a simulation thread waits at a
+/// [`pause_point`] ([`hold_simulation`]), so a run keeps at most its own threads busy.
+/// ponytail: one gate per process (one tier per run); a gate per runtime if tests ever need two.
+static HOLD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Simulation threads waiting at a pause point.
+static PARKED: Mutex<u32> = Mutex::new(0);
+static GATE: std::sync::Condvar = std::sync::Condvar::new();
+
+/// Where a simulation thread waits while a compile holds the simulation: between cycles, and at
+/// the interpreter's periodic look inside an activation. One relaxed load when nothing holds it.
+#[inline(always)]
+pub fn pause_point() {
+    if HOLD.load(Ordering::Relaxed) {
+        park();
+    }
+}
+
+#[cold]
+#[inline(never)]
+fn park() {
+    let mut n = PARKED.lock().unwrap_or_else(PoisonError::into_inner);
+    *n += 1;
+    GATE.notify_all();
+    while HOLD.load(Ordering::SeqCst) {
+        n = GATE.wait(n).unwrap_or_else(PoisonError::into_inner);
+    }
+    *n -= 1;
+}
+
+/// Whether a compile holds the simulation (or waits for it to stop at a pause point).
+pub fn simulation_held() -> bool {
+    HOLD.load(Ordering::Relaxed)
+}
+
+/// Hold the simulation: returns once a simulation thread waits at a pause point, `None` when
+/// `stop` was set first. The simulation goes on when the guard is dropped.
+pub fn hold_simulation(stop: &std::sync::atomic::AtomicBool) -> Option<Held> {
+    HOLD.store(true, Ordering::SeqCst);
+    let held = Held(());
+    let mut n = PARKED.lock().unwrap_or_else(PoisonError::into_inner);
+    while *n == 0 {
+        if stop.load(Ordering::SeqCst) {
+            drop(n);
+            return None;
+        }
+        // (`stop` does not know the gate: look at it every millisecond.)
+        n = GATE
+            .wait_timeout(n, std::time::Duration::from_millis(1))
+            .unwrap_or_else(PoisonError::into_inner)
+            .0;
+    }
+    Some(held)
+}
+
+/// See [`hold_simulation`].
+pub struct Held(());
+
+impl Drop for Held {
+    fn drop(&mut self) {
+        let _n = PARKED.lock().unwrap_or_else(PoisonError::into_inner);
+        HOLD.store(false, Ordering::SeqCst);
+        GATE.notify_all();
+    }
+}
+
 /// The interrupt flags of an observer's process context: observers run between cycles.
 static NO_INTERRUPT: AtomicU8 = AtomicU8::new(0);
 
@@ -2545,6 +2610,7 @@ impl SimControl {
         self.cycle += 1;
         self.stats.cycles += 1;
         PROGRESS.store(self.stats.process_runs, Ordering::Relaxed);
+        pause_point();
         if self.cycle & self.tick_mask == 0 {
             self.tick();
         }

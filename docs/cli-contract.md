@@ -645,7 +645,19 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   under `--dap`. Under `--dap` an explicit `--tier` is checked like without it (a tier the build lacks is `E0120`, exit 2;
   #835), but nothing is compiled (`--verbose` prints no tier notes): the debugger needs the interpreter's frame
   slots. `--tier-max-size=N` (default 50000): with `llvm` or `auto`, a function of more
-  than N IR instructions stays interpreted (user, 2026-10-19, #126). `--tier-heat=BASE,PER_INSTR,PERIOD`
+  than N IR instructions stays interpreted (user, 2026-10-19, #126). `--tier-compile=wait|background`
+  (default `wait`; user, 2026-11-07, #1123): with `auto` (and `clift-auto`, `auto3`), where hot functions
+  compile. `wait`: the tier-up thread compiles only while the simulation waits for it at a pause point (the
+  start of a delta cycle, the interpreter's periodic looks inside a long process run, a step that compiled
+  code hands the interpreter), so a run keeps at most `--threads` threads busy; compiled code in a loop that
+  never leaves it reaches no pause point, and a compile waits until it does. The compiles are paced: their
+  modelled compile time stays within the simulation time seen, as a thread of their own could not make
+  more. `background`: the tier-up thread compiles alongside
+  the run at the lowest OS priority (Linux nice 19, Windows `THREAD_PRIORITY_LOWEST`; nothing else
+  elsewhere), one busy thread more than `--threads` while it compiles. What is hot is judged the same way
+  in both (the policy's clocks count the simulation threads only), but `wait` paces its compiles (above), so
+  a short run, or one whose count asks for many functions, compiles fewer. The output is the same. The other tiers compile nothing during the run and ignore the option, as they do
+  `--tier-heat`. `--tier-heat=BASE,PER_INSTR,PERIOD`
   (hidden, for tests and tuning): with `auto`, a function is hot once a sample every PERIOD
   microseconds has seen the interpreter in it for BASE microseconds plus PER_INSTR nanoseconds
   per IR instruction of it (PERIOD `0`, as in `1,0,0`: from its first call or jump). `llvm` needs a yavs
@@ -659,7 +671,8 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   the `clift` cargo feature (no LLVM needed), otherwise `E0120`, and give the same output. In a build with `clift` and without `llvm`, `--tier=auto` is `clift-auto`, and so is the default tier of such a build (`interp` under `--dap`). `auto3` is `auto` with Cranelift as its first level: a function that becomes warm is translated by Cranelift, one that stays hot is compiled again by LLVM at O2 (a yavs built with both features, otherwise `E0120`); the output is the same. `--verbose` prints, on stderr, a note per function left to the
   interpreter and how many instructions were compiled (`llvm`), or a note per hot function as
   the compile thread takes it (`auto`, so their order and number depend on timing). The test
-  runner passes neither; use `yavs.sim_flags`.
+  runner passes neither; use `yavs.sim_flags`. It passes `--tier-compile` from the sim option
+  `yavs.tier_compile` (before `yavs.sim_flags`, which win).
 - Threads: yavs defaults to `--threads=1`. The test runner already runs `-p N`
   simulations in parallel and passes a thread count only when the user sets one: the sim
   option `yavs.max_threads` (or the runner argument `--yavs-max-threads N` for every test; both
