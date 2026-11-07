@@ -121,9 +121,10 @@ fn slots_enabled() -> bool {
     })
 }
 
-/// Bodies of at least this many instructions after the first walk get a cheaper pass order:
-/// on such a body (a testbench sequencer that runs once, 114 k instructions) one more walk of the
-/// whole function costs more than the code it improves saves.
+/// Bodies of at least this many instructions after the first walk get a cheaper pass set: no
+/// descriptor pass and no short-circuit pass of processes. On such a body (a testbench sequencer
+/// that runs once, 114 k instructions) their walks of the whole function cost more than the code
+/// they improve saves; the largest processes of the CPU designs measured have under 20 k.
 const HUGE_BODY: usize = 50_000;
 
 /// [`HUGE_BODY`], or `YAVS_HUGE_BODY` (differential testing: `1` takes every body as huge).
@@ -139,7 +140,7 @@ fn huge_body() -> usize {
 
 static HUGE_BODIES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-/// Bodies this process optimised with the cheaper pass order of [`HUGE_BODY`] (a work counter:
+/// Bodies this process optimised with the cheaper pass set of [`HUGE_BODY`] (a work counter:
 /// `YAVS_COUNTERS`).
 pub fn huge_bodies() -> u64 {
     HUGE_BODIES.load(std::sync::atomic::Ordering::Relaxed)
@@ -489,14 +490,11 @@ fn optimize_body_with(
     if huge {
         HUGE_BODIES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
-    if dopes::enabled() && dopes::run(prog, &mut f) {
+    if dopes::enabled() && !huge && dopes::run(prog, &mut f) {
         if cfg_enabled() {
             cfg::dead_defs(prog, &mut f);
         }
-        // (On a huge body the walk after the descriptor pass cost more than the rest of it.)
-        if !huge {
-            tidy(prog, &mut f, &mut layouts, inst);
-        }
+        tidy(prog, &mut f, &mut layouts, inst);
     }
     if cfg_enabled()
         && matches!(f.kind, FuncKind::Function | FuncKind::Procedure)
@@ -528,6 +526,7 @@ fn optimize_body_with(
     // memo (which wants the blocks as lowered); not with a debugger reading the variables or with
     // coverage counters.
     if cfg_enabled()
+        && !huge
         && f.kind == FuncKind::Process
         && !keep_variables_on()
         && !f.code.iter().any(|i| {
