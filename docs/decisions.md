@@ -14555,3 +14555,12 @@ whole-signal read, the call, the result's check and copy, the wide drive).
   pooled to test the raise found the workers asleep and could not bring it down: the run lost its threads (3151 of
   4677 batches pooled). A design that never gained keeps a raised threshold, so its trials stay short. `--threads=8`
   without `auto` still has this trap (compiled rtl_lfsr pooled 3369 to 3493 of 4920 batches in some runs).
+- **Measured** (`docs/parallel.md` "Round 2"): best fixed speedups up to 2.89x (rtl_fan interpreted, 8 threads) and
+  1.81x for compiled rtl_lfsr at 4 (was 1.53x); `auto` on the first run 90 to 95 percent of the best fixed speedup on
+  five of the six gaining cells, 85 percent on compiled rtl_lfsr (default tier against fixed runs on fresh command
+  lines), remembered 93 to 102 percent; the CNN accelerator
+  bench 97 percent of 1.41x; the designs that do not gain within 0.3 percent of `--threads=1` in instructions, and
+  within 0.8 percent under a token server. A first run under the default tier is also the compiled tier's first run of
+  that command line (its profile is per command line): measured against fixed runs on fresh command lines the
+  default-tier first runs reach 91, 94 and 85 percent, and `sc5_fifo_repack` compiled, which read 12 percent slower than
+  a remembered `--threads=1`, is 0.96 of a fresh one.
