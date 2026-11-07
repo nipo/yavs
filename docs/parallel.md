@@ -8,7 +8,8 @@ the evaluation of VHDL processes is spread over the threads, and only when many 
 the same moment. Large, flat RTL designs, where thousands of processes wake on the same clock edge,
 run up to about 2.4 times faster on 4 threads and 3.25 times on 8 (whole run, measured 2026-10-28). Testbench-style designs and
 processor models run as fast as on one thread: yavs then keeps the work on one thread. Leave it at
-1 for regressions that already run tests side by side, and measure before you rely on it. Under a
+1 for regressions that already run tests side by side, and measure before you rely on it, or use
+`--threads=auto`, which uses more threads only while they make the run faster (below). Under a
 token server named in `YAVS_TOKENS`, several simulations share one CPU budget (see "Thread budget
 across parallel test runs" below).
 
@@ -58,6 +59,10 @@ Linux and Windows), the threads come from that server
   never gets one has no more threads than a run with `--threads 1`.
 * Tokens are asked for only when a group of processes is worth handing to the threads, never by
   waiting: while none is lent, the group runs on the main thread, as with `--threads 1`.
+* With `--threads=auto` (what the test runner package passes under its server since 2026-11-07) the
+  cap is 8, and tokens are asked for only while the threads are on: a design that does not gain gives
+  them back after its trial (a fraction of a second) and asks again only at the next trial. Its
+  cost under the server (the 2 percent of the processor model below, #882) was not measured again.
 * Tokens are held while groups keep going to the threads and given back after 64 groups in a row
   that stayed on the main thread. The connection to the server closes when the simulation ends in
   any way (normally, with an error, on Ctrl-C, killed or crashed), and that gives every token back.
@@ -122,6 +127,66 @@ median of 3 interleaved runs after an untimed warm-up of each mode, simulation w
 The accelerator bench pools: it gains a third with 2.2 threads on average, and the extra threads cost
 58 percent more CPU time for that third. The processor model never uses a token, and the token mode alone
 costs it 2 percent even with seven cores free ([#882](https://github.com/ru551n/yavs/issues/882)).
+
+## `--threads=auto`
+
+The kernel decides while the run goes (`crates/yavs-kernel/src/kernel/auto.rs`; the rules are in
+`docs/cli-contract.md`, the reasons in `docs/decisions.md` "`--threads=auto`"). Three paths:
+
+* **Static:** fewer than 8 processes that may run in parallel: one thread, no trial, no cache lookup.
+* **Trial:** the threads start off, a trial starts 10 ms into the run, and windows of 25 ms (5 ms when
+  no batch wants the threads) are judged by what the pooled batches saved against their estimate
+  inline, calibrated by timed probe batches; losing windows turn the threads off (the code of
+  `--threads=1`), a pause of 1 s doubling to 16 s (0.1 s once a window won) brings the next trial.
+  Now and then a window runs on half the threads and the faster count is kept.
+* **Memory:** what the last run of the same command line found is kept in the work library's cache:
+  after a run that gained the threads start on, after one that did not they start off with the first
+  trial after 4 s.
+
+Measured 2026-11-07 on `main` plus this change, bench builds with Cranelift, 4 cores and their
+hardware threads (CPUs 4-7 and 20-23, the 8 CPUs of the run; `auto` may use all of them), median of 5
+rounds interleaving the cells, after two untimed runs of each. The host was shared and loaded (load
+7 to 26; builds and tests ran on the other cores of the same CCD), so wall spreads are 2 to 36
+percent; instructions and cycles (user, all threads) are the steadier measure for designs that do not
+gain. Speedup over one thread of the baseline build, whole run; "memory" is a run after one of the
+same command line, "trial" one with nothing remembered.
+
+| Design | Tier | Best fixed | `auto`, memory | `auto`, trial |
+|---|---|---|---|---|
+| rtl_fan | default (`auto`) | 2.24x (8) | 2.03x, 91 % | 2.03x, 91 % |
+| rtl_ff | default | 1.85x (8) | 1.72x, 93 % | 1.72x, 92 % |
+| rtl_lfsr | default | 1.63x (4) | 1.54x, 95 % | 1.13x, 76 % |
+| rtl_fan | interpreter | 2.70x (8) | 2.49x, 92 % | 2.50x, 92 % |
+| rtl_ff | interpreter | 2.25x (8) | 2.08x, 92 % | 1.96x, 88 % |
+| rtl_lfsr | interpreter | 1.81x (4) | 1.74x, 96 % | 1.66x, 97 % |
+| CNN accelerator system bench (4 cores of 2 slots, 27 s) | default | 1.36x (4) | 1.30x, 96 % | 1.33x, 98 % |
+
+The percentages are `auto`'s speedup over the best fixed one. Counted as a share of the gain
+(speedup less 1) instead, the memory path reaches 83 to 92 percent and the trial 78 to 94 percent,
+`rtl_lfsr` under the default tier 27 percent.
+
+The CNN bench is one long test of the downstream project (the 4-core configuration of its top-level
+bench, a network of a few layers through the weight read port; not the prefetch sweep the tracker
+names, which runs 6 to 14 s), median of 3 rounds; its output was identical in every run.
+
+The trial of `rtl_lfsr` under the default tier loses because once its processes are compiled the
+estimated work of a batch (512 registers, about 15 us) is below the pool threshold (20 us), so no
+batch wants the threads; `--threads=4` keeps pooling on costs it timed while the processes were
+interpreted. A lower threshold under `auto` (5 us) only reached 1.19x and made the trial of
+`lfsr64_xor` 9 percent slower in cycles; it was not kept.
+
+The nine designs that do not gain (`rtl_chain`, `rtl_bus`, `rtl_ram`, `lfsr64`, `lfsr64_xor`,
+`compute_h2h`, `xor_sig`, `xor_types`, `rec_pair`), `auto` against `--threads=1`: instructions 0.992
+to 1.009, user cycles 0.954 to 1.009, on both tiers and both paths (the largest instruction
+differences are under the default tier, whose compiles vary from run to run by that much at any
+thread count). `--threads=4` and `--threads=8` cost the same designs up to 2 percent of their
+instructions and 5 percent of their cycles.
+
+Tiny runs (`tests/corpus/scalar/array_attrs` and two designs of 2 and 66 processes, 1.5 to 4 ms,
+`perf stat -r 30`): instructions within 0.05 percent of `--threads=1` on each path and cycles within
+the spread (0.1 to 0.3 percent); no thread more than `--threads=1` is started. Before the trial was
+delayed and the CPU count and the cache lookup were made lazy, the same runs paid 2 percent of their
+instructions and 8 percent of their CPU time.
 
 ## Details
 

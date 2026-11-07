@@ -11017,3 +11017,24 @@ The pass that reads descriptors in registers takes time proportional to the func
 ## Weak designs, second round: element loops, repeated element reads, returned choices
 
 Element loops of native frames in Cranelift are planned in the code itself (`Gen::eloop_plan`), an element of a logic vector read again is a move (`Key::LGet`), a branch that returns one of two integers is a `Select` when a function is inlined, and the interpreter keeps a second layout memo per type (`docs/decisions.md` of the same names). Numbers stay out of this file: a design of a matrix read row by row, a CRC table, a clocked `bool2bit` and an array shift register were the ones that showed each.
+
+## `--threads=auto` (#884, 2026-11-07)
+
+- `yavs run --threads=auto`: the kernel decides while the run goes (`crates/yavs-kernel/src/kernel/auto.rs`): one
+  thread with no trial below 8 processes that may run in parallel, otherwise trials from 10 ms into the run judged
+  in windows of 25 ms (5 ms when nothing wants the threads) by what pooled batches saved, off and on again with
+  doubling pauses, the faster of all or half the threads kept; at most 8 threads and no more than the CPUs; the
+  memory of the last run of the command line in the work library's cache (`crates/yavs/src/threads.rs`); `--verbose`
+  note; `YAVS_COUNTERS` `threads_windows`, `threads_gained`; hidden `YAVS_THREADS_FLIP=1`. `--threads` still
+  defaults to 1. vunit-yavs passes `--threads=auto` under its token server (was `min(N, 4)`) and takes `auto` for
+  `yavs.max_threads` and `--yavs-max-threads`.
+- Tests: `crates/yavs-kernel/tests/determinism.rs` (traces identical with the threads flipped at every cycle, the
+  static path), `kernel/auto.rs` unit tests (strikes, the thread count kept), `crates/yavs/tests/threads_auto.rs`,
+  `tests/cli.rs` `threads_words`, vunit-yavs `test_interface.py`, `test_fake_e2e.py`, `test_real_yavs.py`. The
+  differential corpus (655 tests) passes with `--threads=auto` and `YAVS_THREADS_FLIP=1`, with and without
+  `YAVS_POOL_ALL=1`, on the interpreter and Cranelift, and with plain `--threads=auto` under `clift-auto`.
+- Measured (`docs/parallel.md` "`--threads=auto`"): designs that do not gain within 1 percent of `--threads=1` in
+  instructions and cycles; gaining designs 91 to 96 percent of the best fixed `--threads` with the memory of the
+  last run. Not met: the first run (no memory) of `rtl_lfsr` under the default tier (76 percent: its compiled
+  batches are below the pool threshold) and of `rtl_ff` with the interpreter (88 percent). Not measured: hosts
+  with more than 8 CPUs, the token server's cost with `auto`, Windows.
