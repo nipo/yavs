@@ -544,9 +544,10 @@ class TestRealYavs(unittest.TestCase):
         server.remove(client)
         self.assertEqual(lent.stdout, alone.stdout)
         self.assertGreater(pooled(lent), 0)
-        # --threads=auto takes the token the same way (a run this short ends before it is judged)
+        # --threads=auto takes the token the same way; a run this short ends before its first trial, so the
+        # threads are turned on at once (YAVS_THREADS_FLIP=1)
         client = server.add()
-        auto = run("auto", server.env(client, os.environ))
+        auto = run("auto", dict(server.env(client, os.environ), YAVS_THREADS_FLIP="1"))
         server.remove(client)
         self.assertEqual(auto.stdout, alone.stdout)
         self.assertGreater(pooled(auto), 0)

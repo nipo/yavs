@@ -14452,7 +14452,7 @@ whole-signal read, the call, the result's check and copy, the wide drive).
   the gain of a design changes during a run (a testbench's set-up phase, the swap to compiled code under
   `--tier=auto`, a host that gets busy), and turning the threads off is free (`workers` 0 is the code of
   `--threads=1`) while a trial costs little (the estimate per batch and the timed sample, about 2 percent of the
-  instructions of a design that never pools, for 25 to 50 ms).
+  instructions of a design that never pools, for 5 ms when no batch wants the threads, else 50 ms).
 - **Decision: the measure is the saving of the batches that pooled or wanted to, calibrated by timed probes**
   (agent). saved = (estimate inline of the batches that went to the pool or would have, but for a token) x (inline
   time over estimate of the probe batches minus pooled time over estimate). A window wins at 4 percent of its wall
@@ -14486,7 +14486,8 @@ whole-signal read, the call, the result's check and copy, the wide drive).
   threads; the memory is looked up after the build only past the static estimate** (agent). Why: a tiny run paid 8
   percent of its CPU time (0.13 ms) for `available_parallelism` (cgroup files) and the cache lookup when both were
   done at the start, and 2 percent more instructions for the trial's sampling; measured on the three paths after the
-  change: within 0.03 percent of `--threads=1` in instructions and cycles.
+  change: instructions within 0.07 percent of `--threads=1`, cycles within the spread of the runs (0.1 to 0.3
+  percent).
 - **Decision: at most 8 threads, never more than the CPUs the process may use** (agent). Why: the largest measured
   gains flatten by 8 (`docs/parallel.md`); more is unmeasured. `ponytail:` in `threads.rs`.
 - **Decision: memory = gained or not, per command line (`run_id`), kind `thr` in the work library's store**
