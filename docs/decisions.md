@@ -14723,3 +14723,15 @@ the IR optimiser and lowering. Decisions:
   gate as at one thread, and threaded warm runs of `rtl_lfsr` read about 5 to 10 percent slower in simulate wall
   (host noise of the same size: an A/A pair read 1.08). At one thread a warm gate of 100 ms made the warm runs of
   `rtl_lfsr` 6 to 11 percent faster; the gate's value is the maintainer's to decide.
+
+## `--threads=auto` round 3 (yavs-kernel `kernel/auto.rs`, #884, 2026-11-07)
+
+- **Decision: under `--threads=auto` the kernel looks at the clock about once a millisecond (`TICK_GAP`): the tick mask
+  starts at every 4 cycles and doubles or halves at each tick to keep that gap, at most every 65536 cycles** (agent).
+  Why: a fixed 256 cycles were 20 ms of `rtl_ff` at one thread (6000 delta cycles in its whole run), so the first trial
+  started at twice its `START` and the windows ended up to that late. Measured (bench builds, CPUs 8-15 and 24-31,
+  first runs on fresh command lines, 7 to 10 rounds, paired ratios to the build before): the interpreter 0.94 to 0.96
+  of the wall time on `rtl_fan`, `rtl_ff`, `rtl_lfsr`, the default tier 0.92 to 0.96 there and on `sc5_fifo_repack`
+  (bands of a few percent on a loaded host), more batches pooled per run; the designs that never pool unchanged in
+  instructions (0.999 to 1.000). The cost is a clock read per millisecond.
+

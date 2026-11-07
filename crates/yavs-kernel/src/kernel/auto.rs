@@ -45,8 +45,11 @@ const PAUSE_MAX: Duration = Duration::from_secs(16);
 const EXPLORE_EVERY: u32 = 16;
 /// How much faster against inline the batches on all threads must pool than on half to be kept.
 const FEWER_PERCENT: u64 = 5;
-/// The kernel looks at the clock every this many cycles (a mask of `SimControl::cycle`).
-pub(super) const TICK_MASK: u64 = 0xff;
+/// The kernel looks at the clock every this many cycles at first (a mask of `SimControl::cycle`),
+/// then as often as makes about one look per `TICK_GAP`: a fixed 256 cycles were 20 ms of a design
+/// of slow cycles, which started its first trial and ended its windows that late.
+pub(super) const TICK_MASK: u64 = 0x3;
+const TICK_GAP: Duration = Duration::from_millis(1);
 
 /// What `--threads=auto` decided, for the run's notes and the memory of the next run.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -94,6 +97,8 @@ pub(super) struct Auto {
     since_try: u32,
     windows: u64,
     gained: u64,
+    /// The last `auto_tick`.
+    tick_at: Instant,
 }
 
 impl Auto {
@@ -123,6 +128,7 @@ impl Auto {
             since_try: EXPLORE_EVERY - 1,
             windows: 0,
             gained: 0,
+            tick_at: Instant::now(),
         }
     }
 
@@ -239,6 +245,12 @@ impl SimControl {
             return;
         };
         let now = Instant::now();
+        let gap = now.duration_since(std::mem::replace(&mut a.tick_at, now));
+        if !flip && gap < TICK_GAP / 2 {
+            self.tick_mask = (self.tick_mask << 1 | 1).min(0xffff);
+        } else if !flip && gap > TICK_GAP * 2 {
+            self.tick_mask >>= 1;
+        }
         let elapsed = now.duration_since(a.since);
         if a.on {
             if !flip && (elapsed < WINDOW_EMPTY || elapsed < WINDOW && a.want > 0) {
@@ -392,6 +404,30 @@ mod tests {
         assert_eq!(cost_sample(1, 1), 1);
         assert_eq!(cost_sample(0, 300), 300);
         assert_eq!(cost_sample(300, 100), 200);
+    }
+
+    /// A design of slow cycles starts its trial soon after `START`, not after a fixed number of
+    /// cycles (256 cycles of these 2 ms took half a second).
+    #[test]
+    fn slow_cycles_start_the_trial_on_time() {
+        let mut b = crate::Builder::new();
+        for i in 0..MIN_PROCS {
+            let f = |c: &mut Ctx<'_>| {
+                std::thread::sleep(Duration::from_micros(250));
+                c.wait_for(Time::ns(1))
+            };
+            b.process(&format!("p{i}"), crate::ProcFlags::default(), &[], f);
+        }
+        let cfg = Config {
+            threads: 4,
+            auto: true,
+            ..Config::default()
+        };
+        let mut sim = b.build(cfg).unwrap();
+        // 24 cycles of at least 2 ms each: past `START` whatever the clock's grain.
+        sim.run_until(Time::ns(24)).unwrap();
+        let a = sim.auto.as_ref().unwrap();
+        assert!(a.on || a.windows > 0, "no trial in {} cycles", sim.cycle);
     }
 
     /// Half the threads are kept unless all pool clearly faster.

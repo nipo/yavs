@@ -1155,8 +1155,9 @@ pub struct SimControl {
     idle_live: u32,
     /// Some process qualified for the idle skip (`idle_reprobe` has work).
     idle_live_possible: bool,
-    /// `tick` runs when the cycle number has none of these bits: every 65536 cycles, every
-    /// `auto::TICK_MASK + 1` under `--threads=auto`, every cycle with `Config::auto_flip`.
+    /// `tick` runs when the cycle number has none of these bits: every 65536 cycles, under
+    /// `--threads=auto` about once a millisecond (`auto::TICK_GAP`, at most every 65536 cycles),
+    /// every cycle with `Config::auto_flip`.
     tick_mask: u64,
     /// `Tn` as the last delta computed it (only a cycle sets it, only `run_until` takes it).
     known_next: Option<Option<Time>>,
@@ -2530,6 +2531,8 @@ impl SimControl {
         }
         if self.auto.is_some() {
             self.auto_tick();
+        } else {
+            self.tick_mask = 0xffff;
         }
     }
 

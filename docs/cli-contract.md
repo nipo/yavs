@@ -689,8 +689,9 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   tell). A design with fewer than 8 processes that may run in parallel (not serial, not
   postponed) runs on one thread with no trial. Otherwise the first trial starts 10 ms after the
   build (a shorter run pays nothing for it), and the kernel judges the threads in windows of
-  about 25 ms of wall time while they are on (the clock is read every 256 delta cycles, so
-  these times are lower bounds, coarser for a design of few long cycles): a window
+  about 25 ms of wall time while they are on (the clock is read about once a millisecond, as
+  often as the delta cycles allow, so these times are lower bounds, coarser for a design whose
+  delta cycles each take longer than that): a window
   wins when the time its pooled batches saved (their estimate inline, corrected by timed probe
   batches, less their measured time) is at least 4 percent of it; one window in which no batch
   wanted the threads (such a window ends after 5 ms), two losing windows in a row, or four once a
