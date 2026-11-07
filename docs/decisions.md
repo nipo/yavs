@@ -14707,6 +14707,34 @@ the IR optimiser and lowering. Decisions:
   1.22) and one that does not ends sooner (neorv32 0.71, osvvm 0.77). Peak RSS is the same in every mode (GRLIB 357 to 359 MB, neorv32 145 to 177 MB): memory was
   not the cause; a compile thread adds no memory a waiting run does not. Main-thread instructions with nothing
   compiled (`--tier-heat=2000000000,0,16000`, and `--tier=interp`) are within 0.03 percent of old.
+- **Decision: in the first run of a program under `wait` (no profile of an earlier run), until the looks hold
+  `WAIT_LONG` (1 s) of simulation work, a function the count rule asks for and the cache does not hold waits until
+  the looks saw it interpreted for `WAIT_PAYBACK` (1) times its price; the runs after it compile as before** (user,
+  2026-11-07: the gate in the first run only; `Worker::unpaid`, `stops`). Why: a waiting run pays every compile in
+  full, and the count rule asks for processes the looks never saw (`neorv32_dual_full` compiled 75 functions in
+  0.4 s, most of them seen 0, and ran slower than `--tier=interp`; `osvvm_axi4_random` stopped 0.3 s for three
+  processes seen 3 to 5 ms). A function seen for its price (the model's 45 us an IR instruction, two to three times
+  what Cranelift takes) has saved its compile if the rest of the run is like the part seen. A run past `WAIT_LONG`
+  compiles as before: a long run repays what the count asks for, and GRLIB's large processes, seen for their price
+  only after 4 to 16 s, ran later compiled and the run slower without the limit. In every run the gate held back
+  what never repays within one run, so it was never cached, and warm neorv32 ran 1.18 times as long (its cached code
+  gains: 1.65 s warm against 2.4 s interpreted); in the first run only, the second run compiles what the first
+  skipped and the cache fills one run later. Links of cached code are not held back, `background` and the tests'
+  tier are unchanged. A function of the looks, the profile and the program, as the rest (#670).
+- **Tried and not kept** (cold, paired, the same host and lanes): the gate in every run (above); a payback by kind
+  (the model's payback times 0.25: GRLIB later still, `uvvm_func_cov` 1.2 to 1.3 times the cycles with the next
+  item); a function seen for twice its price passing the count gate (`hdlm_lfsr` compiled `main` at 0.14 s for
+  0.49 s, but short suite tests compile what they do not get back); half and twice the factor (0.5: neorv32 back to
+  0.95 to 0.98, 2: like 1); the asked function seen longest for its price first (level with oldest first); a looser
+  pacing, twice the simulation time or none (no better anywhere).
+- **Measured** (series of three whole runs in one world from a pristine one, against `wait` before the gate, paired
+  and interleaved, Cranelift bench builds, timing cores 8 to 15 under the core locks, a loaded host; medians of 6 to 12
+  pairs, GRLIB 4 with a free core and 8 on one; the A/A pair of the base read 0.92 to 1.08 in medians):
+  first run with a second free core / on one core: `neorv32_dual_full` 0.85 / 0.87, `osvvm_axi4_random` 0.62 / 0.68,
+  GRLIB 0.95 / 0.99, `hdlm_lfsr`, `uvvm_func_cov`, `vunit_logging` 0.98 to 1.04; second run: neorv32 1.00 / 0.95,
+  osvvm 1.02 / 1.08 (it compiles what the first run skipped; A/A 0.95 / 1.00, spreads 0.74 to 1.17), GRLIB 0.92 /
+  1.04 (A/A 0.95 / 0.95), the small ones 0.99 to 1.06; third run: neorv32 0.85 / 0.95, osvvm 0.69 / 0.88, GRLIB 0.94 /
+  1.09 (A/A 0.92 / 1.08), the small ones 0.98 to 1.04. Outputs and exit codes equal in every run.
 
 ## `--tier=auto` under `--threads`: the simulation CPU is the kernel thread's (yavs-llvm `auto.rs`, #884, 2026-11-07)
 
