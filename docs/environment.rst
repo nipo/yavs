@@ -138,7 +138,7 @@ Read by vunit-yavs and VUnit
      - ``vunit-yavs`` 0.10.0
    * - ``VUNIT_YAVS_MAX_THREADS``
      - ``--yavs-max-threads``, for a run script with a command line of its own.
-     - a number, at least 1
+     - a number, at least 1, or ``auto``
      - unset
      - ``vunit-yavs``
      - 0.12.0
@@ -419,6 +419,12 @@ Each one turns a fast path off or changes its threshold, to compare a run with a
      - ``run``
    * - ``YAVS_POOL_ALL``
      - With ``--threads`` above 1, hands every batch of two or more processes to the thread pool, whatever it is worth.
+     - ``1``
+     - unset
+     - ``run``
+   * - ``YAVS_THREADS_FLIP``
+     - With ``--threads=auto``, turns the threads off and on at every check instead of judging them, so a test sees
+       that no decision changes the output.
      - ``1``
      - unset
      - ``run``

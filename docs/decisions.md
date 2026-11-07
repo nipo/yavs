@@ -14442,3 +14442,64 @@ whole-signal read, the call, the result's check and copy, the wide drive).
   with its zeroing call, the descriptor copy and pair of the result, the whole-signal read of the operand, the copy
   of the result into the waveform and the wide drive. Per element the function runs about 550 instructions of
   compiled code against about 325 in the loop, which drives each element on its own (about 220 more in the host).
+
+## `--threads=auto` (yavs-kernel `kernel/auto.rs`, yavs `threads.rs`, vunit-yavs, #884, 2026-11-07)
+
+- **Decision: the kernel decides, while the run goes, from what the threads saved** (agent). The tracker's design
+  had three parts (a static estimate at elaboration, an early trial, run-to-run memory); all three exist, but the
+  trial carries the decision and never stops: the threads are judged in windows of 25 ms of wall time whenever they
+  are on, and tried again after a pause whenever they are off (1 s doubling to 16 s, 0.1 s once a window won). Why:
+  the gain of a design changes during a run (a testbench's set-up phase, the swap to compiled code under
+  `--tier=auto`, a host that gets busy), and turning the threads off is free (`workers` 0 is the code of
+  `--threads=1`) while a trial costs little (the estimate per batch and the timed sample, about 2 percent of the
+  instructions of a design that never pools, for 5 ms when no batch wants the threads, else 50 ms).
+- **Decision: the measure is the saving of the batches that pooled or wanted to, calibrated by timed probes**
+  (agent). saved = (estimate inline of the batches that went to the pool or would have, but for a token) x (inline
+  time over estimate of the probe batches minus pooled time over estimate). A window wins at 4 percent of its wall
+  time. The probe timed is the second of each 64, since the first runs while the processes' data sits in the caches
+  of the cores that ran them last (a cold-cache inline time made losing designs look like gainers); without a probe the
+  factor is 1. Why not instructions or `pooled_batches`: compiled code runs processes 2 to 10 times faster, so only
+  time in the running tier says whether a batch is worth the threads.
+- **Decision: strikes before off** (agent): one window in which no batch wanted the threads, two losing windows (the
+  first of a trial also pays for starting the threads), four once a window won in this run or the last. Why: on a
+  loaded host a single pooled batch can wait for a descheduled worker; the kernel's own `learn_pooled` then raises
+  its threshold for a while, so the next window has almost no pooled work. With two strikes `rtl_lfsr` under
+  `--tier=auto` lost its threads for the rest of the run on a busy host (1205 of 4916 batches pooled).
+- **Decision: the thread count is explored** (agent): after the first window that wins, and every 16 that win, one
+  window runs at the other count (all threads or half) and the count whose pooled batches ran faster against their
+  estimate is kept; the pool is rebuilt at the new size (idle workers of a bigger pool slowed every hand-over: 0.41
+  to 0.45 s against 0.35 s on `rtl_fan`). Why: on 4 cores with their hardware threads `rtl_lfsr` was fastest on 4
+  threads (1.57x compiled, 1.78x interpreted) and slower on 8 (1.43x, 1.65x), while `rtl_fan` interpreted gained
+  most on 8.
+- **Decision: a window in which no batch wanted the threads ends after 5 ms** (agent): the usual design that never
+  pools then pays its trial on 5 ms instead of 25 (the trial of an 85 ms run cost 0.7 percent of its instructions).
+- **Not done: a lower pool threshold under `auto`** (agent, measured): `POOL_WORK_NS` (20 us) keeps the compiled
+  batches of `rtl_lfsr` (512 registers, about 15 us estimated) inline, so its first run under `--tier=auto` loses
+  the threads after compiled code is in (1.10x against 1.57x at `--threads=4`, which keeps pooling on costs it
+  timed while the processes were interpreted). A floor of 5 us under `auto` took it to 1.19x but made the trial of
+  `lfsr64_xor` 9 percent slower in cycles; left for a change of the threshold itself, which also concerns
+  `--threads=N`.
+- **Decision: static estimate = fewer than 8 processes that may run in parallel** (not serial, not postponed): one
+  thread, no trial, no cache lookup (agent). Why: no batch of fewer processes can pass the pool threshold unless its
+  processes are very heavy; the processes' weights are not known before the run. `ponytail:` in the code.
+- **Decision: the first trial starts 10 ms after the build; the CPU count is asked when a batch first wants the
+  threads; the memory is looked up after the build only past the static estimate** (agent). Why: a tiny run paid 8
+  percent of its CPU time (0.13 ms) for `available_parallelism` (cgroup files) and the cache lookup when both were
+  done at the start, and 2 percent more instructions for the trial's sampling; measured on the three paths after the
+  change: instructions within 0.07 percent of `--threads=1`, cycles within the spread of the runs (0.1 to 0.3
+  percent).
+- **Decision: at most 8 threads, never more than the CPUs the process may use** (agent). Why: the largest measured
+  gains flatten by 8 (`docs/parallel.md`); more is unmeasured. `ponytail:` in `threads.rs`.
+- **Decision: memory = gained or not, per command line (`run_id`), kind `thr` in the work library's store**
+  (agent). A run after one that did not gain starts off with its first trial after 4 s; one after a run that gained
+  starts on, with four strikes and 0.1 s pauses. Written only when it changes; not with `--no-cache`. Why: a regression
+  runs the same command lines again; a stale entry only shifts the first trial, it cannot change a result.
+- **Decision: `--threads` keeps its default of 1** (agent, for the maintainer to confirm): `auto` could become the
+  default once it is measured on more hosts and test suites; under a test runner's `-p N` without a token server the
+  threads of all simulations would add up.
+- **Decision: under the test runner's token server every simulation gets `--threads=auto`**, a connection's cap is
+  `min(N, 8) - 1` (agent, 2026-11-07, for the maintainer to confirm). Replaces `--threads=min(N, 4)`
+  (`DEFAULT_MAX_THREADS`, the maintainer's stopgap of 2026-10-31 on #879 "until `--threads=auto` exists"). Why: a
+  simulation whose threads do not gain gives its tokens back after its trial and asks for none until the next one, so
+  the cap no longer has to protect the processor tests; a gaining one can use up to 8. `yavs.max_threads` and
+  `--yavs-max-threads` take a number or `auto`.

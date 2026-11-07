@@ -20,6 +20,7 @@ mod reference;
 mod stdout;
 mod stuck;
 mod surfer;
+mod threads;
 mod timing;
 mod tokens;
 

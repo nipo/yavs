@@ -31,7 +31,8 @@ as ``--name=value``.
    * - ``yavs.sim_flags``
      - ``yavs run`` (sim option).
    * - ``yavs.max_threads``
-     - ``yavs run --threads=N``: the most threads one simulation uses (with the token server, ``-p N`` but at most 4 when not set). An integer of at least 1.
+     - ``yavs run --threads=N``: the most threads one simulation uses, an integer of at least 1, or ``"auto"`` for
+       ``--threads=auto`` (more threads only while they make the run faster; the default with the token server).
        It overrides ``--yavs-max-threads`` for a test. Not passed under ``--yavs-debug`` or to
        ``elab``. A ``--threads`` in ``yavs.sim_flags`` comes after it and wins.
    * - ``yavs.cov_embed_sources``
@@ -123,7 +124,7 @@ out stops the run script with one ``error:`` line that says why and what to drop
        through a token server (:doc:`threads`).
 
 Without ``yavs.max_threads`` or ``--yavs-max-threads`` no thread count is passed and yavs runs
-with its default, unless the token server runs.
+with its default, one thread, unless the token server runs: then every simulation gets ``--threads=auto``.
 
 Compiling
 ---------

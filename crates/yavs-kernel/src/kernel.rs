@@ -24,7 +24,9 @@ use crate::value::{Buf, Elem, SignalType, Value, ValueRef, bits, fill_bits};
 use yavs_logic::StdULogic;
 use yavs_logic::wide::nmask;
 
+mod auto;
 mod hang;
+pub use auto::AutoVerdict;
 pub(crate) use hang::signal_sources;
 pub use hang::{
     ChangingSignal, DeadClock, LoopCause, LoopLink, PortLink, ProcWait, SignalSources, SourceInfo,
@@ -96,6 +98,13 @@ pub struct Config {
     /// With `threads` above 1, start the worker threads when a token first lets a batch use them
     /// (`set_tokens`), not at the start: a run that never holds a token creates none (#879).
     pub lazy_pool: bool,
+    /// With `threads` above 1, judge while running whether the threads pay and turn them off
+    /// (and on again) by what they saved (`--threads=auto`, `kernel/auto.rs`); `threads` is then
+    /// the most, and no more than the CPUs the process may run on are used.
+    pub auto: bool,
+    /// With `auto`: turn the threads the other way at every check (tests: a decision must change
+    /// no output).
+    pub auto_flip: bool,
     /// `Stats::events` counts the changed runs of a bus exactly. Off, a bus nothing asks the
     /// history of (`Builder::no_history`) is compared and copied whole and counts one event per
     /// update; nothing else depends on it.
@@ -117,6 +126,8 @@ impl Default for Config {
             cells: true,
             pool_all: false,
             lazy_pool: false,
+            auto: false,
+            auto_flip: false,
             count_runs: true,
         }
     }
@@ -205,6 +216,9 @@ pub struct Stats {
     pub single_runs: u64,
     /// Batches handed to the thread pool (`--threads` above 1, #497).
     pub pooled_batches: u64,
+    /// `--threads=auto`: windows judged with the threads on, and those that kept them.
+    pub threads_windows: u64,
+    pub threads_gained: u64,
     /// Update phases by path: the usual delta of one independent signal (or nothing due), the
     /// single timed entry, and the general worklist. The fast cases are the point of many
     /// rounds: a design that moves to `update_general` lost one.
@@ -703,12 +717,14 @@ struct Piece<'a> {
 }
 
 /// The estimated time of a pooled batch inline (`all`, ns) and of its splittable part (`work`);
-/// `learn`: every process has a cost (`SimControl::learn_pooled`).
+/// `learn`: every process has a cost (`SimControl::learn_pooled`); `probe`: one that would pool
+/// runs inline to refresh the costs (only under `--threads=auto`, which times it).
 #[derive(Clone, Copy, Default)]
 struct Estimate {
     all: u64,
     work: u64,
     learn: bool,
+    probe: bool,
 }
 
 /// What the processes of a piece committed in the worker, for the kernel thread to apply, and
@@ -1065,6 +1081,9 @@ pub struct SimControl {
     idle_live: u32,
     /// Some process qualified for the idle skip (`idle_reprobe` has work).
     idle_live_possible: bool,
+    /// `tick` runs when the cycle number has none of these bits: every 65536 cycles, every
+    /// `auto::TICK_MASK + 1` under `--threads=auto`, every cycle with `Config::auto_flip`.
+    tick_mask: u64,
     /// `Tn` as the last delta computed it (only a cycle sets it, only `run_until` takes it).
     known_next: Option<Option<Time>>,
     /// The next activity time while end-of-time-step observers run (`Hook::next_time`).
@@ -1109,6 +1128,8 @@ pub struct SimControl {
     watch_changes: bool,
     wakes: Wakes,
     pool: Option<rayon::ThreadPool>,
+    /// `--threads=auto` past the static estimate (`kernel/auto.rs`).
+    auto: Option<Box<auto::Auto>>,
     /// The worker threads `--threads` asks for, built or not (`Config::lazy_pool`).
     workers: usize,
     /// The token pool that decides how many of the pool's workers may run (`set_tokens`), the
@@ -1284,7 +1305,19 @@ impl SimControl {
             }
             n => n - 1,
         };
-        let pool = if workers > 0 && !cfg.lazy_pool {
+        // `--threads=auto`: too few processes that may run in parallel keep one thread, no trial.
+        let parallel = procs
+            .iter()
+            .filter(|m| !m.flags.serial && !m.flags.postponed)
+            .count();
+        let auto = (cfg.auto && workers > 0 && parallel >= auto::MIN_PROCS)
+            .then(|| Box::new(auto::Auto::new(workers, None)));
+        let workers = match &auto {
+            Some(a) => a.start(),
+            None if cfg.auto => 0,
+            None => workers,
+        };
+        let pool = if workers > 0 && !cfg.lazy_pool && !cfg.auto {
             Some(build_pool(workers)?)
         } else {
             None
@@ -1473,7 +1506,7 @@ impl SimControl {
         let no_code_signals = signals.iter().filter(|s| s.keeps_no_codes()).count() as u64;
         let skip_signals = signals.iter().filter(|s| s.skip_ok).count() as u64;
         let nsignals = signals.len() as u64;
-        let (cost, serial_of) = if workers > 0 {
+        let (cost, serial_of) = if workers > 0 || auto.is_some() {
             (
                 vec![0; procs.len()],
                 procs.iter().map(|m| m.flags.serial).collect(),
@@ -1494,6 +1527,11 @@ impl SimControl {
             idle_active,
             idle_live,
             idle_live_possible: idle_live != 0,
+            tick_mask: match &auto {
+                Some(_) if cfg.auto_flip => 0,
+                Some(_) => auto::TICK_MASK,
+                None => 0xffff,
+            },
             names,
             rng: cfg.shuffle,
             cfg,
@@ -1562,6 +1600,7 @@ impl SimControl {
             serial_of,
             early: Vec::new(),
             pool,
+            auto,
             workers,
             tokens: None,
             held: 0,
@@ -1991,14 +2030,26 @@ impl SimControl {
     /// The workers a pooled step may use: all of them without a token pool, else the tokens
     /// held, topped up without blocking.
     fn helpers(&mut self) -> usize {
-        let n = self.workers;
+        if self.pool.is_none() && self.auto.as_ref().is_some_and(|a| !a.counted) {
+            self.auto_cpus();
+        }
+        // `--threads=auto` may run a batch on fewer threads than the pool has (`Auto::limit`).
+        let n = self
+            .auto
+            .as_ref()
+            .map_or(self.workers, |a| a.limit.min(self.workers));
         if let Some(t) = &self.tokens {
             self.token_idle = 0;
             if self.held < n {
                 self.held = t.take(n);
             }
         }
-        let usable = if self.tokens.is_some() { self.held } else { n };
+        // ponytail: tokens held above a lowered limit stay until the next give-back.
+        let usable = if self.tokens.is_some() {
+            self.held.min(n)
+        } else {
+            n
+        };
         if usable > 0 && self.pool.is_none() {
             // ponytail: workers that cannot be started leave the run on one thread, as a token
             // server that cannot be reached does; the output does not depend on them.
@@ -2007,6 +2058,7 @@ impl SimControl {
                 Err(_) => {
                     self.give_tokens();
                     self.workers = 0;
+                    self.auto = None;
                     return 0;
                 }
             }
@@ -2360,6 +2412,18 @@ impl SimControl {
         pids.truncate(keep);
     }
 
+    /// Every `tick_mask + 1` cycles: the idle skip's reprobe (every 65536) and `--threads=auto`.
+    #[cold]
+    #[inline(never)]
+    fn tick(&mut self) {
+        if self.idle_live_possible && self.cycle & 0xffff == 0 {
+            self.idle_reprobe();
+        }
+        if self.auto.is_some() {
+            self.auto_tick();
+        }
+    }
+
     /// Track again the processes `note_idle` stopped tracking: their inputs may be quiet now.
     fn idle_reprobe(&mut self) {
         for (m, armed) in self.procs.iter_mut().zip(&mut self.armed) {
@@ -2437,8 +2501,8 @@ impl SimControl {
         self.cycle += 1;
         self.stats.cycles += 1;
         PROGRESS.store(self.stats.process_runs, Ordering::Relaxed);
-        if self.idle_live_possible && self.cycle & 0xffff == 0 {
-            self.idle_reprobe();
+        if self.cycle & self.tick_mask == 0 {
+            self.tick();
         }
         self.phase(Phase::NextCycle);
         if !self.wakes.pending.is_empty() {
@@ -3941,19 +4005,22 @@ impl SimControl {
         } else {
             None
         };
-        // With a token pool and no token, the batch runs inline.
-        let helpers = if est.is_some() { self.helpers() } else { 0 };
-        if est.is_some() && helpers == 0 {
+        // With a token pool and no token, the batch runs inline. A probe of `--threads=auto`
+        // runs inline too, timed (`timed_batch`).
+        let mut pooled = est.is_some_and(|e| !e.probe);
+        let helpers = if pooled { self.helpers() } else { 0 };
+        if pooled && helpers == 0 {
+            self.starved_batch(est);
             est = None;
-        } else if est.is_none() && self.held != 0 {
+            pooled = false;
+        } else if !pooled && self.held != 0 {
             self.tokens_idle();
         }
-        self.stats.pooled_batches += u64::from(est.is_some());
-        let pooled = est.is_some();
+        self.stats.pooled_batches += u64::from(pooled);
         // A batch on fewer threads than the pool has teaches nothing about the threshold.
         let full = self.workers == helpers;
         let pooled_at = est
-            .filter(|e| e.learn && full)
+            .filter(|e| e.learn && full || self.auto.is_some())
             .map(|_| std::time::Instant::now());
         {
             let sh = Shared {
@@ -4314,9 +4381,31 @@ impl SimControl {
             }
         }
         if let (Some(t), Some(e)) = (pooled_at, est) {
-            self.learn_pooled(e, t.elapsed().as_nanos() as u64);
+            self.timed_batch(e, full, t.elapsed().as_nanos() as u64);
         }
         self.commit_rest(late, pids, postponed, init)
+    }
+
+    /// A batch that went to the pool, or a probe of `--threads=auto`, took `ns`.
+    #[inline(never)]
+    fn timed_batch(&mut self, e: Estimate, full: bool, ns: u64) {
+        if let Some(a) = self.auto.as_deref_mut() {
+            if e.probe {
+                return a.inline(e.all, ns);
+            }
+            a.batch(e.all, Some(ns));
+        }
+        if e.learn && full {
+            self.learn_pooled(e, ns);
+        }
+    }
+
+    /// A batch that would pool got no token.
+    #[cold]
+    fn starved_batch(&mut self, est: Option<Estimate>) {
+        if let (Some(a), Some(e)) = (self.auto.as_deref_mut(), est) {
+            a.batch(e.all, None);
+        }
     }
 
     /// The time of a pooled batch over its estimate inline, averaged (`pool_ratio`, 1024 is
@@ -4361,6 +4450,16 @@ impl SimControl {
         let work = sum - max;
         let pool = if work > self.pool_ns {
             self.probe = self.probe.wrapping_add(1);
+            // Under `--threads=auto` the probe after the probe is timed: the first one finds the
+            // processes in the caches of the cores that ran them last, not as one thread has them.
+            if self.probe % PROBE_EVERY == 1 && self.auto.is_some() {
+                return Some(Estimate {
+                    all,
+                    work,
+                    learn: known,
+                    probe: true,
+                });
+            }
             !self.probe.is_multiple_of(PROBE_EVERY)
         } else if work > POOL_WORK_NS {
             self.raise_probe = self.raise_probe.wrapping_add(1);
@@ -4373,6 +4472,7 @@ impl SimControl {
             all,
             work,
             learn: known,
+            probe: false,
         })
     }
 

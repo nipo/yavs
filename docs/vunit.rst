@@ -161,10 +161,11 @@ tests are left, the token server can lend the idle slots to them as threads:
 
 .. code-block:: bash
 
-    python run.py -p 8 --yavs-jobserver --yavs-max-threads 4
+    python run.py -p 8 --yavs-jobserver
 
-It helps only when those long tests gain from threads. :doc:`threads` says how to tell. Under the server a simulation
-uses at most 4 threads unless ``--yavs-max-threads`` or ``yavs.max_threads`` says otherwise.
+It helps only when those long tests gain from threads. Under the server every simulation runs with
+``--threads=auto``: it takes the idle slots only while its threads make it faster (:doc:`threads`).
+``--yavs-max-threads N`` or ``yavs.max_threads`` gives a fixed number instead.
 
 Other libraries in a test
 -------------------------

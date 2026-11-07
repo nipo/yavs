@@ -47,7 +47,8 @@ Threads
 -------
 
 ``--threads=N`` helps only large, flat designs where many processes wake in the same delta cycle. Leave it at 1
-(the default) unless you measured a gain: :doc:`threads`.
+(the default) unless you measured a gain, or use ``--threads=auto``, which uses more threads only while they make
+the run faster: :doc:`threads`.
 
 Finding where the time goes
 ---------------------------

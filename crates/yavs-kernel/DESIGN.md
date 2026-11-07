@@ -270,6 +270,12 @@ Within a delta the kernel has two phases that never overlap:
   pieces in turn, run the parallel processes and commit the usual clocked ones into the
   piece's buffers, which the kernel thread applies after the join; the serial processes then
   run on the kernel thread in batch order (#481). Where a batch runs changes no output.
+  `Config::auto` (`--threads=auto`, `kernel/auto.rs`) turns the threads off and on while the run
+  goes by setting `workers` to 0 (every test above reads it, so off is the code of one thread)
+  and back: after a static count of the processes that may run in parallel, a periodic `tick`
+  judges windows of wall time by the estimated time their pooled batches saved, calibrated by
+  timed probe batches. Since no decision changes where a batch's effects are committed, none
+  changes the output; `tests/determinism.rs` flips them at every cycle.
   Each gets a `Ctx` holding a shared read-only view (`Shared`: time, delta, cycle number, all
   signals, driver table) and `&mut` to its own `ProcState` (a per-process slot; its mutex is
   locked only by the parallel update of independent signals). A

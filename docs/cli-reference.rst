@@ -434,9 +434,9 @@ Arguments:
 
    Default: ``fs``.
 
-.. option:: --threads=N
+.. option:: --threads=N|auto
 
-   Worker threads for process evaluation (at least 1). The output does not depend on it.
+   Threads for process evaluation: a number of at least 1, or ``auto``, which decides while the run goes whether more threads make it faster and uses them only then (up to the CPUs the run may use, at most 8). The output does not depend on it.
 
    Default: ``1``.
 

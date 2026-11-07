@@ -45,20 +45,19 @@ DEFAULT_DEBUG_PORT = 4711
 DAP_LISTENING = "yavs: DAP listening on "
 # The file names of one yavs analyze call: well below the Windows command line limit of 32767 characters
 MAX_BATCH_CHARS = 20000
-# With a token server a simulation uses at most this many threads unless told otherwise: more buys little
-# (docs/parallel.md) and each thread costs memory in every one of -p N simulations (#879). 4 until
-# --threads=auto exists (#901)
-DEFAULT_MAX_THREADS = 4
+# With a token server a simulation runs with --threads=auto unless told otherwise: it uses tokens only
+# while its threads gain, at most this many threads (the cap of yavs's own --threads=auto, #884)
+AUTO_MAX_THREADS = 8
 
 
-class PositiveIntegerOption(Option):
+class ThreadsOption(Option):
     """
-    Must be an integer of at least 1
+    Must be an integer of at least 1, or "auto"
     """
 
     def validate(self, value):
-        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-            raise ValueError(f"Option {self.name!r} must be an integer of at least 1. Got {value!r}")
+        if value != "auto" and (isinstance(value, bool) or not isinstance(value, int) or value < 1):
+            raise ValueError(f"Option {self.name!r} must be an integer of at least 1 or \"auto\". Got {value!r}")
 
 
 def _debug_port(text):
@@ -73,8 +72,10 @@ def _debug_port(text):
 
 def _max_threads(text):
     """argparse type of --yavs-max-threads"""
+    if text == "auto":
+        return text
     if not text.isdigit() or int(text) < 1:
-        raise argparse.ArgumentTypeError(f"expected an integer of at least 1, got {text!r}")
+        raise argparse.ArgumentTypeError(f"expected an integer of at least 1 or auto, got {text!r}")
     return int(text)
 
 
@@ -232,7 +233,7 @@ class YavsInterface(SimulatorInterface):
         ListOfStringOption("yavs.global_flags"),
         ListOfStringOption("yavs.elab_flags"),
         ListOfStringOption("yavs.sim_flags"),
-        PositiveIntegerOption("yavs.max_threads"),
+        ThreadsOption("yavs.max_threads"),
         ListOfStringOption("yavs.cov_kind"),
         BooleanOption("yavs.cov_embed_sources"),
         # Files of console commands, sourced at the points VUnit sources its init files
@@ -307,7 +308,8 @@ class YavsInterface(SimulatorInterface):
             type=_max_threads,
             default=None,
             metavar="N",
-            help="Run each simulation with at most N threads (yavs run --threads=N); "
+            help="Run each simulation with at most N threads (yavs run --threads=N), or with --threads=auto "
+            "(N=auto: threads only while they make the simulation faster); "
             "the sim option yavs.max_threads overrides it per test. Default: the environment variable "
             "VUNIT_YAVS_MAX_THREADS, for run scripts with a command line of their own.",
         )
@@ -316,7 +318,7 @@ class YavsInterface(SimulatorInterface):
             action="store_true",
             default=False,
             help="Lend the CPU slots of -p N that no test uses to the running simulations through a token server; "
-            "each simulation runs with --threads=N (yavs.max_threads or --yavs-max-threads caps it).",
+            "each simulation runs with --threads=auto (yavs.max_threads or --yavs-max-threads sets another value).",
         )
 
         group.add_argument(
@@ -718,10 +720,10 @@ class YavsInterface(SimulatorInterface):
             cmd += ["--ieee-warnings=off"]
 
         # The cap goes first, so --threads in the raw flags below wins (last one wins); a DAP run is one thread.
-        # With a token server every simulation may use all -p N slots, on tokens.
+        # With a token server every simulation may use the -p N slots, on tokens, while its threads gain.
         max_threads = config.sim_options.get("yavs.max_threads", self._max_threads)
         if max_threads is None and self._tokens is not None:
-            max_threads = min(self._tokens.num_threads, DEFAULT_MAX_THREADS)
+            max_threads = "auto"
         if max_threads is not None and not elaborate_only and not debug:
             cmd += [f"--threads={max_threads}"]
 
@@ -801,7 +803,8 @@ class YavsInterface(SimulatorInterface):
             env = commands.hook.env(env)
         client = None
         if self._tokens is not None and not elaborate_only:
-            client = self._tokens.add(max_threads - 1)
+            cap = min(self._tokens.num_threads, AUTO_MAX_THREADS) if max_threads == "auto" else max_threads
+            client = self._tokens.add(cap - 1)
             env = self._tokens.env(client, environ if env is None else env)
 
         if interactive:

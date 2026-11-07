@@ -1651,12 +1651,12 @@ fn threads_words() {
         assert_eq!(o.status.code(), Some(2));
         String::from_utf8_lossy(&o.stderr).into_owned()
     };
+    // `auto` is a value (#884): the run gets past the option to the missing library.
     let auto = run("--threads=auto");
-    assert!(auto.contains("`auto` is not implemented yet"), "{auto}");
-    assert!(auto.contains("`--threads=4`"), "{auto}");
-    assert!(!auto.contains("invalid digit"), "{auto}");
+    assert!(auto.contains("E0104"), "{auto}");
     let word = run("--threads=many");
     assert!(word.contains("`many` is not a number of threads"), "{word}");
+    assert!(word.contains("or `auto`"), "{word}");
     assert!(!word.contains("invalid digit"), "{word}");
 }
 

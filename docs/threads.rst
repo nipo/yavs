@@ -2,7 +2,8 @@ Threads and the token server
 ============================
 
 This page says when more threads make a simulation faster, how to ask for them, and how parallel tests
-share CPU cores through the token server. Most designs do not gain: measure first.
+share CPU cores through the token server. Most designs do not gain: measure first, or let
+``--threads=auto`` find out.
 
 .. contents:: On this page
    :local:
@@ -10,8 +11,8 @@ share CPU cores through the token server. Most designs do not gain: measure firs
 What threads do
 ---------------
 
-``yavs run --threads=N`` lets one simulation use N threads. The default is 1. There is no
-``--threads=auto`` yet (issue 901): N is a whole number of at least 1.
+``yavs run --threads=N`` lets one simulation use N threads, a whole number of at least 1. The default
+is 1. ``--threads=auto`` decides while the run goes (`Letting yavs decide`_).
 
 * Only the evaluation of VHDL processes is shared. Analysis, elaboration and most of the rest of a run
   stay on one thread.
@@ -40,6 +41,39 @@ They do not help, and cost a few percent, when:
 * the test is testbench-style, with a stimulus process, a checker and a small design;
 * long chains of delta cycles wake only a few processes each;
 * the processes must run in order: file or text I/O, shared variables, protected objects.
+
+Letting yavs decide
+-------------------
+
+.. code-block:: bash
+
+    yavs run --work=work:build/work tb --threads=auto
+
+With ``--threads=auto`` yavs uses more threads only while they make the run faster:
+
+* It may use as many threads as the CPUs the run is allowed on (a ``taskset`` or container limit counts),
+  at most 8. The threads start only when a group of processes is first worth sharing.
+* A design with fewer than 8 processes that can run in parallel stays on one thread for the whole run.
+* Otherwise yavs tries the threads from 10 ms into the run and measures in short windows of about 25 ms what
+  they save. When they save too little,
+  it goes back to one thread, exactly as with ``--threads=1``, and tries again later: after 1 second, then after
+  2, 4, up to 16 seconds. A design whose threads gained tries again after 0.1 s, so a busy part later in the
+  test is found again.
+* It tries half as many threads now and then and keeps the faster count: two hardware threads of one core
+  can be slower than one.
+* It remembers what the last run of the same command line found, in the work library's cache (not with
+  ``--no-cache``): a test that did not gain starts on one thread, one that gained starts with the threads on.
+* ``--verbose`` says what it decided at the end of the run.
+* The output is the same whatever it decides.
+
+Measured on small benchmark designs (2026-11-07, 4 cores and their second hardware threads, a busy host):
+designs of thousands of small processes on one clock got 91 to 96 percent of the speedup of the best fixed
+``--threads`` once the last run was remembered, and designs that do not gain ran within 1 percent of
+``--threads=1``. The first run of a design, with nothing remembered, does worse on some: 88 percent on one
+design with the interpreter, and 76 percent on one whose compiled processes are each too short for yavs to
+share them. A test of a few milliseconds runs on one thread. The numbers are in
+`parallel.md <https://github.com/ru551n/yavs/blob/main/docs/parallel.md>`__. Measure your own longest test if
+you depend on it (`How to decide`_).
 
 How to decide
 -------------
@@ -93,9 +127,10 @@ and the flag does nothing:
     python run.py -p 8 --yavs-jobserver
     python run.py -p 8 --yavs-jobserver --yavs-max-threads 4
 
-``--yavs-max-threads N`` caps the threads of one simulation; the default with the server is the ``-p``
-value, at most 4, since more threads buy little and each costs memory in every simulation. A test can have its
-own cap with ``vu.set_sim_option("yavs.max_threads", 2)``. Without the server ``--yavs-max-threads N`` simply runs
+With the server every simulation runs with ``--threads=auto``: it asks for tokens only while its threads
+gain, and gives them back when they do not. ``--yavs-max-threads N`` gives every simulation ``--threads=N``
+instead (``--yavs-max-threads auto`` is the default). A test can have its own value with
+``vu.set_sim_option("yavs.max_threads", 2)`` or ``"auto"``. Without the server ``--yavs-max-threads N`` simply runs
 each simulation with ``--threads=N``. If the server cannot start (a blocked local socket), the run prints a
 warning and goes on without a server, as if ``--yavs-jobserver`` had not been given. A run script with a command line of its own can set
 ``VUNIT_YAVS_MAX_THREADS`` instead of the flag.
