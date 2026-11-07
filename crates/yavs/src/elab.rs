@@ -174,9 +174,11 @@ pub struct RunArgs {
     /// Time resolution limit (`std.env.resolution_limit`, TIME values in reflection).
     #[arg(long, value_enum, default_value = "fs")]
     resolution: ResolutionArg,
-    /// Worker threads for process evaluation (at least 1). The output does not depend on it.
-    #[arg(long, value_name = "N", default_value = "1", value_parser = parse_threads)]
-    threads: usize,
+    /// Threads for process evaluation: a number of at least 1, or `auto`, which decides while the
+    /// run goes whether more threads make it faster and uses them only then (up to the CPUs the
+    /// run may use, at most 8). The output does not depend on it.
+    #[arg(long, value_name = "N|auto", default_value = "1", value_parser = parse_threads)]
+    threads: Threads,
     /// Collect the heap of access values once this much was allocated since the last
     /// collection (and as much as that collection kept): plain bytes or a `k`, `m` or `g`
     /// suffix (powers of 1024), at least 1. Default 1m.
@@ -345,15 +347,30 @@ fn parse_size(s: &str) -> Result<u64, String> {
     }
 }
 
-fn parse_threads(s: &str) -> Result<usize, String> {
+/// `--threads`: a fixed number, or `auto` (`crate::threads`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Threads {
+    N(usize),
+    Auto,
+}
+
+impl Threads {
+    /// The most threads the run may use.
+    fn count(self) -> usize {
+        match self {
+            Threads::N(n) => n,
+            Threads::Auto => crate::threads::MAX,
+        }
+    }
+}
+
+fn parse_threads(s: &str) -> Result<Threads, String> {
     match s.trim().parse::<usize>() {
         Ok(0) => Err("the number of threads must be at least 1".into()),
-        Ok(n) => Ok(n),
-        Err(_) if s.trim() == "auto" => Err(
-            "`auto` is not implemented yet: give a number of threads, such as `--threads=4`".into(),
-        ),
+        Ok(n) => Ok(Threads::N(n)),
+        Err(_) if s.trim() == "auto" => Ok(Threads::Auto),
         Err(_) => Err(format!(
-            "`{s}` is not a number of threads: give a whole number of at least 1, such as `--threads=4`"
+            "`{s}` is not a number of threads: give a whole number of at least 1, such as `--threads=4`, or `auto`"
         )),
     }
 }
@@ -1364,8 +1381,8 @@ impl yavs_llvm::Generator for Mixed {
     }
 }
 
-/// A name for this run in the profile of `--tier=auto`: a digest of the command line.
-#[cfg(any(feature = "llvm", feature = "clift"))]
+/// A name for this run in the profiles of `--tier=auto` and `--threads=auto`: a digest of the
+/// command line.
 fn run_id() -> String {
     use std::hash::{Hash, Hasher};
     let mut h = std::hash::DefaultHasher::new();
@@ -1643,7 +1660,7 @@ fn prepare(
             );
             return Err((out, 2));
         }
-        if a.threads > 1 {
+        if a.threads != Threads::N(1) {
             out.emit(
                 &none,
                 &Diagnostic::warning("W0109", format!("`--threads` is ignored with `{flag}`"))
@@ -1710,7 +1727,7 @@ fn prepare(
     }
     let idle_mode = std::env::var("YAVS_IDLE_SKIP").unwrap_or_default();
     let cfg = yavs_kernel::Config {
-        threads: a.threads,
+        threads: a.threads.count(),
         shuffle: a.shuffle,
         max_deltas: a.max_deltas,
         resolution,
@@ -1738,8 +1755,13 @@ fn prepare(
         // `YAVS_POOL_ALL=1` hands every batch of two or more processes to the thread pool
         // (`--threads` above 1): the determinism runs exercise the pooled path with it.
         pool_all: std::env::var("YAVS_POOL_ALL").is_ok_and(|v| v == "1"),
-        // Under a token server the worker threads start with the first token (#879).
+        // Under a token server the worker threads start with the first token (#879); `auto`
+        // starts them when a batch first goes to them.
         lazy_pool,
+        auto: a.threads == Threads::Auto,
+        // Hidden test aid: `YAVS_THREADS_FLIP=1` turns the threads of `auto` on and off at every
+        // check, so the corpus runs see a decision change no output.
+        auto_flip: std::env::var("YAVS_THREADS_FLIP").is_ok_and(|v| v == "1"),
     };
     if let Some(seed) = a.shuffle {
         out.emit(&none, &shuffle_note(seed));
@@ -1886,7 +1908,7 @@ fn run_design(
     // First: a token server that is not `<port>:<secret>` or refuses the secret stops the run before
     // any work; one that cannot be reached is a warning, below, and the run has one thread.
     let (tokens, token_warning) =
-        match (a.threads > 1 && !a.debugged()).then(crate::tokens::connect) {
+        match (a.threads.count() > 1 && !a.debugged()).then(crate::tokens::connect) {
             Some(Err(why)) => {
                 let mut out = Out::new(format, color);
                 out.emit(
@@ -2133,6 +2155,16 @@ fn run_design(
     }
     if let Some(p) = &tokens {
         sim.set_tokens(p.clone());
+    }
+    // `--threads=auto` past the static estimate remembers what the last run of this command line
+    // found (#884).
+    let memory = sim
+        .threads_verdict()
+        .is_some_and(|v| v != yavs_kernel::AutoVerdict::Static)
+        .then(|| crate::threads::Memory::open(&a.common.work, a.common.no_cache, &run_id()))
+        .flatten();
+    if let Some(m) = &memory {
+        sim.set_threads_hint(m.hint);
     }
     sim.subscribe(Box::new(Printer));
     if let Some(ac) = &activity {
@@ -2391,6 +2423,17 @@ fn run_design(
     crate::timing::report();
     crate::counters::report(sim.stats(), rt.as_deref());
     yavs_interp::census_dump(40);
+    if let Some(v) = sim.threads_verdict() {
+        if a.verbose {
+            eprintln!(
+                "{}",
+                crate::threads::note(v, memory.as_ref().and_then(|m| m.hint))
+            );
+        }
+        if let Some(m) = &memory {
+            m.save(Some(v));
+        }
+    }
     let mut activity_error = None;
     if let (Some(ac), Some(names), Some(file)) = (&activity, &activity_names, &a.activity) {
         let (runs, events) = (ac.runs(), ac.events());

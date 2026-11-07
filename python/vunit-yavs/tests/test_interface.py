@@ -240,12 +240,16 @@ class TestPackage(unittest.TestCase):
         with mock.patch("sys.stderr", new_callable=io.StringIO) as stderr, self.assertRaises(SystemExit):
             vu.get_simulator_name()
         self.assertIn("at least 1", stderr.getvalue())
+        vu = self._vunit("--yavs-max-threads=auto")
+        vu.get_simulator_name()
+        self.assertEqual(vu._args.yavs_max_threads, "auto")  # pylint: disable=protected-access
 
     def test_max_threads_option_is_validated(self):
         self._vunit().get_simulator_name()
-        for value in (0, -1, "2", True, 1.5):
+        for value in (0, -1, "2", "Auto", True, 1.5):
             with self.assertRaisesRegex(ValueError, "yavs.max_threads.*at least 1"):
                 self.factory.check_sim_option("yavs.max_threads", value)
+        self.factory.check_sim_option("yavs.max_threads", "auto")
 
 
 class TestYavsInterface(unittest.TestCase):
@@ -724,6 +728,11 @@ class TestYavsInterface(unittest.TestCase):
         _, cmd, _ = self._simulate(make_config(), max_threads=3)
         self.assertEqual([arg for arg in cmd if arg.startswith("--threads")], ["--threads=3"])
 
+    def test_max_threads_auto(self):
+        config = make_config(sim_options={"yavs.max_threads": "auto"})
+        _, cmd, _ = self._simulate(config, max_threads=3)
+        self.assertEqual([arg for arg in cmd if arg.startswith("--threads")], ["--threads=auto"])
+
     def test_max_threads_sim_option_overrides_the_command_line(self):
         config = make_config(sim_options={"yavs.max_threads": 5})
         _, cmd, _ = self._simulate(config, max_threads=3)
@@ -873,7 +882,7 @@ class TestYavsInterface(unittest.TestCase):
 
     def test_simulate_with_tokens_passes_threads_and_the_server(self):
         cmd, env, tokens = self._simulate_with_tokens(make_config())
-        self.assertIn("--threads=4", cmd)
+        self.assertIn("--threads=auto", cmd)
         self.assertRegex(env["YAVS_TOKENS"], rf"^{tokens.port}:[0-9a-f]{{32}}$")
 
     def test_simulate_with_tokens_and_a_cap(self):
@@ -882,13 +891,17 @@ class TestYavsInterface(unittest.TestCase):
         self.assertNotIn("--threads=4", cmd)
         self.assertIn("YAVS_TOKENS", env)
 
-    def test_threads_with_tokens_are_capped_at_four_by_default(self):
+    def test_threads_with_tokens_are_auto_by_default(self):
         tokens = TokenServer(16)
         self.addCleanup(tokens.close)
-        _, cmd, _ = self._simulate(make_config(), tokens=tokens)
-        self.assertIn("--threads=4", cmd)
-        _, cmd, _ = self._simulate(make_config(sim_options={"yavs.max_threads": 12}), tokens=tokens)
-        self.assertIn("--threads=12", cmd)
+        # With auto a test may hold at most the tokens of yavs's own cap of 8 threads
+        with mock.patch.object(tokens, "add", wraps=tokens.add) as add:
+            _, cmd, _ = self._simulate(make_config(), tokens=tokens)
+            self.assertIn("--threads=auto", cmd)
+            add.assert_called_with(7)
+            _, cmd, _ = self._simulate(make_config(sim_options={"yavs.max_threads": 12}), tokens=tokens)
+            self.assertIn("--threads=12", cmd)
+            add.assert_called_with(11)
 
     @NEEDS_FAKE_BIN
     def test_token_server_that_cannot_start_is_a_warning_and_no_tokens(self):

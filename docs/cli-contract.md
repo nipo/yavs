@@ -433,7 +433,7 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   design, packages and dead code included, is error `E2120` before time 0 (exit 2; the first 10
   locations are listed); `0 fs` and values such as `0.4 ns` under `ns` are legal. The built-in
   std and ieee sources are exempt. A design that ran with a coarse limit before can now fail.
-- `--stop-time=TIME` (e.g. `10ms` or `10 ns`; a bare number is `E0105`), `--threads=N` (at least 1; 0 is a usage error, exit 2, #839), `--shuffle`,
+- `--stop-time=TIME` (e.g. `10ms` or `10 ns`; a bare number is `E0105`), `--threads=N` (at least 1; 0 is a usage error, exit 2, #839) or `--threads=auto` (below), `--shuffle`,
   `--vhpi=LIB[:ENTRY]`, `--dap=PORT`: not passed by the test runner, used through
   `yavs.sim_flags` or simulator hooks. `--load=LIB` is taken by `yavs elab` as well as `yavs run`
   (#943); `native_library_hooks` passes it to both through `elab_flags`.
@@ -662,13 +662,35 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   runner passes neither; use `yavs.sim_flags`.
 - Threads: yavs defaults to `--threads=1`. The test runner already runs `-p N`
   simulations in parallel and passes a thread count only when the user sets one: the sim
-  option `yavs.max_threads` (or the runner argument `--yavs-max-threads N` for every test)
-  becomes `--threads=N` before the raw flags, so `--threads` in `yavs.sim_flags` still wins; none
-  under `--dap` or for `elab`. With the runner's `--yavs-jobserver` and `-p N` above 1, the
-  runner starts a token server and every `yavs run` gets `--threads=N` (or `yavs.max_threads`
-  when set, before the raw flags) and its own `YAVS_TOKENS`: the runner lends the CPU slots no
-  test uses as tokens, at most `yavs.max_threads - 1` per test when set, breadth first, newest
-  test first, and never takes back a token in use (python/vunit-yavs/README.md "Token server").
+  option `yavs.max_threads` (or the runner argument `--yavs-max-threads N` for every test; both
+  take a number or `auto`) becomes `--threads=N` before the raw flags, so `--threads` in
+  `yavs.sim_flags` still wins; none under `--dap` or for `elab`. With the runner's
+  `--yavs-jobserver` and `-p N` above 1, the runner starts a token server and every `yavs run`
+  gets `--threads=auto` (or `yavs.max_threads` when set, before the raw flags) and its own
+  `YAVS_TOKENS`: the runner lends the CPU slots no test uses as tokens, at most
+  `min(N, 8) - 1` per test with `auto` and `yavs.max_threads - 1` with a number, breadth first,
+  newest test first, and never takes back a token in use (python/vunit-yavs/README.md "Token
+  server"). Before 2026-11-07 the default under the server was `--threads=min(N, 4)`.
+- `--threads=auto` (#884): at most 8 threads, and no more than the CPUs the process may run on
+  (affinity and quota, asked when a batch first wants the threads; one where the system does not
+  tell). A design with fewer than 8 processes that may run in parallel (not serial, not
+  postponed) runs on one thread with no trial. Otherwise the first trial starts 10 ms after the
+  build (a shorter run pays nothing for it), and the kernel judges the threads in windows of
+  about 25 ms of wall time while they are on (the clock is read every 256 delta cycles, so
+  these times are lower bounds, coarser for a design of few long cycles): a window
+  wins when the time its pooled batches saved (their estimate inline, corrected by timed probe
+  batches, less their measured time) is at least 4 percent of it; one window in which no batch
+  wanted the threads, two losing windows in a row, or four once a window of this or the last
+  run won, turn them off (the code paths of `--threads=1`, tokens given back), and a trial comes
+  again after 1 s, doubling up to 16 s (0.1 s once a window won). The worker threads start when
+  the first batch goes to them. What the last run of the same command line found (gained or not)
+  is kept in the work library's cache, kind `thr` (not with `--no-cache` or without a work
+  directory): a run after one that did not gain starts on one thread with a first trial after
+  4 s, one after a run that gained starts with the threads on and retries after 0.1 s. `--verbose` prints a note
+  `note: --threads=auto: ...` on stderr at the end. With a token server it connects as for
+  `--threads=N` above 1. Under `--dap`, `--interactive` and `--do` it is `W0109` as any value
+  but 1. Output and exit status do not depend on any decision. `YAVS_COUNTERS=1` prints
+  `threads_windows` and `threads_gained`.
 - Token server (#801): with `--threads=N` above 1 (and not `--dap`), yavs reads
   `YAVS_TOKENS=<port>:<secret>` at the start of `run`. The simulation owns one implicit token and
   runs at most N - 1 more threads, only on tokens the server lends. Protocol, lines of ASCII
@@ -687,8 +709,9 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   connection or another answer) are error `E0128` at the start of `run`, before analysis (exit 2);
   the message never contains the secret. A port where nothing listens (connect timeout 10 s), a
   server that does not answer within 10 s and a server that goes away during the run are warning
-  `W0118` (one warning; the run is on one thread from then on, tokens only speed it up). Without
-  `YAVS_TOKENS`, or with `--threads=1`, nothing changes. Output and exit status do not depend
+  `W0118` (one warning; the run is on one thread from then on, tokens only speed it up). With
+  `--threads=auto` it connects too, with N = 8; on a host where the run may use fewer CPUs it
+  asks for no more tokens than CPUs less one, and none on one CPU. Without `YAVS_TOKENS`, or with `--threads=1`, nothing changes. Output and exit status do not depend
   on the tokens.
 - Garbage collection: `--gc-threshold=SIZE` (bytes, or a `k`, `m`, `g` suffix; default
   `1m`) sets how much access-value memory is allocated before the heap is collected. The

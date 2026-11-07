@@ -498,7 +498,7 @@ class TestRealYavs(unittest.TestCase):
         self.assertIn("UTF-8", proc.stderr)
 
     def test_run_with_token_server(self):
-        # Each simulation runs with --threads=2 and connects; a bad YAVS_TOKENS would be error E0128
+        # Each simulation runs with --threads=auto and connects; a bad YAVS_TOKENS would be error E0128
         proc = subprocess.run(
             self._command("-p", "2", "--yavs-jobserver", "-v", PASS, COMMA),
             env=self._env(),
@@ -510,7 +510,7 @@ class TestRealYavs(unittest.TestCase):
         )
         self.assertEqual(proc.returncode, 0, proc.stdout)
         self.assertEqual(report(self.xml), {PASS: "passed", COMMA: "passed"})
-        self.assertIn("--threads=2", proc.stdout)
+        self.assertIn("--threads=auto", proc.stdout)
         self.assertNotIn("E0128", proc.stdout)
 
     def test_yavs_runs_on_lent_tokens(self):
@@ -544,6 +544,12 @@ class TestRealYavs(unittest.TestCase):
         server.remove(client)
         self.assertEqual(lent.stdout, alone.stdout)
         self.assertGreater(pooled(lent), 0)
+        # --threads=auto takes the token the same way (a run this short ends before it is judged)
+        client = server.add()
+        auto = run("auto", server.env(client, os.environ))
+        server.remove(client)
+        self.assertEqual(auto.stdout, alone.stdout)
+        self.assertGreater(pooled(auto), 0)
         # Two tests running on -p 2: no free slot, so nothing goes to the threads
         busy = server.add()
         client = server.add()

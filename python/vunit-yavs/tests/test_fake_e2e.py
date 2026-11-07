@@ -125,14 +125,15 @@ class TestFakeYavs(unittest.TestCase):
         self.assertEqual(exit_code, 0, output)
         self.assertEqual(set(results.values()), {"passed"})
         self.assertEqual(len([call for call in calls if call[0] == "tokens"]), 3)
-        # Every simulation may use the -p slots; a test running alone gets the one free slot of -p 2
-        self.assertTrue(all("--threads=2" in run for run in self._runs(calls)))
+        # Every simulation may use the -p slots while its threads gain; a test running alone gets the one free
+        # slot of -p 2
+        self.assertTrue(all("--threads=auto" in run for run in self._runs(calls)))
         self.assertIn(["tokens", 1], calls)
 
     def test_no_token_server_without_the_flag(self):
         _, _, _, calls = self._run("-p", "2", PASS, COMMA)
         self.assertFalse([call for call in calls if call[0] == "tokens"])
-        self.assertFalse(any("--threads=2" in run for run in self._runs(calls)))
+        self.assertFalse(any(arg.startswith("--threads") for run in self._runs(calls) for arg in run))
 
     def test_coverage_is_collected_merged_and_reported(self):
         merged = "merged"

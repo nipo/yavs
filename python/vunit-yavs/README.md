@@ -30,7 +30,7 @@ or later (`pip install vunit-yavs` installs it, a pre-release) and yavs 0.16.1 o
 | `yavs.a_flags` | `yavs analyze` |
 | `yavs.elab_flags` | `yavs run` and `elab` |
 | `yavs.sim_flags` | `yavs run`, such as `--assert-summary`, `--activity`, `--hang-report`, `--wave-include`: they pass through to the run |
-| `yavs.max_threads` (integer, at least 1) | `yavs run --threads=N`, the most threads of one simulation |
+| `yavs.max_threads` (integer, at least 1, or `"auto"`) | `yavs run --threads=N`, the most threads of one simulation; `"auto"` is `--threads=auto`, more threads only while they make the run faster |
 | `enable_coverage` (VUnit's option) | `yavs run --cov-file=<test output>/yavs/coverage.ycov --cov-test=<test name>` with the kinds below (coverage, below) |
 | `yavs.cov_kind` (list of strings) | `yavs run --cov-kind=LIST`: `statement`, `branch`, `toggle`, `condition`, `assert`, `expression`, `combination`, `fsm`. No kind is on by default |
 | `yavs.init_files.after_load` | Console command files sourced after each `vunit_load` |
@@ -42,7 +42,7 @@ or later (`pip install vunit-yavs` installs it, a pre-release) and yavs 0.16.1 o
 | `--yavs-debug[=PORT]` | Runs the selected test under `yavs run --dap=PORT` (default 4711, `0` picks a free port) and prints where to attach; write the port as `--yavs-debug=PORT` |
 | `--yavs-interactive` | Runs the selected test at the yavs console: a `yavs>` prompt at time 0 (below). Not with `--yavs-debug`: one of them drives the run |
 | `--yavs-surfer[=HOST:PORT]` | Shows the waves of the one selected test in Surfer 0.6.0 or later while it runs (`yavs run --surfer`); strictly opt-in. Combines with `--yavs-debug` and `--yavs-interactive`, where the cursor follows the stops |
-| `--yavs-max-threads N` | `yavs.max_threads` for every test that does not set it (environment variable `VUNIT_YAVS_MAX_THREADS` for run scripts with a command line of their own) |
+| `--yavs-max-threads N` | `yavs.max_threads` (a number or `auto`) for every test that does not set it (environment variable `VUNIT_YAVS_MAX_THREADS` for run scripts with a command line of their own) |
 | `--yavs-lint` | After compiling, runs `yavs lint` on every library of the project that is not external; a finding of severity error fails the compile step. To leave out VUnit's own libraries, put `exclude: ['**/vunit/vhdl/**']` in `yavs-lint.yaml`. `file_list` in that file is not read: the project says which files a library has. Unknown keys in that file are warned about once, for the first library |
 | `--yavs-cov=LETTERS` | Collects coverage in every simulation, as `enable_coverage` does for the tests it is set for, of the kinds the letters name: `s` statement, `b` branch, `c` condition, `e` expression, `t` toggle, `f` fsm, `a` assert, `m` combination (`--yavs-cov=sbt`). No kind is on by default; coverage without a kind fails the simulation, naming this flag, `--yavs-cov-kind` and `yavs.cov_kind`. Write the letters with `=` |
 | `--yavs-cov-directives MODE` | `apply` or `ignore`: what `yavs analyze`, `elab` and `run` do with the `-- yavs coverage exclude` comments in the sources (`--coverage-directives`); without it yavs's default, `apply`, which checks them when compiling |
@@ -60,7 +60,7 @@ Compiling: consecutive files of one library, standard and flags go to `yavs anal
 `--batch-compile` and `--parallel-compile` (5.0.0.dev16 does not have them), those flags work with yavs too (several files per call, several calls at once).
 
 Without `yavs.max_threads` or `--yavs-max-threads` no thread count is passed, and yavs runs with
-its default, unless the token server runs (`--threads=min(N, 4)` for `-p N`, below). An explicit `--threads` in `yavs.sim_flags` comes after the cap and wins.
+its default, unless the token server runs (`--threads=auto`, below). An explicit `--threads` in `yavs.sim_flags` comes after the cap and wins.
 
 ## Coverage
 
@@ -121,12 +121,13 @@ waiting for a debugger on the port. The waves and coverage files of such a run a
 
 With `-p N --yavs-jobserver` (Linux and Windows) the run script starts a token server on
 127.0.0.1 and lends the CPU slots of `-p N` that no test uses to the running simulations. Every
-simulation runs with `--threads=N` (at most 4 unless `yavs.max_threads` or `--yavs-max-threads` says more) and gets
+simulation runs with `--threads=auto` (unless `yavs.max_threads` or `--yavs-max-threads` says otherwise) and gets
 `YAVS_TOKENS=<port>:<secret>`, a secret of its own; yavs runs its extra threads only on tokens the
 server lends, and asks for them only while it has work for them. One CPU slot per running test is
 free, the other `N - k` (for `k` running tests) are lent: breadth first (every test gets one extra
 before any gets a second) and newest test first within a round, at most `yavs.max_threads - 1` per
-test. A token in use is never taken back, so a test that starts while every token is out runs at
+test (`min(N, 8) - 1` with `auto`). With `auto` a simulation whose threads do not make it faster asks for no
+tokens after its first fraction of a second. A token in use is never taken back, so a test that starts while every token is out runs at
 once: the total is `N` in the steady state, not at every instant. A simulation gives its tokens
 back when it stops using them and when it ends in any way, also when it is killed. The tail of a
 regression, a few long tests on a machine of idle slots, gets faster on designs whose processes

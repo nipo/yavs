@@ -210,6 +210,57 @@ fn threads_give_identical_traces() {
     }
 }
 
+/// `--threads=auto` turning the threads off and on at every cycle (`Config::auto_flip`) changes
+/// no output, with and without serial processes, on the pool and off it.
+#[test]
+fn auto_threads_that_flip_give_identical_traces() {
+    for with_serial in [true, false] {
+        let one = trace(with_serial, 1, None);
+        let cfg = Config {
+            threads: 8,
+            pool_all: true,
+            auto: true,
+            auto_flip: true,
+            ..Config::default()
+        };
+        let (mut sim, t) = build(design(with_serial), cfg);
+        assert_eq!(sim.run_until(ns(200)).unwrap(), RunStatus::Paused);
+        let st = sim.stats();
+        assert_eq!(one, t.take(), "serial processes: {with_serial}");
+        assert!(st.threads_windows > 10, "{st:?}");
+        assert!(st.pooled_batches > 10, "{st:?}");
+        assert!(st.pooled_batches < st.cycles / 2 + 10, "{st:?}");
+        assert!(matches!(
+            sim.threads_verdict(),
+            Some(AutoVerdict::Judged { gained: 0, .. })
+        ));
+    }
+}
+
+/// Too few processes that may run in parallel: `auto` keeps one thread without a trial.
+#[test]
+fn auto_threads_stay_off_for_a_small_design() {
+    let mut b = Builder::new();
+    for i in 0..3 {
+        b.process(
+            &format!("p{i}"),
+            ProcFlags::default(),
+            &[],
+            p(|c| c.wait_for(ns(1))),
+        );
+    }
+    let cfg = Config {
+        threads: 8,
+        pool_all: true,
+        auto: true,
+        ..Config::default()
+    };
+    let (mut sim, _t) = build(b, cfg);
+    sim.run_until(ns(50)).unwrap();
+    assert_eq!(sim.threads_verdict(), Some(AutoVerdict::Static));
+    assert_eq!(sim.stats().pooled_batches, 0);
+}
+
 #[test]
 fn shuffle_gives_identical_traces_for_order_independent_designs() {
     let one = trace(false, 1, None);
