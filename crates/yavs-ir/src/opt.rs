@@ -121,6 +121,30 @@ fn slots_enabled() -> bool {
     })
 }
 
+/// Bodies of at least this many instructions after the first walk get a cheaper pass order:
+/// on such a body (a testbench sequencer that runs once, 114 k instructions) one more walk of the
+/// whole function costs more than the code it improves saves.
+const HUGE_BODY: usize = 50_000;
+
+/// [`HUGE_BODY`], or `YAVS_HUGE_BODY` (differential testing: `1` takes every body as huge).
+fn huge_body() -> usize {
+    static N: OnceLock<usize> = OnceLock::new();
+    *N.get_or_init(|| {
+        std::env::var("YAVS_HUGE_BODY")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(HUGE_BODY)
+    })
+}
+
+static HUGE_BODIES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Bodies this process optimised with the cheaper pass order of [`HUGE_BODY`] (a work counter:
+/// `YAVS_COUNTERS`).
+pub fn huge_bodies() -> u64 {
+    HUGE_BODIES.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 static KEEP_VARS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Keep the variables of subprograms in their frame slots, where a debugger reads and writes
@@ -211,7 +235,7 @@ pub fn copies_are_portable() -> bool {
 /// what another configuration made (#491). Read when a key is made, i.e. after the command line
 /// set [`keep_variables`], [`compiled_tier`] and [`external_variables`].
 pub fn fingerprint() -> String {
-    fingerprint_of([
+    let switches = fingerprint_of([
         enabled(),
         memo_enabled(),
         cfg_enabled(),
@@ -225,7 +249,8 @@ pub fn fingerprint() -> String {
         frame_blocks_on(),
         proc_objects::enabled(),
         dopes::enabled(),
-    ])
+    ]);
+    format!("{switches} huge={}", huge_body())
 }
 
 fn fingerprint_of(f: [bool; 13]) -> String {
@@ -460,11 +485,18 @@ fn optimize_body_with(
     if split {
         tidy(prog, &mut f, &mut layouts, inst);
     }
+    let huge = f.code.len() >= huge_body();
+    if huge {
+        HUGE_BODIES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
     if dopes::enabled() && dopes::run(prog, &mut f) {
         if cfg_enabled() {
             cfg::dead_defs(prog, &mut f);
         }
-        tidy(prog, &mut f, &mut layouts, inst);
+        // (On a huge body the walk after the descriptor pass cost more than the rest of it.)
+        if !huge {
+            tidy(prog, &mut f, &mut layouts, inst);
+        }
     }
     if cfg_enabled()
         && matches!(f.kind, FuncKind::Function | FuncKind::Procedure)
