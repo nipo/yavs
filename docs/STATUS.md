@@ -11035,6 +11035,7 @@ Element loops of native frames in Cranelift are planned in the code itself (`Gen
   `YAVS_POOL_ALL=1`, on the interpreter and Cranelift, and with plain `--threads=auto` under `clift-auto`.
 - Measured (`docs/parallel.md` "`--threads=auto`"): designs that do not gain within 1 percent of `--threads=1` in
   instructions and cycles; gaining designs 91 to 96 percent of the best fixed `--threads` with the memory of the
-  last run. Not met: the first run (no memory) of `rtl_lfsr` under the default tier (76 percent: its compiled
+  last run; on the real-world suite the two tests that gain get 97 and 99 percent and the others run as with one
+thread. Not met: the first run (no memory) of `rtl_lfsr` under the default tier (76 percent: its compiled
   batches are below the pool threshold) and of `rtl_ff` with the interpreter (88 percent). Not measured: hosts
   with more than 8 CPUs, the token server's cost with `auto`, Windows.

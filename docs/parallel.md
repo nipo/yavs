@@ -182,6 +182,26 @@ differences are under the default tier, whose compiles vary from run to run by t
 thread count). `--threads=4` and `--threads=8` cost the same designs up to 2 percent of their
 instructions and 5 percent of their cycles.
 
+The real-world performance suite (`tools/realbench`, 38 of its 40 tests; the two OSVVM driver tests did
+not run on this host for either binary), `--threads=auto` against `--threads=1` of the baseline, both on
+the same 8 CPUs, interpreter and default tier, median of 3 runs after the warm-up runs, so the memory
+path. By path (a probe run of every cell): 9 tests static, 11 that end before their first trial or start
+off from the memory, 18 judged and turned off, 2 that gain with the interpreter and are turned off
+compiled:
+
+| Test | Tier | `--threads=4` | `--threads=8` | `auto` |
+|---|---|---|---|---|
+| sc5_fifo_repack (FIFO repacker, wide vectors) | interpreter | 1.70x | 1.38x | 1.66x, 97 % |
+| grlib_leon3mp (LEON3 system) | interpreter | 1.12x | 1.04x | 1.11x, 99 % |
+
+Every other test: wall time 0.92 to 1.02 of `--threads=1` for the tests of 0.1 s or more (the shorter
+ones are within the 10 ms steps of the harness's clock) and instructions 0.947 to 1.013 (both ends
+under the default tier, whose compiles vary). User cycles were above 1.01 on 12 cells, 9 of them tests of
+0.02 to 0.14 s whose cycles move by 2 to 6 percent from run to run with identical instructions; the
+others are `vai_window_gen_interlock` interpreted (24 s, 1.017, instructions 1.0000), `uvvm_axistream_vvc`
+compiled (1.021, wall spread 41 percent) and `sc5_fifo_repack` compiled (1.059 with wall 1.000: its
+trials pool and gain nothing compiled, costing CPU time on the other threads, not wall time).
+
 Tiny runs (`tests/corpus/scalar/array_attrs` and two designs of 2 and 66 processes, 1.5 to 4 ms,
 `perf stat -r 30`): instructions within 0.05 percent of `--threads=1` on each path and cycles within
 the spread (0.1 to 0.3 percent); no thread more than `--threads=1` is started. Before the trial was
