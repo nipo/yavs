@@ -1076,7 +1076,20 @@ fn redundant(db: &Db, expr: ExprId, v: &[CovWaiver], diags: &mut Vec<Diagnostic>
 
 /// Whether `bytes` has the word `yavs` in any case: the only files whose comments are read.
 pub fn mentions(bytes: &[u8]) -> bool {
-    bytes.windows(4).any(|w| w.eq_ignore_ascii_case(b"yavs"))
+    // A block of the file is read closely only when it holds a `y` in either case: the test of
+    // every byte is then one the compiler vectorises (a compare per window was 2 to 4 percent of
+    // a cold elaboration).
+    let at = |i: usize| {
+        bytes
+            .get(i + 1..i + 4)
+            .is_some_and(|r| r.eq_ignore_ascii_case(b"avs"))
+    };
+    bytes.chunks(64).enumerate().any(|(k, c)| {
+        c.iter().fold(false, |a, &b| a | (b | 0x20 == b'y'))
+            && c.iter()
+                .enumerate()
+                .any(|(j, &b)| b | 0x20 == b'y' && at(k * 64 + j))
+    })
 }
 
 /// A comment seen by [`parse`].
@@ -1707,6 +1720,25 @@ mod tests {
             Parsed::Err(d) => (d.code.to_string(), d.message.clone()),
             Parsed::Ok(_) => panic!("{text}: accepted"),
             Parsed::Other => panic!("{text}: not a directive"),
+        }
+    }
+
+    /// `mentions` against the plain window search, at every offset across a block boundary.
+    #[test]
+    fn mentions_finds_the_word_wherever_it_is() {
+        let plain = |b: &[u8]| b.windows(4).any(|w| w.eq_ignore_ascii_case(b"yavs"));
+        for word in [&b"yavs"[..], b"YaVs", b"yav", b"yavz", b"Y", b"yyavs"] {
+            for len in [0, 3, 4, 60, 63, 64, 65, 130] {
+                for at in 0..len {
+                    let mut b = vec![b'-'; len];
+                    for (k, &c) in word.iter().enumerate() {
+                        if let Some(x) = b.get_mut(at + k) {
+                            *x = c;
+                        }
+                    }
+                    assert_eq!(mentions(&b), plain(&b), "{word:?} at {at} of {len}");
+                }
+            }
         }
     }
 
