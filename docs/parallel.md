@@ -208,6 +208,69 @@ the spread (0.1 to 0.3 percent); no thread more than `--threads=1` is started. B
 delayed and the CPU count and the cache lookup were made lazy, the same runs paid 2 percent of their
 instructions and 8 percent of their CPU time.
 
+## Round 2 (2026-11-07)
+
+Three changes (`docs/decisions.md` "Parallel kernel, step 3, and `--threads=auto` round 2"): the kernel thread waits
+for the workers of a pooled batch spinning instead of sleeping in the scope (its wake-up was 3 to 5 microseconds of
+every pooled batch); a batch on half the threads teaches the pool threshold; and a trial of `--threads=auto` starts on
+costs timed for every process, compares all against half the threads by pooled time over the inline time of its probe
+batches (half kept unless all are 5 percent faster), and keeps a design that gains from losing its threshold to a few
+slow batches.
+
+Measured on the same host and method as above (bench builds with Cranelift, CPUs 4-7 and 20-23, a shared host: other
+jobs ran on these CPUs for parts of the sitting), 7 rounds, the ratio of each round's pair (cell and one thread of
+`main`) taken per round, speedup over one thread of `main`, whole run. "First run": nothing remembered (a command line
+of its own); "remembered": the run after one of the same command line.
+
+| Design | Tier | Best fixed, `main` | Best fixed, now | `auto` first run, `main` | `auto` first run, now | `auto` remembered, now |
+|---|---|---|---|---|---|---|
+| rtl_fan | interpreter | 2.78x (8) | 2.89x (8) | 2.24x, 80 % | 2.69x, 93 % | 2.82x, 97 % |
+| rtl_ff | interpreter | 2.26x (8) | 2.29x (8) | 1.87x, 83 % | 2.07x, 90 % | 2.18x, 95 % |
+| rtl_lfsr | interpreter | 1.70x (8) | 1.88x (8) | 1.60x, 94 % | 1.77x, 94 % | 1.86x, 99 % |
+| rtl_fan | default | 2.15x (8) | 2.23x (8) | 1.83x, 85 % | 2.11x, 95 % | 2.27x, 102 % |
+| rtl_ff | default | 1.86x (8) | 1.90x (8) | 1.56x, 84 % | 1.69x, 89 % | 1.81x, 95 % |
+| rtl_lfsr | default | 1.53x (4) | 1.81x (4) | 1.37x, 90 % | 1.45x, 80 % | 1.69x, 93 % |
+
+The percentages are of the same build's best fixed speedup. A first run has a command line of its own, and the
+compiled tier keeps a profile per command line in the cache too, so under the default tier a fresh command line is
+slower at one thread already (8 to 21 percent more instructions on the realbench tests below): the default-tier first
+runs above are against remembered fixed runs and read low. Against fixed runs on fresh command lines (7 rounds, ratio
+to one thread of `main` on a fresh command line): rtl_fan 2.25x of 2.47x (91 percent; `main` 80), rtl_ff 1.78x of
+1.90x (94; `main` 88), rtl_lfsr 1.38x of 1.62x (85; `main` 80). The interpreter keeps no such profile. At 2 threads the new build gains 1.30x to 1.64x (`main`
+1.27x to 1.54x). Not met: the first run of `rtl_lfsr` under the default tier (85 percent against fresh fixed runs, 80 against
+remembered ones); it gained in absolute terms while its best fixed speedup rose more. Its runs last
+0.15 to 0.2 s, so the off start (10 ms), the calibration and one window on the slower thread count weigh; `--threads=8`
+of compiled `rtl_lfsr` still loses its threads part of the run in some runs (3369 to 3493 of 4920 batches pooled), the
+raised threshold that `auto` now undoes.
+
+Two tests of the real-world suite that gain with the interpreter (the same CPUs, 5 rounds for `sc5_fifo_repack`, 3 for
+`grlib_leon3mp`; other jobs ran on these CPUs through most of the `grlib_leon3mp` runs, 15 to 100 s of CPU time per run,
+so its bands are wide):
+
+| Test | Tier | `--threads=4`, `main` | `--threads=4`, now | `auto` first run, now | `auto` remembered, now |
+|---|---|---|---|---|---|
+| sc5_fifo_repack | interpreter | 1.42x | 1.95x | 1.79x, 92 % | 1.81x, 93 % |
+| sc5_fifo_repack | default | 1.00x | 1.02x | 1.04x (fresh command lines) | 1.01x |
+| grlib_leon3mp | interpreter | 1.09x | 1.17x | not resolved (band 0.49 to 2.2) | 1.13x, 97 % |
+| grlib_leon3mp | default | 0.92x | 1.04x | 1.09x (band 0.58 to 1.46) | 1.10x (band 0.57 to 1.44) |
+
+The CNN accelerator system bench of the earlier table (default tier, 5 rounds, a quieter hour): `--threads=4` 1.34x on
+`main`, 1.41x now; `auto` 1.37x on the first run and 1.37x remembered, 97 percent; output identical in every run.
+
+`sc5_fifo_repack` under the default tier: against `--threads=1` on a fresh command line the first run of `auto` is
+0.96 in wall and 1.03 in instructions (3 rounds); against a remembered `--threads=1` it read 1.12 (`main` 1.17), which is
+the compiled tier's profile, not the threads. The same holds for the default-tier first runs of `neorv32_single_cache`
+and `poc_ooo_buffer` (equal walls to `--threads=1` on a fresh command line).
+
+The designs that do not gain (`lfsr64`, `lfsr64_xor`, `rtl_chain`, `rtl_bus`, `rtl_ram`, `compute_h2h`, `xor_sig`,
+`rec_pair`), 5 rounds, both tiers: `auto` instructions 0.997 to 1.002 of `--threads=1` on the first run and the
+remembered one, except the first run of `rec_pair` under the default tier at 1.060 (as on `main`, 1.060: the fresh
+command line of the compiled tier, see above); with a token
+server of 8 slots (`YAVS_TOKENS`, one client) 1.000 to 1.008; one thread of the new build against `main` 1.000 to 1.002.
+`--threads=4` still costs those designs 0 to 2.8 percent of their instructions (#858: the estimate of every batch
+and the timed sample; not changed). Wall times of all of them are within the spread of the runs (bands of 5 to 30
+percent on this host).
+
 ## Details
 
 * **Why mid-size batches no longer slow down.** Handing a batch to the threads has a fixed cost of

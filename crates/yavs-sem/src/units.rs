@@ -115,6 +115,8 @@ pub(crate) struct LoadRec {
     pub deps: Vec<u32>,
     /// The files of its file steps, in order (registered by it or before).
     pub files: Vec<FileId>,
+    /// It or a unit it loaded asked `--relaxed` (`Query::Relaxed`): its full key holds the setting.
+    pub relaxed: bool,
 }
 
 /// What a unit asked about the libraries: the answer is part of its full key and checked again
@@ -590,7 +592,14 @@ impl Db {
             return;
         }
         let serial = self.serial_of(lib, key);
+        let relaxed = serial.is_some_and(|s| self.loads[s as usize].relaxed);
         if let Some(f) = self.frames.last_mut() {
+            // The loaded unit's full key holds the setting, so this one's does: it asks too,
+            // however the unit came (analysed inside it, replayed or loaded before).
+            if relaxed && !f.queries.iter().any(|(q, _)| *q == Query::Relaxed) {
+                f.queries
+                    .push((Query::Relaxed, Answer::Bool(self.opts.relaxed)));
+            }
             match serial {
                 Some(s) => f.steps.push(Step::Load(s)),
                 None => {
@@ -628,6 +637,7 @@ impl Db {
             full: None,
             deps: Vec::new(),
             files: Vec::new(),
+            relaxed: false,
         });
         let cacheable = self.cacheable(lib);
         let capture = cacheable
@@ -709,6 +719,7 @@ impl Db {
             r.full = full;
             r.deps = deps;
             r.files = files;
+            r.relaxed = f.queries.iter().any(|(q, _)| *q == Query::Relaxed);
         }
         // What this unit changed itself (the units it loaded and the changes it replayed are in
         // `f.nested_keys`).
@@ -2237,6 +2248,7 @@ impl Db {
             full: Some(e.head.full),
             deps: Vec::new(),
             files: Vec::new(),
+            relaxed: e.head.queries.iter().any(|(q, _)| *q == Query::Relaxed),
         });
         let saved = self.owner;
         self.set_owner(pl.serial);

@@ -5743,8 +5743,13 @@ dependencies; this overrides "no incremental compilation cache" for analysis too
   `Query::Relaxed`): only the four places where the setting changes the analysis ask (R1 a shared variable
   of a non-protected type, R2 a pure function that reads something impure or returns an access type, R5
   an assignment to a target that is not fully constrained), and each asks only when its construct is
-  there. A unit that never asked has one entry for both settings; one that asked is stored under a key
-  with the setting and its answer is checked again before a replay. A reader tries the shared key first,
+  there. A unit asks too when a unit it loads asked (directly or through its own loads), since its full
+  key holds that unit's: `Db::child_end` passes the question up from `LoadRec::relaxed` however the unit
+  came (analysed inside it, replayed from its entry or loaded before in the session; #803: an architecture
+  of an entity that asked was stored under the shared key, so `analyze` under each setting in turn rewrote
+  its one entry and every session of the other setting missed it). A unit that neither asked nor loaded one
+  that did has one entry for both settings; one that asked is stored under a key with the setting and its
+  answer is checked again before a replay. A reader tries the shared key first,
   then the one of its setting. Before, a relaxed run of a design whose libraries were analysed without
   `--relaxed` (or the reverse) found no entry of any library unit and analysed the closure from source
   in its first two runs (a run of the window-generator testbench: 68 misses, 10 after). Whether a unit
@@ -14593,3 +14598,59 @@ the IR optimiser and lowering. Decisions:
   corpus that way); `opt_huge` counts the bodies. Cost: the warm run of `uvvm_func_cov` reads 2.25 against 2.21 G.
 - **Not done:** a worklist for `dead_defs` liveness (gains 13 M on the huge body, loses on small ones); the second
   round of `dopes` only after a `Copy` rewrite (no short proof that nothing else gives it work).
+
+## Parallel kernel, step 3, and `--threads=auto` round 2 (yavs-kernel `run_batch`, `learn_pooled`, `kernel/auto.rs`, #884, 2026-11-07)
+
+- **Decision: the kernel thread waits for the workers of a pooled batch spinning** (agent): after its own pieces it
+  spins until every job it spawned has ended (`spin_until`), at most `JOIN_SPIN` (50 us), and only then enters the
+  scope's blocking wait. Why: that wait sleeps on a condition variable, and the wake-up of the kernel thread was 3.2 to
+  5.2 us of every pooled batch (timed per batch, interpreter, 2 to 8 threads, rtl_fan and rtl_lfsr), 0.65 to 0.9 us
+  spinning; the bound keeps a worker preempted on a busy core from being waited for with the CPU. Measured against the
+  build before, per round paired, 7 rounds, CPUs 4-7 and 20-23: wall 0.84 to 0.95 at 4 and 8 threads on rtl_fan,
+  rtl_ff and rtl_lfsr, instructions 0.2 to 0.8 percent fewer.
+- **Where the threads wait** (agent, measured per pooled batch with a local timing build, interpreter): of a pooled
+  batch of rtl_lfsr at 4 threads (37 us against 94 us inline) about 2 us went to the start of the last worker, 4 to 5
+  to the spread of the workers' ends, 3.6 to the kernel thread's wake-up (now 0.7) and the rest to the work, whose sum
+  over the threads was 1.25 times the inline time (rtl_fan 1.4 times at 4 threads, both about 1.9 at 8, where two
+  threads share a core). At 8 threads on a busy host the last worker often started 25 to 60 us late (rayon's workers
+  yield, then sleep, between batches), and the scope waits for every spawned job to run even when the others took all
+  pieces.
+- **Not done** (agent, measured): workers that spin between pooled batches for twice the usual gap (up to 0.1 or 1 ms):
+  no gain resolved on this host (rtl_lfsr 0.95 to 1.05 of the join spin alone); each thread first running its own
+  pieces (by rayon's thread index): the fills of lines from other cores' caches (`ls_any_fills_from_sys.local_ccx`)
+  did not drop and wall stayed within the noise; 8 pieces per thread instead of 4: a shorter tail but more busy time,
+  no gain.
+- **Decision: a pooled batch teaches `learn_pooled` when it ran on all the threads it may use** (`SimControl::cap`:
+  under `--threads=auto` its `limit`), not only on all the pool's workers (agent). Why: on half the threads no batch was
+  ever learnt from (`helpers == workers` never held), so the threshold stayed where the last window on all threads left
+  it.
+- **Decision: when the threads start (the run, or a trial of `--threads=auto`), the first `CALIBRATE` (2) batches of at
+  least 8 processes run inline with every activation timed, and a process's first sample is its cost, not half of it**
+  (agent). Why: a trial began with the costs of nothing (the threads were off) or of an earlier phase: the first
+  windows estimated the batches at an eighth of their time (inline probes 8.9 times the estimate on rtl_ff), and once
+  the batches pool only the probes (1 in 64 batches, a sixteenth of the processes each) refresh the costs, so the
+  estimate took about 0.5 s to come right.
+- **Decision: thread counts are compared by pooled time over the inline time of the window's probes, both against the
+  same estimates, and all the threads are kept only when they are `FEWER_PERCENT` (5) faster than half** (agent). Why:
+  compared by pooled time over the estimate, the later window always ran on better estimates and looked faster, so the
+  first try kept half the threads on rtl_fan and rtl_ff, which run 10 to 18 percent faster on all 8; on a near tie fewer
+  threads win because hardware threads of the same cores also slow the kernel thread between batches (compiled rtl_lfsr
+  is 8 to 10 percent faster on 4 threads than on 8). Tried and dropped: comparing the windows by wall time per estimated
+  work of all their batches; one window of a few dozen batches is too noisy for it (rtl_ff interpreted then kept half
+  the threads, 83 percent of the best fixed speedup).
+- **Decision: a pooled batch counts at most twice its estimate in `learn_pooled`'s average (was 8 times); under
+  `--threads=auto` a window that won resets the threshold and the average, and so does a trial of a design that won
+  before** (agent). Why: compiled rtl_lfsr gains 1.8x on 4 threads, but a few pooled batches at 3 times their estimate
+  when its compiled code came in raised the threshold, its batches stopped wanting the threads, and the single batches
+  pooled to test the raise found the workers asleep and could not bring it down: the run lost its threads (3151 of
+  4677 batches pooled). A design that never gained keeps a raised threshold, so its trials stay short. `--threads=8`
+  without `auto` still has this trap (compiled rtl_lfsr pooled 3369 to 3493 of 4920 batches in some runs).
+- **Measured** (`docs/parallel.md` "Round 2"): best fixed speedups up to 2.89x (rtl_fan interpreted, 8 threads) and
+  1.81x for compiled rtl_lfsr at 4 (was 1.53x); `auto` on the first run 90 to 95 percent of the best fixed speedup on
+  five of the six gaining cells, 85 percent on compiled rtl_lfsr (default tier against fixed runs on fresh command
+  lines), remembered 93 to 102 percent; the CNN accelerator
+  bench 97 percent of 1.41x; the designs that do not gain within 0.3 percent of `--threads=1` in instructions, and
+  within 0.8 percent under a token server. A first run under the default tier is also the compiled tier's first run of
+  that command line (its profile is per command line): measured against fixed runs on fresh command lines the
+  default-tier first runs reach 91, 94 and 85 percent, and `sc5_fifo_repack` compiled, which read 12 percent slower than
+  a remembered `--threads=1`, is 0.96 of a fresh one.

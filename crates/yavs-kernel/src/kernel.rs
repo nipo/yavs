@@ -38,10 +38,16 @@ pub use hang::{
 const POOL_WORK_NS: u64 = 20_000;
 /// One activation in this many of each process in an inline batch is timed for `SimControl::cost`.
 const COST_EVERY: usize = 16;
+/// Batches of at least `auto::MIN_PROCS` processes that run inline, every activation timed, when
+/// the threads start (the run, or a trial of `--threads=auto`), so the first estimates are not of
+/// a few processes each (`SimControl::calib`).
+const CALIBRATE: u32 = 2;
 /// One batch in this many that would go to the pool runs inline to refresh the costs.
 const PROBE_EVERY: u32 = 64;
 /// Pieces of a pooled batch per thread: enough to balance processes of different cost.
 const PIECES_PER_THREAD: usize = 4;
+/// The longest the kernel thread spins for the workers of a pooled batch to end (`spin_until`).
+const JOIN_SPIN: std::time::Duration = std::time::Duration::from_micros(50);
 /// Generators that re-arm themselves in one cycle (clocks that edge together); more resume.
 const SKIP_MAX: usize = 4;
 /// Batches in a row that do not pool after which held tokens go back to the token pool.
@@ -1156,6 +1162,8 @@ pub struct SimControl {
     batches: u32,
     probe: u32,
     raise_probe: u32,
+    /// `CALIBRATE` batches left to time whole.
+    calib: u32,
     rng: Option<u64>,
     interrupt: Interrupt,
     stats: Stats,
@@ -1191,6 +1199,26 @@ fn build_pool(workers: usize) -> Result<rayon::ThreadPool, SimError> {
         .num_threads(workers)
         .build()
         .map_err(|e| SimError::new(ErrorKind::Usage(format!("thread pool: {e}"))))
+}
+
+/// Spin until `done` holds or `max` has passed (then the caller's blocking wait takes over, so a
+/// preempted worker is not waited for on a busy core); whether it held.
+fn spin_until(done: impl Fn() -> bool, max: std::time::Duration) -> bool {
+    if done() {
+        return true;
+    }
+    let t = std::time::Instant::now();
+    loop {
+        for _ in 0..64 {
+            std::hint::spin_loop();
+            if done() {
+                return true;
+            }
+        }
+        if t.elapsed() >= max {
+            return false;
+        }
+    }
 }
 
 fn signal_pair(v: &mut [Signal], a: usize, b: usize) -> (&Signal, &mut Signal) {
@@ -1612,6 +1640,7 @@ impl SimControl {
             pool_ratio: 512,
             batches: 0,
             probe: 0,
+            calib: CALIBRATE,
             raise_probe: 0,
             interrupt: Interrupt::default(),
             stats: Stats {
@@ -2036,11 +2065,7 @@ impl SimControl {
         if self.pool.is_none() && self.auto.as_ref().is_some_and(|a| !a.counted) {
             self.auto_cpus();
         }
-        // `--threads=auto` may run a batch on fewer threads than the pool has (`Auto::limit`).
-        let n = self
-            .auto
-            .as_ref()
-            .map_or(self.workers, |a| a.limit.min(self.workers));
+        let n = self.cap();
         if let Some(t) = &self.tokens {
             self.token_idle = 0;
             if self.held < n {
@@ -2067,6 +2092,14 @@ impl SimControl {
             }
         }
         usable
+    }
+
+    /// The most workers a pooled batch may use: `--threads=auto` may run it on fewer than the
+    /// pool has (`Auto::limit`).
+    fn cap(&self) -> usize {
+        self.auto
+            .as_ref()
+            .map_or(self.workers, |a| a.limit.min(self.workers))
     }
 
     /// A batch that did not pool: after `TOKEN_IDLE` in a row the tokens go back.
@@ -4014,7 +4047,14 @@ impl SimControl {
         let mut late = std::mem::take(&mut self.late);
         // Initialisation and postponed processes always run inline (their commit differs).
         // The estimate of a pooled batch, to learn from its time (`learn_pooled`).
-        let mut est = if self.workers > 0 && !init && !postponed {
+        let calib = self.calib > 0
+            && !self.cfg.pool_all
+            && self.workers > 0
+            && !init
+            && !postponed
+            && pids.len() >= auto::MIN_PROCS;
+        self.calib -= u32::from(calib);
+        let mut est = if self.workers > 0 && !init && !postponed && !calib {
             self.pool_batch(&pids)
         } else {
             None
@@ -4031,8 +4071,8 @@ impl SimControl {
             self.tokens_idle();
         }
         self.stats.pooled_batches += u64::from(pooled);
-        // A batch on fewer threads than the pool has teaches nothing about the threshold.
-        let full = self.workers == helpers;
+        // A batch on fewer threads than it may use (tokens) teaches nothing about the threshold.
+        let full = helpers == self.cap();
         let pooled_at = est
             .filter(|e| e.learn && full || self.auto.is_some())
             .map(|_| std::time::Instant::now());
@@ -4185,11 +4225,18 @@ impl SimControl {
                             }
                         }
                     };
+                    // The workers that ended: the kernel thread waits for them spinning, since
+                    // the scope's own wait sleeps and its wake-up took 3 to 5 us a batch.
+                    let ended = AtomicUsize::new(0);
                     pool.in_place_scope(|sc| {
                         for _ in 1..k {
-                            sc.spawn(|_| work());
+                            sc.spawn(|_| {
+                                work();
+                                ended.fetch_add(1, Ordering::Release);
+                            });
                         }
                         work();
+                        spin_until(|| ended.load(Ordering::Acquire) == k - 1, JOIN_SPIN);
                     });
                     // The pieces in process order, so their late lists join in process order.
                     let (mut lates, mut serial, mut failed) = (Vec::new(), 0, false);
@@ -4260,10 +4307,13 @@ impl SimControl {
                     // `pool_batch`, at a position that moves from batch to batch.
                     // The offset is scrambled so batches that come every 2^k batches still see
                     // every position.
-                    let mut sample = if self.workers > 0 {
-                        (self.batches.wrapping_mul(0x9e37_79b9) >> 28) as usize % COST_EVERY
+                    let (mut sample, step) = if calib {
+                        (0, 1)
+                    } else if self.workers > 0 {
+                        let at = self.batches.wrapping_mul(0x9e37_79b9) >> 28;
+                        (at as usize % COST_EVERY, COST_EVERY)
                     } else {
-                        usize::MAX
+                        (usize::MAX, COST_EVERY)
                     };
                     // `$timed`: the loop that times activations, a second copy so the one of a
                     // run without a pool has no test for it.
@@ -4292,12 +4342,12 @@ impl SimControl {
                                     let r = if !($timed && i == sample) {
                                         s.process.run(&mut ctx)
                                     } else {
-                                        sample += COST_EVERY;
+                                        sample += step;
                                         let t = std::time::Instant::now();
                                         let r = s.process.run(&mut ctx);
                                         let ns = t.elapsed().as_nanos().min(u128::from(u32::MAX)) as u32;
                                         let c = &mut self.cost[p as usize];
-                                        *c = *c / 2 + ns / 2;
+                                        *c = if *c == 0 { ns } else { *c / 2 + ns / 2 };
                                         r
                                     };
                                     let failed = r.is_err();
@@ -4426,10 +4476,11 @@ impl SimControl {
     /// even): when the average reaches even, the threshold of `pool_batch` rises to twice the
     /// batch's splittable work; a batch at least a fifth faster lowers it to its splittable
     /// work, not below `POOL_WORK_NS`. Processes with much state lose more to the caches of
-    /// other cores than the estimate shows (a processor's pipeline, #497); the average keeps a
-    /// late worker or a preempted core from raising it.
+    /// other cores than the estimate shows (a processor's pipeline, #497); the average, in which
+    /// a batch counts at most twice its estimate, keeps a few slow ones (a late worker, a
+    /// preempted core, the first runs of new compiled code) from raising it.
     fn learn_pooled(&mut self, e: Estimate, ns: u64) {
-        let r = (ns.saturating_mul(1024) / e.all.max(1)).min(8 * 1024);
+        let r = (ns.saturating_mul(1024) / e.all.max(1)).min(2 * 1024);
         self.pool_ratio = self.pool_ratio - self.pool_ratio / 16 + r / 16;
         if self.pool_ratio >= 1024 {
             self.pool_ns = self.pool_ns.max(e.work.saturating_mul(2));

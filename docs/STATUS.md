@@ -6404,7 +6404,8 @@ Found and fixed: the analysed-unit entries were keyed by the session's `--relaxe
 libraries were analysed without it (the open-logic, satcat5, window-generator and GRLIB tests) read no library unit and
 analysed the closure from source in its first two runs. `--relaxed` is now a question a unit asks only where the
 setting changes its analysis (`docs/decisions.md` "`--relaxed` is a question"): window generator cold run 68 unit
-misses to 10 (the rest are bodies with assignments to unconstrained targets, which do depend on it). `tools/realbench
+misses to 10 (the rest are bodies with assignments to unconstrained targets, which do depend on it). A unit that loads one
+that asked asks too (#803; before, it kept one entry that each setting rewrote in turn). `tools/realbench
 --compare` (15033264's change against its parent, bench builds, 42 tests, core 9, load 10 to 25): analysis cold 0.97,
 elab cold 0.98 (instructions 0.96; `vai_weight_buffer` 0.65, `vai_pe_array` 0.72, `sc5_timestamp` instructions 0.70),
 `auto-cold` 0.99, `auto` 1.00, no slowdown; full total (analysis + run) 0.975 cold, `vai_pe_array` 1.11 to 0.95 s,
@@ -11052,9 +11053,19 @@ Element loops of native frames in Cranelift are planned in the code itself (`Gen
 - Measured (`docs/parallel.md` "`--threads=auto`"): designs that do not gain within 1 percent of `--threads=1` in
   instructions and cycles; gaining designs 91 to 96 percent of the best fixed `--threads` with the memory of the
   last run; on the real-world suite the two tests that gain get 97 and 99 percent and the others run as with one
-thread. Not met: the first run (no memory) of `rtl_lfsr` under the default tier (76 percent: its compiled
-  batches are below the pool threshold) and of `rtl_ff` with the interpreter (88 percent). Not measured: hosts
-  with more than 8 CPUs, the token server's cost with `auto`, Windows.
+thread. Not measured: hosts with more than 8 CPUs, Windows.
+- Round 2 (2026-11-07, `docs/parallel.md` "Round 2"): the kernel thread waits for a pooled batch's workers spinning
+  (wall 0.84 to 0.95 at 4 and 8 threads on the three gaining bench designs); a batch on half the threads teaches the
+  pool threshold; a trial calibrates the costs (every process timed in its first two big batches), compares thread
+  counts by pooled over inline time of its probes (half kept unless all are 5 percent faster), and a won window or a
+  trial of a design that won resets a raised threshold. First runs of the gaining designs now reach 90 to 95 percent
+  of the best fixed speedup, except compiled `rtl_lfsr` (85 percent against fresh fixed runs; its best fixed speedup
+  rose from 1.53x to 1.81x); remembered runs 93 to 102 percent; the CNN accelerator bench 97 percent of 1.41x on both paths
+  (`main` 1.34x at 4 threads), `sc5_fifo_repack` interpreted 1.42x to 1.95x at 4 threads, `auto` 92 percent. The premise of the earlier miss (compiled `rtl_lfsr` batches below the
+  pool threshold) did not reproduce: its batches are estimated at about 52 us. Default-tier first runs measured on a
+  fresh command line are also slower at one thread (the compiled tier's profile is per command line); against fresh
+  fixed runs they reach 85 to 94 percent. Open: `--threads=N` still costs designs that never pool up to 2.8 percent of their instructions (#858). The
+  token server's cost with `auto`: instructions within 0.8 percent of `--threads=1` on the designs that do not gain.
 
 ## Copies of subprograms by descriptors
 A specialised copy calls a copy of a subprogram made for the descriptors of records and arrays of composites it knows at the call (`yavs-ir` `opt/subcopy.rs`, `docs/decisions.md` "Copies of subprograms by the descriptors of their arguments"). Stored copies name those calls by what they are for. Not on the eager `--tier=clift`, which has no copies; a descriptor a caller builds per call (a formal of a subtype with a non-static bound) is not known, and compiled-to-compiled calls are outside the debug check.

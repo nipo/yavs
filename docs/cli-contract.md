@@ -686,9 +686,12 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   the first batch goes to them. What the last run of the same command line found (gained or not)
   is kept in the work library's cache, kind `thr` (not with `--no-cache` or without a work
   directory). After the first window that wins, and then after every 16 that win, one window
-  runs on the other thread count (all of them, or half) and the count whose pooled batches were
-  faster against their estimate is kept: hardware threads of one core or a shared cache make
-  some designs faster on fewer threads. A run after one that did not gain starts on one thread with a first trial after
+  runs on the other thread count (all of them, or half) and the count whose pooled batches ran
+  faster against the inline time of that window's timed probe batches is kept, all of them only
+  when 5 percent faster: hardware threads of one core or a shared cache make some designs faster
+  on fewer threads. When the threads start (and at each trial) the first two batches of 8 or more
+  processes run on one thread with every process timed, so the estimates are known from the
+  start. A run after one that did not gain starts on one thread with a first trial after
   4 s, one after a run that gained starts with the threads on and retries after 0.1 s. `--verbose` prints a note
   `note: --threads=auto: ...` on stderr at the end. With a token server it connects as for
   `--threads=N` above 1. Under `--dap`, `--interactive` and `--do` it is `W0109` as any value

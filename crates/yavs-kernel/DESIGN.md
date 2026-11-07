@@ -262,13 +262,15 @@ Within a delta the kernel has two phases that never overlap:
   estimate (`learn_pooled`); a smaller one runs inline, the hand-off costing more than it saves
   (#497). The estimate of a process is an average of timed inline activations (one in
   `COST_EVERY` of each process, at a position that moves from batch to batch; a process not yet
-  timed counts 0), and one in `PROBE_EVERY` of the batches that would pool runs inline to
-  refresh them: a pooled run would measure cold caches. Initialisation and postponed batches
+  timed counts 0; when the threads start, the first big batches run inline with every
+  activation timed, `CALIBRATE`), and one in `PROBE_EVERY` of the batches that would pool runs
+  inline to refresh them: a pooled run would measure cold caches. Initialisation and postponed batches
   run inline; `Config::pool_all` pools every other batch of two or more (tests). A pooled batch
   is cut into pieces of consecutive process numbers, each with its own sub-slices of the slot,
   meta and idle arrays (`split_at_mut`, no lock); the workers and the kernel thread claim
   pieces in turn, run the parallel processes and commit the usual clocked ones into the
-  piece's buffers, which the kernel thread applies after the join; the serial processes then
+  piece's buffers, which the kernel thread applies after the join (it waits for the workers
+  spinning, briefly, rather than sleeping in the scope); the serial processes then
   run on the kernel thread in batch order (#481). Where a batch runs changes no output.
   `Config::auto` (`--threads=auto`, `kernel/auto.rs`) turns the threads off and on while the run
   goes by setting `workers` to 0 (every test above reads it, so off is the code of one thread)
