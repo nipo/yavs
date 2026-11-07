@@ -220,7 +220,7 @@ pub(crate) fn check() -> bool {
 /// The key that names the object of function `f` (`id` of `prog`) before its code is generated
 /// (#785, maintainer 2026-10-27): the build (in every key), the optimiser switches, the target,
 /// the program's identity (`Program::identity`: its stage-cache entry, everything the generator
-/// reads of the program), the process `id` is or is a copy of, the function as handed out (its
+/// reads of the program), `Program::code_key_id` of `id` (the process a process copy is of), the function as handed out (its
 /// optimised code: a copy's folded data among it) and `what` (level, `full`, part). `None` without
 /// a store, for a program not cached, or with a switch of `GEN_SWITCHES`.
 pub(crate) fn pre_key(
@@ -242,7 +242,7 @@ pub(crate) fn pre_key(
         .text(TARGET.get_or_init(crate::jit::target_id))
         .text(identity)
         .text(what)
-        .part(&prog.base_of(id).0.to_le_bytes())
+        .part(&prog.code_key_id(id).0.to_le_bytes())
         .part(&postcard::to_stdvec(f).ok()?);
     Some(k.finish())
 }

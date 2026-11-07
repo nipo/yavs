@@ -1,0 +1,13 @@
+exit	0
+diag	note	5000000	0	:subcopy_shapes:_p1	1 102387 132 4409 44018
+diag	note	15000000	0	:subcopy_shapes:_p1	2 102565 306 4411 44018
+diag	note	25000000	0	:subcopy_shapes:_p1	3 102744 480 4413 44019
+diag	note	35000000	0	:subcopy_shapes:_p1	4 102920 654 4415 44025
+diag	note	45000000	0	:subcopy_shapes:_p1	5 103107 828 4417 44034
+diag	note	55000000	0	:subcopy_shapes:_p1	6 103288 1002 4419 44037
+diag	note	65000000	0	:subcopy_shapes:_p1	7 103472 1176 4421 44043
+diag	note	75000000	0	:subcopy_shapes:_p1	8 103651 1350 4423 44052
+diag	note	85000000	0	:subcopy_shapes:_p1	9 103832 1524 4425 44055
+diag	note	95000000	0	:subcopy_shapes:_p1	10 104016 1698 4427 44061
+diag	note	105000000	0	:subcopy_shapes:_p1	11 104203 1872 4429 44070
+diag	note	115000000	0	:subcopy_shapes:_p1	12 104376 2046 4431 44073

@@ -1244,7 +1244,7 @@ impl Jit {
             target,
             switches,
             identity,
-            base: prog.base_of(id).0,
+            base: prog.code_key_id(id).0,
             native,
             func: &func,
             facts: &facts.0,

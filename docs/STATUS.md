@@ -11039,3 +11039,6 @@ Element loops of native frames in Cranelift are planned in the code itself (`Gen
 thread. Not met: the first run (no memory) of `rtl_lfsr` under the default tier (76 percent: its compiled
   batches are below the pool threshold) and of `rtl_ff` with the interpreter (88 percent). Not measured: hosts
   with more than 8 CPUs, the token server's cost with `auto`, Windows.
+
+## Copies of subprograms by descriptors
+On a side branch, a prototype: a specialised copy calls a copy of a subprogram made for the descriptors of records and arrays of composites it knows at the call (`yavs-ir` `opt/subcopy.rs`, `docs/decisions.md` "Copies of subprograms by the descriptors of their arguments"). Stored copies name those calls by what they are for. Not on the eager `--tier=clift`, which has no copies; a descriptor a caller builds per call (a formal of a subtype with a non-static bound) is not known, and compiled-to-compiled calls are outside the debug check.
