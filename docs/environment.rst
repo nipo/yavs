@@ -285,6 +285,13 @@ Each one turns a fast path off or changes its threshold, to compare a run with a
      - not ``0``
      - unset
      - ``run``
+   * - ``YAVS_HUGE_BODY``
+     - The size, in instructions, from which a process or subprogram is optimised with the cheaper
+       pass set of very large bodies (no descriptor pass, no short-circuit pass of processes).
+       ``1`` gives every body that set, for differential tests.
+     - a number
+     - 50000
+     - ``run``
    * - ``YAVS_INLCMP``
      - ``off``: Cranelift code makes no compare of a drive with the current value; ``check``
        (always in a debug build): every skip made that way asks the kernel's full test and the run
