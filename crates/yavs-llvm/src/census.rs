@@ -33,9 +33,20 @@ pub(crate) enum Cb {
     Planes,
     /// Not a callback: an activation that skipped the table's tags (`rt::enter`, `lean`).
     Lean,
+    /// Not a callback: an activation entered through the tier's own entry (`rt::direct_entry`).
+    Direct,
+    /// Cranelift's cold ways (`yavs_rt_rare`): the codes of a short `SigRead`, the native
+    /// call of an in-place `ieee` op.
+    RareCodes,
+    RareNative,
 }
 
-const NAMES: [&str; 22] = [
+const N: usize = 25;
+
+/// Whether this build counts (the generators emit the calls of `yavs_rt_rare` only then).
+pub const COUNTING: bool = cfg!(any(debug_assertions, feature = "op-census"));
+
+const NAMES: [&str; N] = [
     "step",
     "signal",
     "deopt",
@@ -58,10 +69,13 @@ const NAMES: [&str; 22] = [
     "record",
     "planes",
     "lean",
+    "direct",
+    "rare_codes",
+    "rare_native",
 ];
 
 #[cfg(any(debug_assertions, feature = "op-census"))]
-static COUNTS: [AtomicU64; 22] = [const { AtomicU64::new(0) }; 22];
+static COUNTS: [AtomicU64; N] = [const { AtomicU64::new(0) }; N];
 
 #[inline(always)]
 pub(crate) fn cb(c: Cb) {

@@ -46,7 +46,7 @@ history-check = ["yavs-kernel/history-check"]
 # Test builds only: the heap collection stress mode of yavs-interp (crates/yavs-interp/AGENTS.md).
 gc-stress = ["yavs-interp/gc-stress"]
 # Op and adjacent-pair census of the interpreter, printed at the end of `yavs run` (crates/yavs-interp/AGENTS.md).
-op-census = ["yavs-interp/op-census", "yavs-llvm?/op-census"]
+op-census = ["yavs-interp/op-census", "yavs-kernel/op-census", "yavs-llvm?/op-census"]
 # Panic when a compiled activation marked lean reaches the object table (crates/yavs-llvm/AGENTS.md).
 table-check = ["yavs-llvm?/table-check"]
 

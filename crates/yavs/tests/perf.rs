@@ -112,14 +112,17 @@ fn check_bounds(design: &str, r: &Run, bounds: &[(&str, Bound)]) {
     let mut failed = Vec::new();
     for &(name, bound) in bounds {
         let Some(&v) = r.counters.get(name) else {
-            // A plain release build without `op-census` collects no `ops` or `cb_*`
-            // counters; those bounds are skipped there. In a debug build they are
+            // A plain release build without `op-census` collects no `ops`, `wake_sole_left` or
+            // `cb_*` counters; those bounds are skipped there. In a debug build they are
             // collected, so a missing counter is a failure, not a vacuous pass (#732).
             if cfg!(debug_assertions) {
                 panic!("design `{design}`: no counter `{name}` in {:?}", r.counters);
             }
             assert!(
-                name == "ops" || name == "ops_elab" || name.starts_with("cb_"),
+                name == "ops"
+                    || name == "ops_elab"
+                    || name == "wake_sole_left"
+                    || name.starts_with("cb_"),
                 "design `{design}`: no counter `{name}` in {:?}",
                 r.counters
             );
@@ -993,6 +996,8 @@ case!(
     [
         ("process_runs", Max(2200)),
         ("idle_skips", Min(560)),
+        // Changed signals `wake_sole` leaves to `cycle`, which arms their readers once.
+        ("wake_sole_left", Max(630)),
         ("ops", Max(27715)),
     ]
 );
@@ -1797,6 +1802,8 @@ mod clift {
         "llvm_clocked",
         "q=",
         [
+            // Every activation through the tier's own entry (`rt::direct_entry`).
+            ("cb_direct", Min(940)),
             ("cb_signal", Max(5)),
             ("cb_step", Max(8)),
             ("cb_native", Max(5)),
@@ -1811,6 +1818,8 @@ mod clift {
         "llvm_sigread",
         "wide=",
         [
+            // A short read in one plane word: the codes' cold way never runs.
+            ("cb_rare_codes", Max(0)),
             ("cb_signal", Max(60)),
             ("cb_step", Max(9)),
             ("cb_native", Max(56)),
@@ -2322,6 +2331,9 @@ mod clift {
         r.counters.extend(calls);
         let mut b = table_bounds(&r, "ieee_general.", IEEE_GENERAL);
         b.extend(table_bounds(&r, "ieee_calls.", IEEE_NATIVE_CALLS));
+        // The in-place arms' cold native call (metavalues, widths, lengths): declines that
+        // grew mean an arm lost its case.
+        b.push(("cb_rare_native".into(), Max(17960)));
         ieee_paths_check(&r, b);
     }
 }

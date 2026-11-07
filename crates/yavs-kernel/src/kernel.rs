@@ -264,6 +264,9 @@ pub struct Stats {
     /// Scans of a signal's waiter lists (`Waiters::take_woken`): the wake path that no short
     /// path in `cycle` or `finish_direct` took.
     pub wake_scans: u64,
+    /// Changed signals `wake_sole` left in `changed_sigs` while idle skip was on, so `cycle`
+    /// arms their readers (debug and `op-census` builds only, else 0).
+    pub sole_left: u64,
 }
 
 /// A pending observer wake-up (`Hook::wake_at`). Ordered by time, then registration.
@@ -3370,6 +3373,16 @@ impl SimControl {
     /// process is resumed.
     #[inline(always)]
     fn wake_sole(&mut self, s: u32) -> bool {
+        let done = self.sole_now(s);
+        #[cfg(any(debug_assertions, feature = "op-census"))]
+        if !done && self.idle_active {
+            self.stats.sole_left += 1;
+        }
+        done
+    }
+
+    #[inline(always)]
+    fn sole_now(&mut self, s: u32) -> bool {
         // A GUARD that other guards read stays in `changed_sigs` (`run_guards`).
         if !self.guard_readers.is_empty() && self.guard_readers.contains_key(&s) {
             return false;

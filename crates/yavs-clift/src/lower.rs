@@ -139,6 +139,7 @@ pub struct Jit {
     /// `yavs_rt_region` of a held region asked again (`Gen::hold_recheck`), same stub.
     cold_region: ClifId,
     hold_check: ClifId,
+    rare: ClifId,
     /// Module data by its bytes and whether it is 8-byte aligned.
     tables: HashMap<(Vec<u8>, bool), DataId>,
     /// What a body's reference to module data names in another run (`Name::Data`), by data id.
@@ -571,6 +572,7 @@ impl Jit {
             (DRIVE_FLUSH, yavs_rt_drive_flush as *const u8),
             (REGION, yavs_rt_region as *const u8),
             (HOLD_CHECK, yavs_rt_hold_check as *const u8),
+            (RARE, yavs_rt_rare as *const u8),
             (WAIT_EDGE, yavs_rt_wait_edge as *const u8),
             (SCAN, yavs_rt_scan as *const u8),
         ] {
@@ -651,6 +653,7 @@ impl Jit {
             imp(GATHER, &[I64, I32, I64, I64, I64], Some(I32))?,
         ];
         let hold_check = imp(HOLD_CHECK, &[I64, I64, I64, I64, I64, I32, I64, I64], None)?;
+        let rare = imp(RARE, &[I32], None)?;
         let mut stubs = Vec::new();
         let cold_host = cold_stub(
             &mut module,
@@ -711,6 +714,7 @@ impl Jit {
             cold_deref,
             cold_region,
             hold_check,
+            rare,
             tables: HashMap::new(),
             table_names: HashMap::new(),
             sig,
@@ -1587,6 +1591,7 @@ impl Jit {
             hold_check: self
                 .module
                 .declare_func_in_func(self.hold_check, &mut ctx.func),
+            rare: self.module.declare_func_in_func(self.rare, &mut ctx.func),
             signal: self.module.declare_func_in_func(self.signal, &mut ctx.func),
             lcopy: self.module.declare_func_in_func(self.lcopy, &mut ctx.func),
             zero: self.module.declare_func_in_func(self.zero, &mut ctx.func),
@@ -1822,6 +1827,7 @@ struct Imports {
     cold_deref: FuncRef,
     cold_region: FuncRef,
     hold_check: FuncRef,
+    rare: FuncRef,
     drive_bit: FuncRef,
     codes: FuncRef,
     planes: FuncRef,
@@ -8509,6 +8515,7 @@ impl Gen<'_> {
         );
         self.b.switch_to_block(fb);
         self.clear();
+        self.rare(1);
         self.native_direct(pc, inst, f, native, args, dst)?;
         let alt = res.map(|_| match self.cache[d.0 as usize] {
             Some(v) => v,
@@ -8949,6 +8956,14 @@ impl Gen<'_> {
     fn start(&mut self, bb: Block) {
         self.b.switch_to_block(bb);
         self.clear();
+    }
+
+    /// Builds that count only: the cold way `way` ran (`yavs_rt_rare`, `cb_rare_*`).
+    fn rare(&mut self, way: u32) {
+        if COUNTING {
+            let w = self.c32(way);
+            self.b.ins().call(self.imp.rare, &[w]);
+        }
     }
 
     /// `cond ? t : f` with block arguments `v`: a branch on `cond`.
@@ -9477,6 +9492,7 @@ impl Gen<'_> {
         }
         self.b.ins().jump(join, &[]);
         self.start(codes_at);
+        self.rare(0);
     }
 
     /// `Inst::SigRead`: up to 64 elements from the codes in place (a count known at compile time

@@ -16,6 +16,7 @@ use yavs_interp::{
 
 use yavs_ir::{AddrSpace, FOp, Func, FuncId, FuncKind, Inst, IntOp, Program, Reg, Width};
 
+pub use crate::census::COUNTING;
 use crate::census::{Cb, cb};
 /// The code of `f<id>_c` (`Gen::adapter`): a native-frame function called from the interpreter
 /// with its argument cells in an array.
@@ -25,6 +26,8 @@ pub const HOST: &str = "yavs_rt_host";
 
 pub const REGION: &str = "yavs_rt_region";
 pub const HOLD_CHECK: &str = "yavs_rt_hold_check";
+/// A cold way of generated code ran (`yavs_rt_rare`; only builds that count, `COUNTING`).
+pub const RARE: &str = "yavs_rt_rare";
 
 pub const SIGNAL: &str = "yavs_rt_signal";
 pub const DRIVE: &str = "yavs_rt_drive";
@@ -2776,7 +2779,18 @@ pub fn direct_entry<T: yavs_interp::Tier + 'static>(
     // SAFETY: `Runtime::set_tier` keeps the address of the `T` this entry came from next to the
     // tier itself, and `rt` is that runtime, so the `T` lives as long as `rt`.
     let tier = unsafe { &*(data as *const T) };
+    cb(Cb::Direct);
     p.activate(tier, ctx, rt, func, pc)
+}
+
+/// A cold way of generated code ran: 0 the codes of a short `SigRead`, 1 the native call of an
+/// in-place `ieee` op (work counters `cb_rare_codes`, `cb_rare_native`).
+pub extern "C" fn yavs_rt_rare(way: u32) {
+    cb(if way == 0 {
+        Cb::RareCodes
+    } else {
+        Cb::RareNative
+    });
 }
 
 /// Run compiled `f` (generated for `nregs` registers) from `pc` (`Tier::run`); `lookup`

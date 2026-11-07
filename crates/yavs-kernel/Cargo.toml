@@ -18,6 +18,8 @@ yavs-prefetch.workspace = true
 # Fail when anything reads the history of a signal that keeps none (`Signal::check_history`), also
 # in a release build; debug builds always do.
 history-check = []
+# Work counters on fast paths (`Stats::sole_left`), also in a release build; debug builds always count.
+op-census = []
 
 [lints]
 workspace = true
