@@ -116,6 +116,7 @@ BENCH_SIM1=<template-name> python3 -I tools/bench/run.py --compare A B --group i
 Method (the same for every number quoted in `docs/STATUS.md`):
 
 - Binaries under test come from `tools/build-bench.sh` (`RUSTFLAGS="-C llvm-args=-align-all-functions=6" cargo build --release -p yavs`; Cargo profiles cannot set `llvm-args`, so it is a flag, not a profile). Check with `nm -n --defined-only BIN | awk '$2~/[tT]/' | head`: function starts are multiples of 0x40. A release binary is not comparable with an aligned one.
+- Which build judges which change (maintainer, 2026-11-06): a change to the runtime (kernel, interpreter, the runtime the compiled code calls) is judged on profile-guided bench builds, `tools/build-bench.sh --pgo OUT --features clift --locked` for each side, after an A/A of two such builds of one source (two trainings differ, so their binaries do). A plain build compared with a PGO one must have the same `--target` (`tools/build-bench.sh --target HOST ...`): the flag alone moves cycles by up to 5 percent. A change to the generated code is judged on plain bench builds by exact counts. Say which build every number is from.
 - Pin every timed run, of every tool, to the performance cores of the host (`--cores`, default read from the CPU topology;
   on a hybrid host pass a subset when other agents use some of them). Run builds, analysis and test suites elsewhere
   (`taskset -c <efficiency cores> cargo ...`) so they do not disturb the timings. Say which cores were used.

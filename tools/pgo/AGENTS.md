@@ -11,9 +11,10 @@ script, or measures a profile-guided binary.
   change). `llvm-profdata` comes from rustup's `llvm-tools` component (`rustup component add llvm-tools`, rustc's own LLVM, so the
   profile format matches); the yavs LLVM tier is not involved.
 - `train.py` runs the cases in `train/*.vhd` with the instrumented binary and fails on any run that does not exit 0.
-- Everyday perf comparisons (root rule on bench builds, `tools/build-bench.sh`, `tools/bench`, `tools/realbench`) stay on
-  non-profile-guided builds. Say which kind of build a number is from. A profile-guided build moves every baseline, and a change
-  to the runtime shifts the profile it was trained with.
+- Perf comparisons of runtime changes run on profile-guided bench builds (`tools/build-bench.sh --pgo OUT`, after an A/A of
+  two such builds), those of generated-code changes on plain bench builds by exact counts (maintainer, 2026-11-06;
+  `tools/bench/AGENTS.md` section 7). Say which kind of build a number is from. A profile-guided build moves every baseline,
+  and a change to the runtime shifts the profile it was trained with.
 - `.github/workflows/release.yml` runs this script for every archive (maintainer, 2026-11-03; `docs/decisions.md` "Profile-guided release archives"). `gain.py` is run with `pgo_gain=true` on a dispatch, never on a tag.
 
 ## 2. Map
@@ -66,8 +67,7 @@ script, or measures a profile-guided binary.
 rustup component add llvm-tools
 tools/pgo/build.sh target/yavs-pgo                                  # release flavour
 RUSTFLAGS='-C target-cpu=x86-64-v3' tools/pgo/build.sh target/yavs-pgo-v3
-host=$(rustc -vV | sed -n 's/^host: //p')
-PGO_BUILD="tools/build-bench.sh --features clift --locked --target $host" PGO_DIR=~/.cache/yavs-t-pgo tools/pgo/build.sh ~/.cache/yavs-pgo-bench   # to benchmark
+CARGO_TARGET_DIR=~/.cache/yavs-t-pgo tools/build-bench.sh --pgo ~/.cache/yavs-pgo-bench --features clift --locked   # to benchmark (PGO_DIR defaults to $CARGO_TARGET_DIR/pgo)
 python3 -I tools/pgo/train.py INSTRUMENTED --profile-dir DIR --only rec_pipe                         # one case
 python3 -I tools/pgo/train.py target/release/yavs --check --jobs 4                                   # every case passes, on any build
 python3 -I tools/pgo/gain.py PLAIN PGO                                                               # the gain, on held-out designs
