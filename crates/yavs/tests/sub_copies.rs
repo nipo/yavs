@@ -343,7 +343,14 @@ fn shapes(tag: &str) -> (common::Tmp, String, (i32, String, String)) {
 
 /// A compiled run of `subcopy_shapes` with copies of everything, the counters on.
 fn shapes_run(d: &Path, work: &str, threads: &str, env: &[(&str, &str)]) -> (i32, String, String) {
-    let mut e = vec![SPEC, ("YAVS_SPEC_ALL", "1"), ("YAVS_COUNTERS", "1")];
+    let mut e = vec![
+        SPEC,
+        ("YAVS_SPEC_ALL", "1"),
+        ("YAVS_COUNTERS", "1"),
+        ("YAVS_LOG", "debug"),
+        // (Debug builds check by default, and the check lowers anyway: `CHECK` turns it on.)
+        ("YAVS_CLIFT_PREKEY_CHECK", "0"),
+    ];
     e.extend(env);
     yavs(
         d,
@@ -364,9 +371,17 @@ fn shapes_run(d: &Path, work: &str, threads: &str, env: &[(&str, &str)]) -> (i32
 
 fn no_counters(s: &str) -> String {
     s.lines()
-        .filter(|l| !l.starts_with("counters:"))
+        .filter(|l| !l.starts_with("counters:") && !l.starts_with("debug:"))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// The functions a run lowered for Cranelift, copies of processes and their callers included.
+fn lowered(stderr: &str) -> usize {
+    stderr
+        .lines()
+        .filter(|l| l.starts_with("debug: cache: clif lowered"))
+        .count()
 }
 
 /// Stored code is not linked for a copy that differs from the one it was made for: one copy per
@@ -390,11 +405,15 @@ fn compiled_copies_of_subprograms_are_not_linked_under_another_id() {
 #[test]
 fn warm_runs_with_other_copy_ids_link_the_same_code() {
     let (d, work, want) = shapes("sub_copies_moved");
-    for _ in 0..3 {
+    for _ in 0..2 {
         let r = shapes_run(&d, &work, "1", &[]);
         assert_eq!(r.0, 0, "{}", r.2);
     }
-    let settled = shapes_run(&d, &work, "1", &[]);
+    // (A compile the end of a run cut off comes in the next one.)
+    let settled = (0..8)
+        .map(|_| shapes_run(&d, &work, "1", &[]))
+        .find(|r| lowered(&r.2) == 0)
+        .expect("every run lowered something");
     let linked = counter(&settled.2, "clift_sub_linked");
     assert!(linked > 0, "{}", settled.2);
     assert_eq!(counter(&settled.2, "clift_sub_lowered"), 0, "{}", settled.2);
@@ -410,6 +429,10 @@ fn warm_runs_with_other_copy_ids_link_the_same_code() {
                 "skip {skip}: {}",
                 r.2
             );
+            // Nothing at all is lowered again: no caller names a copy by its id either.
+            if threads == "1" {
+                assert_eq!(lowered(&r.2), 0, "skip {skip}: {}", r.2);
+            }
             // (The empty slots count among the copies: every id moved.)
             let k: u64 = skip.parse().expect("skip");
             let copies = counter(&settled.2, "spec_copies") + k;
