@@ -383,6 +383,17 @@ mod tests {
         assert_ne!(sim.pool_ratio, 512, "no pooled batch was learnt from");
     }
 
+    /// A timed activation always leaves a cost, also one a coarse clock reads as 0 ns, so its
+    /// batches can pool and be learnt from (Windows read the processes above as untimed).
+    #[test]
+    fn a_zero_time_sample_is_a_cost() {
+        assert_eq!(cost_sample(0, 0), 1);
+        assert_eq!(cost_sample(1, 0), 1);
+        assert_eq!(cost_sample(1, 1), 1);
+        assert_eq!(cost_sample(0, 300), 300);
+        assert_eq!(cost_sample(300, 100), 200);
+    }
+
     /// Half the threads are kept unless all pool clearly faster.
     #[test]
     fn fewer_threads_win_a_near_tie() {

@@ -1221,6 +1221,14 @@ fn spin_until(done: impl Fn() -> bool, max: std::time::Duration) -> bool {
     }
 }
 
+/// A process's cost after a timed activation of `ns`: the first sample whole, then averaged.
+/// At least 1: 0 means never timed, and a coarse clock (Windows) reads 0 for a short activation.
+#[inline(always)]
+fn cost_sample(cost: u32, ns: u32) -> u32 {
+    let avg = if cost == 0 { ns } else { cost / 2 + ns / 2 };
+    avg.max(1)
+}
+
 fn signal_pair(v: &mut [Signal], a: usize, b: usize) -> (&Signal, &mut Signal) {
     if a < b {
         let (x, y) = v.split_at_mut(b);
@@ -4347,7 +4355,7 @@ impl SimControl {
                                         let r = s.process.run(&mut ctx);
                                         let ns = t.elapsed().as_nanos().min(u128::from(u32::MAX)) as u32;
                                         let c = &mut self.cost[p as usize];
-                                        *c = if *c == 0 { ns } else { *c / 2 + ns / 2 };
+                                        *c = cost_sample(*c, ns);
                                         r
                                     };
                                     let failed = r.is_err();
