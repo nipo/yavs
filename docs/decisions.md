@@ -4649,7 +4649,9 @@ has no process body. Output is unchanged at any thread count and with `--shuffle
 - **Wake at finish** (`SimControl::wake_sole`): one changed element with one resident waiter without an edge
   trigger is woken in `finish_direct`, without the changed list and the scan in `cycle`; not with an observer of
   value changes. A signal no process ever waited for leaves there too, its readers armed, images written and
-  events counted (#1118: register chains 3 to 4 percent fewer instructions).
+  events counted (#1118: register chains 3 to 4 percent fewer instructions). Idle-skip readers are armed in
+  `wake_sole` only when the signal leaves there; one it leaves in `changed_sigs` is armed once, by `cycle` (it was
+  armed twice).
 - **A batch of one process** (`SimControl::run_one`): no order, batch loop, late list or unwind guard around a loop;
   the clocked commit takes the direct entries from the process's own lists (`commit_rest` is the old tail).
 - **Lists**: the per-process wait, waveform and schedule lists, a driver's pending transactions and
@@ -12796,6 +12798,26 @@ end for those processes. Method as in round 10: bench builds (`llvm`, and `clift
   the scheduler then passes it no state at all; every process is entered with one call and its state pointer. The idea taken: what an
   activation sets up is decided when the code is made, from what the code can reach. Ours keeps the per-activation view and the shared
   table and only drops the tags for processes that cannot reach them; nothing was copied.
+
+## Compiled clocked RTL processes, round 12: one function per tier, and what was left out (yavs-interp, yavs-llvm, yavs-clift, 2026-11-04)
+
+Task: the shortest path from the kernel's run loop to a compiled process, keeping sampling, tier switches, stop requests and debugger paths. Method: `tools/stepcount/step` over 100 kernel cycles of GRLIB and 20 of Microwatt, `--threads=1`, forced Cranelift (`--tier=clift --no-cache`) and at first entry (`--tier=auto --tier-heat=1,0,0 YAVS_SPEC_AFTER=2`), instructions per compiled activation in `InterpProcess::run`, `run_cached`, `Mem::sync` and the scratch.
+
+| window | seam per activation | window per cycle | activations per cycle |
+|---|---:|---:|---:|
+| GRLIB forced | 567 to 510 | 29 201 to 29 026 | 2.80 |
+| Microwatt forced | 477 to 398 | 183 205 to 181 867 | 14.45 |
+| GRLIB at first entry | 596 to 546 | 10 438 to 10 297 | 2.67 |
+| Microwatt at first entry | 437 to 374 | 159 609 to 158 451 | 15.40 |
+
+- **Decision: a compiled activation is one function per tier** (`Tier::direct`, `DirectFn`, `yavs_llvm::rt::direct_entry::<T>`, kept in `Runtime::direct` with the tier's address). `InterpProcess::run` does the activation count and the flag load in no frame of its own (`Machine::direct_ready`) and jumps to the entry; `InterpProcess::activate` holds `Machine::run_direct`, with the tier's `run_cached` and `rt::enter` inlined. The frame of `run` (nine instructions in, nine out) and the virtual call are gone. The first activation of a process and one with a scratch or a specialise to do go through `run_prepared`, an activation that is not compiled through `run_interpreted` (at most 0.14 percent more instructions under `--tier=interp`, geomean 0.9998). A tier without an entry (the stub tiers of the tests) goes through `direct_dyn` and `run_cached` as before.
+- **The tier's record is reached through the host** (`Host::record`, `View::record`), no copy in and out: 12 instructions. The pointer is read at `Mem::begin` and written at the end, never held across compiled code.
+- **The rest of the entry:** `view_hot` (a `hot` process in its root frame: register and slot bases 0, no shared heap, no debugger; `view_root` corrects the flags and heap fields for the other callers), `Host` without `up` (`ret` looks the function up), `Env::pending` boxed and tested in place, `Mem::sync` tests in line, `NativeFlags::activated` only when the flag byte has `NAT_COUNT`, `ClifTier::funcs` holds `lean`, the `any` load is gone (a set `NAT_CODE` implies it), `STAMPS` a byte. All of the above together: -62 instructions per activation on GRLIB, -93 on Microwatt.
+- **Tried and not kept.** `Host::f` looked up on demand: a look-up per activation goes, but half of them make a callback that needs it, and `signal` gained 8 instructions a call for the test: -22 per activation against -39 with the look-up kept. A temporary area shrunk instead of leaving residency: nothing, the swaps on GRLIB are four instances of a 7 234 register process that share one scratch set. `RESIDENT_REGS` at 65 536: +229 per cycle, `RESIDENT_TEMP` at 256 KiB: +371 (the budget counts it per process); sharing one register file among instances is also a cache gain, so these swaps stay. The scratch slot chosen by key: nothing, the scan is short.
+- **Not built.** The view stays rebuilt at every activation, as round 7 decided. A persistent block for its rare fields: about 25 instructions at most, and each reader (`rt.rs` callbacks, both code generators) gains a load, so it nets 10 to 15: not worth moving fields read by generated code that no local run covers for the LLVM tier. `Mem::begin` and `save_tag` of a process that is not `lean` (about 100) are what remains: tags and mixes per space are read at fixed offsets by generated code.
+- **Whole runs** (port to the base of 2026-11-06, main-thread instructions of warm `--tier=auto` runs, bench builds, three runs each): Microwatt 0.9934, `grlib_leon3mp` 0.9943, `neorv32_single_cache` at `--tier=clift` 0.9956. Output and exit status equal on all.
+- **Cycles are undecided.** Plain PGO builds with an A/A of two builds, warm, two cores, with the two changes below: Microwatt 0.982 +-8.3 percent (A/A 1.039 +-8.9), GRLIB 1.003 +-10.8 (A/A 1.005 +-11.5), `neorv32_single_cache` 0.971 +-2.8 (A/A 0.995 +-3.2). A quiet sitting decides.
+- **With it, two smaller cuts.** `wake_sole` arms the idle-skip readers only of a signal it takes out of `changed_sigs` (kernel "Wake at finish"). The three entries compiled code calls natives through (`native_frame`, `native_direct`, `native_light`) read the native's `R<Option<u64>>` tag and value apart (`native_result`): the 16-byte copy of the two words a native stores one by one cannot be forwarded from those stores and waits for both to retire. Non-forwardable store-to-load conflicts on Microwatt 1 278 to 1 129 per kernel cycle; instructions unchanged.
 
 ## README and public docs (maintainer, 2026-10-28)
 
