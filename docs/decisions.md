@@ -14465,6 +14465,20 @@ whole-signal read, the call, the result's check and copy, the wide drive).
   loaded host a single pooled batch can wait for a descheduled worker; the kernel's own `learn_pooled` then raises
   its threshold for a while, so the next window has almost no pooled work. With two strikes `rtl_lfsr` under
   `--tier=auto` lost its threads for the rest of the run on a busy host (1205 of 4916 batches pooled).
+- **Decision: the thread count is explored** (agent): after the first window that wins, and every 16 that win, one
+  window runs at the other count (all threads or half) and the count whose pooled batches ran faster against their
+  estimate is kept; the pool is rebuilt at the new size (idle workers of a bigger pool slowed every hand-over: 0.41
+  to 0.45 s against 0.35 s on `rtl_fan`). Why: on 4 cores with their hardware threads `rtl_lfsr` was fastest on 4
+  threads (1.57x compiled, 1.78x interpreted) and slower on 8 (1.43x, 1.65x), while `rtl_fan` interpreted gained
+  most on 8.
+- **Decision: a window in which no batch wanted the threads ends after 5 ms** (agent): the usual design that never
+  pools then pays its trial on 5 ms instead of 25 (the trial of an 85 ms run cost 0.7 percent of its instructions).
+- **Not done: a lower pool threshold under `auto`** (agent, measured): `POOL_WORK_NS` (20 us) keeps the compiled
+  batches of `rtl_lfsr` (512 registers, about 15 us estimated) inline, so its first run under `--tier=auto` loses
+  the threads after compiled code is in (1.10x against 1.57x at `--threads=4`, which keeps pooling on costs it
+  timed while the processes were interpreted). A floor of 5 us under `auto` took it to 1.19x but made the trial of
+  `lfsr64_xor` 9 percent slower in cycles; left for a change of the threshold itself, which also concerns
+  `--threads=N`.
 - **Decision: static estimate = fewer than 8 processes that may run in parallel** (not serial, not postponed): one
   thread, no trial, no cache lookup (agent). Why: no batch of fewer processes can pass the pool threshold unless its
   processes are very heavy; the processes' weights are not known before the run. `ponytail:` in the code.

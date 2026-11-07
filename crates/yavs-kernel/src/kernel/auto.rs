@@ -4,7 +4,8 @@
 //! that would pool and run inline) say what the estimate is worth inline. A window wins when the
 //! saving is at least `GAIN_PERCENT` of its time. Windows that lose in a row turn the threads off
 //! (`workers` 0: the code paths of `--threads=1`, tokens given back), and a trial comes again
-//! after a pause that doubles with every trial that does not win. Where a batch runs changes no
+//! after a pause that doubles with every trial that does not win. Now and then a window runs on
+//! half the threads (or all again) and the faster count is kept. Where a batch runs changes no
 //! output (DESIGN.md "Parallel evaluation"), so neither does a decision.
 
 use super::*;
@@ -18,6 +19,9 @@ pub(super) const MIN_PROCS: usize = 8;
 /// processes to be timed (`COST_EVERY` batches), short enough that a design that does not gain
 /// pays its trial cost on a small part of a short run.
 const WINDOW: Duration = Duration::from_millis(25);
+/// A window in which no batch wanted the threads ends this early: the usual design that does not
+/// gain pays its trial on 5 ms.
+const WINDOW_EMPTY: Duration = Duration::from_millis(5);
 /// The saving that wins a window, in percent of its wall time: above what being on costs a design
 /// whose batches stay inline (1 to 2 percent).
 const GAIN_PERCENT: u64 = 4;
@@ -36,6 +40,9 @@ const START: Duration = Duration::from_millis(10);
 const PAUSE: Duration = Duration::from_secs(1);
 const PAUSE_GAINED: Duration = Duration::from_millis(100);
 const PAUSE_MAX: Duration = Duration::from_secs(16);
+/// Windows that won between two tries of the other thread count (all of `--threads=auto`'s, or
+/// half of them): the first try follows the first window that won.
+const EXPLORE_EVERY: u32 = 16;
 /// The kernel looks at the clock every this many cycles (a mask of `SimControl::cycle`).
 pub(super) const TICK_MASK: u64 = 0xff;
 
@@ -76,6 +83,13 @@ pub(super) struct Auto {
     lost: u32,
     /// `workers` is limited to the CPUs (`SimControl::auto_cpus`).
     pub(super) counted: bool,
+    /// The workers a pooled batch may use: `workers`, or about half of the threads when that was
+    /// faster (`SimControl::helpers`). Hyperthreads or a shared cache make some designs faster on
+    /// fewer threads; the other count is tried every `EXPLORE_EVERY` windows that won.
+    pub(super) limit: usize,
+    /// The window now runs at the other count; the pooled time over estimate of the one before.
+    trying: Option<u64>,
+    since_try: u32,
     windows: u64,
     gained: u64,
 }
@@ -102,6 +116,9 @@ impl Auto {
             inline: 0,
             lost: 0,
             counted: false,
+            limit: workers,
+            trying: None,
+            since_try: EXPLORE_EVERY - 1,
             windows: 0,
             gained: 0,
         }
@@ -128,6 +145,36 @@ impl Auto {
         self.inline += ns;
     }
 
+    /// After a window that won with pooled time over estimate `this`: keep the thread count that
+    /// pooled faster, and now and then try the other one.
+    fn explore(&mut self, this: Option<u64>) {
+        // Half the threads: workers + 1 of them, the kernel thread counted.
+        let half = self.workers.div_ceil(2) - 1;
+        let Some(r) = this.filter(|_| half > 0) else {
+            return;
+        };
+        if let Some(before) = self.trying.take() {
+            if r >= before {
+                self.limit = if self.limit == self.workers {
+                    half
+                } else {
+                    self.workers
+                };
+            }
+            self.since_try = 0;
+        } else {
+            self.since_try += 1;
+            if self.since_try >= EXPLORE_EVERY {
+                self.trying = Some(r);
+                self.limit = if self.limit == self.workers {
+                    half
+                } else {
+                    self.workers
+                };
+            }
+        }
+    }
+
     pub(super) fn verdict(&self) -> AutoVerdict {
         if self.windows == 0 {
             AutoVerdict::Unjudged
@@ -141,11 +188,11 @@ impl Auto {
 
     /// End a window of `ns` with the threads on: whether they stay on, and whether it won.
     fn judge(&mut self, ns: u64) -> (bool, bool) {
-        if let Some(r) = self
+        let this = self
             .pooled
             .saturating_mul(1024)
-            .checked_div(self.pooled_est)
-        {
+            .checked_div(self.pooled_est);
+        if let Some(r) = this {
             self.ratio = r;
         }
         // Inline time over the estimate, in 1024ths: even until a probe was timed.
@@ -166,6 +213,7 @@ impl Auto {
         if won {
             self.proven = true;
             self.pause = PAUSE_GAINED;
+            self.explore(this);
         }
         (self.want, self.pooled_est, self.pooled) = (0, 0, 0);
         (self.lost < strikes, won)
@@ -183,10 +231,12 @@ impl SimControl {
         let now = Instant::now();
         let elapsed = now.duration_since(a.since);
         if a.on {
-            if elapsed < WINDOW && !flip {
+            if !flip && (elapsed < WINDOW_EMPTY || elapsed < WINDOW && a.want > 0) {
                 return;
             }
+            let limit = a.limit;
             let (on, won) = a.judge(elapsed.as_nanos().min(u128::from(u64::MAX)) as u64);
+            let resized = a.limit != limit;
             let won = won && !flip;
             a.on = on && !flip;
             a.since = now;
@@ -197,6 +247,10 @@ impl SimControl {
             if !a.on {
                 self.workers = 0;
                 self.give_tokens();
+            }
+            if resized {
+                // A pool of the new size: idle workers of a bigger one slow the hand-over.
+                self.pool = None;
             }
         } else if elapsed >= a.pause || flip {
             a.pause = match a.pause {
@@ -214,6 +268,7 @@ impl SimControl {
     /// static estimate; call it before the run): one that did not gain starts on one thread.
     pub fn set_threads_hint(&mut self, hint: Option<bool>) {
         if let Some(a) = self.auto.as_deref_mut() {
+            // Called before the run: the CPUs are not counted yet.
             *a = Auto::new(a.workers, hint);
             self.workers = a.start();
         }
@@ -229,6 +284,7 @@ impl SimControl {
         };
         a.counted = true;
         a.workers = a.workers.min(cpus - 1);
+        a.limit = a.workers;
         self.workers = a.workers;
         if a.workers == 0 {
             // One CPU: one thread for the rest of the run.
@@ -243,5 +299,53 @@ impl SimControl {
             None if self.cfg.auto => Some(AutoVerdict::Static),
             None => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A window of 1 ms whose batches pooled at `ratio` (1024ths of their estimate).
+    fn window(a: &mut Auto, ratio: u64) -> (bool, bool) {
+        a.batch(1_000_000, Some(ratio * 1_000_000 / 1024));
+        a.judge(1_000_000)
+    }
+
+    #[test]
+    fn the_faster_thread_count_is_kept() {
+        let mut a = Auto::new(7, None);
+        // The first window that wins tries half the threads (4 of 8: 3 workers).
+        assert_eq!(window(&mut a, 600), (true, true));
+        assert_eq!(a.limit, 3);
+        // Half pooled faster: kept until the next try.
+        assert_eq!(window(&mut a, 500), (true, true));
+        assert_eq!(a.limit, 3);
+        for _ in 0..EXPLORE_EVERY - 1 {
+            window(&mut a, 500);
+            assert_eq!(a.limit, 3);
+        }
+        // The try of all threads is slower: back to half.
+        window(&mut a, 500);
+        assert_eq!(a.limit, 7);
+        window(&mut a, 700);
+        assert_eq!(a.limit, 3);
+    }
+
+    #[test]
+    fn losing_windows_turn_the_threads_off() {
+        let mut a = Auto::new(7, None);
+        // Nothing wanted the threads: off at once.
+        assert_eq!(a.judge(1_000_000), (false, false));
+        let mut a = Auto::new(7, None);
+        // Pooled no faster than inline: off after two windows.
+        assert_eq!(window(&mut a, 1100), (true, false));
+        assert_eq!(window(&mut a, 1100), (false, false));
+        // After a window that won it takes four.
+        let mut a = Auto::new(7, Some(true));
+        for _ in 0..3 {
+            assert_eq!(window(&mut a, 1100), (true, false));
+        }
+        assert_eq!(window(&mut a, 1100), (false, false));
     }
 }

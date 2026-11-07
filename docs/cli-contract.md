@@ -680,12 +680,15 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   these times are lower bounds, coarser for a design of few long cycles): a window
   wins when the time its pooled batches saved (their estimate inline, corrected by timed probe
   batches, less their measured time) is at least 4 percent of it; one window in which no batch
-  wanted the threads, two losing windows in a row, or four once a window of this or the last
-  run won, turn them off (the code paths of `--threads=1`, tokens given back), and a trial comes
+  wanted the threads (such a window ends after 5 ms), two losing windows in a row, or four once a
+  window of this or the last run won, turn them off (the code paths of `--threads=1`, tokens given back), and a trial comes
   again after 1 s, doubling up to 16 s (0.1 s once a window won). The worker threads start when
   the first batch goes to them. What the last run of the same command line found (gained or not)
   is kept in the work library's cache, kind `thr` (not with `--no-cache` or without a work
-  directory): a run after one that did not gain starts on one thread with a first trial after
+  directory). After the first window that wins, and then after every 16 that win, one window
+  runs on the other thread count (all of them, or half) and the count whose pooled batches were
+  faster against their estimate is kept: hardware threads of one core or a shared cache make
+  some designs faster on fewer threads. A run after one that did not gain starts on one thread with a first trial after
   4 s, one after a run that gained starts with the threads on and retries after 0.1 s. `--verbose` prints a note
   `note: --threads=auto: ...` on stderr at the end. With a token server it connects as for
   `--threads=N` above 1. Under `--dap`, `--interactive` and `--do` it is `W0109` as any value

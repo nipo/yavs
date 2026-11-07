@@ -2033,14 +2033,23 @@ impl SimControl {
         if self.pool.is_none() && self.auto.as_ref().is_some_and(|a| !a.counted) {
             self.auto_cpus();
         }
-        let n = self.workers;
+        // `--threads=auto` may run a batch on fewer threads than the pool has (`Auto::limit`).
+        let n = self
+            .auto
+            .as_ref()
+            .map_or(self.workers, |a| a.limit.min(self.workers));
         if let Some(t) = &self.tokens {
             self.token_idle = 0;
             if self.held < n {
                 self.held = t.take(n);
             }
         }
-        let usable = if self.tokens.is_some() { self.held } else { n };
+        // ponytail: tokens held above a lowered limit stay until the next give-back.
+        let usable = if self.tokens.is_some() {
+            self.held.min(n)
+        } else {
+            n
+        };
         if usable > 0 && self.pool.is_none() {
             // ponytail: workers that cannot be started leave the run on one thread, as a token
             // server that cannot be reached does; the output does not depend on them.

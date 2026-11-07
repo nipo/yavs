@@ -59,6 +59,8 @@ With ``--threads=auto`` yavs uses more threads only while they make the run fast
   it goes back to one thread, exactly as with ``--threads=1``, and tries again later: after 1 second, then after
   2, 4, up to 16 seconds. A design whose threads gained tries again after 0.1 s, so a busy part later in the
   test is found again.
+* It tries half as many threads now and then and keeps the faster count: two hardware threads of one core
+  can be slower than one.
 * It remembers what the last run of the same command line found, in the work library's cache (not with
   ``--no-cache``): a test that did not gain starts on one thread, one that gained starts with the threads on.
 * ``--verbose`` says what it decided at the end of the run.
