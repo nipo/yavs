@@ -1737,7 +1737,13 @@ impl Worker {
     /// wait for the gate. The list alone says too little: all the tests of a library share it, and a
     /// short one lost four times over linking what longer ones had compiled.
     fn link_early(&self, id: FuncId) -> bool {
-        self.long_before() && self.cached(id)
+        self.cached(id) && (self.long_before() || self.early.contains_key(&self.prog.base_of(id)))
+    }
+
+    /// The last run named hot processes of its own (`early`): a shorter run than the gate links what
+    /// the cache holds of them, and makes copies, from the start.
+    fn named_hot(&self) -> bool {
+        self.earlier.base.is_some() && !self.early.is_empty()
     }
 
     /// The last run of this program (`Profile::base`, CPU microseconds) passed the gate.
@@ -3737,7 +3743,7 @@ impl AutoTier {
                     if !sh.halt.load(Ordering::SeqCst) {
                         w.listed = w.lead().map(|g| g.cache_list()).unwrap_or_default();
                         w.load_profile();
-                        if w.counted && w.long_before() {
+                        if w.counted && (w.long_before() || w.named_hot()) {
                             w.native.open_copies();
                         }
                     }
@@ -4476,6 +4482,22 @@ mod tests {
         w.in_cache = vec![Default::default(); w.in_cache.len()];
         w.in_cache[caller.0 as usize].set(false).unwrap();
         assert!(w.waits(caller), "not in the cache");
+    }
+
+    /// A short last run links before the gate what its own profile named hot, and nothing else the
+    /// cache lists.
+    #[test]
+    fn a_short_last_run_links_its_own_hot_processes() {
+        let (prog, caller, callee) = caller_callee();
+        let mut w = counted(prog, u64::MAX);
+        w.in_cache[caller.0 as usize].set(true).unwrap();
+        w.in_cache[callee.0 as usize].set(true).unwrap();
+        w.earlier.base = Some(super::COUNT_GATE_CPU - 1);
+        assert!(w.waits(caller) && !w.named_hot());
+        w.early.insert(caller, 1);
+        assert!(!w.waits(caller), "named hot");
+        assert!(w.named_hot());
+        assert!(w.waits(callee), "not named");
     }
 
     /// A function that ran keeps its compiled native callers unpublished until it has code: it is

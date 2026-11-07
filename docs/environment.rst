@@ -325,7 +325,7 @@ Each one turns a fast path off or changes its threshold, to compare a run with a
      - ``160000``
      - ``run``
    * - ``YAVS_AUTO_WARM_GATE``
-     - Simulation CPU of the last run of a program (the CPU time of the thread that runs the simulation, not of the helper threads of ``--threads``), in microseconds, from which a warm run links what the cache lists and makes copies before ``YAVS_AUTO_GATE``. A large number keeps the gate.
+     - Simulation CPU of the last run of a program (the CPU time of the thread that runs the simulation, not of the helper threads of ``--threads``), in microseconds, from which a warm run links what the cache lists and makes copies before ``YAVS_AUTO_GATE``. A shorter last run still links what the cache holds of the processes it found hot, and makes copies. A large number keeps the gate for the rest.
      - a number
      - ``400000``
      - ``run``

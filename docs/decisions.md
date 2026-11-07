@@ -14741,4 +14741,21 @@ the IR optimiser and lowering. Decisions:
   unchanged within 0.001 elsewhere; `lfsr64` keeps its 2 percent, since its batch of 65 is estimated at just under
   the threshold and must be estimated. The bound only rises between the recounts every 65536 cycles, so one dear
   process keeps every batch estimated, as before.
+- **Rulings (user, 2026-11-07):** keep the kernel-thread CPU fix and lower the warm gate, choosing the value or rule
+  that loses nowhere beyond the A/A on one-thread and threaded warm runs of the small designs, short tests of the
+  real-world suite and the processor designs; land the small-batch skip (#858) and the clock tick of about a
+  millisecond.
+- **Decision: the warm gate stays at 400 ms for what the cache lists, and a warm run whose last run was shorter links at
+  once what the cache holds of the processes that run's profile named hot (`Worker::early`), and makes copies from the
+  start (`named_hot`)** (agent, under the ruling). Why: a flat lower gate lost on the library suite whose tests share a
+  cache list: OSVVM warm, instructions over all threads summed over its 314 runs, 1.013 and 1.028 at 200 ms and 1.065
+  at 100 ms (two 400 ms passes 0.991 apart), as the earlier choice of 400 ms found. A short program's own hot processes
+  are not what other tests compiled. Measured (bench builds, warm runs 1 to 3 of fresh worlds, 6 rounds, simulate
+  wall, paired; A/A within 0.95 to 1.07): one thread `rtl_lfsr` 0.80 to 0.87, `lfsr64` 0.83 to 0.86, `rtl_ff`,
+  `rtl_fan`, `rtl_chain`, `sc5_fifo_repack` within the A/A; `--threads=auto` `rtl_lfsr` 0.86 to 0.92, `lfsr64` 0.83,
+  `rtl_ff` 0.95 to 0.97, the others within the A/A; OSVVM warm 0.990 (cold 1.000).
+  Real-world suite, warm, 12 tests with `auto` and `auto@4` (one pass on a loaded host): instructions within 0.98 to
+  1.04 of the base except `sc5_timestamp` 1.17 (its copies and links come earlier, wall 0.89 and 0.95, CPU 0.88);
+  `grlib_leon3mp`, `neorv32_single_min` and `poc_arith_addw` ran over the gate before and decide as before
+  (instructions 1.00 to 1.01; their walls moved 0.81 to 1.01 with the host's load).
 
