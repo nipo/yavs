@@ -16,6 +16,9 @@ fn on() {
     ONCE.call_once(|| {
         // SAFETY: first thing in every test of this binary, before any thread reads the environment.
         unsafe { std::env::set_var("YAVS_CLIFT_BLOCKCOV", env!("CARGO_TARGET_TMPDIR")) };
+        // The JIT's own memory, as on hosts without the huge arena: a dropped module frees its
+        // tables, so the dump must not read them there.
+        unsafe { std::env::set_var("YAVS_CLIFT_HUGE", "0") };
     });
 }
 

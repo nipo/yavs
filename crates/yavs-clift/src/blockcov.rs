@@ -15,9 +15,11 @@ pub type BlockInfo = (u32, Option<u32>);
 struct Table {
     name: String,
     key: String,
-    /// The address of the body's table, one byte per block, in module data that is never freed.
+    /// The address of the body's table, one byte per block, in the module's data while it lives.
     at: usize,
     blocks: Vec<BlockInfo>,
+    /// The bytes as the module left them, once it is dropped (`freeze`).
+    frozen: Option<Vec<u8>>,
 }
 
 static TABLES: Mutex<Vec<Table>> = Mutex::new(Vec::new());
@@ -39,7 +41,22 @@ pub(crate) fn register(name: String, key: String, at: usize, blocks: Vec<BlockIn
             key,
             at,
             blocks,
+            frozen: None,
         });
+}
+
+/// The module that holds the tables at `ats` goes away: keep their bytes.
+pub(crate) fn freeze(ats: &[usize]) {
+    let mut tables = TABLES.lock().unwrap_or_else(PoisonError::into_inner);
+    for t in tables
+        .iter_mut()
+        .filter(|t| t.frozen.is_none() && ats.contains(&t.at))
+    {
+        // SAFETY: the module is still alive here (`Jit::drop`); `at` is its table of
+        // `blocks.len()` bytes.
+        let b = unsafe { std::slice::from_raw_parts(t.at as *const u8, t.blocks.len()) };
+        t.frozen = Some(b.to_vec());
+    }
 }
 
 /// The name of a body that is the same in every run of a program: `f` or `n` with the function
@@ -94,13 +111,14 @@ pub fn snapshot() -> Vec<BodyCov> {
                 .blocks
                 .iter()
                 .enumerate()
-                // SAFETY: `at` is the table of `blocks.len()` bytes in module data that is never
-                // freed; compiled code writes it, a byte read at any time is fine.
                 .map(|(k, &b)| {
-                    (
-                        b,
-                        unsafe { std::ptr::read_volatile((t.at + k) as *const u8) } != 0,
-                    )
+                    let ran = match &t.frozen {
+                        Some(f) => f[k],
+                        // SAFETY: the module of `at` is alive while the table is not frozen;
+                        // compiled code writes it, a byte read at any time is fine.
+                        None => unsafe { std::ptr::read_volatile((t.at + k) as *const u8) },
+                    };
+                    (b, ran != 0)
                 })
                 .collect(),
         })

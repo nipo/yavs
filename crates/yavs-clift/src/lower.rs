@@ -192,6 +192,8 @@ pub struct Jit {
     last_cov: Option<(DataId, Vec<crate::blockcov::BlockInfo>)>,
     cov_n: u32,
     covs: Vec<(String, String, DataId, Vec<crate::blockcov::BlockInfo>)>,
+    /// The addresses of the tables registered, frozen when the module goes (`Drop`).
+    cov_at: Vec<usize>,
 }
 
 /// The native-frame variant `n<id>` of a function, in the calling convention of the LLVM tier
@@ -504,6 +506,15 @@ fn cold_stub(
     Ok(id)
 }
 
+impl Drop for Jit {
+    fn drop(&mut self) {
+        // `YAVS_CLIFT_BLOCKCOV`: the module's data goes with it.
+        if !self.cov_at.is_empty() {
+            crate::blockcov::freeze(&self.cov_at);
+        }
+    }
+}
+
 impl Jit {
     pub fn new() -> Result<Jit, Error> {
         let opt = flag("YAVS_CLIFT_OPT", "speed");
@@ -740,6 +751,7 @@ impl Jit {
             last_cov: None,
             cov_n: 0,
             covs: Vec::new(),
+            cov_at: Vec::new(),
         })
     }
 
@@ -1760,6 +1772,7 @@ impl Jit {
             .map_err(|e| e.to_string())?;
         for (name, key, did, blocks) in std::mem::take(&mut self.covs) {
             let (at, _) = self.module.get_finalized_data(did);
+            self.cov_at.push(at as usize);
             crate::blockcov::register(name, key, at as usize, blocks);
         }
         if let Some(list) = self.perfmap.take() {
