@@ -262,8 +262,9 @@ Within a delta the kernel has two phases that never overlap:
   estimate (`learn_pooled`); a smaller one runs inline, the hand-off costing more than it saves
   (#497). The estimate of a process is an average of timed inline activations (one in
   `COST_EVERY` of each process, at a position that moves from batch to batch; a process not yet
-  timed counts 0), and one in `PROBE_EVERY` of the batches that would pool runs inline to
-  refresh them: a pooled run would measure cold caches. Initialisation and postponed batches
+  timed counts 0; when the threads start, the first big batches run inline with every
+  activation timed, `CALIBRATE`), and one in `PROBE_EVERY` of the batches that would pool runs
+  inline to refresh them: a pooled run would measure cold caches. Initialisation and postponed batches
   run inline; `Config::pool_all` pools every other batch of two or more (tests). A pooled batch
   is cut into pieces of consecutive process numbers, each with its own sub-slices of the slot,
   meta and idle arrays (`split_at_mut`, no lock); the workers and the kernel thread claim

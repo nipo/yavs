@@ -14534,3 +14534,24 @@ whole-signal read, the call, the result's check and copy, the wide drive).
   under `--threads=auto` its `limit`), not only on all the pool's workers (agent). Why: on half the threads no batch was
   ever learnt from (`helpers == workers` never held), so the threshold stayed where the last window on all threads left
   it.
+- **Decision: when the threads start (the run, or a trial of `--threads=auto`), the first `CALIBRATE` (2) batches of at
+  least 8 processes run inline with every activation timed, and a process's first sample is its cost, not half of it**
+  (agent). Why: a trial began with the costs of nothing (the threads were off) or of an earlier phase: the first
+  windows estimated the batches at an eighth of their time (inline probes 8.9 times the estimate on rtl_ff), and once
+  the batches pool only the probes (1 in 64 batches, a sixteenth of the processes each) refresh the costs, so the
+  estimate took about 0.5 s to come right.
+- **Decision: thread counts are compared by pooled time over the inline time of the window's probes, both against the
+  same estimates, and all the threads are kept only when they are `FEWER_PERCENT` (5) faster than half** (agent). Why:
+  compared by pooled time over the estimate, the later window always ran on better estimates and looked faster, so the
+  first try kept half the threads on rtl_fan and rtl_ff, which run 10 to 18 percent faster on all 8; on a near tie fewer
+  threads win because hardware threads of the same cores also slow the kernel thread between batches (compiled rtl_lfsr
+  is 8 to 10 percent faster on 4 threads than on 8). Tried and dropped: comparing the windows by wall time per estimated
+  work of all their batches; one window of a few dozen batches is too noisy for it (rtl_ff interpreted then kept half
+  the threads, 83 percent of the best fixed speedup).
+- **Decision: a pooled batch counts at most twice its estimate in `learn_pooled`'s average (was 8 times); under
+  `--threads=auto` a window that won resets the threshold and the average, and so does a trial of a design that won
+  before** (agent). Why: compiled rtl_lfsr gains 1.8x on 4 threads, but a few pooled batches at 3 times their estimate
+  when its compiled code came in raised the threshold, its batches stopped wanting the threads, and the single batches
+  pooled to test the raise found the workers asleep and could not bring it down: the run lost its threads (3151 of
+  4677 batches pooled). A design that never gained keeps a raised threshold, so its trials stay short. `--threads=8`
+  without `auto` still has this trap (compiled rtl_lfsr pooled 3369 to 3493 of 4920 batches in some runs).

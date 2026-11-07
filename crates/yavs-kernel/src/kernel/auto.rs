@@ -43,6 +43,8 @@ const PAUSE_MAX: Duration = Duration::from_secs(16);
 /// Windows that won between two tries of the other thread count (all of `--threads=auto`'s, or
 /// half of them): the first try follows the first window that won.
 const EXPLORE_EVERY: u32 = 16;
+/// How much faster against inline the batches on all threads must pool than on half to be kept.
+const FEWER_PERCENT: u64 = 5;
 /// The kernel looks at the clock every this many cycles (a mask of `SimControl::cycle`).
 pub(super) const TICK_MASK: u64 = 0xff;
 
@@ -154,13 +156,18 @@ impl Auto {
             return;
         };
         if let Some(before) = self.trying.take() {
-            if r >= before {
-                self.limit = if self.limit == self.workers {
-                    half
-                } else {
-                    self.workers
-                };
-            }
+            let (all, fewer) = if self.limit == self.workers {
+                (r, before)
+            } else {
+                (before, r)
+            };
+            // All the threads only when their batches pool clearly faster: the busy hardware
+            // threads of the others also slow the kernel thread between the batches.
+            self.limit = if all * (100 + FEWER_PERCENT) / 100 < fewer {
+                self.workers
+            } else {
+                half
+            };
             self.since_try = 0;
         } else {
             self.since_try += 1;
@@ -202,6 +209,9 @@ impl Auto {
             .checked_div(self.inline_est)
             .unwrap_or(1024);
         (self.inline_est, self.inline) = (self.inline_est / 2, self.inline / 2);
+        // The thread counts are compared by pooled time over inline time, which holds while the
+        // estimates still move (they are refreshed only by probes once the batches pool).
+        let pooled_over_inline = this.map(|r| r * 1024 / inline.max(1));
         let saved = self.want.saturating_mul(inline.saturating_sub(self.ratio)) / 1024;
         let won = saved.saturating_mul(100) >= ns.saturating_mul(GAIN_PERCENT);
         self.lost = if won { 0 } else { self.lost + 1 };
@@ -213,7 +223,7 @@ impl Auto {
         if won {
             self.proven = true;
             self.pause = PAUSE_GAINED;
-            self.explore(this);
+            self.explore(pooled_over_inline);
         }
         (self.want, self.pooled_est, self.pooled) = (0, 0, 0);
         (self.lost < strikes, won)
@@ -252,6 +262,12 @@ impl SimControl {
                 // A pool of the new size: idle workers of a bigger one slow the hand-over.
                 self.pool = None;
             }
+            if won {
+                // The threads pay: a threshold that a few slow batches raised (a busy host, the
+                // first runs of new compiled code) is not kept; the single batches pooled to
+                // test it find the workers asleep and could not bring it down.
+                (self.pool_ns, self.pool_ratio) = (POOL_WORK_NS, 512);
+            }
         } else if elapsed >= a.pause || flip {
             a.pause = match a.pause {
                 START => PAUSE,
@@ -261,6 +277,12 @@ impl SimControl {
             a.lost = 0;
             a.since = now;
             self.workers = a.workers;
+            self.calib = CALIBRATE;
+            if a.proven {
+                // The threshold that the windows of a busy host raised would keep the batches
+                // of a design that gained inline; one that never gained keeps it (a short trial).
+                (self.pool_ns, self.pool_ratio) = (POOL_WORK_NS, 512);
+            }
         }
     }
 
@@ -359,6 +381,135 @@ mod tests {
         assert_eq!(sim.auto.as_ref().unwrap().limit, 3);
         assert!(sim.stats().pooled_batches > 0, "{:?}", sim.stats());
         assert_ne!(sim.pool_ratio, 512, "no pooled batch was learnt from");
+    }
+
+    /// Half the threads are kept unless all pool clearly faster.
+    #[test]
+    fn fewer_threads_win_a_near_tie() {
+        for (all, half, limit) in [(480, 500, 3), (450, 500, 7)] {
+            let mut a = Auto::new(7, None);
+            assert_eq!(window(&mut a, all), (true, true));
+            window(&mut a, half);
+            assert_eq!(a.limit, limit, "all {all}, half {half}");
+        }
+    }
+
+    /// The thread counts are compared by pooled time over the probes' inline time: estimates that
+    /// are still too low early in a run make the later window look faster against them.
+    #[test]
+    fn thread_counts_are_compared_against_inline_time() {
+        let mut a = Auto::new(7, None);
+        // All threads: pooled at 2x the estimate, inline at 8x (pooled 4 times faster).
+        a.inline(1_000_000, 8_000_000);
+        assert_eq!(window(&mut a, 2048), (true, true));
+        assert_eq!(a.limit, 3);
+        // Half: pooled at 1.27x the estimate, inline at 4x now (about 3 times faster): slower.
+        a.inline(1_000_000, 2_000_000);
+        window(&mut a, 1300);
+        assert_eq!(a.limit, 7);
+    }
+
+    /// The first big batches when the threads start time every activation: no process is left
+    /// without a cost, and the first time taken is the cost (not half of it).
+    #[test]
+    fn the_first_batches_time_every_process() {
+        let mut b = crate::Builder::new();
+        for i in 0..MIN_PROCS {
+            let f = |c: &mut Ctx<'_>| {
+                std::thread::sleep(Duration::from_micros(200));
+                c.wait_for(Time::ns(1))
+            };
+            b.process(&format!("p{i}"), crate::ProcFlags::default(), &[], f);
+        }
+        let cfg = Config {
+            threads: 4,
+            ..Config::default()
+        };
+        let mut sim = b.build(cfg).unwrap();
+        sim.run_until(Time::ns(1)).unwrap();
+        assert!(sim.cost.iter().all(|&c| c >= 200_000), "{:?}", sim.cost);
+    }
+
+    /// A trial calibrates the costs again, and one of a design that gained starts with the
+    /// threshold reset; one that never gained keeps it.
+    #[test]
+    fn a_trial_starts_afresh() {
+        let mut b = crate::Builder::new();
+        for i in 0..64 {
+            let f = |c: &mut Ctx<'_>| c.wait_for(Time::ns(1));
+            b.process(&format!("p{i}"), crate::ProcFlags::default(), &[], f);
+        }
+        let cfg = Config {
+            threads: 8,
+            auto: true,
+            ..Config::default()
+        };
+        let mut sim = b.build(cfg).unwrap();
+        for proven in [false, true] {
+            (sim.pool_ns, sim.pool_ratio, sim.calib) = (u64::MAX, 2048, 0);
+            let a = sim.auto.as_deref_mut().unwrap();
+            (a.on, a.proven, a.pause) = (false, proven, Duration::ZERO);
+            sim.auto_tick();
+            assert!(sim.workers > 0);
+            let reset = (POOL_WORK_NS, 512, CALIBRATE);
+            let kept = (u64::MAX, 2048, CALIBRATE);
+            let want = if proven { reset } else { kept };
+            assert_eq!(
+                (sim.pool_ns, sim.pool_ratio, sim.calib),
+                want,
+                "proven {proven}"
+            );
+        }
+    }
+
+    /// A window that won undoes a raised threshold; one that lost keeps it.
+    #[test]
+    fn a_window_that_won_resets_the_threshold() {
+        let mut b = crate::Builder::new();
+        for i in 0..64 {
+            let f = |c: &mut Ctx<'_>| c.wait_for(Time::ns(1));
+            b.process(&format!("p{i}"), crate::ProcFlags::default(), &[], f);
+        }
+        let cfg = Config {
+            threads: 8,
+            auto: true,
+            ..Config::default()
+        };
+        let mut sim = b.build(cfg).unwrap();
+        sim.set_threads_hint(Some(true));
+        for (pooled, reset) in [(12_000_000, false), (1_000_000, true)] {
+            (sim.pool_ns, sim.pool_ratio) = (u64::MAX, 2048);
+            let a = sim.auto.as_deref_mut().unwrap();
+            a.since = Instant::now() - WINDOW;
+            a.batch(10_000_000, Some(pooled));
+            sim.auto_tick();
+            let got = (sim.pool_ns, sim.pool_ratio) == (POOL_WORK_NS, 512);
+            assert_eq!(got, reset, "pooled {pooled} ns");
+        }
+    }
+
+    /// A few pooled batches far slower than their estimate do not raise the threshold of a
+    /// design whose batches gain; a run of batches no faster than inline does.
+    #[test]
+    fn a_few_slow_batches_keep_the_threshold() {
+        let mut sim = crate::Builder::new().build(Config::default()).unwrap();
+        let e = Estimate {
+            all: 100_000,
+            work: 90_000,
+            learn: true,
+            probe: false,
+        };
+        for _ in 0..32 {
+            sim.learn_pooled(e, 35_000);
+        }
+        for _ in 0..4 {
+            sim.learn_pooled(e, 800_000);
+        }
+        assert_eq!(sim.pool_ns, POOL_WORK_NS);
+        for _ in 0..16 {
+            sim.learn_pooled(e, 130_000);
+        }
+        assert_eq!(sim.pool_ns, 180_000);
     }
 
     #[test]

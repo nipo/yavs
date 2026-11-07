@@ -38,6 +38,10 @@ pub use hang::{
 const POOL_WORK_NS: u64 = 20_000;
 /// One activation in this many of each process in an inline batch is timed for `SimControl::cost`.
 const COST_EVERY: usize = 16;
+/// Batches of at least `auto::MIN_PROCS` processes that run inline, every activation timed, when
+/// the threads start (the run, or a trial of `--threads=auto`), so the first estimates are not of
+/// a few processes each (`SimControl::calib`).
+const CALIBRATE: u32 = 2;
 /// One batch in this many that would go to the pool runs inline to refresh the costs.
 const PROBE_EVERY: u32 = 64;
 /// Pieces of a pooled batch per thread: enough to balance processes of different cost.
@@ -1155,6 +1159,8 @@ pub struct SimControl {
     batches: u32,
     probe: u32,
     raise_probe: u32,
+    /// `CALIBRATE` batches left to time whole.
+    calib: u32,
     rng: Option<u64>,
     interrupt: Interrupt,
     stats: Stats,
@@ -1631,6 +1637,7 @@ impl SimControl {
             pool_ratio: 512,
             batches: 0,
             probe: 0,
+            calib: CALIBRATE,
             raise_probe: 0,
             interrupt: Interrupt::default(),
             stats: Stats {
@@ -4026,7 +4033,14 @@ impl SimControl {
         let mut late = std::mem::take(&mut self.late);
         // Initialisation and postponed processes always run inline (their commit differs).
         // The estimate of a pooled batch, to learn from its time (`learn_pooled`).
-        let mut est = if self.workers > 0 && !init && !postponed {
+        let calib = self.calib > 0
+            && !self.cfg.pool_all
+            && self.workers > 0
+            && !init
+            && !postponed
+            && pids.len() >= auto::MIN_PROCS;
+        self.calib -= u32::from(calib);
+        let mut est = if self.workers > 0 && !init && !postponed && !calib {
             self.pool_batch(&pids)
         } else {
             None
@@ -4279,10 +4293,13 @@ impl SimControl {
                     // `pool_batch`, at a position that moves from batch to batch.
                     // The offset is scrambled so batches that come every 2^k batches still see
                     // every position.
-                    let mut sample = if self.workers > 0 {
-                        (self.batches.wrapping_mul(0x9e37_79b9) >> 28) as usize % COST_EVERY
+                    let (mut sample, step) = if calib {
+                        (0, 1)
+                    } else if self.workers > 0 {
+                        let at = self.batches.wrapping_mul(0x9e37_79b9) >> 28;
+                        (at as usize % COST_EVERY, COST_EVERY)
                     } else {
-                        usize::MAX
+                        (usize::MAX, COST_EVERY)
                     };
                     // `$timed`: the loop that times activations, a second copy so the one of a
                     // run without a pool has no test for it.
@@ -4311,12 +4328,12 @@ impl SimControl {
                                     let r = if !($timed && i == sample) {
                                         s.process.run(&mut ctx)
                                     } else {
-                                        sample += COST_EVERY;
+                                        sample += step;
                                         let t = std::time::Instant::now();
                                         let r = s.process.run(&mut ctx);
                                         let ns = t.elapsed().as_nanos().min(u128::from(u32::MAX)) as u32;
                                         let c = &mut self.cost[p as usize];
-                                        *c = *c / 2 + ns / 2;
+                                        *c = if *c == 0 { ns } else { *c / 2 + ns / 2 };
                                         r
                                     };
                                     let failed = r.is_err();
@@ -4445,10 +4462,11 @@ impl SimControl {
     /// even): when the average reaches even, the threshold of `pool_batch` rises to twice the
     /// batch's splittable work; a batch at least a fifth faster lowers it to its splittable
     /// work, not below `POOL_WORK_NS`. Processes with much state lose more to the caches of
-    /// other cores than the estimate shows (a processor's pipeline, #497); the average keeps a
-    /// late worker or a preempted core from raising it.
+    /// other cores than the estimate shows (a processor's pipeline, #497); the average, in which
+    /// a batch counts at most twice its estimate, keeps a few slow ones (a late worker, a
+    /// preempted core, the first runs of new compiled code) from raising it.
     fn learn_pooled(&mut self, e: Estimate, ns: u64) {
-        let r = (ns.saturating_mul(1024) / e.all.max(1)).min(8 * 1024);
+        let r = (ns.saturating_mul(1024) / e.all.max(1)).min(2 * 1024);
         self.pool_ratio = self.pool_ratio - self.pool_ratio / 16 + r / 16;
         if self.pool_ratio >= 1024 {
             self.pool_ns = self.pool_ns.max(e.work.saturating_mul(2));
