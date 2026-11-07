@@ -879,9 +879,14 @@ impl Model {
             .flatten();
         if let Some(k) = &key
             && let Some(hit) = self.calls.get(db, k)
+            && (!hit.session || self.session.needs(db, callee).is_ok())
         {
             yavs_interp::replay_reports(&hit.reports);
             crate::callcache::count(true);
+            if hit.session {
+                crate::callcache::count_session_hit();
+                self.session.log_hit(db, callee, vals, hit.val.clone());
+            }
             return Ok(hit.val);
         }
         if key.is_some() {
@@ -918,6 +923,7 @@ impl Model {
                     let hit = crate::callcache::Hit {
                         val: v.clone(),
                         reports: trace.reports,
+                        session: false,
                     };
                     self.calls.put(db, k, &hit);
                 }
@@ -1004,6 +1010,7 @@ impl Model {
                 let hit = crate::callcache::Hit {
                     val: v.clone(),
                     reports: trace.reports,
+                    session: true,
                 };
                 self.calls.put(db, k, &hit);
             }

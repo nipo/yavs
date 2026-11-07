@@ -706,11 +706,15 @@ pub(super) fn dead_defs(prog: &Program, f: &mut crate::Func) -> bool {
     }
     let mut live_in = gen_.clone();
     let mut live_out: Vec<Vec<u64>> = vec![vec![0; w]; nb];
+    // (One pair of buffers for every block and round: an allocation per block per round was
+    // most of the cost on a process of thousands of blocks.)
+    let mut out = vec![0u64; w];
+    let mut inn = vec![0u64; w];
     let mut again = true;
     while again {
         again = false;
         for b in (0..nb).rev() {
-            let mut out = vec![0u64; w];
+            out.fill(0);
             for &s in &succ[b] {
                 if s < nb {
                     for (o, i) in out.iter_mut().zip(&live_in[s]) {
@@ -718,12 +722,12 @@ pub(super) fn dead_defs(prog: &Program, f: &mut crate::Func) -> bool {
                     }
                 }
             }
-            let inn: Vec<u64> = (0..w)
-                .map(|x| gen_[b][x] | (out[x] & !kill[b][x]))
-                .collect();
+            for (x, v) in inn.iter_mut().enumerate() {
+                *v = gen_[b][x] | (out[x] & !kill[b][x]);
+            }
             if inn != live_in[b] || out != live_out[b] {
-                live_in[b] = inn;
-                live_out[b] = out;
+                live_in[b].copy_from_slice(&inn);
+                live_out[b].copy_from_slice(&out);
                 again = true;
             }
         }

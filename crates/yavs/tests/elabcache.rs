@@ -37,6 +37,12 @@ const TTB: &str = "use work.tp.all;\nentity ttb is end;\narchitecture a of ttb i
   signal s1 : bit_vector(1 to c1);\n  signal s2 : bit_vector(1 to c2);\n  signal s3 : bit_vector(1 to c3);\nbegin\n\
   process begin\n    report \"t=\" & integer'image(s1'length) & \" \" & integer'image(s2'length) & \" \" & integer'image(s3'length);\n    wait;\n  end process;\nend;\n";
 
+/// Near variant: the same session call twice in one run, between calls that lower on their own.
+const TTB2: &str = "use work.tp.all;\nuse work.ec.all;\nentity ttb2 is end;\narchitecture a of ttb2 is\n\
+  constant c1 : integer := pick(2);\n  constant c2 : integer := f(4);\n  constant c3 : integer := pick(2);\n\
+  signal s1 : bit_vector(1 to c1 + c2 + c3);\nbegin\n\
+  process begin\n    report \"t2=\" & integer'image(s1'length);\n    wait;\n  end process;\nend;\n";
+
 struct Env {
     tmp: common::Tmp,
 }
@@ -75,6 +81,7 @@ impl Env {
             ("tbg.vhd", TBG),
             ("tpkg.vhd", TPKG),
             ("ttb.vhd", TTB),
+            ("ttb2.vhd", TTB2),
         ] {
             std::fs::write(e.tmp.join(f), t).expect("write");
             e.analyze(f);
@@ -206,5 +213,73 @@ fn a_function_reading_a_package_table_is_answered_from_the_package_state() {
     assert!(third.noted("hit ecall"), "{}", third.stderr);
     for o in [&first, &second, &third] {
         assert_eq!(o.visible(), plain.visible(), "{}", o.stderr);
+    }
+}
+
+/// The run that first answers a call from the cache lowers the program the storing run did, so
+/// it reads that run's program instead of lowering (and compiling) a new one: the session call
+/// `pick` is lowered and logged on a hit as when it ran.
+#[test]
+fn the_first_hit_reads_the_program_the_storing_run_left() {
+    let e = Env::new("ecall-same");
+    for (top, out) in [("ttb", "t=2 5 26"), ("ttb2", "t2=39")] {
+        let first = e.run(top, &[]);
+        let second = e.run(top, &[]);
+        let third = e.run(top, &[]);
+        let all = format!("{}{}", first.stdout, first.stderr);
+        assert!(all.contains(out), "{top}: {all}");
+        assert!(second.noted("store ecall"), "{top}: {}", second.stderr);
+        assert!(second.noted("store ir"), "{top}: {}", second.stderr);
+        assert!(third.noted("hit ecall"), "{top}: {}", third.stderr);
+        assert!(third.noted("hit ir"), "{top}: {}", third.stderr);
+        assert!(!third.noted("store ir"), "{top}: {}", third.stderr);
+        for o in [&second, &third] {
+            assert_eq!(o.visible(), first.visible(), "{top}: {}", o.stderr);
+        }
+    }
+}
+
+/// The same with compiled code: the third run links every body the second compiled.
+#[cfg(feature = "clift")]
+#[test]
+fn the_first_hit_compiles_nothing() {
+    let e = Env::new("ecall-same-clift");
+    let work = e.work();
+    let run = || {
+        let o = Command::new(env!("CARGO_BIN_EXE_yavs"))
+            .current_dir(&e.tmp)
+            .env_remove("YAVS_STDLIB")
+            .env("YAVS_LOG", "debug")
+            // Debug builds lower every body again to check the key, which this test counts.
+            .env("YAVS_CLIFT_PREKEY_CHECK", "0")
+            .args([
+                "--color",
+                "never",
+                "run",
+                "--work",
+                &work,
+                "--tier=clift",
+                "ttb",
+            ])
+            .output()
+            .expect("run");
+        Out {
+            code: o.status.code().unwrap_or(-1),
+            stdout: String::from_utf8_lossy(&o.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&o.stderr).into_owned(),
+        }
+    };
+    let runs: Vec<Out> = (0..3).map(|_| run()).collect();
+    let lowered = |o: &Out| {
+        o.stderr
+            .lines()
+            .filter(|l| l.starts_with("debug: cache: clif lowered"))
+            .count()
+    };
+    assert!(runs[2].noted("hit ecall"), "{}", runs[2].stderr);
+    assert!(lowered(&runs[1]) > 0, "{}", runs[1].stderr);
+    assert_eq!(lowered(&runs[2]), 0, "{}", runs[2].stderr);
+    for o in &runs {
+        assert_eq!(o.visible(), runs[0].visible(), "{}", o.stderr);
     }
 }

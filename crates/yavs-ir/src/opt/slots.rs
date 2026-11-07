@@ -674,10 +674,12 @@ fn live_out(prog: &Program, f: &crate::Func, tracked: &[Reg]) -> Option<Vec<Vec<
     let succ = super::memo::successors(prog, f);
     let (mut live_in, mut live) = (vec![vec![0u64; w]; nb], vec![vec![0u64; w]; nb]);
     let mut changed = true;
+    // (Buffers kept across blocks and rounds: no allocation per block.)
+    let (mut o, mut inn) = (vec![0u64; w], vec![0u64; w]);
     while changed {
         changed = false;
         for b in (0..nb).rev() {
-            let mut o = vec![0u64; w];
+            o.fill(0);
             for &s in &succ[b] {
                 match live_in.get(s) {
                     Some(x) => o.iter_mut().zip(x).for_each(|(o, y)| *o |= y),
@@ -685,10 +687,12 @@ fn live_out(prog: &Program, f: &crate::Func, tracked: &[Reg]) -> Option<Vec<Vec<
                     None => o.fill(!0),
                 }
             }
-            let inn: Vec<u64> = (0..w).map(|k| gen_[b][k] | (o[k] & !kill[b][k])).collect();
+            for (k, v) in inn.iter_mut().enumerate() {
+                *v = gen_[b][k] | (o[k] & !kill[b][k]);
+            }
             if inn != live_in[b] || o != live[b] {
-                live_in[b] = inn;
-                live[b] = o;
+                live_in[b].copy_from_slice(&inn);
+                live[b].copy_from_slice(&o);
                 changed = true;
             }
         }

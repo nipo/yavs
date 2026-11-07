@@ -998,6 +998,10 @@ elab, P-cores 2 and 3 (CCD0), 5 runs interleaved, main against main with the cac
 ratio (instructions / wall): elab warm 0.84 / 0.86, elab cold 0.96 / 0.96 (a repeat inside one elaboration hits too).
 `poc_uart_rx` warm 1.78 G to 0.06 G instructions (0.16 s to 0.01 s), `poc_cache_cpu` warm 2.62 G to 0.13 G (0.24 s to
 0.02 s) and cold 2.73 G to 0.50 G (0.26 s to 0.07 s); the other 39 tests are within noise.
+A hit on a call that ran in the elaboration session lowers and logs it there as the storing run did (2026-11-06), so the
+first run with hits reads the stored program instead of lowering and compiling the design again: `uvvm_axistream_vvc`, one
+world, runs 1 to 5 at auto, all-thread instructions 52.9, 28.3, 19.8, 19.8, 19.7 G (before: run 3 at 50.1 G). Corpus test
+`generics/elab_call_table` reaches the path (`ecall_session_hits`).
 
 ### Package constants in elaboration-time calls (#539)
 

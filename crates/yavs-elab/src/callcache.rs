@@ -12,7 +12,7 @@ use crate::eval::Val;
 
 /// The stage entry's kind and part.
 const KIND: &str = "ecall";
-const PART: &[u8] = b"v1";
+const PART: &[u8] = b"v2";
 /// What one entry keeps (the newest calls win): a design sweeping its generics would otherwise grow it.
 const MAX_CALLS: usize = 8192;
 const MAX_BYTES: usize = 4 << 20;
@@ -21,15 +21,25 @@ const MAX_RESULT: usize = 64 << 10;
 
 static HITS: AtomicU64 = AtomicU64::new(0);
 static RUNS: AtomicU64 = AtomicU64::new(0);
+static SESSION_HITS: AtomicU64 = AtomicU64::new(0);
 
-/// Elaboration-time calls of this process answered from the cache, and calls that ran the
-/// interpreter although they had a key (work counters, `YAVS_COUNTERS`).
-pub fn stats() -> (u64, u64) {
-    (HITS.load(Ordering::Relaxed), RUNS.load(Ordering::Relaxed))
+/// Elaboration-time calls of this process answered from the cache, calls that ran the
+/// interpreter although they had a key, and the hits among the first that were lowered and
+/// logged in the session (work counters, `YAVS_COUNTERS`).
+pub fn stats() -> (u64, u64, u64) {
+    (
+        HITS.load(Ordering::Relaxed),
+        RUNS.load(Ordering::Relaxed),
+        SESSION_HITS.load(Ordering::Relaxed),
+    )
 }
 
 pub(crate) fn count(hit: bool) {
     (if hit { &HITS } else { &RUNS }).fetch_add(1, Ordering::Relaxed);
+}
+
+pub(crate) fn count_session_hit() {
+    SESSION_HITS.fetch_add(1, Ordering::Relaxed);
 }
 
 /// A call's outcome: the value and the reports it made (printed again on a hit).
@@ -37,6 +47,9 @@ pub(crate) fn count(hit: bool) {
 pub(crate) struct Hit {
     pub val: Val,
     pub reports: Vec<(u8, String)>,
+    /// The call ran in the session: a hit lowers and logs it there too, so that it leaves the
+    /// program the storing run left (same function ids, same lowering key).
+    pub session: bool,
 }
 
 /// Loaded on the first call of an elaboration, written back by `flush` when it learnt something.

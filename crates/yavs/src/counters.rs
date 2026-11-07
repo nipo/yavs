@@ -36,7 +36,7 @@ pub fn report(s: yavs_kernel::Stats, rt: Option<&yavs_interp::Runtime>) {
     if std::env::var_os("YAVS_COUNTERS").is_none() {
         return;
     }
-    let (hits, runs) = yavs_elab::call_cache_stats();
+    let (hits, runs, session_hits) = yavs_elab::call_cache_stats();
     let (reads, idle) = yavs_wave::var_counts();
     let (memo_hits, memo_runs) = yavs_interp::pmemo_stats();
     let mut rows = vec![
@@ -72,6 +72,7 @@ pub fn report(s: yavs_kernel::Stats, rt: Option<&yavs_interp::Runtime>) {
         ("wake_scans", s.wake_scans),
         ("ecall_hits", hits),
         ("ecall_runs", runs),
+        ("ecall_session_hits", session_hits),
         ("opt_funcs", yavs_ir::optimised_functions()),
         ("dopes_scans", yavs_ir::opt::dopes_scans()),
         ("elab_restarts", yavs_ir::restarted_calls()),

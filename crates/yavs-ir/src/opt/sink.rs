@@ -192,20 +192,22 @@ impl Sink<'_> {
         }
         let mut live: Vec<Bits> = uses.clone();
         let mut again = true;
+        // (Buffers kept across blocks and rounds: no allocation per block.)
+        let (mut out, mut inn) = (vec![0u64; w], vec![0u64; w]);
         while again {
             again = false;
             for b in (0..nb).rev() {
-                let mut out = vec![0u64; w];
+                out.fill(0);
                 for s in self.succs(b) {
                     for (o, i) in out.iter_mut().zip(&live[s as usize]) {
                         *o |= *i;
                     }
                 }
-                let inn: Bits = (0..w)
-                    .map(|x| uses[b][x] | (out[x] & !defs[b][x]))
-                    .collect();
+                for (x, v) in inn.iter_mut().enumerate() {
+                    *v = uses[b][x] | (out[x] & !defs[b][x]);
+                }
                 if inn != live[b] {
-                    live[b] = inn;
+                    live[b].copy_from_slice(&inn);
                     again = true;
                 }
             }
