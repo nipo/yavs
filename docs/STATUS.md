@@ -6388,7 +6388,8 @@ Found and fixed: the analysed-unit entries were keyed by the session's `--relaxe
 libraries were analysed without it (the open-logic, satcat5, window-generator and GRLIB tests) read no library unit and
 analysed the closure from source in its first two runs. `--relaxed` is now a question a unit asks only where the
 setting changes its analysis (`docs/decisions.md` "`--relaxed` is a question"): window generator cold run 68 unit
-misses to 10 (the rest are bodies with assignments to unconstrained targets, which do depend on it). `tools/realbench
+misses to 10 (the rest are bodies with assignments to unconstrained targets, which do depend on it). A unit that loads one
+that asked asks too (#803; before, it kept one entry that each setting rewrote in turn). `tools/realbench
 --compare` (15033264's change against its parent, bench builds, 42 tests, core 9, load 10 to 25): analysis cold 0.97,
 elab cold 0.98 (instructions 0.96; `vai_weight_buffer` 0.65, `vai_pe_array` 0.72, `sc5_timestamp` instructions 0.70),
 `auto-cold` 0.99, `auto` 1.00, no slowdown; full total (analysis + run) 0.975 cold, `vai_pe_array` 1.11 to 0.95 s,

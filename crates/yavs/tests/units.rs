@@ -594,3 +594,135 @@ fn relaxed_is_asked_only_where_it_changes_the_analysis() {
     assert!(strict.stderr.contains("E1904"), "{strict:?}");
     assert_eq!(strict.notes("hit work.sv/a"), 0, "{strict:?}");
 }
+
+/// Entity `e` asks `--relaxed` (R5: its procedure assigns to an unconstrained `out` target);
+/// architecture `e/a` does not ask itself, but loads `e`.
+const RELAXED_E: &str = "library ieee; use ieee.std_logic_1164.all;\nentity e is\n\
+  procedure clr(x : out std_logic_vector) is begin x := (x'range => '0'); end procedure;\nend;\n";
+const RELAXED_A: &str = "library ieee; use ieee.std_logic_1164.all;\narchitecture a of e is\nbegin\n\
+  process\n    variable v : std_logic_vector(3 downto 0) := \"1111\";\n  begin\n\
+    clr(v); report \"v=\" & to_string(v); wait;\n  end process;\nend;\n";
+
+impl Env {
+    /// The design of [`RELAXED_E`] with the body `clr` has; `e.vhd` and `a.vhd` by absolute path.
+    fn relaxed_design(name: &str, clr: &str) -> (Env, String, String) {
+        let e = Env::new(name);
+        let ent = RELAXED_E.replace("(x'range => '0')", clr);
+        std::fs::write(e.tmp.join("e.vhd"), ent).expect("write");
+        std::fs::write(e.tmp.join("a.vhd"), RELAXED_A).expect("write");
+        let [ef, af]: [String; 2] = e.abs(&["e.vhd", "a.vhd"]).try_into().expect("two");
+        (e, ef, af)
+    }
+
+    /// A run of `e` under each setting reads `e/a` from its entry and prints what source does.
+    fn both_settings_hit(&self) {
+        let work = self.lib("work");
+        for more in [&[][..], &["--relaxed"][..]] {
+            let mut a = vec!["run", "--work", &work];
+            a.extend_from_slice(more);
+            a.push("e");
+            let r = self.yavs(&a);
+            assert_eq!(r.code, 0, "{more:?}: {r:?}");
+            assert!(r.stdout.contains("v=0000"), "{more:?}: {r:?}");
+            assert_eq!(r.notes("miss work."), 0, "{more:?}: {r:?}");
+            assert_eq!(r.notes("hit work.e/a ("), 1, "{more:?}: {r:?}");
+        }
+    }
+}
+
+/// A unit loading one that asked `--relaxed` asks too, whatever way it got it (#803): `e` replayed
+/// from its entry inside the analysis of `e/a`. Analysing `a.vhd` under each setting in turn keeps
+/// one entry per setting instead of rewriting a shared one, so every later session hits.
+#[test]
+fn relaxed_is_inherited_from_a_replayed_unit() {
+    let (e, ef, af) = Env::relaxed_design("units_relaxed_replayed", "(x'range => '0')");
+    e.analyze(&[&ef], &[]);
+    e.analyze(&[&ef], &["--relaxed"]);
+    e.analyze(&[&af], &[]);
+    e.analyze(&[&af], &["--relaxed"]);
+    e.both_settings_hit();
+    // Analysing it again under each setting finds its entry: nothing is analysed or written.
+    let entries = |e: &Env| {
+        let mut v: Vec<_> = e
+            .units("work")
+            .into_iter()
+            .map(|p| (p.clone(), std::fs::read(&p).expect("read")))
+            .collect();
+        v.sort();
+        v
+    };
+    let before = entries(&e);
+    for more in [&[][..], &["--relaxed"][..], &[][..]] {
+        let o = &e.analyze(&[&af], more)[0];
+        assert_eq!(o.notes("miss work."), 0, "{more:?}: {o:?}");
+        assert_eq!(o.notes("not stored"), 0, "{more:?}: {o:?}");
+    }
+    assert!(entries(&e) == before, "an entry was written again");
+}
+
+/// The same with `e` analysed from source inside `e/a` (it has no entry of its own).
+#[test]
+fn relaxed_is_inherited_from_a_unit_analysed_inside() {
+    let (e, ef, af) = Env::relaxed_design("units_relaxed_nested", "(x'range => '0')");
+    e.analyze(&[&ef], &["--no-cache"]);
+    for more in [&[][..], &["--relaxed"][..]] {
+        let o = &e.analyze(&[&af], more)[0];
+        assert_eq!(o.notes("miss work.e/a"), 1, "{more:?}: {o:?}");
+        assert_eq!(o.notes("miss work.e:"), 1, "{more:?}: {o:?}");
+    }
+    e.both_settings_hit();
+}
+
+/// The same with `e` loaded earlier in the session (one call analyses both files).
+#[test]
+fn relaxed_is_inherited_from_a_unit_loaded_before() {
+    let (e, ef, af) = Env::relaxed_design("units_relaxed_loaded", "(x'range => '0')");
+    let work = e.lib("work");
+    for more in [&[][..], &["--relaxed"][..]] {
+        let mut a = vec!["analyze", "--work", &work];
+        a.extend_from_slice(more);
+        a.extend([ef.as_str(), af.as_str()]);
+        let o = e.yavs(&a);
+        assert_eq!(o.code, 0, "{more:?}: {o:?}");
+    }
+    e.both_settings_hit();
+}
+
+/// `run` loads the units at run time and writes nothing: a library analysed under one setting gives
+/// the source's result under the other, and the entries of the first stay as they were.
+#[test]
+fn relaxed_runs_load_units_at_run_time() {
+    let (e, ef, af) = Env::relaxed_design("units_relaxed_run", "(x'range => '0')");
+    e.analyze(&[&ef], &[]);
+    e.analyze(&[&af], &[]);
+    let work = e.lib("work");
+    for _ in 0..2 {
+        let r = e.yavs(&["run", "--relaxed", "--work", &work, "e"]);
+        assert_eq!(r.code, 0, "{r:?}");
+        assert!(r.stdout.contains("v=0000"), "{r:?}");
+        assert_eq!(r.notes("hit work.e/a ("), 0, "{r:?}");
+    }
+    let r = e.yavs(&["run", "--work", &work, "e"]);
+    assert!(r.stdout.contains("v=0000"), "{r:?}");
+    assert_eq!(r.notes("miss work."), 0, "{r:?}");
+    assert_eq!(r.notes("hit work.e/a ("), 1, "{r:?}");
+}
+
+/// What only `--relaxed` accepts (an `others` aggregate assigned to an unconstrained target, R5)
+/// stays rejected by a strict session after the relaxed one stored `e` and `e/a`.
+#[test]
+fn relaxed_entries_do_not_serve_a_strict_session() {
+    let (e, ef, af) = Env::relaxed_design("units_relaxed_strict", "(others => '0')");
+    e.analyze(&[&ef], &["--relaxed"]);
+    e.analyze(&[&af], &["--relaxed"]);
+    let work = e.lib("work");
+    let r = e.yavs(&["run", "--relaxed", "--work", &work, "e"]);
+    assert_eq!(r.code, 0, "{r:?}");
+    assert!(r.stdout.contains("v=0000"), "{r:?}");
+    assert_eq!(r.notes("hit work.e/a ("), 1, "{r:?}");
+    let strict = e.yavs(&["run", "--work", &work, "e"]);
+    assert_ne!(strict.code, 0, "{strict:?}");
+    assert_eq!(strict.notes("hit work.e"), 0, "{strict:?}");
+    let o = e.yavs(&["analyze", "--work", &work, &af]);
+    assert_ne!(o.code, 0, "{o:?}");
+}

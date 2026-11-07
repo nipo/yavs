@@ -5741,8 +5741,13 @@ dependencies; this overrides "no incremental compilation cache" for analysis too
   `Query::Relaxed`): only the four places where the setting changes the analysis ask (R1 a shared variable
   of a non-protected type, R2 a pure function that reads something impure or returns an access type, R5
   an assignment to a target that is not fully constrained), and each asks only when its construct is
-  there. A unit that never asked has one entry for both settings; one that asked is stored under a key
-  with the setting and its answer is checked again before a replay. A reader tries the shared key first,
+  there. A unit asks too when a unit it loads asked (directly or through its own loads), since its full
+  key holds that unit's: `Db::child_end` passes the question up from `LoadRec::relaxed` however the unit
+  came (analysed inside it, replayed from its entry or loaded before in the session; #803: an architecture
+  of an entity that asked was stored under the shared key, so `analyze` under each setting in turn rewrote
+  its one entry and every session of the other setting missed it). A unit that neither asked nor loaded one
+  that did has one entry for both settings; one that asked is stored under a key with the setting and its
+  answer is checked again before a replay. A reader tries the shared key first,
   then the one of its setting. Before, a relaxed run of a design whose libraries were analysed without
   `--relaxed` (or the reverse) found no entry of any library unit and analysed the closure from source
   in its first two runs (a run of the window-generator testbench: 68 misses, 10 after). Whether a unit
