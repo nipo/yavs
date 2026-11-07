@@ -3310,9 +3310,6 @@ impl SimControl {
         if !self.guard_readers.is_empty() && self.guard_readers.contains_key(&s) {
             return false;
         }
-        if self.idle_active {
-            self.arm_readers(s);
-        }
         let sig = &self.signals[s as usize];
         let waiters = &self.waiters[s as usize];
         // No process ever waited for it: `cycle` would only count its events.
@@ -3336,6 +3333,10 @@ impl SimControl {
             }
             Some(w.proc)
         };
+        // Armed here only when the signal leaves `changed_sigs`; else `cycle` arms it once.
+        if self.idle_active {
+            self.arm_readers(s);
+        }
         // The signal leaves `changed_sigs`: its images are written here.
         if !self.signals[s as usize].images.is_empty() {
             self.stats.image_writes += self.images.push_sig(&self.signals[s as usize]);
