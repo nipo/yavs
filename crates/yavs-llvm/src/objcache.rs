@@ -223,7 +223,7 @@ pub(crate) fn check() -> bool {
 /// reads of the program), `Program::code_key` of `id` (the process a process copy is of, a copy
 /// of a subprogram's tag: its code names its id by `lower::id_symbol`), the function as handed
 /// out (`Program::code_key_bytes`: its optimised code, a copy's folded data among it, copies it
-/// calls by what they are for) and `what` (level, `full`, part). `None` without
+/// calls by what they are for), whether it is a copy and `what` (level, `full`, part). `None` without
 /// a store, for a program not cached, or with a switch of `GEN_SWITCHES`.
 pub(crate) fn pre_key(
     prog: &yavs_ir::Program,
@@ -245,6 +245,8 @@ pub(crate) fn pre_key(
         .text(identity)
         .text(what)
         .part(&prog.code_key(id).to_le_bytes())
+        // (A copy is generated as a twin: a process and a copy of it with the same code differ.)
+        .part(&[u8::from(prog.copy_tag(id).is_some())])
         .part(&prog.code_key_bytes(f)?);
     Some(k.finish())
 }
