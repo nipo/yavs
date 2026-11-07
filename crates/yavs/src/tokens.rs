@@ -149,6 +149,15 @@ pub(crate) fn connect() -> Result<Server, String> {
             Ok(0) => break,
             Ok(_) => answer.push(byte[0]),
             Err(e) if e.kind() == ErrorKind::Interrupted => {}
+            // A reset is a close too: a server that drops the connection with the secret unread.
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    ErrorKind::ConnectionReset | ErrorKind::ConnectionAborted
+                ) =>
+            {
+                break;
+            }
             Err(e) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {
                 return Ok(Server::Unreachable(format!(
                     "the token server on {addr} did not answer within {} s",

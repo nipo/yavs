@@ -716,7 +716,7 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   runs at most N - 1 more threads, only on tokens the server lends. Protocol, lines of ASCII
   ending in `\n` over TCP to `127.0.0.1:<port>`:
   1. yavs connects and sends `<secret>`; the server answers `0 0`, or closes the connection
-     when it does not know the secret.
+     when it does not know the secret (a reset counts as a close: error `E0128`).
   2. yavs sends `<want>` (a decimal count, at most N - 1) when the number of tokens it could use
      changes: N - 1 when a group of processes is worth the threads, `0` after 64 groups in a row
      on one thread. Its k-th such line is answered at once with `<k> <lent>` and again whenever

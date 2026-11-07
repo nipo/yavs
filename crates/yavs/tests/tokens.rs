@@ -367,6 +367,33 @@ fn spawn_with(lib: &str, tokens: &str) -> Child {
         .expect("spawn")
 }
 
+/// A server that drops the connection with the secret unread (a reset where a close would have
+/// read it) refused it: an error, as a close is, not a server out of reach.
+#[test]
+fn a_reset_after_the_secret_is_an_error() {
+    let t = common::tempdir("tokens-reset");
+    let lib = analyze(&t);
+    let l = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let port = l.local_addr().expect("addr").port();
+    // ponytail: the accept thread outlives the test; the test process ends anyway.
+    std::thread::spawn(move || {
+        for c in l.incoming().flatten() {
+            let mut b = [0u8; 1];
+            let _ = c.peek(&mut b);
+            drop(c);
+        }
+    });
+    let o = yavs()
+        .args(["run", "--threads=4", lib.as_str(), "tok"])
+        .env("YAVS_TOKENS", format!("{port}:{SECRET}"))
+        .stdin(Stdio::null())
+        .output()
+        .expect("run");
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert_eq!(o.status.code(), Some(2), "{err}");
+    assert!(err.contains("did not accept the secret"), "{err}");
+}
+
 #[test]
 fn an_unusable_token_server_is_an_error() {
     let t = common::tempdir("tokens-bad");
@@ -393,8 +420,8 @@ fn an_unusable_token_server_is_an_error() {
     ];
     for (value, why) in bad {
         let o = run(&["--threads=4"], value);
-        assert_eq!(o.status.code(), Some(2), "{value}");
         let err = String::from_utf8_lossy(&o.stderr);
+        assert_eq!(o.status.code(), Some(2), "{value}: {err}");
         assert!(err.contains("error[E0128]"), "{err}");
         assert!(err.contains(why), "{value}: {err}");
         assert!(err.contains("unset it to run without one"), "{err}");
