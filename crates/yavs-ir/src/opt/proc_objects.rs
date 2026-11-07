@@ -161,9 +161,9 @@ fn values(prog: &Program, f: &crate::Func, defs: &[u32]) -> Vec<Option<V>> {
     v
 }
 
-/// From this many blocks, [`once_before_all`] answers for a process (0 in debug builds, which
-/// check it against [`once_before`] on every process).
-const ALL_AT_ONCE: usize = if cfg!(debug_assertions) { 0 } else { 256 };
+/// From this many blocks, [`once_before_all`] answers for a process (on every process in debug
+/// builds, which check it against [`once_before`]).
+const ALL_AT_ONCE: usize = 256;
 
 /// [`once_before`] for every block at once, in time linear in the blocks and edges (two walks
 /// per block were most of the pass on a process of thousands of blocks).
@@ -470,7 +470,7 @@ pub(super) fn run(prog: &Program, raw: &crate::Func) -> Option<Box<crate::Func>>
             }
             // (Two walks per block cost less than the whole graph's analysis on a small process.)
             if !*checked.get_or_insert_with(|| {
-                if raw.blocks.len() < ALL_AT_ONCE {
+                if !cfg!(debug_assertions) && raw.blocks.len() < ALL_AT_ONCE {
                     return once_before(raw, b, body);
                 }
                 let once = &*all.get_or_insert_with(|| once_before_all(raw, body));
