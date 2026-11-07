@@ -419,6 +419,10 @@ pub(crate) struct Cx {
     /// The waivers of the coverage directives of each file read so far, by decision.
     #[serde(skip)]
     pub cov_dirs: HashMap<yavs_diag::FileId, HashMap<ExprId, Vec<yavs_ir::CovWaiver>>>,
+    /// The entities some `'path_name` or `'instance_name` names (`Fx::prot_name`), found once
+    /// for the `Db` whose address, expression count and version are the key.
+    #[serde(skip)]
+    pub named_entities: Option<((usize, usize, u64), FxHashSet<DeclId>)>,
     /// Empty in an image (`Lowerer::image` refuses otherwise).
     #[serde(skip)]
     pub diags: Vec<Diagnostic>,
@@ -770,6 +774,7 @@ impl<'a> Lowerer<'a> {
                     .map(|(_, u)| u.file)
                     .collect(),
                 cov_dirs: HashMap::default(),
+                named_entities: None,
                 diags: Vec::new(),
                 tys: HashMap::default(),
                 natives: HashMap::default(),
@@ -1241,10 +1246,13 @@ impl<'a> Lowerer<'a> {
     /// Go on with a suspended lowering. `db` must be the `Db` it started with, possibly grown
     /// since: what is lowered already is not lowered again.
     pub fn resume(db: &'a Db, s: Suspended) -> Self {
+        let mut cx = s.cx;
+        // (The `Db` may have grown or changed since: what was found in it goes.)
+        cx.named_entities = None;
         Lowerer {
             db,
             pb: s.pb,
-            cx: s.cx,
+            cx,
             units: s.units,
             packages: s.packages,
         }
