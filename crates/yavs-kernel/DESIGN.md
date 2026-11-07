@@ -268,7 +268,8 @@ Within a delta the kernel has two phases that never overlap:
   is cut into pieces of consecutive process numbers, each with its own sub-slices of the slot,
   meta and idle arrays (`split_at_mut`, no lock); the workers and the kernel thread claim
   pieces in turn, run the parallel processes and commit the usual clocked ones into the
-  piece's buffers, which the kernel thread applies after the join; the serial processes then
+  piece's buffers, which the kernel thread applies after the join (it waits for the workers
+  spinning, briefly, rather than sleeping in the scope); the serial processes then
   run on the kernel thread in batch order (#481). Where a batch runs changes no output.
   `Config::auto` (`--threads=auto`, `kernel/auto.rs`) turns the threads off and on while the run
   goes by setting `workers` to 0 (every test above reads it, so off is the code of one thread)

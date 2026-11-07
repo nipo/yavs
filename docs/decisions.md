@@ -14508,3 +14508,25 @@ whole-signal read, the call, the result's check and copy, the wide drive).
   simulation whose threads do not gain gives its tokens back after its trial and asks for none until the next one, so
   the cap no longer has to protect the processor tests; a gaining one can use up to 8. `yavs.max_threads` and
   `--yavs-max-threads` take a number or `auto`.
+
+## Parallel kernel, step 3, and `--threads=auto` round 2 (yavs-kernel `run_batch`, `learn_pooled`, `kernel/auto.rs`, #884, 2026-11-07)
+
+- **Decision: the kernel thread waits for the workers of a pooled batch spinning** (agent): after its own pieces it
+  spins until every job it spawned has ended (`spin_until`), at most `JOIN_SPIN` (50 us), and only then enters the
+  scope's blocking wait. Why: that wait sleeps on a condition variable, and the wake-up of the kernel thread was 3.2 to
+  5.2 us of every pooled batch (timed per batch, interpreter, 2 to 8 threads, rtl_fan and rtl_lfsr), 0.65 to 0.9 us
+  spinning; the bound keeps a worker preempted on a busy core from being waited for with the CPU. Measured against the
+  build before, per round paired, 7 rounds, CPUs 4-7 and 20-23: wall 0.84 to 0.95 at 4 and 8 threads on rtl_fan,
+  rtl_ff and rtl_lfsr, instructions 0.2 to 0.8 percent fewer.
+- **Where the threads wait** (agent, measured per pooled batch with a local timing build, interpreter): of a pooled
+  batch of rtl_lfsr at 4 threads (37 us against 94 us inline) about 2 us went to the start of the last worker, 4 to 5
+  to the spread of the workers' ends, 3.6 to the kernel thread's wake-up (now 0.7) and the rest to the work, whose sum
+  over the threads was 1.25 times the inline time (rtl_fan 1.4 times at 4 threads, both about 1.9 at 8, where two
+  threads share a core). At 8 threads on a busy host the last worker often started 25 to 60 us late (rayon's workers
+  yield, then sleep, between batches), and the scope waits for every spawned job to run even when the others took all
+  pieces.
+- **Not done** (agent, measured): workers that spin between pooled batches for twice the usual gap (up to 0.1 or 1 ms):
+  no gain resolved on this host (rtl_lfsr 0.95 to 1.05 of the join spin alone); each thread first running its own
+  pieces (by rayon's thread index): the fills of lines from other cores' caches (`ls_any_fills_from_sys.local_ccx`)
+  did not drop and wall stayed within the noise; 8 pieces per thread instead of 4: a shorter tail but more busy time,
+  no gain.

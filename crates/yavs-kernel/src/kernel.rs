@@ -42,6 +42,8 @@ const COST_EVERY: usize = 16;
 const PROBE_EVERY: u32 = 64;
 /// Pieces of a pooled batch per thread: enough to balance processes of different cost.
 const PIECES_PER_THREAD: usize = 4;
+/// The longest the kernel thread spins for the workers of a pooled batch to end (`spin_until`).
+const JOIN_SPIN: std::time::Duration = std::time::Duration::from_micros(50);
 /// Generators that re-arm themselves in one cycle (clocks that edge together); more resume.
 const SKIP_MAX: usize = 4;
 /// Batches in a row that do not pool after which held tokens go back to the token pool.
@@ -1188,6 +1190,26 @@ fn build_pool(workers: usize) -> Result<rayon::ThreadPool, SimError> {
         .num_threads(workers)
         .build()
         .map_err(|e| SimError::new(ErrorKind::Usage(format!("thread pool: {e}"))))
+}
+
+/// Spin until `done` holds or `max` has passed (then the caller's blocking wait takes over, so a
+/// preempted worker is not waited for on a busy core); whether it held.
+fn spin_until(done: impl Fn() -> bool, max: std::time::Duration) -> bool {
+    if done() {
+        return true;
+    }
+    let t = std::time::Instant::now();
+    loop {
+        for _ in 0..64 {
+            std::hint::spin_loop();
+            if done() {
+                return true;
+            }
+        }
+        if t.elapsed() >= max {
+            return false;
+        }
+    }
 }
 
 fn signal_pair(v: &mut [Signal], a: usize, b: usize) -> (&Signal, &mut Signal) {
@@ -4171,11 +4193,18 @@ impl SimControl {
                             }
                         }
                     };
+                    // The workers that ended: the kernel thread waits for them spinning, since
+                    // the scope's own wait sleeps and its wake-up took 3 to 5 us a batch.
+                    let ended = AtomicUsize::new(0);
                     pool.in_place_scope(|sc| {
                         for _ in 1..k {
-                            sc.spawn(|_| work());
+                            sc.spawn(|_| {
+                                work();
+                                ended.fetch_add(1, Ordering::Release);
+                            });
                         }
                         work();
+                        spin_until(|| ended.load(Ordering::Acquire) == k - 1, JOIN_SPIN);
                     });
                     // The pieces in process order, so their late lists join in process order.
                     let (mut lates, mut serial, mut failed) = (Vec::new(), 0, false);
