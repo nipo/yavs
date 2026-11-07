@@ -161,7 +161,203 @@ fn values(prog: &Program, f: &crate::Func, defs: &[u32]) -> Vec<Option<V>> {
     v
 }
 
-/// Is block `b` on every path from the entry to block `to`, with no way back to it?
+/// From this many blocks, [`once_before_all`] answers for a process (on every process in debug
+/// builds, which check it against [`once_before`]).
+const ALL_AT_ONCE: usize = 256;
+
+/// [`once_before`] for every block at once, in time linear in the blocks and edges (two walks
+/// per block were most of the pass on a process of thousands of blocks).
+///
+/// A block that ends in neither a branch nor `Unreachable` reaches every block there. So a path
+/// reaches `to` avoiding `b` exactly when a path of branches does, or reaches such a block (it then
+/// goes to `to` at once): that is dominance of `to` in the graph of branches where such a block
+/// goes to `to` alone. And a path returns to `b` avoiding `to` exactly when `b` lies on a cycle of
+/// branches without `to`, or reaches such a block by branches (which then returns to `b`).
+fn once_before_all(f: &crate::Func, to: usize) -> Vec<bool> {
+    let n = f.blocks.len();
+    // The branch targets of each block; `None` for a block that reaches every block.
+    let succ: Vec<Option<Vec<usize>>> = (0..n)
+        .map(|x| {
+            let Some(l) = f.blocks.values()[x].end.checked_sub(1) else {
+                return Some(Vec::new());
+            };
+            let v = match f.code.get(l as usize) {
+                Some(&Inst::Br { to }) => vec![to.0 as usize],
+                Some(&Inst::CondBr { t, f: e, .. }) => vec![t.0 as usize, e.0 as usize],
+                Some(Inst::Unreachable { .. }) => Vec::new(),
+                _ => return None,
+            };
+            Some(v.into_iter().filter(|&s| s < n).collect())
+        })
+        .collect();
+    let mut out = vec![false; n];
+    if to >= n {
+        return out;
+    }
+    // Dominators of `to` (reverse post-order and the iteration of Cooper, Harvey and Kennedy).
+    let succ1 = |x: usize| -> Vec<usize> { succ[x].clone().unwrap_or_else(|| vec![to]) };
+    let mut rpo = Vec::new();
+    let mut seen = vec![false; n];
+    let mut stack: Vec<(usize, usize)> = vec![(0, 0)];
+    if n > 0 {
+        seen[0] = true;
+    }
+    while let Some(&mut (x, ref mut k)) = stack.last_mut() {
+        let ss = succ1(x);
+        if let Some(&s) = ss.get(*k) {
+            *k += 1;
+            if !std::mem::replace(&mut seen[s], true) {
+                stack.push((s, 0));
+            }
+        } else {
+            rpo.push(x);
+            stack.pop();
+        }
+    }
+    rpo.reverse();
+    let mut order = vec![usize::MAX; n];
+    for (i, &x) in rpo.iter().enumerate() {
+        order[x] = i;
+    }
+    let mut preds = vec![Vec::new(); n];
+    for &x in &rpo {
+        for s in succ1(x) {
+            preds[s].push(x);
+        }
+    }
+    let mut idom = vec![usize::MAX; n];
+    if let Some(&r) = rpo.first() {
+        idom[r] = r;
+    }
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for &x in rpo.iter().skip(1) {
+            let mut new = usize::MAX;
+            for &p in &preds[x] {
+                if idom[p] == usize::MAX {
+                    continue;
+                }
+                new = if new == usize::MAX {
+                    p
+                } else {
+                    let (mut a, mut b) = (p, new);
+                    while a != b {
+                        while order[a] > order[b] {
+                            a = idom[a];
+                        }
+                        while order[b] > order[a] {
+                            b = idom[b];
+                        }
+                    }
+                    a
+                };
+            }
+            if new != idom[x] {
+                idom[x] = new;
+                changed = true;
+            }
+        }
+    }
+    // (`to` reached by nothing: every block is before it on every path.)
+    let mut dom = vec![idom[to] == usize::MAX; n];
+    if idom[to] != usize::MAX {
+        let mut x = to;
+        loop {
+            dom[x] = true;
+            if x == idom[x] {
+                break;
+            }
+            x = idom[x];
+        }
+    }
+    // The graph of branches without `to`: blocks that reach a block of the other kind, and
+    // blocks on a cycle (strongly connected components of Tarjan, iteratively).
+    let edges = |x: usize| -> Vec<usize> {
+        if x == to {
+            return Vec::new();
+        }
+        succ[x]
+            .iter()
+            .flatten()
+            .copied()
+            .filter(|&s| s != to)
+            .collect()
+    };
+    let mut rev = vec![Vec::new(); n];
+    for x in 0..n {
+        for s in edges(x) {
+            rev[s].push(x);
+        }
+    }
+    let mut to_any = vec![false; n];
+    let mut work: Vec<usize> = (0..n).filter(|&x| x != to && succ[x].is_none()).collect();
+    for &x in &work {
+        to_any[x] = true;
+    }
+    while let Some(x) = work.pop() {
+        for &p in &rev[x] {
+            if !std::mem::replace(&mut to_any[p], true) {
+                work.push(p);
+            }
+        }
+    }
+    let mut cyc = vec![false; n];
+    let (mut index, mut low, mut on) = (vec![usize::MAX; n], vec![0; n], vec![false; n]);
+    let (mut next, mut comp) = (0, Vec::new());
+    for root in 0..n {
+        if index[root] != usize::MAX {
+            continue;
+        }
+        let mut st: Vec<(usize, usize)> = vec![(root, 0)];
+        index[root] = next;
+        low[root] = next;
+        next += 1;
+        comp.push(root);
+        on[root] = true;
+        while let Some(&mut (x, ref mut k)) = st.last_mut() {
+            let es = edges(x);
+            if let Some(&s) = es.get(*k) {
+                *k += 1;
+                if s == x {
+                    cyc[x] = true;
+                }
+                if index[s] == usize::MAX {
+                    index[s] = next;
+                    low[s] = next;
+                    next += 1;
+                    comp.push(s);
+                    on[s] = true;
+                    st.push((s, 0));
+                } else if on[s] {
+                    low[x] = low[x].min(index[s]);
+                }
+            } else {
+                st.pop();
+                if let Some(&(p, _)) = st.last() {
+                    low[p] = low[p].min(low[x]);
+                }
+                if low[x] == index[x] {
+                    let at = comp.iter().rposition(|&c| c == x).unwrap_or(0);
+                    let scc: Vec<usize> = comp.drain(at..).collect();
+                    for &c in &scc {
+                        on[c] = false;
+                        if scc.len() > 1 {
+                            cyc[c] = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    for b in 0..to {
+        out[b] = (b == 0 || dom[b]) && !to_any[b] && !cyc[b];
+    }
+    out
+}
+
+/// Is block `b` on every path from the entry to block `to`, with no way back to it? (The
+/// definition [`once_before_all`] is checked against in debug builds.)
 fn once_before(f: &crate::Func, b: usize, to: usize) -> bool {
     let succs = |x: usize, out: &mut Vec<usize>| {
         let Some(l) = f
@@ -237,6 +433,7 @@ pub(super) fn run(prog: &Program, raw: &crate::Func) -> Option<Box<crate::Func>>
     };
     // What each register holding a handle or an address of interest is used for.
     let mut cands: Vec<Cand> = Vec::new();
+    let mut all: Option<Vec<bool>> = None;
     for b in 0..body.min(raw.blocks.len()) {
         let Some(bl) = raw.blocks.values().get(b) else {
             continue;
@@ -271,7 +468,16 @@ pub(super) fn run(prog: &Program, raw: &crate::Func) -> Option<Box<crate::Func>>
             if shared || !plain(&prog.types, ty, 0) || defs.get(h.0 as usize) != Some(&1) {
                 continue;
             }
-            if !*checked.get_or_insert_with(|| once_before(raw, b, body)) {
+            // (Two walks per block cost less than the whole graph's analysis on a small process.)
+            if !*checked.get_or_insert_with(|| {
+                if !cfg!(debug_assertions) && raw.blocks.len() < ALL_AT_ONCE {
+                    return once_before(raw, b, body);
+                }
+                let once = &*all.get_or_insert_with(|| once_before_all(raw, body));
+                let o = once.get(b).copied().unwrap_or(false);
+                debug_assert_eq!(o, once_before(raw, b, body), "once_before of block {b}");
+                o
+            }) {
                 continue;
             }
             cands.push(Cand {

@@ -1007,6 +1007,14 @@ first run with hits reads the stored program instead of lowering and compiling t
 world, runs 1 to 5 at auto, all-thread instructions 52.9, 28.3, 19.8, 19.8, 19.7 G (before: run 3 at 50.1 G). Corpus test
 `generics/elab_call_table` reaches the path (`ecall_session_hits`).
 
+### Cold optimiser and lowering cost (perf/w3-t3, 2026-11-07)
+
+`docs/decisions.md` "Cold optimiser cost". Cold runs at auto, main-thread instructions against the wave 3 baseline
+4ef7ec895 (exact counts, 3 runs): `uvvm_func_cov` 1.073 (was 1.28), `hdlm_fifo_sync` 0.985, `olo_axi_master_full`
+0.997, `vunit_logging` 1.050. The exact fixes leave the IR of every corpus test equal; the cheaper pass set of huge
+bodies changes only those bodies (none in the corpus or in GRLIB and Microwatt). Warm `uvvm_func_cov` 2.25 against
+2.21 G (its huge body is optimised less).
+
 ### Package constants in elaboration-time calls (#539)
 
 Functions called while elaborating that read a package constant with a computed initialiser (a configuration table, say) run

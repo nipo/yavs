@@ -14572,3 +14572,24 @@ whole-signal read, the call, the result's check and copy, the wide drive).
 **Tests.** `crates/yavs/tests/sub_copies.rs`; corpus `composite/subcopy_shapes` (matrices, arrays of unconstrained arrays, records with unconstrained fields and arrays of them from package, architecture and process objects; copies called from copies, recursion, `out` and `inout`), `subcopy_generics` (instances with the same and other generics, a generate, a subprogram of the architecture that reads a generic, a signal, an access value), `subcopy_bounds` (an index error inside a copy), `subcopy_edges` (null dimensions, arrays and fields, one data under three shapes through a pure function, recursion on record slices, a generate's parameter, a heap object of a new shape per call, one record as `in` and `inout`, a signal parameter, a partly constrained formal, two instances of a generic package, textio), `subcopy_nested` (a nested function on its parent's parameter, a heap object replaced by one of another shape, a failing whole-record assignment to an `inout` formal); `tools/difftest/reach.py --counters spec_subs` is above zero on them.
 
 **Off.** `YAVS_NO_SUBCOPY=1` (fingerprint `subcopy`), `YAVS_SUB_ALL=1` keys on plain vectors too.
+
+## Cold optimiser cost: exact fixes and a cheaper pass set for huge bodies (yavs-ir `opt`, yavs-lower, perf/w3-t3, maintainer ruling 2026-11-07)
+
+The cold main thread of library testbenches had risen 6 to 28 percent over the pinned baseline of wave 3, mostly in
+the IR optimiser and lowering. Decisions:
+
+- **Exact fixes first** (the same IR, checked by `YAVS_DUMPIR` over the corpus): the set of entities named by
+  `'path_name`/`'instance_name` found once per `Db` borrow, not per protected variable (`Cx::named_entities`, keyed
+  by the `Db`'s address, expression count and version, dropped on `Lowerer::resume`); a vectorised search for a
+  coverage directive (`covdir::mentions`); a table by register in `Func::sig_history_uses`; `proc_objects`
+  answers `once_before` for every block of a process of 256 blocks or more in one linear pass (dominance of the
+  body, cycles and the "reaches every block" terminators; debug builds compare it with the walks on every process);
+  the fixed-point loops of the optimiser reuse their buffers.
+- **Huge bodies get a cheaper pass set** (maintainer, 2026-11-07): from `HUGE_BODY` = 50 000 instructions after the
+  first walk, no descriptor pass (`dopes`, with its `dead_defs` and `tidy`) and no short-circuit pass of processes.
+  Such a body is a testbench sequencer that runs once (`uvvm_func_cov`'s `p_main`, 114 k): the passes cost more
+  than they save there. The largest processes of GRLIB and Microwatt are under 20 k, so RTL keeps every pass. The
+  size is in the optimiser fingerprint; `YAVS_HUGE_BODY=1` gives every body the cheaper set (difftest runs the
+  corpus that way); `opt_huge` counts the bodies. Cost: the warm run of `uvvm_func_cov` reads 2.25 against 2.21 G.
+- **Not done:** a worklist for `dead_defs` liveness (gains 13 M on the huge body, loses on small ones); the second
+  round of `dopes` only after a `Copy` rewrite (no short proof that nothing else gives it work).

@@ -941,16 +941,27 @@ impl Func {
     /// test, a call, a store). An instruction nobody listed here counts as asking.
     pub fn sig_history_uses(&self) -> Vec<u32> {
         let f = self.full();
-        let mut origin = std::collections::HashMap::<Reg, u32>::new();
+        if !f.code.iter().any(|i| matches!(i, Inst::SigVal { .. })) {
+            return Vec::new();
+        }
+        // The signal each register names, by register (a hashed map was a few percent of a
+        // cold lowering, which asks this of every function).
+        let mut slot = vec![None::<u32>; f.reg_ty.len()];
+        let origin_set = |r: Reg, n: u32, slot: &mut Vec<Option<u32>>| {
+            let k = r.0 as usize;
+            if slot.len() <= k {
+                slot.resize(k + 1, None);
+            }
+            slot[k] = Some(n);
+        };
         let mut out = Vec::new();
         for i in &f.code {
+            let origin = |r: &Reg, slot: &[Option<u32>]| slot.get(r.0 as usize).copied().flatten();
             match *i {
-                Inst::SigVal { dst, sig, .. } => {
-                    origin.insert(dst, sig);
-                }
+                Inst::SigVal { dst, sig, .. } => origin_set(dst, sig, &mut slot),
                 Inst::SigSlice { dst, sig, .. } => {
-                    if let Some(&n) = origin.get(&sig) {
-                        origin.insert(dst, n);
+                    if let Some(n) = origin(&sig, &slot) {
+                        origin_set(dst, n, &mut slot);
                     }
                 }
                 Inst::SigRead { .. }
@@ -961,9 +972,9 @@ impl Func {
                 | Inst::Disconnect { .. }
                 | Inst::DisconnectSlot { .. } => {}
                 _ => {
-                    i.visit(&mut |r, _, _| out.extend(origin.get(&r).copied()));
+                    i.visit(&mut |r, _, _| out.extend(origin(&r, &slot)));
                     let list = i.list().and_then(|l| f.regs(l)).unwrap_or_default();
-                    out.extend(list.iter().filter_map(|r| origin.get(r).copied()));
+                    out.extend(list.iter().filter_map(|r| origin(r, &slot)));
                 }
             }
         }

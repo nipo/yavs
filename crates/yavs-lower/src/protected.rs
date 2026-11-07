@@ -464,16 +464,35 @@ impl Fx<'_, '_> {
     pub(crate) fn prot_name(&mut self, d: DeclId, t: TypeId, h: Reg, span: Span) -> R<()> {
         let db = self.db;
         let vars = state_vars(db, t);
-        if !db.exprs.iter().any(|(_, x)| {
-            matches!(
-                x.kind,
-                ExprKind::Attr {
-                    attr: PredefAttr::PathName | PredefAttr::InstanceName,
-                    prefix: AttrPrefix::Entity(v),
-                    ..
-                } if vars.contains(&v)
-            )
-        }) {
+        // (One scan of the expressions per `Db`, not one per variable: it was most of the
+        // lowering of a testbench with many protected objects.)
+        let key = (
+            std::ptr::from_ref(db) as usize,
+            db.exprs.len(),
+            db.exprs.version(),
+        );
+        if self
+            .cx
+            .named_entities
+            .as_ref()
+            .is_none_or(|(k, _)| *k != key)
+        {
+            let named = db
+                .exprs
+                .iter()
+                .filter_map(|(_, x)| match x.kind {
+                    ExprKind::Attr {
+                        attr: PredefAttr::PathName | PredefAttr::InstanceName,
+                        prefix: AttrPrefix::Entity(v),
+                        ..
+                    } => Some(v),
+                    _ => None,
+                })
+                .collect();
+            self.cx.named_entities = Some((key, named));
+        }
+        let named = self.cx.named_entities.as_ref().map(|(_, n)| n);
+        if !vars.iter().any(|v| named.is_some_and(|n| n.contains(v))) {
             return Ok(());
         }
         let mut cells = vec![h];
