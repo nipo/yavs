@@ -640,14 +640,39 @@ impl Program {
         self.copies.get(f).map_or(f, |c| c.base)
     }
 
-    /// The id a compiled tier keys the code of `f` by across runs: a process copy's process (its
-    /// own id is in no code it has), else `f`, since a copy of a subprogram runs on native frames,
-    /// which hold the id of their function, and its id differs between runs.
-    pub fn code_key_id(&self, f: FuncId) -> FuncId {
+    /// Whether `f` is a copy of a subprogram (`Program::sub_copy`).
+    pub fn is_sub_copy(&self, f: FuncId) -> bool {
+        self.copies.get(f).is_some_and(|c| c.digest == SUB_DIGEST)
+    }
+
+    /// What compiled tiers key the code of `f` by across runs, and name it by in the keys of its
+    /// callers: a process copy's process (its own id is in no code it has), a copy of a subprogram's
+    /// `copy_tag` (its code holds its id only through a symbol the linker fills per run), else `f`.
+    pub fn code_key(&self, f: FuncId) -> u64 {
         match self.copies.get(f) {
-            Some(c) if c.digest != SUB_DIGEST => c.base,
-            _ => f,
+            Some(c) if c.digest != SUB_DIGEST => u64::from(c.base.0),
+            Some(_) => self.copy_tag(f).unwrap_or(u64::from(f.0)),
+            None => u64::from(f.0),
         }
+    }
+
+    /// The bytes compiled tiers key the code `o` by: its serialised form with the calls of copies
+    /// of subprograms named by what they are for, as stored copies name them (their ids differ
+    /// between runs).
+    pub fn code_key_bytes(&self, o: &Func) -> Option<Vec<u8>> {
+        let (bytes, calls) = self.portable_calls(o)?;
+        if calls.is_empty() {
+            return Some(bytes);
+        }
+        postcard::to_stdvec(&(bytes, calls)).ok()
+    }
+
+    /// The copy whose `copy_tag` is `tag`, if this run made it.
+    pub fn copy_with_tag(&self, tag: u64) -> Option<FuncId> {
+        let c = &self.copies;
+        (0..c.count.load(Ordering::Relaxed) as u32)
+            .map(|n| FuncId(c.first + n))
+            .find(|&f| self.copy_tag(f) == Some(tag))
     }
 
     /// A number that names the copy `f` by what it is for, the same in every run: a hash of its
@@ -762,6 +787,13 @@ impl Program {
         }
         self.copies.first = first as u32;
         self.copies.list = (0..n).map(|_| OnceLock::new()).collect();
+        // Test aid: `YAVS_COPY_SKIP=K` leaves the first K slots empty, so every copy has another id
+        // than in a run without it (compiled code must not depend on copy ids).
+        let skip = std::env::var("YAVS_COPY_SKIP").map_or(0, |v| v.parse().unwrap_or(0));
+        let skip = std::cmp::min(skip, subs);
+        // (Taken from the slots of copies of subprograms, so processes keep theirs.)
+        self.copies.count = AtomicUsize::new(skip);
+        self.copies.sub_max = subs - skip;
     }
 
     /// The optimised body of copy `c`: an earlier run's if the stage cache had it, else made now.

@@ -307,12 +307,12 @@ fn an_error_in_a_copy_has_its_own_text() {
     }
 }
 
-/// Native frames hold the id of their copy, and copy ids follow the order copies are made: stored
-/// code is not linked for a copy with another id (the pre-key check of a debug build aborted the
-/// third run, where one copy per subprogram moves the ids of the later copies).
-#[test]
-fn compiled_copies_of_subprograms_are_not_linked_under_another_id() {
-    let d = tempdir("sub_copies_ids");
+const CHECK: (&str, &str) = ("YAVS_CLIFT_PREKEY_CHECK", "1");
+
+/// The corpus test `subcopy_shapes` analysed into a fresh library, and its interpreted output
+/// without copies.
+fn shapes(tag: &str) -> (common::Tmp, String, (i32, String, String)) {
+    let d = tempdir(tag);
     let src = include_str!("../../../tests/corpus/composite/subcopy_shapes.vhd");
     std::fs::write(d.join("t.vhd"), src).expect("write");
     let work = format!("work:{}", d.join("lib").display());
@@ -322,13 +322,6 @@ fn compiled_copies_of_subprograms_are_not_linked_under_another_id() {
         &["analyze", "--std=2008", "--work", &work, "t.vhd"],
     );
     assert_eq!(a.0, 0, "{}", a.2);
-    let tier = ["--tier=clift-auto", "--tier-heat=1,0,0"];
-    let args = |d: &Path, env: &[(&str, &str)]| {
-        let mut args = vec!["run", "--std=2008", "--work", &work];
-        args.extend(tier);
-        args.extend(["--threads", "1", "subcopy_shapes"]);
-        yavs(d, env, &args)
-    };
     let want = yavs(
         &d,
         &[NO_SUBS],
@@ -345,14 +338,165 @@ fn compiled_copies_of_subprograms_are_not_linked_under_another_id() {
         ],
     );
     assert_eq!(want.0, 0, "{}", want.2);
-    let all = [SPEC, ("YAVS_SPEC_ALL", "1")];
-    let one = [SPEC, ("YAVS_SPEC_ALL", "1"), ("YAVS_SUB_PER", "1")];
-    for env in [&all[..], &all[..], &one[..], &one[..], &all[..]] {
-        let got = args(&d, env);
-        assert_eq!(
-            (&want.0, &want.1, &want.2),
-            (&got.0, &got.1, &got.2),
-            "{env:?}"
+    (d, work, want)
+}
+
+/// A compiled run of `subcopy_shapes` with copies of everything, the counters on.
+fn shapes_run(d: &Path, work: &str, threads: &str, env: &[(&str, &str)]) -> (i32, String, String) {
+    let mut e = vec![
+        SPEC,
+        ("YAVS_SPEC_ALL", "1"),
+        ("YAVS_COUNTERS", "1"),
+        ("YAVS_LOG", "debug"),
+        // (Debug builds check by default, and the check lowers anyway: `CHECK` turns it on.)
+        ("YAVS_CLIFT_PREKEY_CHECK", "0"),
+    ];
+    e.extend(env);
+    yavs(
+        d,
+        &e,
+        &[
+            "run",
+            "--std=2008",
+            "--work",
+            work,
+            "--tier=clift-auto",
+            "--tier-heat=1,0,0",
+            "--threads",
+            threads,
+            "subcopy_shapes",
+        ],
+    )
+}
+
+fn no_counters(s: &str) -> String {
+    s.lines()
+        .filter(|l| !l.starts_with("counters:") && !l.starts_with("debug:"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The functions a run lowered for Cranelift, copies of processes and their callers included.
+fn lowered(stderr: &str) -> usize {
+    stderr
+        .lines()
+        .filter(|l| l.starts_with("debug: cache: clif lowered"))
+        .count()
+}
+
+/// Stored code is not linked for a copy that differs from the one it was made for: one copy per
+/// subprogram in the third run moves the ids of the later copies and leaves some calls to the
+/// subprograms (before the id symbols, the pre-key check aborted this run).
+#[test]
+fn compiled_copies_of_subprograms_are_not_linked_under_another_id() {
+    let (d, work, want) = shapes("sub_copies_ids");
+    let one = [CHECK, ("YAVS_SUB_PER", "1")];
+    for env in [&[CHECK][..], &[CHECK], &one, &one, &[CHECK]] {
+        let got = shapes_run(&d, &work, "1", env);
+        assert_eq!(got.0, want.0, "{env:?}: {}", got.2);
+        assert_eq!(got.1, want.1, "{env:?}");
+        assert_eq!(no_counters(&got.2), want.2, "{env:?}");
+    }
+}
+
+/// Code of copies of subprograms names their ids through symbols the linker fills per run, so a
+/// warm run whose copies have other ids links all of it, lowers none and prints the same; the
+/// pre-key check agrees at one and four threads.
+#[test]
+fn warm_runs_with_other_copy_ids_link_the_same_code() {
+    let (d, work, want) = shapes("sub_copies_moved");
+    for _ in 0..2 {
+        let r = shapes_run(&d, &work, "1", &[]);
+        assert_eq!(r.0, 0, "{}", r.2);
+    }
+    // (A compile the end of a run cut off comes in the next one.)
+    let settled = (0..8)
+        .map(|_| shapes_run(&d, &work, "1", &[]))
+        .find(|r| lowered(&r.2) == 0)
+        .expect("every run lowered something");
+    let linked = counter(&settled.2, "clift_sub_linked");
+    assert!(linked > 0, "{}", settled.2);
+    assert_eq!(counter(&settled.2, "clift_sub_lowered"), 0, "{}", settled.2);
+    for skip in ["1", "4"] {
+        for threads in ["1", "4"] {
+            let moved = [("YAVS_COPY_SKIP", skip)];
+            let r = shapes_run(&d, &work, threads, &moved);
+            assert_eq!((r.0, &r.1), (want.0, &want.1), "skip {skip}: {}", r.2);
+            assert_eq!(no_counters(&r.2), want.2, "skip {skip}");
+            assert_eq!(
+                counter(&r.2, "clift_sub_lowered"),
+                0,
+                "skip {skip}: {}",
+                r.2
+            );
+            // Nothing at all is lowered again: no caller names a copy by its id either.
+            if threads == "1" {
+                assert_eq!(lowered(&r.2), 0, "skip {skip}: {}", r.2);
+            }
+            // (The empty slots count among the copies: every id moved.)
+            let k: u64 = skip.parse().expect("skip");
+            let copies = counter(&settled.2, "spec_copies") + k;
+            assert_eq!(counter(&r.2, "spec_copies"), copies, "skip {skip}");
+            // (Four threads compile the same functions, in another order.)
+            assert_eq!(
+                counter(&r.2, "clift_sub_linked"),
+                linked,
+                "skip {skip}: {}",
+                r.2
+            );
+            let c = shapes_run(&d, &work, threads, &[moved[0], CHECK]);
+            assert_eq!(
+                (c.0, &c.1),
+                (want.0, &want.1),
+                "checked skip {skip}: {}",
+                c.2
+            );
+            assert!(
+                counter(&c.2, "clift_sub_linked") > 0,
+                "checked skip {skip}: {}",
+                c.2
+            );
+        }
+    }
+}
+
+/// The same under the LLVM tier's `--tier=auto`: its objects name a copy's id through an absolute
+/// symbol of the run's JIT, and the pre-key check agrees (it also caught a process and its copy of
+/// the same code sharing an entry, though one is generated as a twin and the other not).
+#[cfg(feature = "llvm")]
+#[test]
+fn llvm_warm_runs_with_other_copy_ids_agree() {
+    let (d, work, want) = shapes("sub_copies_llvm");
+    let run = |env: &[(&str, &str)]| {
+        let mut e = vec![
+            SPEC,
+            ("YAVS_SPEC_ALL", "1"),
+            ("YAVS_LLVM_PREKEY_CHECK", "1"),
+        ];
+        e.extend(env);
+        let r = yavs(
+            &d,
+            &e,
+            &[
+                "run",
+                "--std=2008",
+                "--work",
+                &work,
+                "--tier=auto",
+                "--tier-heat=1,0,0",
+                "--threads",
+                "1",
+                "subcopy_shapes",
+            ],
         );
+        assert_eq!((r.0, &r.1), (want.0, &want.1), "{env:?}: {}", r.2);
+    };
+    for env in [
+        &[][..],
+        &[],
+        &[("YAVS_COPY_SKIP", "3")],
+        &[("YAVS_COPY_SKIP", "3")],
+    ] {
+        run(env);
     }
 }

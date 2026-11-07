@@ -122,6 +122,20 @@ pub fn report(s: yavs_kernel::Stats, rt: Option<&yavs_interp::Runtime>) {
         rows.push(("llvm_interpreted_insts", l(1)));
         rows.push(("llvm_native_frames", l(2)));
     }
+    // Copies of subprograms in Cranelift code: linked by a pre-key, lowered, compiled, and the id
+    // symbols lowered code named.
+    #[cfg(feature = "clift")]
+    for (name, v) in [
+        "clift_sub_linked",
+        "clift_sub_lowered",
+        "clift_sub_compiled",
+        "clift_sub_ids",
+    ]
+    .into_iter()
+    .zip(yavs_clift::sub_copy_stats())
+    {
+        rows.push((name, v as u64));
+    }
     for (name, v) in rows {
         eprintln!("counters: {name}={v}");
     }

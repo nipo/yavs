@@ -1957,6 +1957,67 @@ mod clift {
         ]
     );
 
+    /// Copies of subprograms (the corpus test `subcopy_shapes`, copies of everything) warm, the
+    /// last run with other copy ids (`YAVS_COPY_SKIP`): their code names the ids through id
+    /// symbols, so it is all linked and none lowered.
+    #[test]
+    fn sub_copies_link_under_other_ids() {
+        let d = tempdir("sub_copy_ids");
+        let work = format!("work:{}", d.join("lib").display());
+        let src = include_str!("../../../tests/corpus/composite/subcopy_shapes.vhd");
+        std::fs::write(d.join("t.vhd"), src).expect("write");
+        let a = yavs(
+            &d,
+            &[],
+            &["analyze", "--std=2008", "--work", &work, "t.vhd"],
+        );
+        assert_eq!(a.code, 0, "{}", a.stderr);
+        let run = |env: &[(&str, &str)]| {
+            let mut e = vec![("YAVS_SPEC_AFTER", "2"), ("YAVS_SPEC_ALL", "1")];
+            e.extend(env);
+            let r = yavs(
+                &d,
+                &e,
+                &[
+                    "run",
+                    "--std=2008",
+                    "--work",
+                    &work,
+                    "--tier=clift-auto",
+                    "--tier-heat=1,0,0",
+                    "--threads",
+                    "1",
+                    "subcopy_shapes",
+                ],
+            );
+            assert_eq!(r.code, 0, "{}", r.all());
+            r
+        };
+        let cold = run(&[]);
+        check_bounds(
+            "sub_copy_ids (cold)",
+            &cold,
+            &[("clift_sub_lowered", Min(41)), ("clift_sub_ids", Min(51))],
+        );
+        run(&[]);
+        let moved = run(&[("YAVS_COPY_SKIP", "2")]);
+        assert_eq!(moved.stdout, cold.stdout);
+        // (The empty slots count among the copies: every id moved by 2.)
+        assert_eq!(
+            moved.counters["spec_copies"],
+            cold.counters["spec_copies"] + 2
+        );
+        check_bounds(
+            "sub_copy_ids (warm, other ids)",
+            &moved,
+            &[
+                ("clift_sub_linked", Min(41)),
+                ("clift_sub_lowered", Max(0)),
+                ("clift_sub_compiled", Max(0)),
+            ],
+        );
+    }
+
     // `perf/ieee_paths.vhd` compiled: native calls per key (`cb_native` of `YAVS_COUNTERS=pc`), an
     // unlisted key 0 (computed in place on every call); the in-place ops are listed for their calls
     // on more than 64 elements. A new path updates this table in the same commit.

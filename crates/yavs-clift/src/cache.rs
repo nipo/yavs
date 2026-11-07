@@ -60,6 +60,33 @@ pub(crate) fn note_hit() {
     HITS.fetch_add(1, Ordering::Relaxed);
 }
 
+/// Copies of subprograms: linked by a pre-key, lowered, compiled by Cranelift (no stored body),
+/// and the id symbols the lowered functions named (`Jit::slot`).
+static SUBS: [AtomicUsize; 4] = [const { AtomicUsize::new(0) }; 4];
+
+/// `YAVS_COUNTERS`: `[linked by pre-key, lowered, compiled, id symbols named]` of copies of
+/// subprograms so far.
+pub fn sub_copy_stats() -> [usize; 4] {
+    SUBS.each_ref().map(|a| a.load(Ordering::Relaxed))
+}
+
+/// A lowered function names `n` id symbols of copies of subprograms.
+pub(crate) fn note_ids(n: usize) {
+    SUBS[3].fetch_add(n, Ordering::Relaxed);
+}
+
+/// Copy of a subprogram `id` (`tag`, its `Program::copy_tag`) was `what` (0 linked, 1 lowered,
+/// 2 compiled).
+pub(crate) fn note_sub(what: usize, id: u32, tag: u64) {
+    SUBS[what].fetch_add(1, Ordering::Relaxed);
+    debug("sub copy", || {
+        format!(
+            "f{id} tag {tag:016x} {}",
+            ["linked", "lowered", "compiled"][what]
+        )
+    });
+}
+
 /// The store as Cranelift's cache of compiled functions.
 pub(crate) struct Kv(pub Store);
 
@@ -145,6 +172,9 @@ pub(crate) enum Name {
     Func(String),
     /// Module data: a table, a constant, the program of an element loop.
     Data { bytes: Vec<u8>, align8: bool },
+    /// The id of the copy of a subprogram whose `Program::copy_tag` this is, in this run
+    /// (`Jit::slot`).
+    Slot(u64),
 }
 
 /// What a pre-key names.
@@ -174,18 +204,19 @@ pub(crate) struct PreInputs<'a> {
     pub switches: &'a str,
     /// The program: its types, constants, tables and other functions, ids and all.
     pub identity: &'a str,
-    /// `Program::code_key_id`: the function, or the process a process copy is of (its own id is
-    /// in no code it has); a copy of a subprogram by its own id, which its native frames hold.
-    pub base: u32,
+    /// `Program::code_key`: the function, the process a process copy is of, or the tag of a copy of
+    /// a subprogram (its id is in its code only through `Name::Slot`).
+    pub base: u64,
     /// Native-frame variant or frame-mode code.
     pub native: bool,
-    /// The function as handed out, serialised: a copy's folded data is in its code.
+    /// The function as handed out, serialised (`Program::code_key_bytes`: copies it calls by what
+    /// they are for): a copy's folded data is in its code.
     pub func: &'a [u8],
     /// The facts of a copy, which are in neither of the above.
     pub facts: &'a [u8],
     /// The route: per native callee, through `Mem::ntab` (`None`) or directly, with its pre-key,
-    /// since its body may be inlined. In callee order.
-    pub callees: &'a [(u32, Option<Key>)],
+    /// since its body may be inlined. By `Program::code_key`, in that order.
+    pub callees: &'a [(u64, Option<Key>)],
 }
 
 /// The key of the entry of a function, made before anything is lowered.
@@ -408,16 +439,17 @@ pub(crate) fn add_compiled(name: &str, len: u32) {
 /// The kind of the entry of [`Routes`].
 const ROUTES: &str = "route";
 
-/// How a function reaches its native callees: per callee id, directly (`true`) or through
-/// `Mem::ntab`.
-pub(crate) type Route = Rc<HashMap<u32, bool>>;
+/// How a function reaches its native callees: per callee (`Program::code_key`), directly (`true`)
+/// or through `Mem::ntab`.
+pub(crate) type Route = Rc<HashMap<u64, bool>>;
 
 /// The routes by function and whether it is the native-frame variant.
 type Known = HashMap<(u64, bool), Route>;
 
 /// The first route of each function compiled in a program (`--tier=clift-auto`), one text entry per
 /// program in the objects store, a line `<function> <0|1 native> <callee>+|- ...` each. A function is
-/// named by its id, a copy of a process by its `Program::copy_tag`: its id depends on the run. Both
+/// named by its id, a copy by its `Program::copy_tag` (a callee by `Program::code_key`): its id
+/// depends on the run. Both
 /// routes are the same semantics, so a line applied to another program only mis-steers a call.
 #[derive(Default)]
 pub(crate) struct Routes {
@@ -438,7 +470,7 @@ impl Routes {
                     let (g, how) = c.split_at_checked(c.len().checked_sub(1)?)?;
                     Some((g.parse().ok()?, how == "+"))
                 })
-                .collect::<Option<HashMap<u32, bool>>>()?;
+                .collect::<Option<HashMap<u64, bool>>>()?;
             Some(((f, native), Rc::new(calls)))
         };
         text.lines().filter_map(line).collect()
@@ -461,7 +493,7 @@ impl Routes {
     }
 
     /// Remember the route a function of no stored route was just made with.
-    pub(crate) fn add(&mut self, f: u64, native: bool, calls: impl Iterator<Item = (u32, bool)>) {
+    pub(crate) fn add(&mut self, f: u64, native: bool, calls: impl Iterator<Item = (u64, bool)>) {
         let mut calls: Vec<_> = calls.collect();
         calls.sort_unstable();
         let mut line = format!("{f} {}", u8::from(native));
@@ -510,7 +542,7 @@ mod tests {
         let mut other = KeyBuilder::new("y");
         other.text("y");
         let other = other.finish();
-        let base = |callees: &'static [(u32, Option<Key>)]| PreInputs {
+        let base = |callees: &'static [(u64, Option<Key>)]| PreInputs {
             fingerprint: "f",
             target: "t",
             switches: "s",
@@ -522,7 +554,7 @@ mod tests {
             callees,
         };
         // (Leaked: a test, and the slices must outlive the closure above.)
-        let leak = |c: Vec<(u32, Option<Key>)>| -> &'static [(u32, Option<Key>)] { c.leak() };
+        let leak = |c: Vec<(u64, Option<Key>)>| -> &'static [(u64, Option<Key>)] { c.leak() };
         let c0 = leak(vec![(3, Some(callee))]);
         let k0 = pre_key_without(&base(c0), "");
         assert_eq!(k0, pre_key_without(&base(c0), ""));

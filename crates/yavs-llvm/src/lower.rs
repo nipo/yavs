@@ -537,6 +537,24 @@ pub(crate) fn level_for(prog: &Program, f: &Func, level: OptLevel) -> OptLevel {
 }
 
 /// Compile `f` alone into `jit`: its entry (none for `Part::Native`) and register count, and the
+/// The symbol whose address is the id of copy `g` of a subprogram in this run (`Jit::define_ids`):
+/// its code names it, not the id, which differs between runs. `None` for any other function.
+pub(crate) fn id_symbol(prog: &Program, g: FuncId) -> Option<String> {
+    let t = prog.copy_tag(g).filter(|_| prog.is_sub_copy(g))?;
+    Some(format!("yavs.id.{t:016x}"))
+}
+
+/// The id symbols code of `f` (`id`) may name: its own and its callees'.
+fn define_ids(jit: &mut Jit, prog: &Program, id: FuncId, f: &Func) -> Result<(), Error> {
+    let calls = f.code.iter().filter_map(call_of).map(|c| c.0);
+    for g in std::iter::once(id).chain(calls) {
+        if let Some(name) = id_symbol(prog, g) {
+            jit.define_absolute(&name, g.0 as usize)?;
+        }
+    }
+    Ok(())
+}
+
 /// address of its native-frame code (0 for none), or why it stays interpreted.
 pub(crate) fn compile_one(
     jit: &mut Jit,
@@ -563,6 +581,7 @@ pub(crate) fn compile_one(
     let full = crate::auto::compute(prog, f);
     let pre = crate::objcache::pre_key(prog, id, f, &format!("{opt:?} {full} {part:?}"));
     let stored = pre.as_ref().and_then(crate::objcache::pre_get);
+    define_ids(jit, prog, id, f).map_err(|e| e.0)?;
     if let Some(e) = stored.as_ref().filter(|_| !crate::objcache::check())
         && let Some(c) = linked(jit, f, (id.0, &prog.label(id)), &stem, part, e)?
     {
@@ -1757,6 +1776,33 @@ impl Gen {
     fn c32(&self, v: u32) -> LLVMValueRef {
         // SAFETY: constant creation.
         unsafe { LLVMConstInt(self.i32, u64::from(v), 0) }
+    }
+
+    /// The id of function `g` as an `i64`: a constant, or for a copy of a subprogram the address
+    /// of its id symbol (`id_symbol`, an absolute symbol of this run's JIT), so its object is the
+    /// same in every run.
+    unsafe fn fid64(&self, c: &Cur, g: FuncId) -> LLVMValueRef {
+        let Some(name) = id_symbol(c.prog, g) else {
+            return self.c64(i64::from(g.0));
+        };
+        let cname = CString::new(name).expect("no NUL");
+        // SAFETY: a declaration of our module, its address as an integer.
+        unsafe {
+            let mut v = LLVMGetNamedGlobal(self.module, cname.as_ptr());
+            if v.is_null() {
+                v = LLVMAddGlobal(self.module, self.i8, cname.as_ptr());
+            }
+            LLVMBuildPtrToInt(self.b, v, self.i64, c"".as_ptr())
+        }
+    }
+
+    /// `fid64` as an `i32`.
+    unsafe fn fid(&self, c: &Cur, g: FuncId) -> LLVMValueRef {
+        match id_symbol(c.prog, g) {
+            // SAFETY: as `fid64`.
+            Some(_) => unsafe { LLVMBuildTrunc(self.b, self.fid64(c, g), self.i32, c"".as_ptr()) },
+            None => self.c32(g.0),
+        }
     }
 
     /// The entry switch of frame-mode code: a tree of range compares over the sorted entry pcs,
@@ -5185,7 +5231,7 @@ impl Gen {
                 let mut args = [
                     c.env,
                     c.mem,
-                    self.c32(nat.id.0),
+                    self.fid(&c, nat.id),
                     exit_pc,
                     LLVMBuildLoad2(self.b, self.i64, nat.temp_base, c"".as_ptr()),
                     self.c64(nregs as i64),
@@ -6438,7 +6484,13 @@ impl Gen {
                 self.declare(&format!("f{}_n", callee.0), ty)
             } else {
                 let tab = self.mem_ld(c, MEM_NTAB, self.ptr);
-                let at = self.gep(tab, self.c64(i64::from(callee.0) * 8));
+                let at = match id_symbol(c.prog, callee) {
+                    Some(_) => self.gep(
+                        tab,
+                        LLVMBuildShl(self.b, self.fid64(c, callee), self.c64(3), c"".as_ptr()),
+                    ),
+                    None => self.gep(tab, self.c64(i64::from(callee.0) * 8)),
+                };
                 let fp = LLVMBuildLoad2(self.b, self.ptr, at, c"".as_ptr());
                 LLVMSetOrdering(
                     fp,
@@ -6496,7 +6548,7 @@ impl Gen {
                 let mut a = [
                     c.env,
                     c.mem,
-                    self.c32(callee.0),
+                    self.fid(c, callee),
                     buf,
                     self.c32(n as u32),
                     dep,
@@ -6563,7 +6615,7 @@ impl Gen {
                     let mut a = [
                         c.env,
                         c.mem,
-                        self.c32(callee.0),
+                        self.fid(c, callee),
                         buf,
                         self.c32(n as u32),
                         dep,
@@ -7955,7 +8007,7 @@ impl Gen {
             let mut a = [
                 c.env,
                 c.mem,
-                self.c32(nat.id.0),
+                self.fid(c, nat.id),
                 self.c32(pc),
                 nat.depth,
                 idx(&uses),

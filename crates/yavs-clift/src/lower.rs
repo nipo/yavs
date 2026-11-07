@@ -98,6 +98,21 @@ pub type Error = String;
 /// The error of a compile that the compilation cache could not serve (`Jit::set_cached_only`).
 pub const NOT_CACHED: &str = "not in the compilation cache";
 
+/// The prefix of the id symbol of a copy of a subprogram, `yavs.id.<tag>.<id>` (`Jit::slot`).
+const SLOT: &str = "yavs.id.";
+
+/// The symbol of the frame-mode code (`kind` `f`) or variant (`n`) of `id`: a copy of a subprogram
+/// by its tag, since its callers' stored entries name it and its id differs between runs.
+fn symbol(prog: &Program, kind: &str, id: FuncId) -> String {
+    let label = prog.label(id);
+    match prog.copy_tag(id).filter(|_| prog.is_sub_copy(id)) {
+        Some(t) => {
+            yavs_llvm::perfmap::symbol(kind, prog.base_of(id).0, &format!("c{t:016x}_{label}"))
+        }
+        None => yavs_llvm::perfmap::symbol(kind, id.0, &label),
+    }
+}
+
 /// A function in the perf map: name, definition, size, and the IR pc of each stretch of its code.
 type PerfEntry = (String, ClifId, usize, Vec<(u32, u32, u32)>);
 
@@ -166,6 +181,11 @@ pub struct Jit {
     bodies: HashMap<String, ClifId>,
     /// The target and the switches in a pre-key (`cache::pre_key`); none: this run has no pre-keys.
     pre_target: Option<(String, String)>,
+    /// The copy of a subprogram being built (id, tag), for its counters (`cache::note_sub`).
+    sub_now: Option<(u32, u64)>,
+    /// The id symbols of copies of subprograms (`Jit::slot`): by tag, and the tag of each.
+    slots: HashMap<u64, (FuncId, ClifId)>,
+    slot_tags: HashMap<u32, u64>,
 }
 
 /// The native-frame variant `n<id>` of a function, in the calling convention of the LLVM tier
@@ -496,6 +516,11 @@ impl Jit {
         ];
         let mut b = JITBuilder::with_flags(&flags, cranelift_module::default_libcall_names())
             .map_err(|e| e.to_string())?;
+        // The id symbol of a copy of a subprogram (`Jit::slot`): its address is the id.
+        b.symbol_lookup_fn(Box::new(|name| {
+            let id: usize = name.strip_prefix(SLOT)?.rsplit('.').next()?.parse().ok()?;
+            Some(std::ptr::without_provenance(id))
+        }));
         for (n, p) in [
             (STEP, yavs_rt_step as *const u8),
             (HOST, yavs_rt_host as *const u8),
@@ -693,6 +718,9 @@ impl Jit {
             missed: false,
             bodies: HashMap::new(),
             pre_target,
+            sub_now: None,
+            slots: HashMap::new(),
+            slot_tags: HashMap::new(),
         })
     }
 
@@ -788,6 +816,8 @@ impl Jit {
             .1;
         if hit {
             crate::cache::note_hit();
+        } else if let Some((id, tag)) = self.sub_now {
+            crate::cache::note_sub(2, id, tag);
         }
         let code = ctx.compiled_code().ok_or("no compiled code")?;
         self.define_compiled(fid, &ctx.func, code)
@@ -1045,7 +1075,9 @@ impl Jit {
                 nats.insert(func, None);
                 continue;
             }
-            let stored = route.as_ref().and_then(|r| r.get(&func.0).copied());
+            let stored = route
+                .as_ref()
+                .and_then(|r| r.get(&prog.code_key(func)).copied());
             if stored == Some(false) {
                 nats.insert(func, None);
                 continue;
@@ -1057,7 +1089,10 @@ impl Jit {
                 NatVar::No => None,
             };
         }
-        let route_now: Vec<(u32, bool)> = nats.iter().map(|(g, n)| (g.0, n.is_some())).collect();
+        let route_now: Vec<(u64, bool)> = nats
+            .iter()
+            .map(|(&g, n)| (prog.code_key(g), n.is_some()))
+            .collect();
         let fresh_route = self.allowed.is_some() && route.is_none();
         let mut route_of: Vec<(FuncId, bool)> =
             nats.iter().map(|(&g, n)| (g, n.is_some())).collect();
@@ -1079,6 +1114,9 @@ impl Jit {
             };
             if fresh_route {
                 jit.routes.add(tag, native, route_now.iter().copied());
+            }
+            if prog.is_sub_copy(id) {
+                crate::cache::note_sub(0, id.0, tag);
             }
             Ok(Some(Built {
                 fid,
@@ -1127,6 +1165,10 @@ impl Jit {
         if check && let Some(b) = linked(self, &stored)? {
             return Ok(Built { body, ..b });
         }
+        let sub = prog.is_sub_copy(id).then_some((id.0, tag));
+        if let Some((id, tag)) = sub {
+            crate::cache::note_sub(1, id, tag);
+        }
         let shared = clif.filter(|_| copy).map(|c| body_key(&c, &ctx.func));
         if let Some(&c) = shared.as_ref().and_then(|k| self.bodies.get(k)) {
             // Counts as linked from the cache, so `--tier=auto` charges a link (the LLVM tier's
@@ -1150,7 +1192,7 @@ impl Jit {
         let fid = self
             .module
             .declare_function(
-                &yavs_llvm::perfmap::symbol(if native { "n" } else { "f" }, id.0, &prog.label(id)),
+                &symbol(prog, if native { "n" } else { "f" }, id),
                 Linkage::Export,
                 &ctx.func.signature,
             )
@@ -1159,7 +1201,10 @@ impl Jit {
         let asm = std::env::var("YAVS_CLIFT_ASM")
             .is_ok_and(|v| v.parse::<u32>().is_ok_and(|n| n == id.0));
         ctx.set_disasm(asm);
-        if let Err(e) = self.define_code(fid, &mut ctx) {
+        self.sub_now = sub;
+        let defined = self.define_code(fid, &mut ctx);
+        self.sub_now = None;
+        if let Err(e) = defined {
             if e == NOT_CACHED {
                 return Err(e);
             }
@@ -1228,7 +1273,7 @@ impl Jit {
         let mut callees = Vec::with_capacity(nats.len());
         for (g, n) in nats {
             callees.push((
-                g.0,
+                prog.code_key(*g),
                 match n {
                     Some(n) => Some(n.pre?),
                     None => None,
@@ -1236,7 +1281,7 @@ impl Jit {
             ));
         }
         callees.sort_unstable_by_key(|c| c.0);
-        let func = postcard::to_stdvec(f).ok()?;
+        let func = prog.code_key_bytes(f)?;
         let mut facts = HashBytes(Vec::new());
         prog.facts(id).hash(&mut facts);
         Some(crate::cache::pre_key(&PreInputs {
@@ -1244,7 +1289,7 @@ impl Jit {
             target,
             switches,
             identity,
-            base: prog.code_key_id(id).0,
+            base: prog.code_key(id),
             native,
             func: &func,
             facts: &facts.0,
@@ -1259,7 +1304,9 @@ impl Jit {
             .user_named_funcs()
             .values()
             .map(|n| {
-                if n.namespace == 0 {
+                if let (0, Some(&t)) = (n.namespace, self.slot_tags.get(&n.index)) {
+                    Name::Slot(t)
+                } else if n.namespace == 0 {
                     let c = ClifId::from_u32(n.index);
                     Name::Func(decls.get_function_decl(c).linkage_name(c).into_owned())
                 } else {
@@ -1288,6 +1335,13 @@ impl Jit {
                     _ => return Ok(None),
                 },
                 Name::Data { bytes, align8 } => (1, self.table(bytes, *align8)?.as_u32()),
+                Name::Slot(tag) => {
+                    let known = self.slots.get(tag).map(|s| s.0);
+                    match known.or_else(|| prog.copy_with_tag(*tag)) {
+                        Some(g) => (0, self.slot(prog, g)?.as_u32()),
+                        None => return Ok(None),
+                    }
+                }
             };
             let r = func.declare_imported_user_function(ir::UserExternalName { namespace, index });
             // (The code names its symbols by this position.)
@@ -1308,8 +1362,7 @@ impl Jit {
         } else {
             self.sig.clone()
         };
-        let name =
-            yavs_llvm::perfmap::symbol(if native { "n" } else { "f" }, id.0, &prog.label(id));
+        let name = symbol(prog, if native { "n" } else { "f" }, id);
         let fid = self
             .module
             .declare_function(&name, Linkage::Export, &signature)
@@ -1325,6 +1378,28 @@ impl Jit {
             self.bodies.insert(k, fid);
         }
         Ok(Some(fid))
+    }
+
+    /// The id symbol of copy `g` of a subprogram in this module: an import whose address is the
+    /// copy's id in this run, so code that names it is the same in every run (`Gen::fid`). A
+    /// function reference, not data: Cranelift's inliner keeps a callee's function references.
+    fn slot(&mut self, prog: &Program, g: FuncId) -> Result<ClifId, Error> {
+        let tag = prog.copy_tag(g).ok_or("no copy")?;
+        if let Some(&(h, c)) = self.slots.get(&tag) {
+            return if h == g {
+                Ok(c)
+            } else {
+                Err(format!("copies {h} and {g} have one tag"))
+            };
+        }
+        let sig = Signature::new(self.sig.call_conv);
+        let c = self
+            .module
+            .declare_function(&format!("{SLOT}{tag:016x}.{}", g.0), Linkage::Import, &sig)
+            .map_err(|e| e.to_string())?;
+        self.slots.insert(tag, (g, c));
+        self.slot_tags.insert(c.as_u32(), tag);
+        Ok(c)
     }
 
     /// The data `bytes` of the module (`align8`: 8-byte aligned), defined at the first use.
@@ -1444,9 +1519,21 @@ impl Jit {
         ctx.func.name = UserFuncName::user(u32::from(native), id.0);
         let mut natives = HashMap::new();
         let mut bodies: HashMap<FuncRef, Rc<ir::Function>> = HashMap::new();
-        // (In id order: the body, and so its key in the compilation cache, is the same every run.)
+        // (In `code_key` order: the body, and so its key in the compilation cache, is the same
+        // every run.)
         let mut order: Vec<_> = nats.iter().collect();
-        order.sort_by_key(|(g, _)| g.0);
+        order.sort_by_key(|(g, _)| prog.code_key(**g));
+        // The id symbols of the copies of subprograms the code names: its own frames' and its
+        // callees' (`Gen::fid`).
+        let mut ids = HashMap::new();
+        let own = (native && prog.is_sub_copy(id)).then_some(id);
+        for g in own.into_iter().chain(order.iter().map(|(g, _)| **g)) {
+            if prog.is_sub_copy(g) && !ids.contains_key(&g) {
+                let c = self.slot(prog, g)?;
+                ids.insert(g, self.module.declare_func_in_func(c, &mut ctx.func));
+            }
+        }
+        crate::cache::note_ids(ids.len());
         for (&g, n) in order {
             let fr = n
                 .as_ref()
@@ -1567,6 +1654,7 @@ impl Jit {
             tables: tabs,
             consts: cons,
             natives,
+            ids,
             cc: self.sig.call_conv,
         };
         let cfg = self.module.target_config();
@@ -1720,6 +1808,8 @@ struct Imports {
     /// never change: reads of them need no lookup.
     consts: HashMap<yavs_ir::ConstId, (GlobalValue, u64)>,
     natives: HashMap<FuncId, NatRef>,
+    /// The id symbols of copies of subprograms (`Jit::slot`).
+    ids: HashMap<FuncId, FuncRef>,
     /// The calling convention of the variants (`native_sig`).
     cc: CallConv,
 }
@@ -4669,6 +4759,18 @@ impl Gen<'_> {
         self.b.ins().iconst(I32, i64::from(v))
     }
 
+    /// The id of function `g` as an `I32`: a constant, or for a copy of a subprogram the address
+    /// of its id symbol (`Jit::slot`), which the linker sets for this run.
+    fn fid(&mut self, g: FuncId) -> Value {
+        match self.imp.ids.get(&g).copied() {
+            Some(fr) => {
+                let a = self.b.ins().func_addr(I64, fr);
+                self.b.ins().ireduce(I32, a)
+            }
+            None => self.c32(g.0),
+        }
+    }
+
     fn ld(&mut self, r: Reg) -> Value {
         if let Some(Some(Known::Int(v))) = self.known.get(r.0 as usize) {
             let v = *v;
@@ -5068,7 +5170,7 @@ impl Gen<'_> {
             };
         }
         let tb = self.nat_temp_base();
-        let fu = self.c32(func);
+        let fu = self.fid(FuncId(func));
         let nr = self.c64(nregs as i64);
         let sl = self.c64(i64::from(f.frame));
         let regs = self.regs;
@@ -5158,12 +5260,20 @@ impl Gen<'_> {
             Some(_) => None,
             None => {
                 let tab = self.mem_ld(MEM_NTAB);
-                let at = self.b.ins().load(
-                    I64,
-                    MemFlagsData::trusted(),
-                    tab,
-                    (u64::from(callee.0) * 8) as i32,
-                );
+                let at = match self.imp.ids.get(&callee).copied() {
+                    Some(fr) => {
+                        let id = self.b.ins().func_addr(I64, fr);
+                        let off = self.b.ins().ishl_imm_s(id, 3);
+                        let p = self.b.ins().iadd(tab, off);
+                        self.b.ins().load(I64, MemFlagsData::trusted(), p, 0)
+                    }
+                    None => self.b.ins().load(
+                        I64,
+                        MemFlagsData::trusted(),
+                        tab,
+                        (u64::from(callee.0) * 8) as i32,
+                    ),
+                };
                 let set = self.b.ins().icmp_imm_s(IntCC::NotEqual, at, 0);
                 okc = self.b.ins().band(okc, set);
                 Some(at)
@@ -5231,7 +5341,7 @@ impl Gen<'_> {
                 Some(n) => n.depth,
                 None => self.c64(NATIVE_FRAME_MODE as i64),
             };
-            let (cv, nv) = (self.c32(callee.0), self.c32(n as u32));
+            let (cv, nv) = (self.fid(callee), self.c32(n as u32));
             let c = self
                 .b
                 .ins()
@@ -5289,7 +5399,7 @@ impl Gen<'_> {
                 self.brif_split(miss, keep, after);
                 self.b.switch_to_block(keep);
                 self.b.ins().store(MemFlagsData::trusted(), val, out, 0);
-                let (cv, nv) = (self.c32(callee.0), self.c32(n as u32));
+                let (cv, nv) = (self.fid(callee), self.c32(n as u32));
                 self.b.ins().call(
                     self.imp.memo_keep,
                     &[self.env, self.mem, cv, buf, nv, dep, out],
@@ -10343,7 +10453,7 @@ impl Gen<'_> {
                 .store(MemFlagsData::trusted(), idx, od, (k * 4) as i32);
         }
         let (fv, pv, nin, nout) = (
-            self.c32(func),
+            self.fid(FuncId(func)),
             self.c32(pc),
             self.c32(uses.len() as u32),
             self.c32(defs.len() as u32),
