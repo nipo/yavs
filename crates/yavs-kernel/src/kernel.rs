@@ -1216,6 +1216,9 @@ pub struct SimControl {
     /// inline activations (0 until one is timed); the count of batches, which places the timed
     /// activations, and of the batches above and below `pool_ns`, which pick the probes (#497).
     cost: Vec<u32>,
+    /// The largest of `cost`, refreshed every 65536 cycles (`tick`): a batch of `n` processes
+    /// whose `n - 1` could not pass the lowest threshold at this cost is not estimated (`small`).
+    cost_hi: u64,
     /// With a pool: per process, whether it is serial (dense, written only at build: the metas
     /// are written by the workers).
     serial_of: Vec<bool>,
@@ -1702,6 +1705,7 @@ impl SimControl {
             watch_changes: false,
             wakes: Wakes::default(),
             cost,
+            cost_hi: 0,
             serial_of,
             early: Vec::new(),
             pool,
@@ -2526,8 +2530,11 @@ impl SimControl {
     #[cold]
     #[inline(never)]
     fn tick(&mut self) {
-        if self.idle_live_possible && self.cycle & 0xffff == 0 {
-            self.idle_reprobe();
+        if self.cycle & 0xffff == 0 {
+            if self.idle_live_possible {
+                self.idle_reprobe();
+            }
+            self.cost_hi = self.cost.iter().copied().max().map_or(0, u64::from);
         }
         if self.auto.is_some() {
             self.auto_tick();
@@ -4131,7 +4138,21 @@ impl SimControl {
             && !postponed
             && pids.len() >= auto::MIN_PROCS;
         self.calib -= u32::from(calib);
-        let mut est = if self.workers > 0 && !init && !postponed && !calib {
+        // A batch too small to pool at the dearest cost known is not estimated, and timed only one
+        // time in `COST_EVERY` (once a cost is known): both cost a design that never pools 1 to 2
+        // percent of its instructions (#858).
+        let small = self.workers > 0
+            && !calib
+            && !self.cfg.pool_all
+            && (pids.len() as u64)
+                .saturating_sub(1)
+                .saturating_mul(self.cost_hi)
+                <= self.pool_ns.min(POOL_WORK_NS);
+        let untimed = small && {
+            self.batches = self.batches.wrapping_add(1);
+            self.cost_hi != 0 && !self.batches.is_multiple_of(COST_EVERY as u32)
+        };
+        let mut est = if self.workers > 0 && !init && !postponed && !calib && !small {
             self.pool_batch(&pids)
         } else {
             None
@@ -4386,7 +4407,7 @@ impl SimControl {
                     // every position.
                     let (mut sample, step) = if calib {
                         (0, 1)
-                    } else if self.workers > 0 {
+                    } else if self.workers > 0 && !untimed {
                         let at = self.batches.wrapping_mul(0x9e37_79b9) >> 28;
                         (at as usize % COST_EVERY, COST_EVERY)
                     } else {
@@ -4425,6 +4446,7 @@ impl SimControl {
                                         let ns = t.elapsed().as_nanos().min(u128::from(u32::MAX)) as u32;
                                         let c = &mut self.cost[p as usize];
                                         *c = cost_sample(*c, ns);
+                                        self.cost_hi = self.cost_hi.max(u64::from(*c));
                                         r
                                     };
                                     let failed = r.is_err();
@@ -4506,7 +4528,7 @@ impl SimControl {
                             }))
                         };
                     }
-                    let caught = if self.workers > 0 {
+                    let caught = if self.workers > 0 && !untimed {
                         batch_loop!(true)
                     } else {
                         batch_loop!(false)

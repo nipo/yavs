@@ -14734,4 +14734,11 @@ the IR optimiser and lowering. Decisions:
   of the wall time on `rtl_fan`, `rtl_ff`, `rtl_lfsr`, the default tier 0.92 to 0.96 there and on `sc5_fifo_repack`
   (bands of a few percent on a loaded host), more batches pooled per run; the designs that never pool unchanged in
   instructions (0.999 to 1.000). The cost is a clock read per millisecond.
+- **Decision: a batch whose `n - 1` processes could not pass the lowest pool threshold at the dearest cost known
+  (`cost_hi`, the largest process cost) is not estimated, and is timed in one such batch in 16** (agent, #858). Why:
+  the estimate (a pass over the batch) and the timed samples are what `--threads=N` costs a design that never pools.
+  Measured (interpreter, `--threads=4` and `8`, 5 rounds): instructions over one thread on `rtl_ram` 1.012 to 1.004,
+  unchanged within 0.001 elsewhere; `lfsr64` keeps its 2 percent, since its batch of 65 is estimated at just under
+  the threshold and must be estimated. The bound only rises between the recounts every 65536 cycles, so one dear
+  process keeps every batch estimated, as before.
 

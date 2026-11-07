@@ -535,6 +535,32 @@ mod tests {
         }
     }
 
+    /// A batch too small to pool at the dearest cost known is timed one time in `COST_EVERY`,
+    /// not at every batch (#858): a timed activation moves its process's cost off 1000 ns.
+    #[test]
+    fn small_batches_are_timed_rarely() {
+        let mut b = crate::Builder::new();
+        for i in 0..16 {
+            let f = |c: &mut Ctx<'_>| c.wait_for(Time::ns(1));
+            b.process(&format!("p{i}"), crate::ProcFlags::default(), &[], f);
+        }
+        let cfg = Config {
+            threads: 4,
+            ..Config::default()
+        };
+        let mut sim = b.build(cfg).unwrap();
+        sim.run_until(Time::ns(2)).unwrap();
+        sim.cost.fill(1000);
+        sim.cost_hi = 1000;
+        sim.run_until(Time::ns(17)).unwrap();
+        let timed = sim.cost.iter().filter(|&&c| c != 1000).count();
+        assert!(
+            timed <= 1,
+            "{timed} processes timed in 15 batches: {:?}",
+            sim.cost
+        );
+    }
+
     /// A few pooled batches far slower than their estimate do not raise the threshold of a
     /// design whose batches gain; a run of batches no faster than inline does.
     #[test]
