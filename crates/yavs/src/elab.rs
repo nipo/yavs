@@ -290,11 +290,10 @@ pub(crate) fn tiers_built() -> &'static str {
     if crate::reference::GENERIC_TIERS.get() {
         return "the tiers `yavs --version` names";
     }
-    match (cfg!(feature = "llvm"), cfg!(feature = "clift")) {
-        (true, true) => "the Cranelift and LLVM tiers",
-        (false, true) => "the Cranelift tier",
-        (true, false) => "the LLVM tier",
-        (false, false) => "no compiled tier, only `interp`",
+    if cfg!(feature = "clift") {
+        "the Cranelift tier"
+    } else {
+        "no compiled tier, only `interp`"
     }
 }
 
@@ -303,9 +302,8 @@ fn tier_help() -> String {
     let built = tiers_built();
     format!(
         "Execution tier: `interp` runs the interpreter alone; `auto` runs it and compiles the \
-         functions that become hot (see `--tier-compile`); `clift` and `llvm` compile every \
-         function before time 0; `clift-auto` is `auto` with Cranelift; `auto3` has Cranelift \
-         compile warm functions and LLVM O2 those that stay hot. A tier needs its code generator \
+         functions that become hot (see `--tier-compile`); `clift` compiles every function \
+         before time 0; `clift-auto` is another name for `auto`. A tier needs its code generator \
          in the build (error E0120 otherwise): this yavs has {built}. Default: `auto` with a compiled tier, `interp` with \
          `--dap`, `--interactive` or `--do`, and without one."
     )
@@ -555,14 +553,14 @@ impl RunArgs {
     /// The tier of this run: the one asked for, else `auto` where it is built in and nothing
     /// needs the interpreter alone (a debugger reads frame slots).
     pub(crate) fn tier(&self) -> TierArg {
-        let compiled = cfg!(feature = "llvm") || cfg!(feature = "clift");
+        let compiled = cfg!(feature = "clift");
         let t = self.tier.unwrap_or(if compiled && !self.debugged() {
             TierArg::Auto
         } else {
             TierArg::Interp
         });
-        // Without LLVM, `auto` is the same policy with Cranelift (user, 2026-10-24).
-        if t == TierArg::Auto && !cfg!(feature = "llvm") && cfg!(feature = "clift") {
+        // `auto` is the tier-up policy with Cranelift (user, 2026-10-24; LLVM removed 2026-11-08).
+        if t == TierArg::Auto && compiled {
             TierArg::CliftAuto
         } else {
             t
@@ -575,7 +573,9 @@ impl RunArgs {
 pub enum TierArg {
     /// The interpreter alone.
     Interp,
-    /// LLVM: every function before time 0 (the `llvm` feature).
+    /// Removed with the LLVM tier (user, 2026-11-08): kept hidden so that asking for it is a
+    /// clear error (`removed_tier`), not an unknown value.
+    #[value(hide = true)]
     Llvm,
     /// The interpreter, and the functions that become hot compiled during the run.
     Auto,
@@ -583,8 +583,8 @@ pub enum TierArg {
     Clift,
     /// Cranelift: the functions that become hot, during the run.
     CliftAuto,
-    /// Three tiers: the interpreter, Cranelift for warm functions, LLVM O2 for those that stay
-    /// hot (needs the `llvm` and `clift` features).
+    /// Removed with the LLVM tier, like `Llvm`.
+    #[value(hide = true)]
     Auto3,
 }
 
@@ -1088,7 +1088,7 @@ pub fn elab(
 /// Ends tier-up when the run is over (`AutoTier::stop`): `end` at the normal end, without
 /// waiting for a function still compiling; on any other return the drop waits for it.
 enum StopTierUp {
-    #[cfg(any(feature = "llvm", feature = "clift"))]
+    #[cfg(feature = "clift")]
     Llvm(std::sync::Arc<yavs_llvm::AutoTier>),
 }
 
@@ -1099,13 +1099,13 @@ impl StopTierUp {
     #[allow(unused_variables)]
     fn end(self, code: u8, keep_exit: bool) {
         match &self {
-            #[cfg(any(feature = "llvm", feature = "clift"))]
+            #[cfg(feature = "clift")]
             StopTierUp::Llvm(t) => {
                 if !t.stop(keep_exit) {
                     yavs_llvm::exit_now(code);
                 }
             }
-            #[cfg(not(any(feature = "llvm", feature = "clift")))]
+            #[cfg(not(feature = "clift"))]
             _ => {}
         }
     }
@@ -1120,7 +1120,7 @@ impl StopTierUp {
         color: bool,
     ) -> (std::time::Duration, Arc<dyn Fn() + Send + Sync>) {
         match self {
-            #[cfg(any(feature = "llvm", feature = "clift"))]
+            #[cfg(feature = "clift")]
             StopTierUp::Llvm(t) => {
                 let tier = t.clone();
                 (
@@ -1141,7 +1141,7 @@ impl StopTierUp {
                     }),
                 )
             }
-            #[cfg(not(any(feature = "llvm", feature = "clift")))]
+            #[cfg(not(feature = "clift"))]
             _ => unreachable!("no tier-up without a compiled tier"),
         }
     }
@@ -1150,18 +1150,18 @@ impl StopTierUp {
 impl Drop for StopTierUp {
     fn drop(&mut self) {
         match self {
-            #[cfg(any(feature = "llvm", feature = "clift"))]
+            #[cfg(feature = "clift")]
             StopTierUp::Llvm(t) => {
                 t.stop(true);
             }
-            #[cfg(not(any(feature = "llvm", feature = "clift")))]
+            #[cfg(not(feature = "clift"))]
             _ => {}
         }
     }
 }
 
-/// The work library's compilation cache keeps the code Cranelift compiles (#481), as the LLVM tier's
-/// does (#505); not with `--no-cache`.
+/// The work library's compilation cache keeps the code Cranelift compiles (#481); not with
+/// `--no-cache`.
 #[cfg(feature = "clift")]
 fn clift_cache(a: &RunArgs) {
     let work = a.common.work.split_once(':').map_or("", |(_, d)| d);
@@ -1277,124 +1277,6 @@ fn use_clift(
     Ok(Some(StopTierUp::Llvm(t)))
 }
 
-/// `--tier=auto3`: `yavs_llvm::AutoTier` with Cranelift as its first level (functions are
-/// translated by Cranelift once warm, compiled again by LLVM at O2 once they stay hot).
-#[cfg(all(feature = "llvm", feature = "clift"))]
-fn use_auto3(
-    rt: &yavs_interp::Runtime,
-    a: &RunArgs,
-) -> Result<Option<StopTierUp>, Box<Diagnostic>> {
-    clift_cache(a);
-    // (The O2 compiles of LLVM link from its own store, as under `--tier=auto`.)
-    let work = a.common.work.split_once(':').map_or("", |(_, d)| d);
-    if !a.common.no_cache && !work.is_empty() {
-        yavs_llvm::set_cache(Some(std::path::Path::new(work)));
-    }
-    let bug = |e: String| {
-        Box::new(
-            Diagnostic::error("E0121", "the compiled tiers cannot compile the design")
-                .with_note(e)
-                .with_note("this is a bug in yavs"),
-        )
-    };
-    let heat = a
-        .tier_heat
-        .map_or(yavs_llvm::Heat::DEFAULT, |[base, per_instr, period]| {
-            yavs_llvm::Heat {
-                base,
-                per_instr,
-                period,
-                budget: 0,
-            }
-        });
-    let prog = rt.prog.clone();
-    let verbose = a.verbose;
-    let note: yavs_llvm::Note = Box::new(move |f, level, why| {
-        if !verbose {
-            return;
-        }
-        let name = prog.func(f).map_or("?", |f| f.name.as_str());
-        let n = prog.func(f).map_or(0, |f| f.code.len());
-        let by = if level == yavs_llvm::OptLevel::O2 {
-            "LLVM O2"
-        } else {
-            "Cranelift"
-        };
-        match why {
-            Ok(t) => eprintln!(
-                "note: `{name}` ({n} IR instructions) is hot: compiled by --tier=auto3 with {by} in {} us",
-                t.as_micros()
-            ),
-            Err(why) => eprintln!("note: `{name}` is hot but stays interpreted: {why}"),
-        }
-    });
-    let first = yavs_clift::First::new().map_err(bug)?;
-    // `YAVS_MIXED=1`, for tests: LLVM compiles the functions of even id and Cranelift the others
-    // (as the only generator), so compiled callers and callees of both kinds call each other.
-    if std::env::var_os("YAVS_MIXED").is_some() {
-        let t = yavs_llvm::AutoTier::start_deferred_with(
-            rt,
-            yavs_llvm::OptLevel::O2,
-            a.tier_max_size,
-            heat,
-            note,
-            yavs_llvm::Gens {
-                main: Some(Box::new(Mixed {
-                    llvm: yavs_llvm::LlvmGenerator::new(),
-                    clift: first,
-                })),
-                first: None,
-            },
-        )
-        .map_err(|e| bug(e.to_string()))?;
-        return Ok(Some(StopTierUp::Llvm(t)));
-    }
-    let t = yavs_llvm::AutoTier::start_deferred(
-        rt,
-        yavs_llvm::OptLevel::O0,
-        a.tier_max_size,
-        heat,
-        note,
-        Some(Box::new(first)),
-    )
-    .map_err(|e| bug(e.to_string()))?;
-    Ok(Some(StopTierUp::Llvm(t)))
-}
-
-/// The generator of `YAVS_MIXED=1` (`use_auto3`): LLVM for the functions of even id, Cranelift for
-/// the others.
-#[cfg(all(feature = "llvm", feature = "clift"))]
-struct Mixed {
-    llvm: yavs_llvm::LlvmGenerator,
-    clift: yavs_clift::First,
-}
-
-#[cfg(all(feature = "llvm", feature = "clift"))]
-impl yavs_llvm::Generator for Mixed {
-    fn open(&mut self) -> Result<(), String> {
-        self.llvm.open()
-    }
-
-    fn tree(&mut self, ids: &[yavs_ir::FuncId]) {
-        self.clift.tree(ids);
-    }
-
-    fn compile(
-        &mut self,
-        prog: &yavs_ir::Program,
-        id: yavs_ir::FuncId,
-        f: &yavs_ir::Func,
-        level: yavs_llvm::OptLevel,
-        part: yavs_llvm::native::Part,
-    ) -> Result<yavs_llvm::native::Compiled, String> {
-        if id.0.is_multiple_of(2) {
-            self.llvm.compile(prog, id, f, level, part)
-        } else {
-            self.clift.compile(prog, id, f, level, part)
-        }
-    }
-}
-
 /// A name for this run in the profiles of `--tier=auto` and `--threads=auto`: a digest of the
 /// command line.
 fn run_id() -> String {
@@ -1411,7 +1293,7 @@ fn use_tier(
     a: &RunArgs,
 ) -> Result<Option<StopTierUp>, Box<Diagnostic>> {
     let t = tier_of(rt, a)?;
-    #[cfg(any(feature = "llvm", feature = "clift"))]
+    #[cfg(feature = "clift")]
     if let Some(StopTierUp::Llvm(t)) = &t {
         t.set_compile(match a.tier_compile {
             TierCompileArg::Wait => yavs_llvm::Compile::Wait,
@@ -1425,182 +1307,53 @@ fn tier_of(
     rt: Option<&yavs_interp::Runtime>,
     a: &RunArgs,
 ) -> Result<Option<StopTierUp>, Box<Diagnostic>> {
-    if a.tier() == TierArg::Auto3 {
-        #[cfg(all(feature = "llvm", feature = "clift"))]
-        return rt.map_or(Ok(None), |rt| use_auto3(rt, a));
-        #[cfg(not(all(feature = "llvm", feature = "clift")))]
-        return Err(Box::new(
-            Diagnostic::error(
-                "E0120",
-                "`--tier=auto3` needs a yavs built with the LLVM and Cranelift tiers",
-            )
-            .with_note("this yavs was built without the `llvm` and `clift` cargo features")
-            .with_help("use `--tier=interp`, or build yavs with `--features llvm,clift`"),
-        ));
+    if let Some(d) = removed_tier(a) {
+        return Err(d);
     }
-    if matches!(a.tier(), TierArg::Clift | TierArg::CliftAuto) {
-        #[cfg(feature = "clift")]
-        return rt.map_or(Ok(None), |rt| use_clift(rt, a));
-        #[cfg(not(feature = "clift"))]
-        return Err(Box::new(
+    if a.tier() == TierArg::Interp {
+        return Ok(None);
+    }
+    #[cfg(feature = "clift")]
+    return rt.map_or(Ok(None), |rt| use_clift(rt, a));
+    #[cfg(not(feature = "clift"))]
+    {
+        let _ = rt;
+        let name = clap::ValueEnum::to_possible_value(&a.tier()).map(|v| v.get_name().to_string());
+        Err(Box::new(
             Diagnostic::error(
                 "E0120",
-                "`--tier=clift` needs a yavs built with the Cranelift tier",
+                format!(
+                    "`--tier={}` needs a yavs built with the Cranelift tier",
+                    name.unwrap_or_default()
+                ),
             )
             .with_note("this yavs was built without the `clift` cargo feature")
             .with_help(
                 "use `--tier=interp`, or install a yavs release archive or build yavs with \
                  `--features clift`",
             ),
-        ));
-    }
-    use_llvm_tier(rt, a)
-}
-
-/// Set up `--tier=llvm` (compile the program now) or `--tier=auto` (start tier-up).
-#[cfg(feature = "llvm")]
-fn use_llvm_tier(
-    rt: Option<&yavs_interp::Runtime>,
-    a: &RunArgs,
-) -> Result<Option<StopTierUp>, Box<Diagnostic>> {
-    let Some(rt) = rt else {
-        return Ok(None);
-    };
-    let bug = |e: yavs_llvm::Error| {
-        Box::new(
-            Diagnostic::error("E0121", "the LLVM tier cannot compile the design")
-                .with_note(e.to_string())
-                .with_note("this is a bug in yavs"),
-        )
-    };
-    let opt = yavs_llvm::OptLevel::O2;
-    // Compiled code is kept in the compilation cache of the work library (#505).
-    let work = a.common.work.split_once(':').map_or("", |(_, d)| d);
-    if a.tier() != TierArg::Interp && !a.common.no_cache && !work.is_empty() {
-        yavs_llvm::set_cache(Some(std::path::Path::new(work)));
-        // The run-to-run profile of `--tier=auto` is of this command line (#754).
-        yavs_llvm::set_run_id(Some(&run_id()));
-    }
-    match a.tier() {
-        TierArg::Interp | TierArg::Clift | TierArg::CliftAuto | TierArg::Auto3 => Ok(None),
-        TierArg::Llvm => {
-            // A missing library is a problem of the installation, not a bug in the tier.
-            yavs_llvm::load_library().map_err(|e| {
-                Box::new(
-                    Diagnostic::error("E0127", "the LLVM library cannot be loaded")
-                        .with_note(e.to_string())
-                        .with_help(
-                            "keep the `lib` directory of the release archive next to `yavs`, install LLVM 21, or use `--tier=interp`",
-                        ),
-                )
-            })?;
-            let tier = yavs_llvm::compile(&rt.prog, opt, a.tier_max_size).map_err(bug)?;
-            use_llvm(rt, tier, a.verbose);
-            Ok(None)
-        }
-        TierArg::Auto => {
-            let heat = a
-                .tier_heat
-                .map_or(yavs_llvm::Heat::DEFAULT, |[base, per_instr, period]| {
-                    yavs_llvm::Heat {
-                        base,
-                        per_instr,
-                        period,
-                        budget: 0,
-                    }
-                });
-            let prog = rt.prog.clone();
-            let verbose = a.verbose;
-            let note: yavs_llvm::Note = Box::new(move |f, level, why| {
-                if !verbose {
-                    return;
-                }
-                let name = prog.func(f).map_or("?", |f| f.name.as_str());
-                let n = prog.func(f).map_or(0, |f| f.code.len());
-                match why {
-                    Ok(t) => eprintln!(
-                        "note: `{name}` ({n} IR instructions) is hot: compiled by --tier=auto at {level:?} in {} ms",
-                        t.as_millis()
-                    ),
-                    Err(why) => {
-                        eprintln!("note: `{name}` is hot but stays interpreted: {why}")
-                    }
-                }
-            });
-            let t = yavs_llvm::AutoTier::start_deferred(
-                rt,
-                // The hidden `--tier-heat` is for tests and tuning: O0 first, O2 for the hot ones.
-                if a.tier_heat.is_some() {
-                    yavs_llvm::OptLevel::O0
-                } else {
-                    yavs_llvm::OptLevel::O2
-                },
-                a.tier_max_size,
-                heat,
-                note,
-                None,
-            )
-            .map_err(|e| bug(yavs_llvm::Error(e.0)))?;
-            Ok(Some(StopTierUp::Llvm(t)))
-        }
+        ))
     }
 }
 
-/// Run the compiled program from now on (`--tier=llvm`).
-#[cfg(feature = "llvm")]
-fn use_llvm(rt: &yavs_interp::Runtime, tier: yavs_llvm::LlvmTier, verbose: bool) {
-    crate::counters::llvm_compiled(
-        tier.inline,
-        tier.interpreted.iter().map(|k| k.1).sum(),
-        tier.native_frames(),
-    );
-    if verbose {
-        for (f, why) in &tier.notes {
-            let name = rt.prog.func(*f).map_or("?", |f| f.name.as_str());
-            eprintln!("note: `{name}` stays interpreted under --tier=llvm: {why}");
-        }
-        let n: usize = tier.interpreted.iter().map(|k| k.1).sum();
-        let kinds: Vec<String> = tier
-            .interpreted
-            .iter()
-            .map(|(k, c)| format!("{k} {c}"))
-            .collect();
-        eprintln!(
-            "note: --tier=llvm: {} instructions compiled, {n} executed by the interpreter ({}); {} functions callable on native frames",
-            tier.inline,
-            kinds.join(", "),
-            tier.native_frames()
-        );
-        let (hits, stored) = yavs_llvm::cache_stats();
-        eprintln!(
-            "note: --tier=llvm: {hits} modules linked from the compilation cache, {stored} compiled and stored"
-        );
-    }
-    rt.set_tier(std::sync::Arc::new(tier));
-}
-
-#[cfg(not(feature = "llvm"))]
-fn use_llvm_tier(
-    _: Option<&yavs_interp::Runtime>,
-    a: &RunArgs,
-) -> Result<Option<StopTierUp>, Box<Diagnostic>> {
+/// `--tier=llvm` and `--tier=auto3`, removed with the LLVM tier (user, 2026-11-08): E0120.
+fn removed_tier(a: &RunArgs) -> Option<Box<Diagnostic>> {
     let name = match a.tier() {
         TierArg::Llvm => "llvm",
-        TierArg::Auto => "auto",
-        TierArg::Interp | TierArg::Clift | TierArg::CliftAuto | TierArg::Auto3 => return Ok(None),
+        TierArg::Auto3 => "auto3",
+        _ => return None,
     };
-    Err(Box::new(
+    Some(Box::new(
         Diagnostic::error(
             "E0120",
-            format!("`--tier={name}` needs a yavs built with the LLVM tier"),
+            format!("`--tier={name}` was removed together with the LLVM tier"),
         )
-        .with_note("this yavs was built without the `llvm` cargo feature")
+        .with_note("Cranelift is the compiled tier of yavs")
         .with_help(if cfg!(feature = "clift") {
-            "use `--tier=auto` or `--tier=clift`, which this yavs has, or `--tier=interp`; \
-             `--tier=llvm` needs a yavs built with `--features llvm` (needs LLVM 21)"
+            "use `--tier=auto` (the default), `--tier=clift` or `--tier=interp`"
         } else {
-            "use `--tier=interp`, or build yavs with `--features clift` (Cranelift, as the \
-             release archives) or `--features llvm` (needs LLVM 21)"
+            "use `--tier=interp`, or install a yavs release archive or build yavs with \
+             `--features clift` for the compiled tier"
         }),
     ))
 }
@@ -1643,7 +1396,7 @@ fn prepare(
     let (mut out, db, e) = elaborate(
         &a.common,
         lowering,
-        matches!(a.tier(), TierArg::Llvm | TierArg::Clift),
+        a.tier() == TierArg::Clift,
         collapse,
         format,
         color,
@@ -1919,6 +1672,12 @@ fn run_design(
         out.emit(&SourceMap::default(), &d);
         return out.finish(2);
     }
+    // A removed tier fails before any work.
+    if let Some(d) = removed_tier(&a) {
+        let mut out = Out::new(format, color);
+        out.emit(&SourceMap::default(), &d);
+        return out.finish(2);
+    }
     // `--surfer` without `--wave`: `<top>.fst` beside the work library directory.
     if a.surfer.is_some() && a.wave.is_none() {
         let dir = a.common.work.split_once(':').map_or("", |(_, d)| d);
@@ -1978,19 +1737,19 @@ fn run_design(
     if a.debugged() {
         yavs_interp::keep_variables();
     }
-    // Eager Cranelift compiles the whole program before time 0 like `--tier=llvm` (no specialised
-    // copies, layout slots); the tiers that tier up with LLVM get the layout slots, which also keep
-    // the 32-byte blocks the interpreter fuses in the frame, the form compiled code is faster with
-    // (#756). `clift-auto` keeps only the blocks in the frame: its code does not use the slots,
-    // which cost process-frame memory (user, 2026-10-26); `YAVS_CLIFT_LAYOUT_SLOTS=1` adds them.
+    // Eager Cranelift compiles the whole program before time 0 (no specialised copies, layout
+    // slots); the layout slots also keep the 32-byte blocks the interpreter fuses in the frame, the
+    // form compiled code is faster with (#756). `clift-auto` keeps only the blocks in the frame: its
+    // code does not use the slots, which cost process-frame memory (user, 2026-10-26);
+    // `YAVS_CLIFT_LAYOUT_SLOTS=1` adds them.
     match a.tier() {
-        TierArg::Llvm | TierArg::Clift => yavs_interp::compiled_tier(),
-        TierArg::Auto | TierArg::Auto3 => yavs_interp::layout_slots(),
+        TierArg::Clift => yavs_interp::compiled_tier(),
         TierArg::CliftAuto if std::env::var("YAVS_CLIFT_LAYOUT_SLOTS").is_ok_and(|v| v == "1") => {
             yavs_interp::layout_slots()
         }
         TierArg::CliftAuto => yavs_interp::frame_blocks(),
-        TierArg::Interp => {}
+        // (`auto` without Cranelift and the removed tiers stop before the run, `tier_of`.)
+        TierArg::Interp | TierArg::Auto | TierArg::Llvm | TierArg::Auto3 => {}
     }
     // A plugin may deposit into process variables between activations, and the waveform
     // recorder reads them from their slots.
@@ -2160,11 +1919,7 @@ fn run_design(
     let mut tier_up = match use_tier(built.as_ref().map(|b| &*b.rt), &a) {
         Ok(g) => g,
         Err(d) => {
-            let code = if matches!(d.code, "E0120" | "E0127") {
-                2
-            } else {
-                3
-            };
+            let code = if d.code == "E0120" { 2 } else { 3 };
             out.emit(&none, &d);
             return out.finish(code);
         }
@@ -2682,15 +2437,9 @@ fn wave_error(path: &str, err: yavs_wave::Error) -> Diagnostic {
         .with_note(err.to_string())
 }
 
-/// Ends the process from the signal thread. With the compiled tier built in, `exit` would run
-/// the static destructors of LLVM under a compile thread that is inside LLVM (a crash, #625), so
-/// the process ends without exit handlers, unless `keep_exit` (foreign libraries or VHPI plugins
-/// loaded, whose exit handlers must run).
+/// Ends the process from the signal thread. (`keep_exit` chose an exit without handlers for the
+/// removed LLVM tier, whose static destructors crashed under a busy compile thread, #625.)
 fn exit_after_signal(code: u8, keep_exit: bool) -> ! {
-    #[cfg(feature = "llvm")]
-    if !keep_exit {
-        yavs_llvm::exit_now(code);
-    }
     let _ = keep_exit;
     std::process::exit(code.into())
 }

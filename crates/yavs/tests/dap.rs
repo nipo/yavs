@@ -1492,12 +1492,11 @@ end;
 
 #[test]
 fn missing_tier_is_e0120_under_dap() {
+    // (A removed tier is E0120 in every build.)
     let tier = if !cfg!(feature = "clift") {
         "clift"
-    } else if !cfg!(feature = "llvm") {
-        "llvm"
     } else {
-        return; // every tier is built in
+        "llvm"
     };
     let dir = setup("tier");
     let out = yavs()

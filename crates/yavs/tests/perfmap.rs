@@ -1,9 +1,9 @@
-//! The perf map of the compiled tiers (#1074, `YAVS_CLIFT_PERFMAP`, `YAVS_LLVM_PERFMAP`): one line
+//! The perf map of the compiled tier (#1074, `YAVS_CLIFT_PERFMAP`): one line
 //! `address size name` per function of generated code, whether it was compiled in the run or linked
 //! from the compilation cache, named after its process (instance path) or subprogram, and listed
-//! once with the sizes the machine code has. Needs the `clift` or the `llvm` feature and a Unix host (the map is
+//! once with the sizes the machine code has. Needs the `clift` feature and a Unix host (the map is
 //! written to `/tmp`, where `perf` reads it).
-#![cfg(all(unix, any(feature = "clift", feature = "llvm")))]
+#![cfg(all(unix, feature = "clift"))]
 
 mod common;
 use common::tempdir;
@@ -220,16 +220,4 @@ fn clift_lists_compiled_and_cached_code_by_name() {
 #[test]
 fn clift_auto_lists_cached_code_by_name() {
     auto("clift-auto", "YAVS_CLIFT_PERFMAP");
-}
-
-#[cfg(feature = "llvm")]
-#[test]
-fn llvm_lists_compiled_and_cached_code_by_name() {
-    eager("llvm", "YAVS_LLVM_PERFMAP", false);
-}
-
-#[cfg(feature = "llvm")]
-#[test]
-fn llvm_auto_lists_cached_code_by_name() {
-    auto("auto", "YAVS_LLVM_PERFMAP");
 }

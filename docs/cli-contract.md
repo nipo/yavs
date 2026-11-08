@@ -67,10 +67,9 @@ Conventions:
   ```
 
   e.g. `yavs 0.4.0-dev (1a2b3c4 2026-10-18)`. The details say whether the compiled tier is
-  built in: `yavs 0.8.0 (compiled tier: llvm)` or `yavs 0.9.0 (interpreter only, no compiled
-  tier)` (a build with neither `llvm` nor `clift` fails `--tier=auto` and `--tier=llvm` with E0120;
-  a build with the `clift` feature says `compiled tier: cranelift`, or `llvm, cranelift` with
-  both, and runs `--tier=auto` with Cranelift when `llvm` is not built in). The release archives are built with `clift` only, `compiled tier: cranelift` (#780): one per platform, and for x86_64 a second `-compat` one.
+  built in: `yavs 0.9.0 (compiled tier: cranelift)` (a build with the `clift` feature) or `yavs 0.9.0
+  (interpreter only, no compiled tier)` (a build without it fails `--tier=auto`, `clift` and `clift-auto` with E0120).
+  Builds before the LLVM tier was removed (2026-11-08) could also say `llvm`. The release archives are built with `clift` only, `compiled tier: cranelift` (#780): one per platform, and for x86_64 a second `-compat` one.
   The x86_64 release archives without `-compat` are built for x86-64-v3: on a CPU without it every command exits with status 1
   and a plain message on stderr (`error: this build of yavs needs a CPU with x86-64-v3 ...`, naming the missing
   features, the `-compat` archive and building from source), before the command line is read. It has no code and no `--explain`
@@ -246,18 +245,15 @@ identical to a run without it, at any `--threads`.
   of its functions (`libopt-<key>.img`). The library is made when four different closures have asked for the prefix, by
   one run at a time (`<kind>-<key>.making` while it does), and only when no package body follows the
   prefix, nothing was instantiated at elaboration time and the run has no coverage counters and is not
-  `--tier=llvm`; otherwise the run lowers as before. Results, messages and waveforms are identical with
+  `--tier=clift`; otherwise the run lowers as before. Results, messages and waveforms are identical with
   and without it. These entries count toward the limit of the directory.
-- With `--tier=llvm` or `--tier=auto`, the machine code of every module the compiled tier makes is
-  kept in `<dir>/yavs-cache/obj/obj-<key>.img` of the work library (#505); a later run that makes a
-  module with the same key (the same generated code, options, target and yavs build) links it instead
-  of compiling it. Same rules: identical results, damaged or foreign entries ignored and compiled
-  again, atomic writes, nothing stored into a directory that cannot be written, `--no-cache`, `yavs
-  cache clean`. The directory keeps at most 16384 objects and 256 MiB, apart from the 4 GiB of entries, under the same rule at the limit.
-  With `--tier=clift`, `--tier=clift-auto` or `--tier=auto3` the machine code of every function
-  Cranelift translates goes to the same directory as `clif-<key>.img` (the function's translated
-  body, the target and the yavs build; #481), under the same rules and limits; `--tier=auto3` keeps
-  its LLVM modules there too. `route-<key>.img`, one per design, holds how each compiled function
+- With `--tier=clift` or `--tier=auto` the machine code of every function Cranelift translates is kept in
+  `<dir>/yavs-cache/obj/clif-<key>.img` of the work library (the function's translated body, the target and the
+  yavs build; #481, #505); a later run that makes a function with the same key links it instead of compiling it.
+  Same rules: identical results, damaged or foreign entries ignored and compiled again, atomic writes, nothing
+  stored into a directory that cannot be written, `--no-cache`, `yavs cache clean`. The directory keeps at most
+  16384 objects and 256 MiB, apart from the 4 GiB of entries, under the same rule at the limit. (The removed
+  LLVM tier kept its modules there as `obj-<key>.img`.) `route-<key>.img`, one per design, holds how each compiled function
   first called the others, so that an unchanged design makes the same bodies in every run (#1035).
   `clifpre-<key>.img`, one per function, names the `clif-<key>.img` of its code and the symbols it
   refers to, under a key of everything the code depends on, so a warm run links without translating.
@@ -512,7 +508,7 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   status are those of a run without the option. A sample counts every simulation thread that
   runs a process, so with `--threads N` the shares can add up to more than 100 percent. The
   interpreter publishes the subprogram and statement it is in every 128 loop iterations or
-  calls (the subprogram exactly at every call with `--tier=llvm` or `auto`), so short
+  calls (the subprogram exactly at every call with `--tier=auto`), so short
   activations may show none, a statement is where the interpreter last looked, and compiled
   code has no `lines` rows. A small subprogram the optimiser inlined counts as its caller in
   `subprograms`, but its statements are `lines` of their own function. The sampler is a thread
@@ -630,9 +626,9 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   never waits for the client: when too many batches are queued the newest is merged into the
   last (`merged: true`, only the last change of each value kept). A failure of the live waves
   is `E0702` (the run fails). Supported requests and the id scheme: `crates/yavs-dap/AGENTS.md`.
-- `--tier=interp|llvm|auto` (`run`; default `auto` in a build with the `llvm` or the `clift` feature unless `--dap` is
-  given, else `interp`, quietly: no error, no warning; user, 2026-10-22, #510): `llvm` compiles every function of the
-  design with the LLVM tier before time 0 and runs that code; `auto` starts in the interpreter
+- `--tier=interp|auto|clift|clift-auto` (`run`; default `auto` in a build with the `clift` feature unless `--dap` is
+  given, else `interp`, quietly: no error, no warning; user, 2026-10-22, #510): `clift` compiles every function of the
+  design with Cranelift before time 0 and runs that code; `auto` starts in the interpreter
   and compiles each function that becomes hot (once the instructions it ran in the interpreter
   would have paid for its compilation) at the cheapest optimisation level on one background
   thread, swapping the code in while the simulation runs, which never waits for it.
@@ -644,9 +640,9 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   code (package and instance initialisation) runs interpreted either way, and so does a run
   under `--dap`. Under `--dap` an explicit `--tier` is checked like without it (a tier the build lacks is `E0120`, exit 2;
   #835), but nothing is compiled (`--verbose` prints no tier notes): the debugger needs the interpreter's frame
-  slots. `--tier-max-size=N` (default 50000): with `llvm` or `auto`, a function of more
+  slots. `--tier-max-size=N` (default 50000): with `clift` or `auto`, a function of more
   than N IR instructions stays interpreted (user, 2026-10-19, #126). `--tier-compile=wait|background`
-  (default `wait`; user, 2026-11-07, #1123): with `auto` (and `clift-auto`, `auto3`), where hot functions
+  (default `wait`; user, 2026-11-07, #1123): with `auto` (and `clift-auto`), where hot functions
   compile. `wait`: the tier-up thread compiles only while the simulation waits for it at a pause point (the
   start of a delta cycle, the interpreter's periodic looks inside a long process run, a step that compiled
   code hands the interpreter), so a run keeps at most `--threads` threads busy; compiled code in a loop that
@@ -662,16 +658,15 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   `--tier-heat`. `--tier-heat=BASE,PER_INSTR,PERIOD`
   (hidden, for tests and tuning): with `auto`, a function is hot once a sample every PERIOD
   microseconds has seen the interpreter in it for BASE microseconds plus PER_INSTR nanoseconds
-  per IR instruction of it (PERIOD `0`, as in `1,0,0`: from its first call or jump). `llvm` needs a yavs
-  built with the `llvm` cargo feature (LLVM 21), `auto` one built with `llvm` or `clift`: otherwise asking for them
-  explicitly is error `E0120` (exit 2). `--help` for `--tier` and `--explain E0120` name the tiers the executable
+  per IR instruction of it (PERIOD `0`, as in `1,0,0`: from its first call or jump). `auto`, `clift`
+  and `clift-auto` need a yavs built with the `clift` cargo feature: otherwise asking for them explicitly is error
+  `E0120` (exit 2). `llvm` and `auto3` were removed with the LLVM tier (user, 2026-11-08): asking for them is `E0120`
+  in every build, before any analysis, with a help line naming the tiers to use. `--help` for `--tier` and `--explain E0120` name the tiers the executable
   has (#845, #850); a
   design the tier cannot compile (or a compile thread that cannot start) is `E0121` (exit 3, a
-  bug in yavs); an LLVM library that cannot be loaded (Linux: `lib/` next to `yavs`, else the
-  system's) is `E0127` for `--tier=llvm` (exit 2), and a warning for `--tier=auto`, whose hot code stays
-  interpreted. `clift` and `clift-auto` are `llvm` and `auto` with the Cranelift code generator; they need a yavs built with
-  the `clift` cargo feature (no LLVM needed), otherwise `E0120`, and give the same output. In a build with `clift` and without `llvm`, `--tier=auto` is `clift-auto`, and so is the default tier of such a build (`interp` under `--dap`). `auto3` is `auto` with Cranelift as its first level: a function that becomes warm is translated by Cranelift, one that stays hot is compiled again by LLVM at O2 (a yavs built with both features, otherwise `E0120`); the output is the same. `--verbose` prints, on stderr, a note per function left to the
-  interpreter and how many instructions were compiled (`llvm`), or a note per hot function as
+  bug in yavs; `E0127`, the LLVM library that could not be loaded, is retired). `clift-auto` is another name for
+  `auto`. `--verbose` prints, on stderr, a note per function left to the
+  interpreter and how many instructions were compiled (`clift`), or a note per hot function as
   the compile thread takes it (`auto`, so their order and number depend on timing). The test
   runner passes neither; use `yavs.sim_flags`. It passes `--tier-compile` from the sim option
   `yavs.tier_compile` (before `yavs.sim_flags`, which win).

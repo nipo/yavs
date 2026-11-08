@@ -26,7 +26,7 @@ tests pass; every failure is tracked as an issue. This is evidence, not a proof 
 Terms used here: *passed / total* counts the tests a suite judges itself, out of the tests that can be judged (a test whose own
 expectation is wrong or depends on the implementation is not counted, with its reason). To *analyse* a file is to
 check it and store it in a library; to *simulate* is to elaborate the design and run it. A *tier* is the interpreter or one of the
-compilers (LLVM, Cranelift) that run a design; every tier gives the same output. The *language reference* is the IEEE 1076 standard.
+compiler (Cranelift) that run a design; every tier gives the same output. The *language reference* is the IEEE 1076 standard.
 
 ## Details
 
@@ -554,8 +554,8 @@ The table is a full run: nightly, by hand and on a release tag. A push runs Linu
 | suite | where | date, commit | tool |
 | --- | --- | --- | --- |
 | Differential testbenches | CI | this report (see Generated) | `tools/difftest/difftest.py` |
-| Differential testbenches, `auto` tier | local | 2026-10-26, `cd5268f8b2` | `tools/conformance/run.py --local --llvm` |
-| Differential testbenches, `llvm` tier | local | 2026-10-26, `cd5268f8b2` | `tools/conformance/run.py --local --llvm` |
+| Differential testbenches, `auto` tier | local | 2026-10-26, `cd5268f8b2` | `tools/conformance/run.py --local --compiled` |
+| Differential testbenches, `llvm` tier | local | 2026-10-26, `cd5268f8b2` | `tools/conformance/run.py --local --compiled` |
 | Known simulator differences | CI | this report (see Generated) | `tools/discrepancies/run.py` |
 | sim1's regression tests | CI | this report (see Generated) | `tools/difftest/external.py` |
 | sim2's regression tests | CI | this report (see Generated) | `tools/difftest/external.py` |
@@ -574,9 +574,9 @@ The table is a full run: nightly, by hand and on a release tag. A push runs Linu
 
 ```sh
 tools/fetch-corpus.sh                        # the external suites and libraries at pinned commits, ~/.cache/rsim-corpus
-cargo build --release -p yavs                # add --features llvm for the LLVM tier (needs LLVM 21)
+cargo build --release -p yavs --features clift  # with the compiled tier
 tools/conformance/run.py --yavs target/release/yavs --out ~/.cache/yavs-conformance                 # what CI runs
-tools/conformance/run.py --yavs target/release/yavs --out ~/.cache/yavs-conformance --local --llvm  # plus the local results
+tools/conformance/run.py --yavs target/release/yavs --out ~/.cache/yavs-conformance --local --compiled  # plus the local results
 tools/conformance/run.py --check --yavs target/release/yavs --out ~/.cache/yavs-conformance         # is the committed report current?
 ```
 
@@ -591,6 +591,6 @@ The local results need the reference simulators, configured in the untracked `to
 | PSL | a subset; the rest is skipped with warning W0004 or listed in the tracking issue [#445](https://github.com/ru551n/yavs/issues/445) |
 | SDF and VITAL timing, SystemC, macOS | out of scope (docs/plan.md, "Out of scope") |
 | Platforms | Linux x86_64, Linux aarch64 and Windows x86_64 only |
-| LLVM tier | the release archives use the Cranelift compiled tier (`--tier=auto` default); the LLVM tier exists only in a build from source with the `llvm` feature. CI has not built or tested it since 2026-10-30 ([#898](https://github.com/ru551n/yavs/issues/898)) |
+| LLVM tier | removed on 2026-11-08 (maintainer decision): the compiled tier is Cranelift (`--tier=auto`, the default, and `--tier=clift`) |
 | Reference simulators | the comparison is against two established open-source VHDL simulators (sim3 and sim4, two commercial simulators, vote in part of the discrepancy catalogue); where the language reference is unclear yavs is permissive and the choice is recorded below |
 | What a pass means | a pass is agreement with a recorded reference output or with a suite's own verdict. It is evidence, not a proof of correctness; each known disagreement is listed in the catalogue |

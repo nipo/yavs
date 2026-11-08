@@ -2,7 +2,7 @@
 //! negations, `not`, `to_x01`, `to_ux01`, fills, slices (null ones too) and concatenations of
 //! every length class (1 element, the plane block of 64, 65, several blocks), with every
 //! std_ulogic code among the elements. Output and exit status are the same in every tier.
-#![cfg(any(feature = "llvm", feature = "clift"))]
+#![cfg(feature = "clift")]
 
 mod common;
 use common::tempdir;
@@ -183,16 +183,10 @@ fn vector_operations_in_compiled_code_match_the_interpreter() {
     assert_eq!(want.0, Some(0), "{want:?}");
     assert!(want.1.lines().count() >= 300, "{}", want.1);
     for flags in [
-        #[cfg(feature = "llvm")]
-        vec!["--tier=llvm"],
-        #[cfg(feature = "llvm")]
-        vec!["--tier=auto", "--tier-heat=1,0,0"],
         #[cfg(feature = "clift")]
         vec!["--tier=clift"],
         #[cfg(feature = "clift")]
         vec!["--tier=clift-auto", "--tier-heat=1,0,0"],
-        #[cfg(all(feature = "llvm", feature = "clift"))]
-        vec!["--tier=auto3", "--tier-heat=1,0,0"],
     ] {
         assert_eq!(run(&dir, &flags), want, "{flags:?}");
     }
@@ -298,16 +292,10 @@ fn to_01_in_compiled_code_matches_the_interpreter() {
     assert_eq!(want.0, Some(0), "{want:?}");
     assert!(want.1.lines().count() >= 700, "{}", want.1);
     for flags in [
-        #[cfg(feature = "llvm")]
-        vec!["--tier=llvm"],
-        #[cfg(feature = "llvm")]
-        vec!["--tier=auto", "--tier-heat=1,0,0"],
         #[cfg(feature = "clift")]
         vec!["--tier=clift"],
         #[cfg(feature = "clift")]
         vec!["--tier=clift-auto", "--tier-heat=1,0,0"],
-        #[cfg(all(feature = "llvm", feature = "clift"))]
-        vec!["--tier=auto3", "--tier-heat=1,0,0"],
     ] {
         assert_eq!(run_z(&dir, &flags), want, "{flags:?}");
     }
@@ -413,16 +401,10 @@ fn tiers_match(name: &str, src: &str, min: usize) {
     assert_eq!(want.0, Some(0), "{want:?}");
     assert!(want.1.lines().count() >= min, "{}", want.1);
     for flags in [
-        #[cfg(feature = "llvm")]
-        vec!["--tier=llvm"],
-        #[cfg(feature = "llvm")]
-        vec!["--tier=auto", "--tier-heat=1,0,0"],
         #[cfg(feature = "clift")]
         vec!["--tier=clift"],
         #[cfg(feature = "clift")]
         vec!["--tier=clift-auto", "--tier-heat=1,0,0"],
-        #[cfg(all(feature = "llvm", feature = "clift"))]
-        vec!["--tier=auto3", "--tier-heat=1,0,0"],
     ] {
         assert_eq!(go(&flags), want, "{flags:?}");
     }
@@ -1539,16 +1521,10 @@ fn all_tiers_fail(name: &str, src: &str) {
         "{want:?}"
     );
     for flags in [
-        #[cfg(feature = "llvm")]
-        vec!["--tier=llvm"],
-        #[cfg(feature = "llvm")]
-        vec!["--tier=auto", "--tier-heat=1,0,0"],
         #[cfg(feature = "clift")]
         vec!["--tier=clift"],
         #[cfg(feature = "clift")]
         vec!["--tier=clift-auto", "--tier-heat=1,0,0"],
-        #[cfg(all(feature = "llvm", feature = "clift"))]
-        vec!["--tier=auto3", "--tier-heat=1,0,0"],
     ] {
         assert_eq!(go(&flags), want, "{flags:?}");
     }
@@ -2206,8 +2182,6 @@ fn elements_of_array_operands_in_subprograms_match_the_interpreter() {
         vec!["--tier=clift", "--threads=4"],
         #[cfg(feature = "clift")]
         vec!["--tier=clift-auto", "--tier-heat=1,0,0", "--threads=4"],
-        #[cfg(feature = "llvm")]
-        vec!["--tier=auto", "--tier-heat=1,0,0", "--threads=4"],
     ] {
         assert_eq!(go(&flags), want, "{flags:?}");
     }
@@ -2709,8 +2683,6 @@ end;
         assert!(want.1.contains("k=3"), "{name}: {want:?}");
         assert!(want.2.contains(what), "{name}: {want:?}");
         for flags in [
-            #[cfg(feature = "llvm")]
-            vec!["--tier=llvm"],
             #[cfg(feature = "clift")]
             vec!["--tier=clift"],
             #[cfg(feature = "clift")]

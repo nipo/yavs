@@ -578,7 +578,7 @@ def main():
     ap.add_argument("--sims", default="", help="reference simulator labels, e.g. sim1,sim2 (internal designs only)")
     ap.add_argument("--ref", default="", help="head-to-head: reference labels (e.g. sim1,sim2); BIN is the yavs binary")
     ap.add_argument("--cores", default="", help="--ref: cpu list every timed run is pinned to (default: the performance cores)")
-    ap.add_argument("--tiers", default="interp", help="--ref: yavs tiers to time, comma separated (interp,auto,llvm)")
+    ap.add_argument("--tiers", default="interp", help="--ref: yavs tiers to time, comma separated (interp,auto,clift)")
     ap.add_argument("--tiny", action="store_true", help="--ref: then run the tiny-test corpus too (tiny.py, same references)")
     ap.add_argument("--instructions", action="store_true", help="--ref: one extra perf-stat run per cell for the instruction count")
     ap.add_argument("--out", default=str(CACHE))

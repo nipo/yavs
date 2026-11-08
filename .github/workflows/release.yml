@@ -257,8 +257,8 @@ jobs:
           env -u YAVS_STDLIB "$name/yavs" run --work=work:$w t | grep -q ': ok'
           env -u YAVS_STDLIB "$name/yavs" run --tier=auto --work=work:$w t | grep -q ': ok'
           env -u YAVS_STDLIB "$name/yavs" run --tier=clift --work=work:$w t | grep -q ': ok'
-          # Without LLVM the LLVM tier is refused (fail early, no fallback).
-          if "$name/yavs" run --tier=llvm --work=work:$w t 2> err.txt; then echo "--tier=llvm ran without LLVM"; exit 1; fi
+          # The removed LLVM tier is refused (fail early, no fallback).
+          if "$name/yavs" run --tier=llvm --work=work:$w t 2> err.txt; then echo "--tier=llvm ran"; exit 1; fi
           grep -q E0120 err.txt
           # Linux: the same smoke test in the oldest environment the archive claims (glibc 2.17).
           # centos:7 is multi-arch, so the arm64 runner runs the arm64 image natively.

@@ -1,7 +1,7 @@
 //! Element loops in compiled code (#757): on a native frame the iterations of a copy or fill loop
 //! but the last run planned in the code itself (or in `yavs_rt_eloop` for the shapes it leaves), and the output, the exit status and the message of a loop
 //! that leaves its vector are those of the interpreter, which runs the plain loop.
-#![cfg(any(feature = "llvm", feature = "clift"))]
+#![cfg(feature = "clift")]
 
 mod common;
 use common::tempdir;
@@ -64,12 +64,6 @@ fn element_loops_in_compiled_code_match_the_interpreter() {
     let want = run(&d, &["--tier=interp"], false, false);
     assert!(text(&want).contains("short LLLHH000"), "{}", text(&want));
     let mut tiers = Vec::new();
-    if cfg!(feature = "llvm") {
-        tiers.push((vec!["--tier=llvm"], 5, false));
-        tiers.push((vec!["--tier=auto", "--tier-heat=1,0,0"], 1, false));
-        tiers.push((vec!["--tier=llvm"], 5, true));
-        tiers.push((vec!["--tier=auto", "--tier-heat=1,0,0"], 1, true));
-    }
     if cfg!(feature = "clift") {
         tiers.push((vec!["--tier=clift"], 5, false));
         tiers.push((vec!["--tier=clift-auto", "--tier-heat=1,0,0"], 1, false));

@@ -1,12 +1,12 @@
 //! Procedures and functions that drive signals, read vector signals or slices, run on native frames
-//! of compiled code (`--tier=llvm`, `--tier=auto` compiling everything at once; a build with the
-//! `llvm` feature) and give the interpreter's results: scalar, vector (also wider than 64
+//! of compiled code (`--tier=clift`, `--tier=auto` compiling everything at once; a build with the
+//! `clift` feature) and give the interpreter's results: scalar, vector (also wider than 64
 //! elements), integer, real, time, enumeration and array targets, delayed, transport and rejecting
 //! assignments, a resolved signal with two drivers, nested procedures, reads of vectors of 8 to
 //! 100 elements and of slices of an unconstrained signal parameter. Where the kernel's fast answer
 //! is missing (an array of integers, a negative delay) the frames are materialised and the
 //! interpreter runs the assignment, error and call trace included.
-#![cfg(any(feature = "llvm", feature = "clift"))]
+#![cfg(feature = "clift")]
 
 mod common;
 use common::tempdir;
@@ -175,18 +175,10 @@ fn counter(stderr: &str, name: &str) -> u64 {
 
 const TIERS: &[&[&str]] = &[
     &["--tier=interp"],
-    #[cfg(feature = "llvm")]
-    &["--tier=llvm"],
-    #[cfg(feature = "llvm")]
-    &["--tier=auto", "--tier-heat=1,0,0"],
-    #[cfg(feature = "llvm")]
-    &["--tier=auto", "--tier-heat=1,0,0", "--threads=4"],
     #[cfg(feature = "clift")]
     &["--tier=clift"],
     #[cfg(feature = "clift")]
     &["--tier=clift-auto", "--tier-heat=1,0,0", "--threads=4"],
-    #[cfg(all(feature = "llvm", feature = "clift"))]
-    &["--tier=auto3", "--tier-heat=1,0,0"],
 ];
 
 fn run(dir: &Path, flags: &[&str], top: &str) -> Output {
@@ -209,13 +201,10 @@ fn signal_procedures_and_vector_functions_on_native_frames_match_the_interpreter
         let o = run(&dir, flags, "native_signals");
         assert!(o.status.success(), "{flags:?}: {o:?}");
         assert_eq!(String::from_utf8_lossy(&o.stdout), want, "{flags:?}");
-        if flags == &["--tier=llvm"] || flags == &["--tier=clift"] {
+        if flags == &["--tier=clift"] {
             // The procedures and functions run on native frames: the calls are not steps of
             // the interpreter (only the rejecting procedure and the report calls are).
             let err = String::from_utf8_lossy(&o.stderr);
-            if flags == &["--tier=llvm"] {
-                assert!(counter(&err, "llvm_native_frames") >= 14, "{err}");
-            }
             assert!(counter(&err, "cb_step.Call") <= 32, "{err}");
         }
     }

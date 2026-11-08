@@ -9,7 +9,7 @@ script, or measures a profile-guided binary.
   (`-C profile-generate`), the training runs (`train.py`), `llvm-profdata merge`, and the final build (`-C profile-use`). No
   crate changes; the profile is regenerated in every build, never checked in (a checked-in profile goes stale with every source
   change). `llvm-profdata` comes from rustup's `llvm-tools` component (`rustup component add llvm-tools`, rustc's own LLVM, so the
-  profile format matches); the yavs LLVM tier is not involved.
+  profile format matches).
 - `train.py` runs the cases in `train/*.vhd` with the instrumented binary and fails on any run that does not exit 0.
 - Perf comparisons of runtime changes run on profile-guided bench builds (`tools/build-bench.sh --pgo OUT`, after an A/A of
   two such builds), those of generated-code changes on plain bench builds by exact counts (maintainer, 2026-11-06;

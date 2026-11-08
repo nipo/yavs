@@ -1735,13 +1735,8 @@ impl Jit {
             self.last_cov = Some((did, blocks));
         }
         if self.pin {
-            // Every caller of a native variant has the view in the register already, except an
-            // LLVM-compiled one (`--tier=auto3`).
-            pin_mem(
-                &mut ctx.func,
-                if native { 1 } else { 2 },
-                native && !yavs_llvm::WITH_LLVM,
-            );
+            // Every caller of a native variant has the view in the register already.
+            pin_mem(&mut ctx.func, if native { 1 } else { 2 }, native);
         }
         // `YAVS_CLIFT_CLIF=<function id>`: the Cranelift IR of that function (variant) on stderr.
         if std::env::var("YAVS_CLIFT_CLIF")

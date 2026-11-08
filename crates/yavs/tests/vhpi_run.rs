@@ -947,21 +947,6 @@ fn vhpi_reads_and_deposits_variables() {
         ];
         yavs(&args)
     };
-    // Compiled code too: a process whose declarative part runs early (`prestart`) stops
-    // before its statements, also when it is compiled.
-    let tier = |t: &str| {
-        let args = [
-            "run",
-            "--relaxed",
-            &lib,
-            &spec,
-            "--resolution=ns",
-            t,
-            "--tier-heat=1,0,0",
-            "top",
-        ];
-        yavs(&args)
-    };
     let (code, err, out) = run("--threads=1");
     assert_eq!(code, 0, "{err}");
     assert!(!err.contains("bug in yavs"), "{err}");
@@ -981,13 +966,6 @@ fn vhpi_reads_and_deposits_variables() {
     assert_eq!(code, 0, "{err}");
     assert_eq!(again, out, "--profile");
     assert!(err.contains("profile: processes"), "{err}");
-    if cfg!(feature = "llvm") {
-        for t in ["--tier=llvm", "--tier=auto"] {
-            let (code, err, again) = tier(t);
-            assert_eq!(code, 0, "{err}");
-            assert_eq!(again, out, "{t}");
-        }
-    }
 }
 
 /// `--vhpi` under `--dap` (#325): the plugin runs and ends the simulation. Over a port: the

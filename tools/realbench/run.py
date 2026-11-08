@@ -11,7 +11,7 @@
 Tests are listed in tests.toml (source, path, top, generics, library setup, category, why). Libraries come
 from the analysis-corpus manifests of tools/corpus (built once per tool, cached under --cache), the
 test's own extra files are analysed on top, all in a private world directory per timed cell. Cells:
-`interp`, `auto`, `llvm` are warm (an untimed run fills the compilation cache of the world, then the timed
+`interp`, `auto`, `clift` are warm (an untimed run fills the compilation cache of the world, then the timed
 runs); `<tier>-cold` copies the pristine world before every timed run (empty compilation cache). The
 reference (--ref, label sim1) runs elaboration plus run, analysis excluded. Every timed run is pinned to one
 core of --cores (one test at a time per core), under systemd-run MemoryMax=2G and timeout 300 (`--timeout`), wall, CPU,
@@ -19,7 +19,7 @@ peak RSS and (perf) instructions as in tools/bench/run.py --ref, which supplies 
 Phases (--phases, default all four), each timed apart for yavs and the reference, with a ratio yavs / reference per test, per category
 and overall: `analyze` (the test's whole compile order, consecutive files of one library and standard in ONE CALL by default, for both tools
 (#745; --analyze-calls per-file: one call per file); library part and own files apart; cold = fresh libraries, warm =
-the same files again into the populated libraries), `elab` (elaboration only, cold and warm cache), `codegen` (yavs `--tier=llvm` minus
+the same files again into the populated libraries), `elab` (elaboration only, cold and warm cache), `codegen` (yavs `--tier=clift` minus
 `--tier=interp`, both stopped at time 0; cold and warm cache; the reference generates code inside its elaboration), `run` (the --tiers cells).
 Python is stdlib only (run with `python3 -I`) except that the OSVVM driver tests need pyEDAA.OSVVM (tools/suites/requirements.txt). See AGENTS.md.
 """
@@ -49,7 +49,7 @@ COLD = "-cold"
 ANALYZE_CALLS = "batched"  # analysis cells and replays: "batched" (consecutive files of a library and standard per call) or "per-file"
 RECORDER = (None, None)  # (binary, key) that records the suite drivers for the reference worlds
 TIERS_DEFAULT = "interp,auto,auto-cold"
-TIERS_ALL = ("interp", "auto", "llvm", "clift", "clift-auto", "auto3")
+TIERS_ALL = ("interp", "auto", "clift", "clift-auto")
 
 
 class Fail(Exception):
@@ -553,7 +553,7 @@ SHARED = {}  # library-part analysis cells shared by the tests of one corpus sel
 
 class Cell:
     """One timed command of a test. mode: run (elaboration and run), elab (elaboration only), stop0 (run to time 0: elaboration, package
-    initialisation and, with the llvm tier, code generation), analyze (the compile order, one call per file; part lib or own)."""
+    initialisation and, with the clift tier, code generation), analyze (the compile order, one call per file; part lib or own)."""
 
     def __init__(self, name, tool, binary=None, tier=None, cold=False, phase="run", mode="run", part=None, shared=None):
         self.name, self.tool, self.binary, self.tier, self.cold = name, tool, binary, tier, cold
@@ -760,7 +760,7 @@ def measure_group(t, cells, ctx, cores, runs, instr, scratch):
 
 
 def derive(kind, parts):
-    """sum: the analysis of the library part plus the own files. diff: llvm minus interp up to time 0 (code generation, floored at 0)."""
+    """sum: the analysis of the library part plus the own files. diff: clift minus interp up to time 0 (code generation, floored at 0)."""
     if any(p.get("wall") is None for p in parts):
         return {"wall": None, "cpu": None, "rss": None, "ins": None, "ok": 0, "runs": 0, "rcs": [r for p in parts for r in p["rcs"]], "tail": "; ".join(p.get("tail", "") for p in parts if p.get("tail"))}
     f = (lambda xs: None if None in xs else sum(xs)) if kind == "sum" else (lambda xs: None if None in xs else max(xs[0] - xs[1], 0.0))
@@ -785,7 +785,7 @@ def make_cells(binaries, refs, tiers, phases, compare=False):
             if p == "run":
                 for tk in tiers if yavs else ["run"]:
                     if yavs and tk.removesuffix(COLD).split("+")[0].partition("@")[0] not in TIERS_ALL:
-                        raise Fail(f"unknown tier `{tk}` (interp, auto, llvm, clift, clift-auto, auto3, each also with {COLD} and as tier@N for N threads)")
+                        raise Fail(f"unknown tier `{tk}` (interp, auto, clift, clift-auto, each also with {COLD} and as tier@N for N threads)")
                     cells.append(Cell(nm(tk), tool, b, tk.removesuffix(COLD) if yavs else None, tk.endswith(COLD)))
                     ph[p].append(nm(tk))
                     if yavs and ref0:
@@ -798,8 +798,8 @@ def make_cells(binaries, refs, tiers, phases, compare=False):
                     if yavs and ref0:
                         basis[nm(f"elab-{temp}")] = f"{ref0}:elab-{temp}"
                 elif p == "codegen" and yavs:
-                    raw = [nm(f"{tier}0-{temp}") for tier in ("llvm", "interp")]
-                    cells += [Cell(n, tool, b, tier, cold, p, "stop0") for n, tier in zip(raw, ("llvm", "interp"))]
+                    raw = [nm(f"{tier}0-{temp}") for tier in ("clift", "interp")]
+                    cells += [Cell(n, tool, b, tier, cold, p, "stop0") for n, tier in zip(raw, ("clift", "interp"))]
                     hidden += raw
                     derived.append((nm(f"codegen-{temp}"), "diff", raw))
                     ph[p].append(nm(f"codegen-{temp}"))
@@ -1111,9 +1111,9 @@ def self_test():
     names = {c.name: c for c in cells}
     assert spec["phases"]["run"] == ["sim1", "interp", "auto-cold"] and spec["basis"]["interp"] == "sim1"
     assert spec["basis"]["analyze-cold-lib"] == "sim1:analyze-cold-lib" and spec["basis"]["elab-warm"] == "sim1:elab-warm"
-    assert spec["basis"]["codegen-cold"] == "sim1:elab-cold" and set(spec["hidden"]) == {"llvm0-cold", "interp0-cold", "llvm0-warm", "interp0-warm"}
+    assert spec["basis"]["codegen-cold"] == "sim1:elab-cold" and set(spec["hidden"]) == {"clift0-cold", "interp0-cold", "clift0-warm", "interp0-warm"}
     assert names["sim1:analyze-cold-lib"].shared and not names["analyze-cold-own"].shared and names["elab-warm"].warmups == 2 and names["elab-cold"].warmups == 1
-    assert names["analyze-warm-own"].warmups == 1 and names["llvm0-warm"].mode == "stop0" and names["sim1:elab-cold"].cold
+    assert names["analyze-warm-own"].warmups == 1 and names["clift0-warm"].mode == "stop0" and names["sim1:elab-cold"].cold
     assert [d[:2] for d in derived if d[0] in ("codegen-warm", "analyze-cold")] == [("analyze-cold", "sum"), ("codegen-warm", "diff")]
     assert make_cells(bins * 2, [], ["interp"], ["run"], True)[2]["basis"] == {}  # (labels A/B come from main)
     two = [dict(bins[0], label="A"), dict(bins[0], label="B")]
@@ -1125,9 +1125,9 @@ def self_test():
     assert derive("sum", [c(1, 1), {"wall": None, "rcs": [1], "tail": "x"}])["wall"] is None
     ph = {"analyze": ["analyze-cold", "analyze-cold-lib", "analyze-cold-own", "sim1:analyze-cold", "sim1:analyze-cold-lib", "sim1:analyze-cold-own"], "codegen": ["codegen-cold"], "elab": ["elab-cold", "sim1:elab-cold"]}
     bs = {"analyze-cold": "sim1:analyze-cold", "analyze-cold-lib": "sim1:analyze-cold-lib", "analyze-cold-own": "sim1:analyze-cold-own", "codegen-cold": "sim1:elab-cold", "elab-cold": "sim1:elab-cold"}
-    meta3 = dict(meta, phases=ph, basis=bs, hidden=["llvm0-cold"], cells=[n for v in ph.values() for n in v])
+    meta3 = dict(meta, phases=ph, basis=bs, hidden=["clift0-cold"], cells=[n for v in ph.values() for n in v])
     cs = {"analyze-cold": c(2, 20), "analyze-cold-lib": c(1.5, 15), "analyze-cold-own": c(0.5, 5), "sim1:analyze-cold": c(1, 20), "sim1:analyze-cold-lib": c(0.75, 15),
-          "sim1:analyze-cold-own": c(0.25, 5), "codegen-cold": c(3), "elab-cold": c(0.1), "sim1:elab-cold": c(0.3), "llvm0-cold": {"wall": None, "rcs": [1], "tail": "hidden"}}
+          "sim1:analyze-cold-own": c(0.25, 5), "codegen-cold": c(3), "elab-cold": c(0.1), "sim1:elab-cold": c(0.3), "clift0-cold": {"wall": None, "rcs": [1], "tail": "hidden"}}
     md3 = markdown({"meta": meta3, "tests": {"a": {"category": "c1", "cells": cs}}})
     assert "## Phase: analyze" in md3 and "| analyze-cold | 1 | **2.00**" in md3 and "| codegen-cold | 1 | **10.00**" in md3 and "Analysis per file" in md3 and "100.0" in md3
     assert "hidden" not in md3 and "analyze-cold-lib | " in md3
@@ -1217,10 +1217,10 @@ def main():
                     "tiers auto,auto-cold,auto@4 (1 and 4 threads: --cores needs 4 CPUs, e.g. 9,10,11,12), 3 runs, counted cycles, timeout 900, label cpubench; each option still wins when given")
     ap.add_argument("--with-interp", action="store_true", help="with --cpubench: also the interpreter tier (its own before/after, never compared with the reference; adds the longest cell)")
     ap.add_argument("--phases", default=",".join(PHASES), help="comma separated: analyze (the compile order, cold and warm; see --analyze-calls), elab (elaboration only), "
-                    "codegen (llvm tier minus interp up to time 0), run (the --tiers cells)")
+                    "codegen (clift tier minus interp up to time 0), run (the --tiers cells)")
     ap.add_argument("--analyze-calls", choices=("batched", "per-file"), default="batched",
                     help="analysis cells, both tools: consecutive files of a library and standard in one call (default, #745) or one call per file")
-    ap.add_argument("--tiers", default=TIERS_DEFAULT, help="run phase: comma separated: interp, auto, llvm, each also as <tier>-cold")
+    ap.add_argument("--tiers", default=TIERS_DEFAULT, help="run phase: comma separated: interp, auto, clift, clift-auto, each also as <tier>-cold")
     ap.add_argument("--tests", default="", help="comma separated test names")
     ap.add_argument("--category", default="", help="only this category")
     ap.add_argument("--runs", default="auto", help="timed runs per cell (default auto: 5, 3 or 2 by test length; 0 = probe)")

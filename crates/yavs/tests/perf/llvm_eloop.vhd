@@ -1,4 +1,4 @@
--- Copy and fill loops over logic vectors in functions that run on native frames under --tier=llvm:
+-- Copy and fill loops over logic vectors in functions that run on native frames under --tier=clift:
 -- each is planned at its head, its iterations but the last done at once (the short row copies
 -- inline, the fills by a runtime call, cb_eloop), and the rest stays in the compiled code (no
 -- step, no deopt, no lookup call).

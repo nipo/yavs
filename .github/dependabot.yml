@@ -15,10 +15,6 @@ updates:
       cargo-minor-patch:
         update-types: [minor, patch]
     ignore:
-      # llvm-sys is pinned with "=211.1.1" on purpose: LLVM 21 is the only supported LLVM
-      # (docs/decisions.md, "LLVM bindings: llvm-sys 211"). Major bumps need a decision first.
-      - dependency-name: "llvm-sys"
-        update-types: ["version-update:semver-major"]
       # Cranelift (yavs-clift, `clift` feature, #481) is pinned with "=": 0.x minor releases are
       # breaking, so major and minor bumps are made by hand after the clift benchmarks
       # (docs/STATUS.md, "clift"); patch releases come with the group above.

@@ -97,10 +97,6 @@ fn records_without_byte_codes_match_records_with_them() {
         for flags in [
             vec!["--tier=interp"],
             vec!["--tier=interp", "--threads", "4"],
-            #[cfg(feature = "llvm")]
-            vec!["--tier=llvm"],
-            #[cfg(feature = "llvm")]
-            vec!["--tier=auto", "--tier-heat=1,0,0", "--threads", "4"],
             #[cfg(feature = "clift")]
             vec!["--tier=clift"],
             #[cfg(feature = "clift")]

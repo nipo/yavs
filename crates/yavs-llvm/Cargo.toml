@@ -1,17 +1,14 @@
 [package]
 name = "yavs-llvm"
-description = "LLVM 21 tier for yavs: IR to LLVM, JIT through ORC LLJIT"
+description = "Runtime of the yavs compiled tier: tier-up policy, host functions, native-frame loop"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
 [features]
-# LLVM is optional so `cargo build --workspace` works on machines without it.
-# Test with: cargo test -p yavs-llvm --features llvm
-llvm = ["dep:llvm-sys", "dep:libloading", "dep:postcard"]
 # The interpreter's collect-at-every-safepoint build for the unit tests:
-# cargo test -p yavs-llvm --features llvm,gc-stress
+# cargo test -p yavs-llvm --features gc-stress
 gc-stress = ["yavs-interp/gc-stress"]
 # Count the callbacks of compiled code in release builds too (always counted in debug builds).
 op-census = ["yavs-interp/op-census"]
@@ -20,23 +17,14 @@ op-census = ["yavs-interp/op-census"]
 table-check = []
 
 [dependencies]
-# Pinned to LLVM 21.1 (design rule 5). Dynamic linking keeps link memory low;
-# llvm-sys falls back to static libs when no shared libLLVM exists.
-llvm-sys = { version = "=211.1.1", features = ["prefer-dynamic", "strict-versioning"], optional = true }
-libloading = { version = "0.9.0", optional = true }
 yavs-interp = { path = "../yavs-interp" }
 yavs-kernel = { path = "../yavs-kernel" }
 yavs-ir = { path = "../yavs-ir" }
 yavs-cache = { path = "../yavs-cache" }
-postcard = { workspace = true, optional = true }
 
-[[example]]
-name = "measure"
-required-features = ["llvm"]
-
-# Not `workspace = true`: the workspace forbids unsafe_code, and this crate is
-# the FFI boundary to LLVM. It denies unsafe_code and allows it at the crate
-# root with a comment instead.
+# Not `workspace = true`: the workspace forbids unsafe_code, and compiled code
+# calls this runtime through raw pointers. It denies unsafe_code and allows it
+# at the crate root with a comment instead.
 [lints.rust]
 unsafe_code = "deny"
 unsafe_op_in_unsafe_fn = "deny"

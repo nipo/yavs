@@ -5857,7 +5857,7 @@ impl Machine {
     /// suspension (`Flow::Suspend`) or a pause (`Flow::Next`), with the frame's pc the IR pc
     /// of the instruction; on a fault the frame's pc is the failing op's IR pc.
     ///
-    /// With `TIER` (a compiled tier is set, `--tier=llvm|auto`): the thread's sampling slot
+    /// With `TIER` (a compiled tier is set, `--tier=clift|auto`): the thread's sampling slot
     /// names the function being interpreted (`Runtime::sampler`); on entry and after every
     /// jump, if the function has compiled code, that runs from the op's IR pc, and the
     /// interpreter goes on at the op of the IR pc it returns (stepping IR instructions inside

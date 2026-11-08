@@ -111,11 +111,11 @@ const EXPLAIN: &[(&str, &str)] = &[
     ("E0105", "`--stop-time` is not a valid time such as `10ms`."),
     (
         "E0120",
-        "`yavs run --tier=...` names a compiled tier that this yavs was built without. `clift`, `clift-auto` and, in a build without LLVM, `auto` need the `clift` cargo feature (Cranelift, which the release archives are built with); `llvm` and `auto` in a build without Cranelift need the `llvm` feature (LLVM 21); `auto3` needs both. Use a tier the build has, or `--tier=interp`, which every build has. The user guide page \"Running faster\" describes the tiers: https://yavs.readthedocs.io/en/latest/running-faster.html",
+        "`yavs run --tier=...` names a compiled tier that this yavs was built without, or one that was removed. `auto`, `clift` and `clift-auto` need the `clift` cargo feature (Cranelift, which the release archives are built with). `llvm` and `auto3` were removed together with the LLVM tier: Cranelift is the compiled tier, `--tier=auto` (the default) or `--tier=clift`. Use a tier the build has, or `--tier=interp`, which every build has. The user guide page \"Running faster\" describes the tiers: https://yavs.readthedocs.io/en/latest/running-faster.html",
     ),
     (
         "E0121",
-        "A compiled tier could not compile the design for `--tier=clift` or `--tier=llvm`, or could not start compiling for `--tier=auto`. This is a bug in yavs; `--tier=interp` runs the design.",
+        "The compiled tier could not compile the design for `--tier=clift`, or could not start compiling for `--tier=auto`. This is a bug in yavs; `--tier=interp` runs the design.",
     ),
     (
         "E0123",
@@ -133,10 +133,7 @@ const EXPLAIN: &[(&str, &str)] = &[
         "E0126",
         "The directory of the std/ieee units shared by all libraries cannot be used: `--std-cache` or `YAVS_STD_CACHE` is empty, no user cache directory is known, or (for `yavs analyze`) the directory cannot be created or written. Name a writable directory with `--std-cache` or `YAVS_STD_CACHE`, or use `off` to keep the std/ieee units in each library. Exit status 2.",
     ),
-    (
-        "E0127",
-        "`yavs run --tier=llvm` could not load the LLVM 21 shared library (Linux). It is looked for in `lib/` next to the yavs executable (the release archives with the compiled tier keep it there), then through the dynamic loader, then at the path the build used; the note lists what was tried. Keep the `lib` directory with `yavs`, install LLVM 21, or use `--tier=interp`. With `--tier=auto` the same problem is a warning and the hot code stays interpreted. Exit status 2.",
-    ),
+    // E0127 (the LLVM library cannot be loaded) is retired with the LLVM tier. Never reuse it.
     (
         "E0128",
         "`--threads` is above 1 and `YAVS_TOKENS` names a token server that yavs cannot use: the value is not `<port>:<secret>`, or the server did not accept the secret (often a `YAVS_TOKENS` left over from a test runner that has ended). The run stops before analysis (exit 2). Unset `YAVS_TOKENS` to run without a token server. A server that cannot be reached is warning `W0118`.",

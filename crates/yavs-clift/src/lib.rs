@@ -90,9 +90,8 @@ impl ClifTier {
     }
 }
 
-/// The Cranelift code generator of `yavs-llvm`'s `AutoTier` (`Generator`): the only one in a
-/// build without LLVM (`--tier=clift-auto`), the first level of the hybrid with LLVM
-/// (`--tier=auto3`). It compiles the callees of a native-frame function into the same module (direct
+/// The Cranelift code generator of `yavs-llvm`'s `AutoTier` (`Generator`), its only one
+/// (`--tier=auto`). It compiles the callees of a native-frame function into the same module (direct
 /// calls, inlined when small), and reports them with the root (`Compiled::extra`).
 #[cfg(feature = "clift")]
 pub struct First {
