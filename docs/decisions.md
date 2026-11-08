@@ -14852,10 +14852,11 @@ the IR optimiser and lowering. Decisions:
 
 - **Decision: a signal of at most 64 elements whose alive waiters are all resident and have no edge trigger keeps a
   wake plan, and `wake_sole` wakes from it when the value is finished, so the signal never enters `changed_sigs`**
-  (agent). Why: on the CPU designs nearly every changed signal that `wake_sole` left to `cycle` was such a signal with
-  several waiters, which `cycle` then woke through `small_list` or a `take_woken` scan (counted on the base, per kernel
-  cycle: Microwatt 8.6 of 9.1, neorv32_single_cache 4.3 of 4.6, GRLIB 0.17 of 0.50; GRLIB's others come from the
-  driver update paths, which this does not touch). The reference simulators wake the waiters of a value from a list at
+  (agent). Why: on the CPU designs nearly every changed signal with waiters that reached `cycle` was such a signal,
+  left there by `wake_sole` because it had several waiters, which `cycle` then woke through `small_list` or a
+  `take_woken` scan (counted on the base, per kernel cycle, of the signals with waiters that reached `cycle`:
+  Microwatt 8.1 of 8.85, neorv32_single_cache 4.0 of 4.55, GRLIB 0.14 of 0.50; GRLIB's others come from the driver
+  update paths, which this does not touch). The reference simulators wake the waiters of a value from a list at
   the write; this is that list, made once from what changes only when a waiter list changes.
 - **The plan:** each alive waiter once (deduplicated by registration), as process, element mask and epoch, in
   registration order. Made at the first event after the lists changed; `Plan::Slow` when an alive waiter is plain (a
