@@ -40,7 +40,9 @@ The compile cache
 
 ``yavs-cache/`` keeps what can be reused: analyzed design units, the lowered form of a design and the
 compiled code. The first run of a design notes it, the second stores it, later runs reuse it
-(:doc:`running-faster`).
+(:doc:`running-faster`). Analyzed design units are stored by ``analyze``, and by a run that had to
+analyze a unit again (for example an architecture analyzed before the entity it instantiates), so the
+next testbench reads it instead.
 
 * The key of an entry holds the yavs build and the options, so an edit or another yavs makes a new
   entry. Nothing has to be cleaned by hand.

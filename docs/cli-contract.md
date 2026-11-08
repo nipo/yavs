@@ -162,10 +162,11 @@ directly (`docs/design/vhdl-93.md`).
   and may contain spaces and, on Windows, drive letters (`C:\x`): split
   `NAME:PATH` at the first colon only.
 - Concurrency (plan rule 14): `run` and `elab` never write a manifest or lock a library
-  for writing. The only thing they write into a library directory is the compilation cache
-  entry of the work library (below, in `<work dir>/yavs-cache/`), best effort and by atomic
-  rename, so any number of them may run at once against the same libraries. They never write
-  analysed-unit entries (`yavs-cache/units/`); `analyze` does, by atomic rename as well.
+  for writing. The only things they write into a library directory are the compilation cache
+  entries of the work library (below, in `<work dir>/yavs-cache/`) and the analysed-unit entry
+  (`yavs-cache/units/`) of a unit they had to analyse from source, into that unit's library,
+  best effort and by atomic rename (or by creating the file whole), so any number of them may
+  run at once against the same libraries; `analyze` writes unit entries the same way.
   `analyze` must be safe when several processes analyze into the same library
   at the same time (two `run.py` invocations, or a future parallel compile in
   the test runner). yavs does this with automatic library locking like the reference simulator's: each library
@@ -272,9 +273,13 @@ identical to a run without it, at any `--threads`.
   options (`--std` of the design, `--psl`, `--encoding`, `-D`, and `--relaxed` where the unit's analysis depends on it) are the same and the
   libraries answer what they answered then; anything else, a damaged entry included, is a miss and the
   unit is analysed from source. Diagnostics, warnings included, and results are identical either way. `yavs analyze` shows warnings and notes only for the files named in the call (a unit read from the library was reported when its file was analysed, #584; errors are always shown), so a file that uses a unit with a warning does not repeat it, and `-Werror` counts the named files' warnings only.
-  Only `analyze` writes entries (under its library session; the units of other libraries and of
-  `std`/`ieee` by atomic rename, no lock); `elab` and `run` only read them. A library directory that
-  cannot be written is read and never fails. `analyze --no-cache` neither reads nor writes them; `yavs
+  `analyze` writes the entry of every unit it analyses from source (under its library session; the units
+  of other libraries and of `std`/`ieee` by atomic rename, no lock). `elab` and `run` write the entry of a
+  unit they had to analyse from source (its entry was missing, stale, or made under the other `--relaxed`
+  where the unit asked for it) the same way, without a lock, into the unit's library or the shared store,
+  so the next closure that needs it replays it (user ruling 2026-11-07, `docs/decisions.md` "Analysed-unit
+  cache"). Two writers of one entry write the same unit; a reader checks every entry it uses, so one that
+  lost a race with an edit is a miss. A library directory that cannot be written is read and never fails. `analyze --no-cache` neither reads nor writes them; `yavs
   cache clean` removes them. The directory keeps at most 16384 entries and 512 MiB, apart from the 4 GiB
   of entries, under the same rule at the limit (a read does not refresh a unit's time, so its age is the
   age of the entry). A library directory therefore holds at most about 4.75 GiB of cache.

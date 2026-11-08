@@ -971,6 +971,11 @@ every analysis corpus.
 Analysing a file again whose unit a later file replaced (the same entity name in two files) re-parses it and analyses all
 its units like the first time (#577; the manifest marks such a file `partial`).
 
+`elab` and `run` store the entry of a unit they had to analyse from source (2026-11-08, wave 3 of the performance work,
+branch `perf/w3-cold887`): an architecture analysed before the entity it binds to (fletcher: 6 units, neorv32: 1 per
+closure) and units that asked `--relaxed` under the other setting (the `std`/`ieee` bodies too) were analysed from source on
+every first and second run of every closure; now the first run stores them and every later closure replays them.
+
 Analysing a library file by file (#581, #584): the head-to-head's "slower than sim1" cells (hdl-modules FIFO selection 1.45,
 satcat5 1.37, Open Logic 1.16) were the per-call manifest fsync (#561, fixed in 60ebdc2e): at 65b7f573 the hdl-modules FIFO
 selection took 5.5 s cold and 4.4 s warm, on the main before this work 2.3 s and 1.4 s (cores 8 and 9, same host load,

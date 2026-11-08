@@ -329,8 +329,9 @@ pub fn prepare_shared_std(dir: &Path) -> Result<(), Box<Diagnostic>> {
 }
 
 impl Units {
-    /// The store for a run with `libs` mapped and `work` the work library's directory; only
-    /// `yavs analyze` writes (`writable`). `shared` is the directory of [`shared_std_dir`].
+    /// The store for a run with `libs` mapped and `work` the work library's directory; `writable`:
+    /// units analysed from source are stored (`analyze`, `elab`, `run`; not `lint`). `shared` is
+    /// the directory of [`shared_std_dir`].
     /// `None` with a custom std/ieee tree (its files are not part of the build).
     pub fn store_for(
         opts: &Options,
@@ -485,7 +486,9 @@ pub fn analyze_closure(
     let enabled = enabled && opts.stdlib == Path::new(yavs_sem::stdlib::EMBEDDED);
     let mut opts = opts;
     if enabled {
-        opts.units = Units::store_for(&opts, work_dir, shared_std, false);
+        // A unit the run has to analyse from source (its entry is stale or missing) is stored,
+        // so the next closure that needs it replays it.
+        opts.units = Units::store_for(&opts, work_dir, shared_std, true);
     }
     if !enabled {
         let directives = opts.cov_directives;
