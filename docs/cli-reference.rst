@@ -248,7 +248,7 @@ Arguments:
 
 .. option:: --no-cache
 
-   Neither read nor write the compilation cache of the work library.
+   Neither read nor write the compilation cache of the work library nor the analysed units of the libraries.
 
 .. option:: --std-cache=DIR|off
 
@@ -337,7 +337,7 @@ Arguments:
 
 .. option:: --no-cache
 
-   Neither read nor write the compilation cache of the work library.
+   Neither read nor write the compilation cache of the work library nor the analysed units of the libraries.
 
 .. option:: --std-cache=DIR|off
 

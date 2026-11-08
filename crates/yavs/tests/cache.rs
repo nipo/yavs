@@ -1222,6 +1222,101 @@ fn closures_share_the_analysis_of_their_first_files() {
     assert!(edited.stdout.contains("k=47"), "{edited:?}");
 }
 
+/// A run that continues from a prefix image and analyses a unit after it from source (its entry
+/// is gone) stores that unit, and the entry replays as the analysis from source does (the check
+/// mode of `analyze` compares the two).
+#[test]
+fn a_unit_analysed_on_a_prefix_image_is_stored_right() {
+    let tmp = tempdir("prefix_store");
+    let dir = |l: &str| tmp.join(l);
+    let spec = |l: &str| format!("{l}:{}", dir(l).display());
+    let yavs = |args: &[String], check: bool| {
+        let mut c = Command::new(env!("CARGO_BIN_EXE_yavs"));
+        c.env_remove("YAVS_STDLIB")
+            .env("YAVS_LOG", "debug")
+            .args(["--color", "never"])
+            .args(args);
+        if check {
+            c.env("YAVS_UNIT_CHECK", "1");
+        }
+        let o = c.output().expect("yavs");
+        Out {
+            code: o.status.code().unwrap_or(-1),
+            stdout: String::from_utf8_lossy(&o.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&o.stderr).into_owned(),
+        }
+    };
+    let analyze = |lib: &str, map: &[&str], file: &str, check: bool| {
+        let mut a = vec!["analyze".to_string(), format!("--work={}", spec(lib))];
+        a.extend(map.iter().map(|m| format!("--map={}", spec(m))));
+        a.push(tmp.join(file).display().to_string());
+        let o = yavs(&a, check);
+        assert_eq!(o.code, 0, "{a:?}: {o:?}");
+        o
+    };
+    for i in 0..10 {
+        let uses = if i == 0 {
+            String::new()
+        } else {
+            format!("use work.pa{}.all;\n", i - 1)
+        };
+        let prev = if i == 0 {
+            "0".into()
+        } else {
+            format!("k{}", i - 1)
+        };
+        let text =
+            format!("{uses}package pa{i} is\n  constant k{i} : integer := {prev} + {i};\nend;\n");
+        std::fs::write(tmp.join(format!("pa{i}.vhd")), text).expect("write");
+        analyze("liba", &[], &format!("pa{i}.vhd"), false);
+    }
+    let wp = "library liba; use liba.pa9.all;\npackage wp is\n  constant w : integer := k9 * 2;\n  \
+function f (x : integer) return integer;\nend;\npackage body wp is\n  \
+function f (x : integer) return integer is begin return x + w; end;\nend;\n";
+    std::fs::write(tmp.join("wp.vhd"), wp).expect("write");
+    analyze("work", &["liba"], "wp.vhd", false);
+    for n in [1, 2, 3] {
+        let tb = format!(
+            "use work.wp.all;\nentity tb{n} is end;\narchitecture a of tb{n} is\nbegin\n  process\n  begin\n    \
+             report \"f=\" & integer'image(f({n}));\n    wait;\n  end process;\nend;\n"
+        );
+        std::fs::write(tmp.join(format!("tb{n}.vhd")), tb).expect("write");
+        analyze("work", &["liba"], &format!("tb{n}.vhd"), false);
+    }
+    let run = |top: &str| {
+        yavs(
+            &[
+                "run".into(),
+                format!("--work={}", spec("work")),
+                format!("--map={}", spec("liba")),
+                top.into(),
+            ],
+            false,
+        )
+    };
+    run("tb1");
+    let second = run("tb2");
+    assert!(note(&second, "store prefix of 10 files"), "{second:?}");
+    let units = dir("work").join("yavs-cache").join("units");
+    for f in std::fs::read_dir(&units).expect("units").flatten() {
+        std::fs::remove_file(f.path()).expect("remove");
+    }
+    let third = run("tb3");
+    assert_eq!(third.code, 0, "{third:?}");
+    assert!(third.stdout.contains("f=93"), "{third:?}");
+    assert!(note(&third, "hit prefix of 10 files"), "{third:?}");
+    let stored = third
+        .stderr
+        .lines()
+        .filter(|l| l.starts_with("debug: units: store work "))
+        .count();
+    assert!(stored >= 3, "wp, its body and tb3: {third:?}");
+    for f in ["wp.vhd", "tb3.vhd"] {
+        let o = analyze("work", &["liba"], f, true);
+        assert!(o.stderr.contains("debug: units: hit work."), "{f}: {o:?}");
+    }
+}
+
 /// Two entities for a generate that picks one by a generic: the lowered design differs with the
 /// generic, the closure does not (#479).
 const PICK: &str = "entity ea is end;\narchitecture a of ea is\nbegin\n  process\n  begin\n    report \"from ea\";\n    wait;\n  end process;\nend;\n\
