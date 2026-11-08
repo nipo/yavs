@@ -273,6 +273,9 @@ pub struct Stats {
     /// Changed signals `wake_sole` left in `changed_sigs` while idle skip was on, so `cycle`
     /// arms their readers (debug and `op-census` builds only, else 0).
     pub sole_left: u64,
+    /// Batches not estimated for the pool because the same batch was estimated below the
+    /// threshold a few batches before (`SimControl::stay`).
+    pub estimates_skipped: u64,
 }
 
 /// A pending observer wake-up (`Hook::wake_at`). Ordered by time, then registration.
@@ -801,6 +804,12 @@ struct Estimate {
     probe: bool,
 }
 
+/// What tells two batches apart for `SimControl::stay`: a batch of the same length, first and
+/// last process is taken to be the same (a guess: where a batch runs changes no output).
+fn batch_key(pids: &[u32]) -> [u32; 3] {
+    [pids.len() as u32, pids[0], pids[pids.len() - 1]]
+}
+
 /// What the processes of a piece committed in the worker, for the kernel thread to apply, and
 /// the processes it left to the commit loop (`late`, in process order).
 #[derive(Default)]
@@ -1219,6 +1228,9 @@ pub struct SimControl {
     /// The largest of `cost`, refreshed every 65536 cycles (`tick`): a batch of `n` processes
     /// whose `n - 1` could not pass the lowest threshold at this cost is not estimated (`small`).
     cost_hi: u64,
+    /// The last batch whose estimate stayed below the lowest threshold (length, first and last
+    /// process) and how many more times it counts as `small` before it is estimated again.
+    stay: ([u32; 3], u32),
     /// With a pool: per process, whether it is serial (dense, written only at build: the metas
     /// are written by the workers).
     serial_of: Vec<bool>,
@@ -1706,6 +1718,7 @@ impl SimControl {
             wakes: Wakes::default(),
             cost,
             cost_hi: 0,
+            stay: ([0; 3], 0),
             serial_of,
             early: Vec::new(),
             pool,
@@ -4138,16 +4151,18 @@ impl SimControl {
             && !postponed
             && pids.len() >= auto::MIN_PROCS;
         self.calib -= u32::from(calib);
-        // A batch too small to pool at the dearest cost known is not estimated, and timed only one
-        // time in `COST_EVERY` (once a cost is known): both cost a design that never pools 1 to 2
-        // percent of its instructions (#858).
+        // A batch too small to pool at the dearest cost known, or the batch last estimated below
+        // the threshold again (`stay`), is not estimated, and timed only one time in `COST_EVERY`
+        // (once a cost is known): both cost a design that never pools 1 to 2 percent of its
+        // instructions (#858).
         let small = self.workers > 0
             && !calib
             && !self.cfg.pool_all
-            && (pids.len() as u64)
+            && ((pids.len() as u64)
                 .saturating_sub(1)
                 .saturating_mul(self.cost_hi)
-                <= self.pool_ns.min(POOL_WORK_NS);
+                <= self.pool_ns.min(POOL_WORK_NS)
+                || self.stays(&pids));
         let untimed = small && {
             self.batches = self.batches.wrapping_add(1);
             self.cost_hi != 0 && !self.batches.is_multiple_of(COST_EVERY as u32)
@@ -4631,6 +4646,9 @@ impl SimControl {
         } else {
             false
         };
+        if work <= self.pool_ns.min(POOL_WORK_NS) {
+            self.stay = (batch_key(pids), COST_EVERY as u32 - 1);
+        }
         // A batch with a process not yet timed teaches nothing.
         pool.then_some(Estimate {
             all,
@@ -4638,6 +4656,15 @@ impl SimControl {
             learn: known,
             probe: false,
         })
+    }
+
+    /// The batch is the one `pool_batch` last found below the lowest threshold, and may be taken
+    /// as `small` once more (`Stats::estimates_skipped`).
+    fn stays(&mut self, pids: &[u32]) -> bool {
+        let hit = self.stay.1 != 0 && self.stay.0 == batch_key(pids);
+        self.stay.1 -= u32::from(hit);
+        self.stats.estimates_skipped += u64::from(hit);
+        hit
     }
 
     /// `run_batch` of one process after initialisation (a stage of a chain of processes): no

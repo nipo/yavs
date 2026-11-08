@@ -247,6 +247,10 @@ kernel.
   over the batch), and one batch in 64 that would pool runs inline. Pooled runs measure cold caches and
   would confirm themselves; batch means spread one heavy process over its cheap neighbours (both seen in
   the prototype, section 5). New processes start at a neutral cost (200 ns).
+- The estimate itself is a pass over the batch, the cost of `--threads=N` on a design that never pools. A batch
+  that could not pass the threshold at the dearest process cost known is not estimated; neither is the batch
+  last estimated below the threshold (same length, first and last process), for its next 15 batches. Both are
+  then timed in one batch in 16.
 - Determinism: the choice changes only where a process runs, never the commit order, and the inline and the
   pooled paths commit identically (checked by the prototype across every design here).
 - Measured (prototype mode 3, section 5): lfsr64, lfsr64_xor and rtl_bus fall back to 1.0x of the one-thread

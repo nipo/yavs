@@ -14821,3 +14821,12 @@ the IR optimiser and lowering. Decisions:
 - **Dependencies:** LLVM 21 is no longer an approved manual dependency (root `AGENTS.md` rule 9,
   `docs/plan.md`).
 
+## `--threads=auto` round 4 (yavs-kernel, #884, 2026-11-08)
+
+- **Decision: the batch last estimated at or below the lowest pool threshold (`SimControl::stay`: its length, first
+  and last process) is taken as `small` the next 15 times it comes: no estimate, timed in one batch in 16** (agent).
+  Why: a batch near the threshold passes the bound of `small` (one dear process anywhere sets `cost_hi`), so it was
+  estimated at every delta cycle and a sixteenth of its activations timed, though it stays inline. Two batches with
+  the same key are taken to be the same: a wrong guess changes where a batch runs, never the output. Measured
+  (interpreter, all-thread instructions, no batch pooled): over one thread `lfsr64` at `--threads=4` 1.021 to 1.002,
+  `rtl_bus` at `--threads=8` 1.008 to 1.001; one thread unchanged.

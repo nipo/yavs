@@ -561,6 +561,35 @@ mod tests {
         );
     }
 
+    /// A batch estimated below the threshold is not estimated again at once, and is then timed as
+    /// rarely as a small one, also when one dear process makes the bound of `small` useless.
+    #[test]
+    fn a_batch_below_the_threshold_stays_unestimated() {
+        let mut b = crate::Builder::new();
+        for i in 0..16 {
+            let f = |c: &mut Ctx<'_>| c.wait_for(Time::ns(1));
+            b.process(&format!("p{i}"), crate::ProcFlags::default(), &[], f);
+        }
+        let cfg = Config {
+            threads: 4,
+            ..Config::default()
+        };
+        let mut sim = b.build(cfg).unwrap();
+        sim.run_until(Time::ns(2)).unwrap();
+        sim.cost.fill(1000);
+        // 15 x 1000 ns is below the threshold; 15 x this is not.
+        sim.cost_hi = 10_000_000;
+        sim.run_until(Time::ns(17)).unwrap();
+        assert_eq!(sim.stay.0, [16, 0, 15]);
+        assert!(sim.stats().estimates_skipped >= 13, "{:?}", sim.stats());
+        let timed = sim.cost.iter().filter(|&&c| c != 1000).count();
+        assert!(
+            timed <= 2,
+            "{timed} processes timed in 15 batches: {:?}",
+            sim.cost
+        );
+    }
+
     /// A few pooled batches far slower than their estimate do not raise the threshold of a
     /// design whose batches gain; a run of batches no faster than inline does.
     #[test]
