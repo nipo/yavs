@@ -189,6 +189,7 @@ const PASS: &[&str] = &[
     "delta/record_wake",
     "delta/signal_update_order",
     "delta/skip_unchanged",
+    "delta/wake_plan",
     "held/held_active",
     "held/held_deltas",
     "held/held_guarded",

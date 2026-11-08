@@ -454,6 +454,11 @@ Each one turns a fast path off or changes its threshold, to compare a run with a
      - ``on``, ``off``, ``check``
      - ``on``
      - ``run``
+   * - ``YAVS_WAKE_CHECK``
+     - ``1``: checks every process woken at the moment a signal's value is finished against a scan of the processes waiting on that signal, and stops with an internal error on a difference.
+     - ``1``
+     - unset
+     - ``run``
    * - ``YAVS_POOL_ALL``
      - With ``--threads`` above 1, hands every batch of two or more processes to the thread pool, whatever it is worth.
      - ``1``

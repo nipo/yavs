@@ -1532,6 +1532,9 @@ fn prepare(
         // `check` runs the ones the kernel would skip and fails when one does something else.
         idle_skip: idle_mode != "off" && !cov_counters,
         idle_check: idle_mode == "check",
+        // `YAVS_WAKE_CHECK=1` checks each wake done when a value is finished against a scan of
+        // the signal's waiters; a difference is an internal error.
+        wake_check: std::env::var("YAVS_WAKE_CHECK").is_ok_and(|v| v == "1"),
         // `YAVS_CELLS=off` lists the exact runs of changed elements for every waited part.
         cells: !std::env::var("YAVS_CELLS").is_ok_and(|v| v == "off"),
         // `YAVS_POOL_ALL=1` hands every batch of two or more processes to the thread pool

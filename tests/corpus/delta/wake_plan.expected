@@ -1,0 +1,131 @@
+exit	0
+diag	note	0	0	:wake_plan:bits(0):bit_p	bit 0='0'
+diag	note	0	0	:wake_plan:bits(1):bit_p	bit 1='0'
+diag	note	0	0	:wake_plan:bits(2):bit_p	bit 2='0'
+diag	note	0	0	:wake_plan:bits(3):bit_p	bit 3='0'
+diag	note	0	0	:wake_plan:bits(4):bit_p	bit 4='0'
+diag	note	0	0	:wake_plan:bits(5):bit_p	bit 5='0'
+diag	note	0	0	:wake_plan:bits(6):bit_p	bit 6='0'
+diag	note	0	0	:wake_plan:bits(7):bit_p	bit 7='0'
+diag	note	0	0	:wake_plan:bits(8):bit_p	bit 8='0'
+diag	note	0	0	:wake_plan:bits(9):bit_p	bit 9='0'
+diag	note	0	0	:wake_plan:bits(10):bit_p	bit 10='0'
+diag	note	0	0	:wake_plan:bits(11):bit_p	bit 11='0'
+diag	note	0	0	:wake_plan:bits(12):bit_p	bit 12='0'
+diag	note	0	0	:wake_plan:bits(13):bit_p	bit 13='0'
+diag	note	0	0	:wake_plan:bits(14):bit_p	bit 14='0'
+diag	note	0	0	:wake_plan:bits(15):bit_p	bit 15='0'
+diag	note	0	0	:wake_plan:whole	whole ev=falsefalsefalsefalse
+diag	note	0	0	:wake_plan:fa	fa a='0'
+diag	note	0	0	:wake_plan:fbc	fbc b=0000 c='0'
+diag	note	0	0	:wake_plan:pp	pp n=0
+diag	note	0	0	:wake_plan:vall	vall 0000
+diag	note	0	0	:wake_plan:ua	ua 00
+diag	note	0	0	:wake_plan:ub	ub '0'
+diag	note	0	0	:wake_plan:uc	uc 000
+diag	note	5000000	1	:wake_plan:ua	ua 01
+diag	note	5000000	1	:wake_plan:ub	ub '1'
+diag	note	5000000	1	:wake_plan:usw	usw 0 1
+diag	note	5000000	1	:wake_plan:uend	uend 1
+diag	note	5000000	1	:wake_plan:whole	whole ev=truefalsefalsefalse
+diag	note	5000000	1	:wake_plan:fa	fa a='1'
+diag	note	5000000	1	:wake_plan:edge	edge a
+diag	note	5000000	1	:wake_plan:alt	alt a ev=truefalsefalsefalse
+diag	note	5000000	1	:wake_plan:sw	sw a 1
+diag	note	7000000	0	:wake_plan:tmo	tmo c'event=false
+diag	note	10000000	1	:wake_plan:whole	whole ev=falsetruefalsefalse
+diag	note	10000000	1	:wake_plan:fbc	fbc b=1010 c='0'
+diag	note	10000000	1	:wake_plan:ender	ender 1
+diag	note	10000000	1	:wake_plan:bits(3):bit_p	bit 3='1'
+diag	note	10000000	1	:wake_plan:vall	vall 0008
+diag	note	10000000	1	:wake_plan:ua	ua 03
+diag	note	10000000	1	:wake_plan:uend	uend 2
+diag	note	14000000	0	:wake_plan:tmo	tmo c'event=false
+diag	note	15000000	1	:wake_plan:ua	ua 08
+diag	note	15000000	1	:wake_plan:uc	uc 001
+diag	note	15000000	1	:wake_plan:uend	uend 3
+diag	note	15000000	1	:wake_plan:ub	ub '0'
+diag	note	15000000	1	:wake_plan:usw	usw 0 2
+diag	note	15000000	1	:wake_plan:whole	whole ev=falsefalsetruetrue
+diag	note	15000000	1	:wake_plan:fbc	fbc b=1010 c='1'
+diag	note	15000000	1	:wake_plan:tmo	tmo c'event=true
+diag	note	15000000	1	:wake_plan:fn	fn n=5
+diag	note	15000000	1	:wake_plan:alt	alt n ev=falsefalsetruetrue
+diag	note	15000000	1	:wake_plan:bits(7):bit_p	bit 7='1'
+diag	note	15000000	1	:wake_plan:vall	vall 00F8
+diag	note	15000000	1	:wake_plan:bits(6):bit_p	bit 6='1'
+diag	note	15000000	1	:wake_plan:bits(5):bit_p	bit 5='1'
+diag	note	15000000	1	:wake_plan:bits(4):bit_p	bit 4='1'
+diag	note	15000000	2	:wake_plan:pp	pp n=5
+diag	note	20000000	1	:wake_plan:ua	ua 09
+diag	note	20000000	1	:wake_plan:ub	ub '1'
+diag	note	20000000	1	:wake_plan:usw	usw 0 3
+diag	note	20000000	1	:wake_plan:uend	uend 4
+diag	note	20000000	1	:wake_plan:whole	whole ev=truetruetruetrue
+diag	note	20000000	1	:wake_plan:fa	fa a='0'
+diag	note	20000000	1	:wake_plan:sw	sw a 2
+diag	note	20000000	1	:wake_plan:alt	alt a ev=truetruetruetrue
+diag	note	20000000	1	:wake_plan:fbc	fbc b=0101 c='0'
+diag	note	20000000	1	:wake_plan:ender	ender 2
+diag	note	20000000	1	:wake_plan:tmo	tmo c'event=true
+diag	note	20000000	1	:wake_plan:fn	fn n=6
+diag	note	20000000	2	:wake_plan:pp	pp n=6
+diag	note	25000000	1	:wake_plan:whole	whole ev=truetruefalsefalse
+diag	note	25000000	1	:wake_plan:fa	fa a='1'
+diag	note	25000000	1	:wake_plan:edge	edge a
+diag	note	25000000	1	:wake_plan:sw	sw a 3
+diag	note	25000000	1	:wake_plan:fbc	fbc b=0100 c='0'
+diag	note	25000000	1	:wake_plan:late	late b=0100
+diag	note	25000000	1	:wake_plan:bits(15):bit_p	bit 15='1'
+diag	note	25000000	1	:wake_plan:vall	vall 80F8
+diag	note	25000000	1	:wake_plan:ua	ua 29
+diag	note	25000000	1	:wake_plan:uc	uc 101
+diag	note	25000000	1	:wake_plan:usw	usw 5 '1'
+diag	note	27000000	0	:wake_plan:tmo	tmo c'event=false
+diag	note	30000000	1	:wake_plan:ua	ua 28
+diag	note	30000000	1	:wake_plan:ub	ub '0'
+diag	note	30000000	1	:wake_plan:whole	whole ev=truefalsetruefalse
+diag	note	30000000	1	:wake_plan:fa	fa a='0'
+diag	note	30000000	1	:wake_plan:fbc	fbc b=0100 c='1'
+diag	note	30000000	1	:wake_plan:tmo	tmo c'event=true
+diag	note	30000000	1	:wake_plan:sw	sw c ev=truefalsetruefalse
+diag	note	35000000	1	:wake_plan:whole	whole ev=falsefalsefalsetrue
+diag	note	35000000	1	:wake_plan:fn	fn n=7
+diag	note	35000000	1	:wake_plan:alt	alt n ev=falsefalsefalsetrue
+diag	note	35000000	1	:wake_plan:bits(0):bit_p	bit 0='1'
+diag	note	35000000	1	:wake_plan:vall	vall 80F9
+diag	note	35000000	1	:wake_plan:ua	ua 2A
+diag	note	35000000	1	:wake_plan:ulate	ulate '1'
+diag	note	35000000	2	:wake_plan:pp	pp n=7
+diag	note	37000000	0	:wake_plan:tmo	tmo c'event=false
+diag	note	40000000	1	:wake_plan:ua	ua 0A
+diag	note	40000000	1	:wake_plan:uc	uc 001
+diag	note	40000000	1	:wake_plan:usw	usw 5 '0'
+diag	note	40000000	1	:wake_plan:whole	whole ev=truetruetruefalse
+diag	note	40000000	1	:wake_plan:fbc	fbc b=1111 c='0'
+diag	note	40000000	1	:wake_plan:late	late b=1111
+diag	note	40000000	1	:wake_plan:tmo	tmo c'event=true
+diag	note	40000000	1	:wake_plan:sw	sw c ev=truetruetruefalse
+diag	note	40000000	1	:wake_plan:fa	fa a='1'
+diag	note	40000000	1	:wake_plan:edge	edge a
+diag	note	40000000	1	:wake_plan:alt	alt a ev=truetruetruefalse
+diag	note	45000000	1	:wake_plan:whole	whole ev=falsefalsefalsetrue
+diag	note	45000000	1	:wake_plan:fn	fn n=8
+diag	note	45000000	1	:wake_plan:alt	alt n ev=falsefalsefalsetrue
+diag	note	45000000	1	:wake_plan:bits(15):bit_p	bit 15='0'
+diag	note	45000000	1	:wake_plan:vall	vall 0000
+diag	note	45000000	1	:wake_plan:bits(7):bit_p	bit 7='0'
+diag	note	45000000	1	:wake_plan:bits(6):bit_p	bit 6='0'
+diag	note	45000000	1	:wake_plan:bits(5):bit_p	bit 5='0'
+diag	note	45000000	1	:wake_plan:bits(4):bit_p	bit 4='0'
+diag	note	45000000	1	:wake_plan:bits(3):bit_p	bit 3='0'
+diag	note	45000000	1	:wake_plan:bits(0):bit_p	bit 0='0'
+diag	note	45000000	1	:wake_plan:ua	ua 0B
+diag	note	45000000	1	:wake_plan:ub	ub '1'
+diag	note	45000000	2	:wake_plan:pp	pp n=8
+diag	note	50000000	1	:wake_plan:ua	ua 09
+diag	note	50000000	1	:wake_plan:ulate	ulate '0'
+diag	note	55000000	1	:wake_plan:ua	ua 29
+diag	note	55000000	1	:wake_plan:uc	uc 101
+diag	note	55000000	1	:wake_plan:usw	usw 5 '1'
+diag	note	60000000	0	:wake_plan:stim	done

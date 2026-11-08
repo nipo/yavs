@@ -8698,7 +8698,8 @@ rtl_chain), where "kernel" counts `yavs-kernel` including the `Ctx` callbacks of
     step (#733).
   - Waking in `finish_direct` for every signal with a small list of resident waiters, as `wake_sole` does for one (it would skip the changed list, the
     sort and the per-signal head of `cycle`, about 0.5% of neorv32): the edge-trigger and observer exclusions of `wake_sole` apply, and a wake
-    before the other signals of the update are finished changes which cycles can take the clock batch. Not built.
+    before the other signals of the update are finished changes which cycles can take the clock batch. Not built then; built for signals of at
+    most 64 elements as the wake plan ("Wake plan", 2026-11-08), which moved no clock batch on the CPU designs.
   - Lazy arming (comparing the event cycle of each signal a process reads when it is woken instead of arming its readers at every event) costs
     about as much as arming on neorv32 (37 woken processes per delta, each checking all its reads when it is not armed, against 53 reader entries
     examined per delta) and loses the early exit of an already armed reader. Not built.
