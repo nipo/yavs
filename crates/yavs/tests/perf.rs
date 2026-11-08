@@ -188,6 +188,14 @@ case!(frame_slices, "x=", &[], [("ops", Max(11400))]);
 // looks at each instruction a few times, not once per vector (a scan per vector made the
 // optimiser cost grow with the square of the function).
 case!(dopes_scan, "t=", &[], [("dopes_scans", Max(19000))]);
+// A function on an array of vectors called every cycle: its result is data and bounds (#1122), so
+// each call skips the result pair and the descriptor copy; the floor shows a slide back to the pair.
+case!(
+    elem_result,
+    "sum=8316",
+    &[],
+    [("flat_elem_results", Min(1)), ("ops", Max(75200))]
+);
 case!(
     pkg_table,
     "sum=212",

@@ -3078,7 +3078,9 @@ impl Fx<'_, '_> {
                 )?;
                 self.ret_term(Some(r));
             }
-            crate::expr::V::A(data, dope) if self.is_general(db.base(ret), span)? => {
+            crate::expr::V::A(data, dope)
+                if !self.ret_flat && self.is_general(db.base(ret), span)? =>
+            {
                 let t = db.base(ret);
                 let tid = self.ty(t, span)?;
                 let mut dope = dope;

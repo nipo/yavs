@@ -42,7 +42,9 @@ pub use program::{
 pub use program::{
     COV_INPUTS, FRAME_OBJECT, frame_object_addr, frame_object_range, is_frame_object, native_shown,
 };
-pub use program::{bytes, lazy_bodies, note_restart, optimised_functions, restarted_calls};
+pub use program::{
+    bytes, flat_elem_results, lazy_bodies, note_restart, optimised_functions, restarted_calls,
+};
 pub use ty::{DOPE_DIM_BYTES, Field, Layout, LayoutError, LogicKind, Refl, ReflKind, Ty, dim_len};
 pub use verify::VerifyError;
 pub use yavs_kernel::StmtId;

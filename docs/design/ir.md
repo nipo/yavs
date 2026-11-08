@@ -213,7 +213,7 @@ pub enum LogicKind { StdULogic, Bit, Boolean }       // gets the yavs-logic fast
 | real | `f64` | |
 | other array | elements contiguous, row major | bounds in a **dope**: `[left, right, dir]` per dimension, `i64` each |
 | unconstrained array object, a result other than the next row | `{data: Addr, dope: Addr}` (fat) | |
-| result of array type `Ty::flat_array`, scalar elements, no `ieee` native (`Func::ret_flat`) | the data address in the result register, the words through `RetBounds` before the `Ret` and `TakeBounds` right after the `Call` | the machine's three words, a pointer in the view (`TierFrame::ret_bounds`) for compiled code |
+| result of array type `Ty::flat_array`, elements holding no handle, no `ieee` native (`Func::ret_flat`) | the data address in the result register, the words through `RetBounds` before the `Ret` and `TakeBounds` right after the `Call` | the machine's three words, a pointer in the view (`TierFrame::ret_bounds`) for compiled code |
 | array parameter of one dimension, nothing below it needing a descriptor (`Ty::flat_array`, whatever the formal's subtype) | four cells: `data`, then the descriptor's words `left, right, dir` in the callee's parameter slots | the slots are the descriptor, its address is `AddrOf Frame`; reads go to registers (`opt/dopes.rs`), a frame that is materialised or a nested subprogram finds them in memory |
 | any other array parameter | two cells: `data`, `dope` | |
 | record | fields at offsets from a `Layout` | offsets are runtime data when a field is unconstrained |

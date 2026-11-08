@@ -1179,12 +1179,14 @@ impl<'a, 'b> Fx<'a, 'b> {
     /// Return `v`, closing the files this subprogram declared first.
     /// Does function `sp` return an array as its data address and `RetBounds`? By its type, as
     /// an array parameter; not a function with an `ieee` native, whose result the caller gets as
-    /// the native's fat pair whichever of them ran (`ieee_body`).
+    /// the native's fat pair whichever of them ran (`ieee_body`), nor elements holding handles
+    /// (left on the pair, which the collector was checked with).
     pub(crate) fn flat_result(&mut self, sp: &yavs_sem::decl::Subprogram, span: Span) -> R<bool> {
         let Some(r) = sp.ret else { return Ok(false) };
         let t = self.ty(self.db.base(r), span)?;
-        Ok(Ty::flat_array(self.fb.program().types(), t)
-            && !self.is_general(self.db.base(r), span)?
+        let types = self.fb.program().types();
+        Ok(Ty::flat_array(types, t)
+            && !Ty::has_handles(types, t)
             && yavs_ir::ieee::native_symbol(sp.mangled.as_str()).is_none())
     }
 
