@@ -14822,3 +14822,34 @@ the IR optimiser and lowering. Decisions:
 - **Dependencies:** LLVM 21 is no longer an approved manual dependency (root `AGENTS.md` rule 9,
   `docs/plan.md`).
 
+
+## Wake plan (yavs-kernel `finish_direct`, `wake_plan`, `Waiters::plan`, wave 3 item K1, 2026-11-08)
+
+- **Decision: a signal of at most 64 elements whose alive waiters are all resident and have no edge trigger keeps a
+  wake plan, and `wake_sole` wakes from it when the value is finished, so the signal never enters `changed_sigs`**
+  (agent). Why: on the CPU designs nearly every changed signal that `wake_sole` left to `cycle` was such a signal with
+  several waiters, which `cycle` then woke through `small_list` or a `take_woken` scan (counted on the base, per kernel
+  cycle: Microwatt 8.6 of 9.1, neorv32_single_cache 4.3 of 4.6, GRLIB 0.17 of 0.50; GRLIB's others come from the
+  driver update paths, which this does not touch). The reference simulators wake the waiters of a value from a list at
+  the write; this is that list, made once from what changes only when a waiter list changes.
+- **The plan:** each alive waiter once (deduplicated by registration), as process, element mask and epoch, in
+  registration order. Made at the first event after the lists changed; `Plan::Slow` when an alive waiter is plain (a
+  plain one is gone at its first wake) or has an edge trigger (a trigger reads signals the update may not have
+  finished), or the signal is wider. Dead waiters are left out: epochs and generations only grow. Forgotten by `add`
+  (`Slow` for a plain waiter), by `drop_cache` (a process left a resident wait, the same point that drops the clock's
+  wake list) and by a `take_woken` that removed waiters. A process in it whose epoch moved sends the signal to `cycle`
+  (waking is idempotent). Not in a shuffled run (the wake order is its run order) or while a re-armed clock generator
+  waits (`skip_n`).
+- **Check:** `YAVS_WAKE_CHECK=1` (`Config::wake_check`) holds every wake `wake_sole` does, by the plan or by the one-waiter
+  paths, against a scan of the waiter lists (`Waiters::hit_by`) and stops with an internal error naming the processes;
+  difftest's `yavs-clift-check` candidate sets it. A mutant that never forgets the plan in `add` gives a wrong result on
+  `delta/wake_plan` (a late waiter is not woken), and the check names it. Whole runs under the check: Microwatt, GRLIB and
+  neorv32_single_cache pass with output, exit status and the counters `cycles`, `wakes`, `events`, `process_runs`
+  equal to the base. `wakes` equal also says the clock batch (which wakes no process one by one) was taken in the same
+  cycles, the worry recorded under "Kernel round 22" for a wake in `finish_direct`.
+- **Measured** (bench builds of f8541916 and the change, warm whole runs from one master, `--tier=auto`, main-thread
+  user instructions, median of 3, spread in brackets): Microwatt 118 906 to 115 699 per kernel cycle, **0.973**
+  (0.10 %, 0.18 %); neorv32_single_cache at `--tier=clift` (its `auto` count moves with the compile race) 193 045 to
+  191 534, **0.992** (0.03 %, 0.01 %); GRLIB 23 689 to 23 682, 1.000 (0.31 %, 0.51 %). Waiter-list scans per run:
+  Microwatt 27.6 M to 0.52 M, neorv32_single_cache 0.60 M to 0.09 M, GRLIB 322 k to 31 k. Output and exit status equal
+  in every run.
