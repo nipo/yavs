@@ -126,6 +126,9 @@ pub struct Facts {
     sens_spans: Vec<Span>,
     /// The expressions that were package-path external names (`@lib.pkg.obj`) with their names.
     pub(crate) package_paths: Vec<(ExprId, ExternalId)>,
+    /// The named entities that are the prefix of `'path_name` or `'instance_name`, sorted: a
+    /// protected object keeps its name only when its type asks one of its variables for it.
+    pub entity_names: Vec<DeclId>,
 }
 
 impl Facts {
@@ -643,6 +646,7 @@ impl Db {
             f.pass_edges.extend_from_slice(&u.pass_edges);
             f.elem_ext |= u.elem_ext;
             f.package_paths.extend_from_slice(&u.package_paths);
+            f.entity_names.extend_from_slice(&u.entity_names);
         }
         if !self.unit_facts.is_empty() {
             f.forces.sort_unstable_by_key(|s| s.index());
@@ -654,6 +658,7 @@ impl Db {
             &mut f.history_wholes,
             &mut f.elem_direct,
             &mut f.param_reads,
+            &mut f.entity_names,
         ] {
             v.sort_unstable_by_key(|d| d.index());
             v.dedup();
@@ -698,6 +703,11 @@ impl Db {
                 prefix: AttrPrefix::Expr(p),
                 ..
             } => self.note_history(p, matches!(attr, PredefAttr::LastValue), f),
+            ExprKind::Attr {
+                attr: PredefAttr::PathName | PredefAttr::InstanceName,
+                prefix: AttrPrefix::Entity(d),
+                ..
+            } => f.entity_names.push(d),
             ExprKind::External(x)
                 if self.externals[x].path_kind == yavs_syntax::ast::PathKind::Package =>
             {

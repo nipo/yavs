@@ -422,7 +422,7 @@ pub(crate) struct Cx {
     /// The entities some `'path_name` or `'instance_name` names (`Fx::prot_name`), found once
     /// for the `Db` whose address, expression count and version are the key.
     #[serde(skip)]
-    pub named_entities: Option<((usize, usize, u64), FxHashSet<DeclId>)>,
+    pub named_entities: Option<((usize, usize, u64), Vec<DeclId>)>,
     /// Empty in an image (`Lowerer::image` refuses otherwise).
     #[serde(skip)]
     pub diags: Vec<Diagnostic>,

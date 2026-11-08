@@ -479,6 +479,48 @@ entity ftb is end;\narchitecture a of ftb is\n  signal t : std_logic;\nbegin\n  
     assert!(r.stdout.contains("S=") || r.stderr.contains("S="), "{r:?}");
 }
 
+/// The variables a protected body names with `'path_name` are a fact of the analysis too: a
+/// replayed package body brings them, so an object of the type keeps its name in a run that
+/// replays every unit (and the check mode finds the same set as an analysis from source).
+#[test]
+fn entries_carry_the_named_entities_of_their_unit() {
+    let e = Env::new("units_named");
+    let pk = "package pk is\n  type t is protected\n    procedure inc;\n  end protected;\nend;\n\
+package body pk is\n  type t is protected body\n    variable n : natural;\n    procedure inc is\n    begin\n\
+      report \"P=\" & n'path_name & \" I=\" & n'instance_name;\n      n := n + 1;\n    end procedure;\n\
+  end protected body;\nend;\n";
+    let sh = "package sh is\n  shared variable s : work.pk.t;\nend;\n";
+    let tb = "entity ntb is end;\narchitecture a of ntb is\nbegin\n  p : process\n    variable v : work.pk.t;\n\
+  begin\n    v.inc;\n    work.sh.s.inc;\n    wait;\n  end process;\nend;\n";
+    for (f, t) in [("pk.vhd", pk), ("sh.vhd", sh), ("ntb.vhd", tb)] {
+        std::fs::write(e.tmp.join(f), t).expect("write");
+    }
+    let paths: Vec<String> = ["pk.vhd", "sh.vhd", "ntb.vhd"]
+        .iter()
+        .map(|f| e.tmp.join(f).display().to_string())
+        .collect();
+    let files: Vec<&str> = paths.iter().map(String::as_str).collect();
+    e.analyze(&files, &["--std=2019"]);
+    let o = Command::new(env!("CARGO_BIN_EXE_yavs"))
+        .current_dir(&e.tmp)
+        .env_remove("YAVS_STDLIB")
+        .env("YAVS_UNIT_CHECK", "1")
+        .args(["analyze", "--std=2019", "--work", &e.lib("work")])
+        .args(&files)
+        .output()
+        .expect("run");
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let work = e.lib("work");
+    for _ in 0..3 {
+        let r = e.yavs(&["run", "--std=2019", "--work", &work, "ntb"]);
+        assert_eq!(r.code, 0, "{r:?}");
+        assert_eq!(r.notes("miss "), 0, "{r:?}");
+        let all = format!("{}{}", r.stdout, r.stderr);
+        assert!(all.contains("P=:ntb:p:v:n I=:ntb(a):p:v:n"), "{r:?}");
+        assert!(all.contains("P=:work:sh:s:n I=:work:sh:s:n"), "{r:?}");
+    }
+}
+
 #[test]
 fn a_package_body_removes_the_generics_its_declaration_made() {
     // The body of a generic package takes the generics of its declaration out of the set of unused

@@ -5797,7 +5797,9 @@ dependencies; this overrides "no incremental compilation cache" for analysis too
   every entry (as `differs_from` does) gives the same `Db`. A decode error is an internal error (as for a page of an
   image): the entry was checksummed when it was read and the plan checked its owners, so a failure is a bug in yavs.
 - **An entry holds the elaborator's facts about its own expressions and statements** (`Db::facts`: `'active` reads,
-  force and release statements, package-path external names; format 2). They are found when the entry is made, from the
+  force and release statements, package-path external names; format 2; since format 17 also the named entities that
+  prefix `'path_name`/`'instance_name`, which `Fx::prot_name` read by scanning every expression of the `Db`: on a cold
+  run of a library testbench that scan decoded every replayed expression, 6 to 18 percent of its elaboration). They are found when the entry is made, from the
   unit's own segments (those entries are decoded then anyway), written last in the body as ids (so they are mapped by the
   replay like the other ids) and kept in `Db::unit_facts` by load until `settle`. `Db::scan_facts` skips the entries of
   those loads and merges their facts (sorted by id, equal to a scan), so a cold `settle` reads no page of a replayed
