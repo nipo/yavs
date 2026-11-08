@@ -1,1 +1,0 @@
-Large designs that pass records, arrays of records or matrices to subprograms simulate faster: those calls go to copies of the subprograms made for the shapes of their arguments, and the generated code of loops and process activations does less work.

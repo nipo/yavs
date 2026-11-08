@@ -231,12 +231,12 @@
        8
       ],
       "composite": [
-       157,
-       157
+       162,
+       162
       ],
       "delta": [
-       17,
-       17
+       18,
+       18
       ],
       "env": [
        16,
@@ -247,8 +247,8 @@
        12
       ],
       "generics": [
-       58,
-       58
+       59,
+       59
       ],
       "held": [
        10,
@@ -295,8 +295,8 @@
        24
       ],
       "rtl": [
-       4,
-       4
+       5,
+       5
       ],
       "scalar": [
        20,
@@ -336,12 +336,12 @@
        8
       ],
       "composite": [
-       157,
-       157
+       162,
+       162
       ],
       "delta": [
-       17,
-       17
+       18,
+       18
       ],
       "env": [
        16,
@@ -352,8 +352,8 @@
        12
       ],
       "generics": [
-       58,
-       58
+       59,
+       59
       ],
       "held": [
        10,
@@ -400,8 +400,8 @@
        24
       ],
       "rtl": [
-       4,
-       4
+       5,
+       5
       ],
       "scalar": [
        20,
@@ -441,12 +441,12 @@
        8
       ],
       "composite": [
-       157,
-       157
+       162,
+       162
       ],
       "delta": [
-       17,
-       17
+       18,
+       18
       ],
       "env": [
        16,
@@ -457,8 +457,8 @@
        12
       ],
       "generics": [
-       58,
-       58
+       59,
+       59
       ],
       "held": [
        10,
@@ -505,8 +505,8 @@
        24
       ],
       "rtl": [
-       4,
-       4
+       5,
+       5
       ],
       "scalar": [
        20,
@@ -546,10 +546,9 @@
     "classes": {
      "analysis": 23,
      "elab": 7,
-     "oracle": 25,
+     "oracle": 26,
      "pass": 1014,
-     "skip": 403,
-     "timeout": 1
+     "skip": 403
     },
     "pass_list": 995,
     "pass_list_regressions": [],
@@ -626,9 +625,9 @@
   }
  },
  "generated": {
-  "commit": "5a461d96aa",
-  "commit_date": "2026-11-06",
-  "version": "0.16.0"
+  "commit": "5fc57b2f88",
+  "commit_date": "2026-11-07",
+  "version": "0.16.1"
  },
  "local": {
   "records": {
@@ -1349,162 +1348,162 @@
   "corpus_refs": {
    "en_cl_fix-2008": {
     "pass": 149,
-    "recorded": "2026-11-06",
+    "recorded": "2026-11-07",
     "total": 149
    },
    "fletcher-2008": {
     "pass": 101,
-    "recorded": "2026-11-06",
+    "recorded": "2026-11-07",
     "total": 101
    },
    "grlib-1993": {
     "pass": 454,
-    "recorded": "2026-11-06",
+    "recorded": "2026-11-07",
     "total": 454
    },
    "grlib-2008": {
     "pass": 410,
-    "recorded": "2026-11-06",
+    "recorded": "2026-11-07",
     "total": 410
    },
    "hdl-modules-2008": {
     "pass": 86,
-    "recorded": "2026-11-06",
+    "recorded": "2026-11-07",
     "total": 86
    },
    "hdl-modules-2019": {
     "pass": 86,
-    "recorded": "2026-11-06",
+    "recorded": "2026-11-07",
     "total": 86
    },
    "json-for-vhdl-2008": {
     "pass": 149,
-    "recorded": "2026-11-06",
+    "recorded": "2026-11-07",
     "total": 149
    },
    "neorv32-2008": {
     "pass": 67,
-    "recorded": "2026-11-06",
+    "recorded": "2026-11-07",
     "total": 67
    },
    "neotrng-2008": {
     "pass": 2,
-    "recorded": "2026-11-06",
+    "recorded": "2026-11-07",
     "total": 2
    },
    "open-logic-2008": {
     "pass": 386,
-    "recorded": "2026-11-06",
+    "recorded": "2026-11-07",
     "total": 386
    },
    "osvvm-2008": {
     "pass": 174,
-    "recorded": "2026-11-06",
+    "recorded": "2026-11-07",
     "total": 174
    },
    "osvvm-2019": {
     "pass": 174,
-    "recorded": "2026-11-06",
+    "recorded": "2026-11-07",
     "total": 174
    },
    "poc-2008": {
     "pass": 417,
-    "recorded": "2026-11-06",
+    "recorded": "2026-11-07",
     "total": 417
    },
    "satcat5-2008": {
     "pass": 246,
-    "recorded": "2026-11-06",
+    "recorded": "2026-11-07",
     "total": 246
    },
    "surf-2008": {
     "pass": 310,
-    "recorded": "2026-11-06",
+    "recorded": "2026-11-07",
     "total": 318
    },
    "uvvm-2008": {
     "pass": 235,
-    "recorded": "2026-11-06",
+    "recorded": "2026-11-07",
     "total": 235
    },
    "uvvm-2019": {
     "pass": 235,
-    "recorded": "2026-11-06",
+    "recorded": "2026-11-07",
     "total": 235
    },
    "vests-1993": {
     "pass": 1939,
-    "recorded": "2026-11-06",
+    "recorded": "2026-11-07",
     "total": 1939
    },
    "vhdl-compliance-2008": {
     "pass": 171,
-    "recorded": "2026-11-06",
+    "recorded": "2026-11-07",
     "total": 171
    },
    "vhdl-compliance-2019": {
     "pass": 208,
-    "recorded": "2026-11-06",
+    "recorded": "2026-11-07",
     "total": 208
    },
    "vhdl-extras-2008": {
     "pass": 25,
-    "recorded": "2026-11-06",
+    "recorded": "2026-11-07",
     "total": 25
    },
    "vhdl-ideas-2019": {
     "pass": 18,
-    "recorded": "2026-11-06",
+    "recorded": "2026-11-07",
     "total": 19
    },
    "vhdl-interfaces-2019": {
     "pass": 34,
-    "recorded": "2026-11-06",
+    "recorded": "2026-11-07",
     "total": 34
    },
    "vhdl-tool-checks-2008": {
     "pass": 1,
-    "recorded": "2026-11-06",
+    "recorded": "2026-11-07",
     "total": 1
    },
    "vhdl-tool-checks-2019": {
     "pass": 1,
-    "recorded": "2026-11-06",
+    "recorded": "2026-11-07",
     "total": 1
    },
    "vhlib-2008": {
     "pass": 26,
-    "recorded": "2026-11-06",
+    "recorded": "2026-11-07",
     "total": 26
    },
    "vunit-2008": {
     "pass": 143,
-    "recorded": "2026-11-06",
+    "recorded": "2026-11-07",
     "total": 143
    },
    "vunit-2019": {
     "pass": 143,
-    "recorded": "2026-11-06",
+    "recorded": "2026-11-07",
     "total": 143
    },
    "vunit-tests-2008": {
     "pass": 218,
-    "recorded": "2026-11-06",
+    "recorded": "2026-11-07",
     "total": 218
    },
    "vunit-tests-2019": {
     "pass": 218,
-    "recorded": "2026-11-06",
+    "recorded": "2026-11-07",
     "total": 218
    },
    "yavs-lib-2008": {
     "pass": 27,
-    "recorded": "2026-11-06",
+    "recorded": "2026-11-07",
     "total": 27
    },
    "yavs-lib-2019": {
     "pass": 26,
-    "recorded": "2026-11-06",
+    "recorded": "2026-11-07",
     "total": 28
    }
   },
