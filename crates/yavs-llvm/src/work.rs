@@ -51,6 +51,16 @@ pub(crate) fn per_thread(out: &mut Vec<(usize, u64)>) {
     imp::per_thread(out, None);
 }
 
+/// The calling thread's id (0 where there is no counter), for `of_thread`.
+pub(crate) fn thread_id() -> i32 {
+    imp::thread_id()
+}
+
+/// The instructions the thread `tid` (`thread_id`) retired so far, once its counter is open.
+pub(crate) fn of_thread(tid: i32) -> Option<u64> {
+    imp::of_thread(tid)
+}
+
 /// `per_thread` for the threads with these slot indices only: a read is a system call, and the
 /// sampler shares the core with the simulation it counts.
 pub(crate) fn of_threads(slots: &[usize], out: &mut Vec<(usize, u64)>) {
@@ -214,8 +224,21 @@ mod imp {
     #[cfg(test)]
     pub(super) fn register_now(index: usize) -> Result<i32, std::io::Error> {
         let fd = open(gettid())?;
-        state().fds.push((index, fd));
+        let mut st = state();
+        st.fds.push((index, fd));
+        st.tids.push((index, gettid()));
         Ok(fd)
+    }
+
+    pub(super) fn thread_id() -> i32 {
+        gettid()
+    }
+
+    pub(super) fn of_thread(tid: i32) -> Option<u64> {
+        let st = state();
+        let (slot, _) = st.tids.iter().find(|t| t.1 == tid)?;
+        let (_, fd) = st.fds.iter().find(|f| f.0 == *slot)?;
+        Some(read_one(*fd))
     }
 
     pub(super) fn per_thread(out: &mut Vec<(usize, u64)>, only: Option<&[usize]>) {
@@ -241,6 +264,14 @@ mod imp {
     }
 
     pub fn per_thread(_: &mut Vec<(usize, u64)>, _: Option<&[usize]>) {}
+
+    pub fn thread_id() -> i32 {
+        0
+    }
+
+    pub fn of_thread(_: i32) -> Option<u64> {
+        None
+    }
 }
 
 #[cfg(all(
@@ -270,7 +301,11 @@ mod tests {
             };
             let start = super::imp::read_one(fd);
             spin(2_000_000);
-            Some(super::imp::read_one(fd) - start)
+            let got = super::imp::read_one(fd) - start;
+            // Read by thread id too (`of_thread`, the kernel thread's count for the trace).
+            let by_id = super::of_thread(super::thread_id()).expect("counter by thread id");
+            assert!(by_id >= start + got, "{by_id} < {start} + {got}");
+            Some(got)
         });
         // The test thread itself is not counted: its spin adds nothing to the worker's counter.
         spin(2_000_000);

@@ -14840,4 +14840,9 @@ the IR optimiser and lowering. Decisions:
   tier, 4 and 8 threads; the designs that never pool unchanged); wall `rtl_fan` 0.82 to 0.995 in all eight
   readings (two cells of one binary in four sittings) against 0.95 to 1.09 with the switch off, the others within
   the A/A (whose own band reached 0.90 to 1.07).
-
+- **Decision: the trace line of `--tier=auto` that serves the calibration of `work::INSTR_PER_US` pairs the kernel
+  thread's instructions with the kernel thread's CPU time** (agent). Why: since round 3 the CPU time is the kernel
+  thread's; the instructions were the sum over the threads running at the last look, which counted the pool's
+  workers and read 0 whenever none ran at that look (it did on `rtl_lfsr` at one and at four threads). Measured
+  (`rtl_lfsr`, default tier, first run, loaded host): about 9 600 instructions per CPU microsecond at one thread and
+  9 000 at four; `INSTR_PER_US` (16 000) is not changed here.
