@@ -324,6 +324,26 @@ Each one turns a fast path off or changes its threshold, to compare a run with a
      - a number
      - ``1``
      - ``run``
+   * - ``YAVS_AUTO_WAIT_SHARE``
+     - With ``--tier-compile=wait``: the part of the simulation CPU time the compiles may take (each one priced at what it is measured to cost); a function whose compile does not fit waits.
+     - a number
+     - ``0.25``
+     - ``run``
+   * - ``YAVS_AUTO_WAIT_LONG_SHARE``
+     - With ``--tier-compile=wait``: ``YAVS_AUTO_WAIT_SHARE`` once the run has a second of simulation work behind it.
+     - a number
+     - ``1``
+     - ``run``
+   * - ``YAVS_AUTO_WAIT_GAIN``
+     - With ``--tier-compile=wait``, in the runs after the first: the part of a function's time its compiled code is expected to save; a function the cache does not hold compiles only when that part of its share of the rest of the run (as long as the last run), over a few runs, pays for its compile. ``0`` turns the rule off.
+     - a number
+     - ``0.3``
+     - ``run``
+   * - ``YAVS_AUTO_WAIT_ORDER``
+     - With ``--tier-compile=wait``: ``1`` compiles the functions the count rule asks for by the time seen in them per compile time, ``0`` in the order asked.
+     - ``0`` or ``1``
+     - ``1``
+     - ``run``
    * - ``YAVS_AUTO_GATE``
      - Work of the simulation threads before the count rule compiles anything or makes a copy of a process, in the sampler's microseconds of work (16 000 instructions each, CPU microseconds where the counters are refused).
      - a number

@@ -928,6 +928,9 @@ enum Msg {
 /// on the sequence of looks and not on how long a compile or a trial took (#670).
 struct Look {
     running: Vec<(FuncId, bool, u64)>,
+    /// The CPU time of the kernel thread since the look before (microseconds, `sim_cpu`; where
+    /// there is no such clock, the busiest thread's work), whatever it was running.
+    cpu: u64,
 }
 
 /// The look of `total` microseconds shared equally by the running functions (the CPU time of the
@@ -936,6 +939,7 @@ fn shared_look(total: u64, running: &[(usize, FuncId, bool)]) -> Look {
     let n = running.len().max(1) as u64;
     Look {
         running: running.iter().map(|&(_, f, c)| (f, c, total / n)).collect(),
+        cpu: total,
     }
 }
 
@@ -1173,6 +1177,17 @@ const PROBE_PART: u64 = 50;
 /// 40 to 45), its price for every kind of function (`Worker::price_of`).
 const FIRST_US_PER_INSTR: f64 = 45.0;
 
+/// What a first-level generator (Cranelift) takes per IR instruction, in CPU microseconds of the
+/// compile thread, measured on cold compiles of GRLIB, the neorv32 SoC, the window generator, OSVVM
+/// and LFSR (2026-11-08, 455 compiles): frame-mode code 21 to 34 by kind (median 26, rising past
+/// 3 000 IR to 38), native-frame code 61 at under 100 IR rising to 148 at 1 000 to 3 000 (the
+/// callees made with it included): `FIRST_NATIVE_US` plus an IR instruction per
+/// `FIRST_NATIVE_GROWTH` instructions. What pacing charges (`Worker::cpu_price`), not the price the
+/// policy's thresholds read (`FIRST_US_PER_INSTR`).
+const FIRST_FRAME_US: u64 = 28;
+const FIRST_NATIVE_US: u64 = 55;
+const FIRST_NATIVE_GROWTH: u64 = 16;
+
 /// How long a run lasts before the compile thread is wanted: it samples nothing earlier (not for
 /// eager tiers). [`AutoTier::start_deferred`] leaves the start to the caller, who calls
 /// [`AutoTier::launch`] after this time.
@@ -1213,6 +1228,26 @@ const COUNT_GATE_CPU: u64 = 400_000;
 /// compiles (`--tier-compile=wait`) compiles it for the count (`Worker::unpaid`);
 /// `YAVS_AUTO_WAIT_PAYBACK` overrides it (a tuning aid).
 const WAIT_PAYBACK: f64 = 1.0;
+/// The budget of a run that stops for its compiles (`Worker::wait_share`): a quarter of the simulation
+/// CPU. Measured (all-thread instructions, three-run series from cold, 2026-11-08): a half compiled the
+/// first run of `uvvm_axistream_vvc` as dear as no budget (48.5 G against 42.1), an eighth left GRLIB's
+/// first run 11 percent dearer (267.8 G against 240.8) and the cache settling a run later.
+const WAIT_SHARE: f64 = 0.25;
+/// The budget once the looks hold `WAIT_LONG` of work (`Worker::share`): the whole simulation CPU, as
+/// the pacing before it. Measured (all-thread instructions, paired with the build before): a quarter
+/// all through cost GRLIB's first run 5 to 11 percent; with the whole after `WAIT_LONG` its first run
+/// is 0.96, a half 0.98, and `uvvm_axistream_vvc`'s first run keeps 0.97 of the 0.78 that a quarter
+/// gives it.
+const WAIT_LONG_SHARE: f64 = 1.0;
+/// What compiled code saves of the time of what it compiles (`Worker::unrepaid`): the whole-run gain of
+/// settled cached code over the interpreter, measured 0.27 (`osvvm_axi4_random`), 0.37
+/// (`neorv32_dual_full`), 0.41 (`uvvm_axistream_vvc`), 0.8 (the window generator, a compute design).
+/// Half and double: 0.15 level with 0.3, 0.6 lets `osvvm_axi4_random` run 2 and 3 cost 10 and 20
+/// percent more.
+const WAIT_GAIN: f64 = 0.3;
+/// `Worker::next_asked` orders by heat per price: in oldest-first order a large one-shot sequencer held
+/// the budget (`uvvm_axistream_vvc` run 2 29.4 G against 25.0).
+const WAIT_ORDER: bool = true;
 /// The work in the looks (microseconds) after which a run that stops for its compiles compiles what
 /// the count asks for as one that does not: a run that long is likely to repay it.
 const WAIT_LONG: u64 = 1_000_000;
@@ -1324,6 +1359,10 @@ struct Worker {
     /// compiling.
     total: u64,
     spent: u64,
+    /// The simulation CPU the looks covered (`Look::cpu`), and what the compiles cost by `cpu_price`
+    /// (microseconds): what pacing compares.
+    sim_us: u64,
+    paid: u64,
     /// `compute` per function, once asked.
     compute: Vec<std::cell::OnceCell<bool>>,
     /// `kind` per function, once asked.
@@ -1390,6 +1429,8 @@ struct Worker {
     /// Functions asked for that wait (`waits`), and those that did at some time.
     waiting: Vec<FuncId>,
     held: Vec<bool>,
+    /// Functions `unrepaid` held at some time (`CountStat::Unrepaid`).
+    unrepaid_seen: Vec<bool>,
     /// Callees that keep compiled native-frame code unpublished, to ask for (`publish`), and whether
     /// they were.
     want: Vec<FuncId>,
@@ -1415,6 +1456,15 @@ struct Worker {
     /// waits to be repaid by the time seen (`unpaid`), and `wait_payback` is the part of its price.
     stops: bool,
     wait_payback: f64,
+    /// The budget of the compiles of a run that stops for them: `paid` at most this part of the
+    /// simulation CPU looked at (`YAVS_AUTO_WAIT_SHARE`); `unrepaid`'s factor
+    /// (`YAVS_AUTO_WAIT_GAIN`); whether `next_asked` orders by heat per price
+    /// (`YAVS_AUTO_WAIT_ORDER`).
+    wait_share: f64,
+    /// `wait_share` once the run is long (`share`, `YAVS_AUTO_WAIT_LONG_SHARE`).
+    wait_long_share: f64,
+    wait_gain: f64,
+    wait_order: bool,
     trace: Option<Trace>,
 }
 
@@ -1467,6 +1517,7 @@ impl Worker {
     /// were running, and note what became hot. Only the look and the state decide; nothing here
     /// reads a clock.
     fn see(&mut self, look: &Look, upgrade: bool, pending: &mut Pending) {
+        self.sim_us += look.cpu;
         if look.running.is_empty() {
             return;
         }
@@ -1626,6 +1677,8 @@ impl Worker {
             first,
             total: 0,
             spent: 0,
+            sim_us: 0,
+            paid: 0,
             compute: vec![Default::default(); nfuncs],
             kinds: vec![Default::default(); nfuncs],
             in_cache: vec![Default::default(); nfuncs],
@@ -1658,6 +1711,7 @@ impl Worker {
             counted: false,
             waiting: Vec::new(),
             held: vec![false; nfuncs],
+            unrepaid_seen: vec![false; nfuncs],
             want: Vec::new(),
             wanted: vec![false; nfuncs],
             gate: 0,
@@ -1672,6 +1726,10 @@ impl Worker {
             guard_share: GUARD_SHARE,
             guard_calls: GUARD_CALLS,
             stops: false,
+            wait_share: WAIT_SHARE,
+            wait_long_share: WAIT_LONG_SHARE,
+            wait_gain: WAIT_GAIN,
+            wait_order: WAIT_ORDER,
             wait_payback: WAIT_PAYBACK,
             trace: std::env::var_os("YAVS_AUTO_TRACE").map(|_| Trace {
                 t0: std::time::Instant::now(),
@@ -1747,6 +1805,106 @@ impl Worker {
         (self.total < self.gate && !self.link_early(id))
             || (sub && !self.entered_from_code(id))
             || self.unpaid(id)
+            || self.unrepaid(id)
+    }
+
+    /// A later run of a program that stops for its compiles (`stops`, a profile of an earlier run)
+    /// does not stop for a function the cache does not hold whose compile (`body_price`) its share
+    /// of the looks would not save in the rest of the run the profile predicts (its last run's
+    /// simulation CPU less what the looks covered), times `wait_gain` (what compiled code saves of
+    /// the time) and `profile::EARLY_RUNS` (the cache serves the runs after). Read from the looks
+    /// and the profile; `wait_gain` 0 turns it off.
+    fn unrepaid(&self, id: FuncId) -> bool {
+        let Some(base) = self.earlier.base else {
+            return false;
+        };
+        if !self.stops || self.wait_gain <= 0.0 || self.cached(id) {
+            return false;
+        }
+        let rest = base.saturating_sub(self.sim_us) as f64;
+        let share = self.time[id.0 as usize][0] as f64 / self.total.max(1) as f64;
+        share * rest * self.wait_gain * (profile::EARLY_RUNS as f64) < self.body_price(id) as f64
+    }
+
+    /// Count `id` once as held by `unrepaid` (`CountStat::Unrepaid`).
+    fn note_unrepaid(&mut self, id: FuncId) {
+        if self.unrepaid(id) && !std::mem::replace(&mut self.unrepaid_seen[id.0 as usize], true) {
+            self.native.count_stat(CountStat::Unrepaid);
+        }
+    }
+
+    /// The part of the simulation CPU the compiles of a run that stops for them may take: `wait_share`,
+    /// `wait_long_share` once the looks hold `WAIT_LONG` of work (a long run repays more).
+    fn share(&self) -> f64 {
+        if self.total >= WAIT_LONG {
+            self.wait_long_share
+        } else {
+            self.wait_share
+        }
+    }
+
+    /// `cpu_price` of what the count compiles of `id` (`asked_part`), a link when the cache holds it.
+    fn body_price(&self, id: FuncId) -> u64 {
+        let hit = self.cached(id);
+        match self.asked_part(id) {
+            Part::Native => self.cpu_price(id, Part::Native, hit),
+            _ => {
+                let native = self.nat[id.0 as usize].0 == 0 && self.nset(id).contains(&id);
+                self.cpu_price(id, Part::Frame, hit)
+                    + if native {
+                        self.cpu_price(id, Part::Native, hit)
+                    } else {
+                        0
+                    }
+            }
+        }
+    }
+
+    /// The next of the functions the count asked for (none waits) to compile in a run that stops for
+    /// its compiles: links first, then the most seen per `body_price` among those whose price fits
+    /// the budget (`paid` at most `wait_share` of the simulation CPU looked at), the oldest first
+    /// otherwise; `None` when none fits. Not ordered with `wait_order` off.
+    fn next_asked(&self, asked: &std::collections::VecDeque<FuncId>) -> Option<usize> {
+        if !self.stops || !self.counted {
+            return (!asked.is_empty()).then_some(0);
+        }
+        let room = self.sim_us as f64 * self.share();
+        let fits = |id: FuncId| (self.paid + self.body_price(id)) as f64 <= room;
+        if !self.wait_order {
+            return asked
+                .front()
+                .filter(|&&id| self.cached(id) || fits(id))
+                .map(|_| 0);
+        }
+        if let Some(k) = asked.iter().position(|&id| self.cached(id)) {
+            return Some(k);
+        }
+        let heat =
+            |id: FuncId| self.time[id.0 as usize][0] as f64 / self.body_price(id).max(1) as f64;
+        (0..asked.len())
+            .filter(|&k| fits(asked[k]))
+            .max_by(|&a, &b| heat(asked[a]).total_cmp(&heat(asked[b])).then(b.cmp(&a)))
+    }
+
+    /// The trace line of a function the count asked for that `waits`: which of its rules hold it.
+    fn held_why(&self, id: FuncId) -> String {
+        let f = self.prog.func(id);
+        let sub = f.is_some_and(|f| f.kind != FuncKind::Process);
+        format!(
+            "held f{} `{}` ({} IR): gate {}, uncalled subprogram {}, unpaid {} (seen {} of price {} us, cached {}), unrepaid {} (body {} us), seen total {} us",
+            id.0,
+            f.map_or("?", |f| f.name.as_str()),
+            f.map_or(0, |f| f.code.len()),
+            self.total < self.gate && !self.link_early(id),
+            sub && !self.entered_from_code(id),
+            self.unpaid(id),
+            self.time[id.0 as usize][0],
+            self.price_of(id, false),
+            self.cached(id),
+            self.unrepaid(id),
+            self.body_price(id),
+            self.total
+        )
     }
 
     /// The first run of a program (no profile of an earlier run) that stops for its compiles
@@ -1817,6 +1975,9 @@ impl Worker {
         if !self.waiting.is_empty() {
             let wait = std::mem::take(&mut self.waiting);
             let (stay, free): (Vec<_>, Vec<_>) = wait.into_iter().partition(|&i| self.waits(i));
+            for &i in &stay {
+                self.note_unrepaid(i);
+            }
             self.waiting = stay;
             go.extend(free);
         }
@@ -2082,6 +2243,24 @@ impl Worker {
             (FIRST_US_PER_INSTR * f.code.len() as f64) as u64
         } else {
             self.model(id).price(f.code.len())
+        }
+    }
+
+    /// What compiling `part` of `id` costs in CPU microseconds (`hit`: a link from the cache), for
+    /// pacing and the budget of the count's compiles (`paid`): a first-level generator's measured
+    /// cost (`FIRST_FRAME_US`, `FIRST_NATIVE_US`), else `price_of`.
+    fn cpu_price(&self, id: FuncId, part: Part, hit: bool) -> u64 {
+        let Some(f) = self.prog.func(id) else {
+            return 0;
+        };
+        if hit || self.first.is_none() {
+            return self.price_of(id, hit);
+        }
+        let n = f.code.len() as u64;
+        if part == Part::Native {
+            n * (FIRST_NATIVE_US + n / FIRST_NATIVE_GROWTH)
+        } else {
+            n * FIRST_FRAME_US
         }
     }
 
@@ -3187,8 +3366,12 @@ impl Worker {
             ));
         }
         // (What a compile and a link from the cache are charged: the generator borrows `self` below.)
-        let (prices, model_cost, kind, list_key, frame_need) = (
+        let (prices, charges, model_cost, kind, list_key, frame_need) = (
             [self.price_of(id, false), self.price_of(id, true)],
+            [
+                self.cpu_price(id, part, false),
+                self.cpu_price(id, part, true),
+            ],
             self.cost(id),
             self.kind(id),
             self.list_key(id, f),
@@ -3274,6 +3457,7 @@ impl Worker {
                 if !self.early_root {
                     self.spent += prices[usize::from(hit)];
                 }
+                self.paid += charges[usize::from(hit)];
                 if let Some(tr) = &self.trace {
                     let seen = self.time.get(id.0 as usize).map_or([0, 0], |t| *t);
                     let base = match self.prog.base_of(id) {
@@ -3459,6 +3643,7 @@ fn sampler_loop(
     crate::work::per_thread(&mut last);
     // The work seen so far (microseconds), which sets how far apart the looks are (`stretch`).
     let mut done_us: u64 = 0;
+    let mut cpu_carry: u64 = 0;
     let mut batch = Vec::with_capacity(BATCH);
     let mut running = Vec::new();
     let mut counts = Vec::new();
@@ -3519,17 +3704,17 @@ fn sampler_loop(
             cpu.map_or(0, |c| u64::try_from(c.as_micros()).unwrap_or(u64::MAX)),
             Ordering::Relaxed,
         );
-        let look = if work {
-            Look {
-                running: running
-                    .iter()
-                    .map(|&(i, f, c)| {
-                        // (A worker that spun before it got to run counts for at most two periods.)
-                        let d = since(&counts, &last, i).min(2 * target);
-                        (f, c, crate::work::work_us(d))
-                    })
-                    .collect(),
-            }
+        let mut look = if work {
+            let running: Vec<_> = running
+                .iter()
+                .map(|&(i, f, c)| {
+                    // (A worker that spun before it got to run counts for at most two periods.)
+                    let d = since(&counts, &last, i).min(2 * target);
+                    (f, c, crate::work::work_us(d))
+                })
+                .collect();
+            let cpu = running.iter().map(|r| r.2).max().unwrap_or(0);
+            Look { running, cpu }
         } else {
             let dt = match (cpu, last_cpu) {
                 (Some(c), Some(l)) => c.saturating_sub(l),
@@ -3537,6 +3722,11 @@ fn sampler_loop(
             };
             shared_look(u64::try_from(dt.as_micros()).unwrap_or(u64::MAX), &running)
         };
+        if let (Some(c), Some(l)) = (cpu, last_cpu) {
+            look.cpu = u64::try_from(c.saturating_sub(l).as_micros()).unwrap_or(u64::MAX);
+        }
+        // (The CPU time of a look not sent goes with the next one sent.)
+        look.cpu += std::mem::take(&mut cpu_carry);
         (last_cpu, last_wall) = (cpu, wall);
         done_us += look.running.iter().map(|r| r.2).max().unwrap_or(0);
         for &(i, c) in &counts {
@@ -3552,6 +3742,7 @@ fn sampler_loop(
             || (yavs_interp::simulation_held()
                 && (wall_timed || look.running.iter().all(|r| r.2 == 0)))
         {
+            cpu_carry = look.cpu;
             continue;
         }
         batch.push(look);
@@ -3734,11 +3925,21 @@ impl AutoTier {
             w.gate_cpu = n;
         }
         (w.guard_share, w.guard_calls) = guard_knobs();
-        if let Some(p) = std::env::var("YAVS_AUTO_WAIT_PAYBACK")
-            .ok()
-            .and_then(|v| v.parse().ok())
-        {
+        let knob = |name: &str| std::env::var(name).ok().and_then(|v| v.parse::<f64>().ok());
+        if let Some(p) = knob("YAVS_AUTO_WAIT_PAYBACK") {
             w.wait_payback = p;
+        }
+        if let Some(p) = knob("YAVS_AUTO_WAIT_SHARE") {
+            w.wait_share = p;
+        }
+        if let Some(p) = knob("YAVS_AUTO_WAIT_LONG_SHARE") {
+            w.wait_long_share = p;
+        }
+        if let Some(p) = knob("YAVS_AUTO_WAIT_GAIN") {
+            w.wait_gain = p;
+        }
+        if let Some(p) = knob("YAVS_AUTO_WAIT_ORDER") {
+            w.wait_order = p != 0.0;
         }
         let spawn = move |wait: bool| {
             std::thread::Builder::new()
@@ -3858,13 +4059,27 @@ impl AutoTier {
                             // A run that waits for its compiles gets no more of them than a thread
                             // of their own could make: the compile time (the model's) at most the
                             // simulation time seen. Not with a waiting `Tier::hot` (eager, sync).
+                            let was = paced;
                             paced = sh.compile.load(Ordering::Relaxed) == COMPILE_WAIT
                                 && heat.budget != 0
                                 && !sync
-                                && w.spent > w.total;
+                                && w.paid as f64 > w.sim_us as f64 * w.share();
+                            if let (true, Some(tr)) = (was != paced, &w.trace) {
+                                tr.line(format!(
+                                    "paced {}: paid {} us, spent {} us, seen {} us, looked {} us, simulation CPU {:?}, {} asked",
+                                    if paced { "on" } else { "off" },
+                                    w.paid,
+                                    w.spent,
+                                    w.total,
+                                    w.sim_us,
+                                    sim_cpu(sh.sim_clock),
+                                    pending.asked.len()
+                                ));
+                            }
                             if paced {
                                 break;
                             }
+                            let over = std::cell::Cell::new(false);
                             let probe = if pending.asked.is_empty() {
                                 pending.probes.pop()
                             } else {
@@ -3874,13 +4089,20 @@ impl AutoTier {
                             let Some((ids, o2, sampled)) = probe
                                 .map(|id| (vec![(id, Part::Both)], false, true))
                                 .or_else(|| {
-                                    while let Some(id) = pending.asked.pop_front() {
+                                    let mut k = 0;
+                                    while let Some(&id) = pending.asked.get(k) {
                                         if !w.counted || !w.waits(id) {
-                                            return Some((vec![(id, w.ask(id))], false, false));
+                                            k += 1;
+                                            continue;
                                         }
+                                        pending.asked.remove(k);
+                                        w.note_unrepaid(id);
                                         if !w.held[id.0 as usize] {
                                             w.held[id.0 as usize] = true;
                                             w.native.count_stat(CountStat::Held);
+                                            if let Some(tr) = &w.trace {
+                                                tr.line(w.held_why(id));
+                                            }
                                         }
                                         w.waiting.push(id);
                                         // (A run that waits for a compile goes on interpreted.)
@@ -3888,7 +4110,16 @@ impl AutoTier {
                                             f.store(true, Ordering::Release);
                                         }
                                     }
-                                    None
+                                    let Some(k) = w.next_asked(&pending.asked) else {
+                                        // (None fits the budget: wait for more looks.)
+                                        if !pending.asked.is_empty() {
+                                            over.set(true);
+                                            w.native.count_stat(CountStat::OverBudget);
+                                        }
+                                        return None;
+                                    };
+                                    let id = pending.asked.remove(k)?;
+                                    Some((vec![(id, w.ask(id))], false, false))
                                 })
                                 .or_else(|| {
                                     pending
@@ -3906,6 +4137,7 @@ impl AutoTier {
                                     w.pick(&mut pending.cands).map(|ids| (ids, false, true))
                                 })
                             else {
+                                paced = over.get();
                                 // (All that was left to do for them waits, `YAVS_AUTO_SYNC`.)
                                 for id in unfinished.drain(..) {
                                     if let Some(f) = sh.finished.get(id.0 as usize) {
@@ -4046,9 +4278,11 @@ impl AutoTier {
                             ));
                         }
                         tr.line(format!(
-                            "sampled {} us, compiled for {} us (clock: {} instructions, {} us of CPU time, process CPU less the sampler's and the compile thread's)",
+                            "sampled {} us, compiled for {} us, paid {} us of {} us looked at (clock: {} instructions, {} us of CPU time, process CPU less the sampler's and the compile thread's)",
                             w.total,
                             w.spent,
+                            w.paid,
+                            w.sim_us,
                             sh.read_instr.load(Ordering::Relaxed),
                             sh.read_cpu_us.load(Ordering::Relaxed),
                         ));
@@ -4457,6 +4691,7 @@ mod tests {
     fn look(us: u64) -> super::Look {
         super::Look {
             running: vec![(yavs_ir::FuncId(0), false, us)],
+            cpu: us,
         }
     }
 
@@ -4537,6 +4772,81 @@ mod tests {
         assert!(w.waits(caller));
         w.gate = 0;
         assert!(!w.waits(caller));
+    }
+
+    /// A later run that stops for its compiles (`unrepaid`) holds a function the cache does not hold
+    /// while its share of the looks times the rest of the run the profile predicts, times the gain and
+    /// the runs the cache serves, is below its compile; the first run, a run that does not stop, a
+    /// link and a gain of 0 are as before.
+    #[test]
+    fn a_later_run_compiles_what_the_rest_of_it_repays() {
+        let (prog, caller, _) = caller_callee();
+        let mut w = counted(prog, 0);
+        let k = caller.0 as usize;
+        let body = w.body_price(caller) as f64;
+        assert!(body > 0.0);
+        (w.stops, w.wait_gain, w.wait_payback) = (true, 0.5, 0.0);
+        // A tenth of the looks: the rest must hold body / (0.1 * 0.5 * EARLY_RUNS).
+        (w.total, w.time[k][0]) = (1000, 100);
+        let need = (body / (0.1 * 0.5 * super::profile::EARLY_RUNS as f64)).ceil() as u64;
+        assert!(!w.waits(caller), "no profile: the first run's rules");
+        w.sim_us = 7;
+        w.earlier.base = Some(need + 7 - 1);
+        assert!(w.waits(caller), "the rest is too short");
+        w.earlier.base = Some(need + 7 + 1);
+        assert!(!w.waits(caller));
+        w.sim_us = 10;
+        assert!(w.waits(caller), "the run went on");
+        w.wait_gain = 0.0;
+        assert!(!w.waits(caller), "off");
+        w.wait_gain = 0.5;
+        w.stops = false;
+        assert!(!w.waits(caller), "a run that does not stop");
+        w.stops = true;
+        w.in_cache = vec![Default::default(); w.in_cache.len()];
+        w.in_cache[k].set(true).unwrap();
+        assert!(!w.waits(caller), "a link");
+    }
+
+    /// The next compile of a run that stops for them (`next_asked`): links first, then the most seen
+    /// per price of those that fit the budget, none when none fits; the oldest when not ordered.
+    #[test]
+    fn a_run_that_stops_compiles_the_hottest_per_price_that_fits() {
+        let (prog, caller, callee) = caller_callee();
+        let mut w = counted(prog, 0);
+        let (a, b) = (w.body_price(caller), w.body_price(callee));
+        assert!(a > 0 && b > 0);
+        let q: std::collections::VecDeque<_> = [caller, callee].into();
+        (w.stops, w.wait_order, w.wait_share, w.wait_long_share) = (true, true, 1.0, 1.0);
+        w.time[caller.0 as usize][0] = a;
+        w.time[callee.0 as usize][0] = 2 * b;
+        w.sim_us = a + b;
+        assert_eq!(w.next_asked(&q), Some(1), "the callee is hotter per price");
+        w.sim_us = a.min(b) - 1;
+        assert_eq!(w.next_asked(&q), None, "none fits");
+        // A long run gets the long run's budget.
+        (w.wait_long_share, w.total) = (2.0, super::WAIT_LONG);
+        assert_eq!(w.next_asked(&q), Some(1));
+        (w.wait_long_share, w.total) = (1.0, 0);
+        w.sim_us = a.max(b);
+        w.paid = a.max(b) - a.min(b);
+        let cheap = if a <= b { 0 } else { 1 };
+        assert_eq!(w.next_asked(&q), Some(cheap), "only the cheaper fits");
+        w.paid = 0;
+        w.wait_order = false;
+        w.sim_us = a + b;
+        assert_eq!(w.next_asked(&q), Some(0), "the oldest");
+        w.wait_order = true;
+        w.in_cache = vec![Default::default(); w.in_cache.len()];
+        w.in_cache[caller.0 as usize].set(true).unwrap();
+        w.sim_us = 0;
+        assert_eq!(w.next_asked(&q), Some(0), "a link needs no room");
+        w.stops = false;
+        assert_eq!(
+            w.next_asked(&q),
+            Some(0),
+            "a run that does not stop takes them in order"
+        );
     }
 
     /// A warm run links what the cache lists before the gate only if its own last run was long: the
@@ -4772,6 +5082,7 @@ mod tests {
         w.see(
             &super::Look {
                 running: vec![(f, false, 10_000_000)],
+                cpu: 10_000_000,
             },
             false,
             &mut pending,
@@ -5536,6 +5847,7 @@ mod tests {
     fn what_is_hot_depends_on_the_looks_only() {
         let look = |ms: u64| super::Look {
             running: vec![(yavs_ir::FuncId(0), false, ms * 1000)],
+            cpu: ms * 1000,
         };
         let hot_after = |pause: bool| {
             let (mut w, f) = worker(100);
@@ -5628,6 +5940,7 @@ mod tests {
         let (mut w, f) = worker(100);
         let look = |us: u64| super::Look {
             running: vec![(f, false, us)],
+            cpu: us,
         };
         let mut pending = super::Pending::default();
         w.see(&look(10), false, &mut pending);
@@ -5668,6 +5981,7 @@ mod tests {
         let (mut w, f) = worker(100);
         let look = |us: u64| super::Look {
             running: vec![(f, false, us)],
+            cpu: us,
         };
         let mut pending = super::Pending::default();
         // 19 ms: not yet; 21 ms: hot.
@@ -5760,6 +6074,7 @@ mod tests {
         let at = super::Heat::DEFAULT.threshold(w.prog.func(f).unwrap());
         let look = |us: u64| super::Look {
             running: vec![(f, false, us)],
+            cpu: us,
         };
         let mut pending = super::Pending::default();
         w.see(&look(at - 1), false, &mut pending);
@@ -5839,6 +6154,7 @@ mod tests {
         assert_eq!(w.tree(f), [(f, Part::Frame)]);
         let look = |us: u64| super::Look {
             running: vec![(f, false, us)],
+            cpu: us,
         };
         let mut pending = super::Pending::default();
         // (Not a candidate again although hot: native-frame code of it exists.)
