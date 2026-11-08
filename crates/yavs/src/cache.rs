@@ -249,6 +249,9 @@ fn with_stages(
     db
 }
 
+/// Unit entries this process stored (`YAVS_COUNTERS` `units_stored`).
+pub static UNITS_STORED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 /// The analysed-unit cache (`docs/decisions.md` "Analysed-unit cache", `yavs_sem::units`): the
 /// entries of a library's units in its directory; those of the built-in std/ieee in the store
 /// shared by all libraries ([`shared_std_dir`]), or in the work library's with sharing off.
@@ -390,6 +393,7 @@ impl yavs_sem::UnitStore for Units {
         if let Some((s, k)) = self.store(lib, identity) {
             self.note(&|| format!("store {lib} {} ({} bytes)", k.hex(), bytes.len()));
             s.put("unit", &k, bytes);
+            UNITS_STORED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
     }
 
