@@ -980,8 +980,11 @@ struct Shared {
     /// Why the sampler counts CPU time and not instructions (`work::activate`), once it started;
     /// `None` while the work clock counts.
     clock_off: Mutex<Option<String>>,
+    /// The thread id of the kernel thread (`work::thread_id`).
+    sim_tid: i32,
     /// What the sampler has read so far, for the trace and the calibration of `work::INSTR_PER_US`:
-    /// the simulation CPU (`sim_cpu`, microseconds) and the instructions of the simulation threads.
+    /// the simulation CPU (`sim_cpu`, microseconds) and the instructions of the same thread (all
+    /// threads' would count the pool's workers against the kernel thread's CPU).
     read_cpu_us: std::sync::atomic::AtomicU64,
     read_instr: std::sync::atomic::AtomicU64,
     /// Eager mode: per function, its compile (or the decision to leave it interpreted) is over,
@@ -3513,8 +3516,9 @@ fn sampler_loop(
             counts.clear();
         }
         let (cpu, wall) = (clock(), std::time::Instant::now());
-        sh.read_instr
-            .store(counts.iter().map(|e| e.1).sum::<u64>(), Ordering::Relaxed);
+        if let Some(n) = crate::work::of_thread(sh.sim_tid) {
+            sh.read_instr.store(n, Ordering::Relaxed);
+        }
         sh.read_cpu_us.store(
             cpu.map_or(0, |c| u64::try_from(c.as_micros()).unwrap_or(u64::MAX)),
             Ordering::Relaxed,
@@ -3677,6 +3681,7 @@ impl AutoTier {
                 .collect(),
             // (The tier is made on the kernel thread, the one that runs the simulation.)
             sim_clock: own_cpu_clock(),
+            sim_tid: crate::work::thread_id(),
             ..Shared::default()
         });
         let ntab: Arc<[AtomicUsize]> = (0..prog.funcs.len()).map(|_| AtomicUsize::new(0)).collect();
@@ -4046,7 +4051,7 @@ impl AutoTier {
                             ));
                         }
                         tr.line(format!(
-                            "sampled {} us, compiled for {} us (clock: {} instructions, {} us of CPU time, process CPU less the sampler's and the compile thread's)",
+                            "sampled {} us, compiled for {} us (clock: {} instructions and {} us of CPU time of the kernel thread)",
                             w.total,
                             w.spent,
                             sh.read_instr.load(Ordering::Relaxed),

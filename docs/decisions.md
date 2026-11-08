@@ -14822,6 +14822,31 @@ the IR optimiser and lowering. Decisions:
 - **Dependencies:** LLVM 21 is no longer an approved manual dependency (root `AGENTS.md` rule 9,
   `docs/plan.md`).
 
+## `--threads=auto` round 4 (yavs-kernel, #884, 2026-11-08)
+
+- **Decision: the batch last estimated at or below the lowest pool threshold (`SimControl::stay`: its length, first
+  and last process) is taken as `small` the next 15 times it comes: no estimate, timed in one batch in 16** (agent).
+  Why: a batch near the threshold passes the bound of `small` (one dear process anywhere sets `cost_hi`), so it was
+  estimated at every delta cycle and a sixteenth of its activations timed, though it stays inline. Two batches with
+  the same key are taken to be the same: a wrong guess changes where a batch runs, never the output. Measured
+  (interpreter, all-thread instructions, no batch pooled): over one thread `lfsr64` at `--threads=4` 1.021 to 1.002,
+  `rtl_bus` at `--threads=8` 1.008 to 1.001; one thread unchanged.
+- **Decision: the estimate of a batch stops once its splittable work passes `pool_ns` (`sum - max` only grows), except
+  before a probe of `--threads=auto`; the pieces of the pooled batch add up their processes' costs and the whole
+  estimate is put together after the join, so `learn_pooled` and the windows see what they saw before** (agent).
+  Why: the pass over a batch of thousands of processes ran on the kernel thread before any worker started (about
+  5 percent of the kernel thread's samples on `rtl_fan` at `--threads=4`). Measured (one PGO bench build with a
+  switch, both cells and an A/A cell against the switch off, CPUs 12-15 and 28-31, 8 rounds, paired): all-thread
+  instructions `rtl_fan` 0.93 to 0.97, `rtl_ff` 0.96 to 0.97, `rtl_lfsr` 0.97 to 0.99 (interpreter and default
+  tier, 4 and 8 threads; the designs that never pool unchanged); wall `rtl_fan` 0.82 to 0.995 in all eight
+  readings (two cells of one binary in four sittings) against 0.95 to 1.09 with the switch off, the others within
+  the A/A (whose own band reached 0.90 to 1.07).
+- **Decision: the trace line of `--tier=auto` that serves the calibration of `work::INSTR_PER_US` pairs the kernel
+  thread's instructions with the kernel thread's CPU time** (agent). Why: since round 3 the CPU time is the kernel
+  thread's; the instructions were the sum over the threads running at the last look, which counted the pool's
+  workers and read 0 whenever none ran at that look (it did on `rtl_lfsr` at one and at four threads). Measured
+  (`rtl_lfsr`, default tier, first run, loaded host): about 9 600 instructions per CPU microsecond at one thread and
+  9 000 at four; `INSTR_PER_US` (16 000) is not changed here.
 
 ## Wake plan (yavs-kernel `finish_direct`, `wake_plan`, `Waiters::plan`, wave 3 item K1, 2026-11-08)
 
