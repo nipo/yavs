@@ -33,6 +33,7 @@ pub fn report(s: yavs_kernel::Stats, rt: Option<&yavs_interp::Runtime>) {
         ("pooled_batches", s.pooled_batches),
         ("threads_windows", s.threads_windows),
         ("estimates_skipped", s.estimates_skipped),
+        ("estimates_cut", s.estimates_cut),
         ("threads_gained", s.threads_gained),
         ("wakes", s.wakes),
         ("idle_skips", s.idle_skips),

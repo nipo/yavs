@@ -276,6 +276,8 @@ pub struct Stats {
     /// Batches not estimated for the pool because the same batch was estimated below the
     /// threshold a few batches before (`SimControl::stay`).
     pub estimates_skipped: u64,
+    /// Estimates that stopped once the batch passed the pool threshold (`pool_batch`).
+    pub estimates_cut: u64,
 }
 
 /// A pending observer wake-up (`Hook::wake_at`). Ordered by time, then registration.
@@ -795,13 +797,16 @@ struct Piece<'a> {
 
 /// The estimated time of a pooled batch inline (`all`, ns) and of its splittable part (`work`);
 /// `learn`: every process has a cost (`SimControl::learn_pooled`); `probe`: one that would pool
-/// runs inline to refresh the costs (only under `--threads=auto`, which times it).
+/// runs inline to refresh the costs (only under `--threads=auto`, which times it); `whole`: the
+/// sums cover the batch, not only the processes `pool_batch` added up before the batch passed
+/// the threshold (the pieces of the pooled batch add up the rest, `Early::est`).
 #[derive(Clone, Copy, Default)]
 struct Estimate {
     all: u64,
     work: u64,
     learn: bool,
     probe: bool,
+    whole: bool,
 }
 
 /// What tells two batches apart for `SimControl::stay`: a batch of the same length, first and
@@ -825,6 +830,9 @@ struct Early {
     serial: u32,
     /// A process of the piece failed.
     failed: bool,
+    /// The costs of the piece's processes: all, the parallel ones and the largest of those, and
+    /// whether every one has a cost (`Estimate`).
+    est: (u64, u64, u64, bool),
 }
 
 pub(crate) struct ProcMeta {
@@ -4177,7 +4185,7 @@ impl SimControl {
         let mut pooled = est.is_some_and(|e| !e.probe);
         let helpers = if pooled { self.helpers() } else { 0 };
         if pooled && helpers == 0 {
-            self.starved_batch(est);
+            self.starved_batch(est, &pids);
             est = None;
             pooled = false;
         } else if !pooled && self.held != 0 {
@@ -4274,7 +4282,7 @@ impl SimControl {
                             out: bufs.pop().unwrap_or_default(),
                         }));
                     }
-                    let (next, names) = (AtomicUsize::new(0), &self.names);
+                    let (next, names, cost) = (AtomicUsize::new(0), &self.names, &self.cost);
                     let work = || {
                         while let Some(part) = parts.get(next.fetch_add(1, Ordering::Relaxed)) {
                             let mut part = part.lock().unwrap_or_else(PoisonError::into_inner);
@@ -4286,13 +4294,20 @@ impl SimControl {
                                 armed,
                                 out,
                             } = &mut *part;
+                            // The piece's part of the estimate (`Estimate::whole`).
+                            let mut est = (0, 0, 0, true);
                             for &p in pids.iter() {
                                 let i = p as usize - *lo;
+                                let c = u64::from(cost[p as usize]);
+                                est.0 += c;
+                                est.3 &= c != 0;
                                 if procs[i].flags.serial {
                                     out.serial += 1;
                                     out.late.push(p);
                                     continue;
                                 }
+                                est.1 += c;
+                                est.2 = est.2.max(c);
                                 let slot = slot_mut(&mut slots[i]);
                                 resumption(procs, i as u32, &mut slot.st);
                                 run(p, slot, false);
@@ -4336,6 +4351,7 @@ impl SimControl {
                                     out.late.push(p);
                                 }
                             }
+                            out.est = est;
                         }
                     };
                     // The workers that ended: the kernel thread waits for them spinning, since
@@ -4353,11 +4369,16 @@ impl SimControl {
                     });
                     // The pieces in process order, so their late lists join in process order.
                     let (mut lates, mut serial, mut failed) = (Vec::new(), 0, false);
+                    let mut sums = (0, 0, 0, true);
                     for part in parts {
                         let mut out = part
                             .into_inner()
                             .unwrap_or_else(PoisonError::into_inner)
                             .out;
+                        sums.0 += out.est.0;
+                        sums.1 += out.est.1;
+                        sums.2 = sums.2.max(out.est.2);
+                        sums.3 &= out.est.3;
                         for (t, d) in out.queue.drain(..) {
                             self.queue.push(self.now, t, Entry::Driver(d));
                         }
@@ -4373,6 +4394,9 @@ impl SimControl {
                     }
                     self.early = bufs;
                     self.idle_active = self.idle_live != 0;
+                    if let Some(e) = est.as_mut().filter(|e| !e.whole) {
+                        (e.all, e.work, e.learn, e.whole) = (sums.0, sums.1 - sums.2, sums.3, true);
+                    }
                     // The serial processes in batch order, as the inline loop runs them: none
                     // after a process that stopped the batch (it is not committed either), and
                     // live while no earlier one wrote.
@@ -4580,9 +4604,14 @@ impl SimControl {
 
     /// A batch that would pool got no token.
     #[cold]
-    fn starved_batch(&mut self, est: Option<Estimate>) {
+    fn starved_batch(&mut self, est: Option<Estimate>, pids: &[u32]) {
         if let (Some(a), Some(e)) = (self.auto.as_deref_mut(), est) {
-            a.batch(e.all, None);
+            let all = if e.whole {
+                e.all
+            } else {
+                pids.iter().map(|&p| u64::from(self.cost[p as usize])).sum()
+            };
+            a.batch(all, None);
         }
     }
 
@@ -4613,17 +4642,28 @@ impl SimControl {
     /// `docs/design/parallel-kernel.md` 4.1).
     fn pool_batch(&mut self, pids: &[u32]) -> Option<Estimate> {
         if self.cfg.pool_all {
-            return (pids.len() >= 2).then_some(Estimate::default());
+            return (pids.len() >= 2).then_some(Estimate {
+                whole: true,
+                ..Estimate::default()
+            });
         }
         self.batches = self.batches.wrapping_add(1);
-        let (mut all, mut sum, mut max, mut known) = (0, 0, 0, true);
-        for &p in pids {
+        // The sum stops once the batch passed the threshold (`sum - max` only grows): the pieces
+        // of the pooled batch add up the rest. A probe needs the whole sum before it runs.
+        let probe_next = self.auto.is_some() && self.probe.wrapping_add(1) % PROBE_EVERY == 1;
+        let (mut all, mut sum, mut max, mut known, mut whole) = (0, 0, 0, true, true);
+        for (i, &p) in pids.iter().enumerate() {
             let c = u64::from(self.cost[p as usize]);
             all += c;
             known &= c != 0;
             if !self.serial_of[p as usize] {
                 sum += c;
                 max = max.max(c);
+                if sum - max > self.pool_ns && !probe_next && i + 1 < pids.len() {
+                    whole = false;
+                    self.stats.estimates_cut += 1;
+                    break;
+                }
             }
         }
         let work = sum - max;
@@ -4637,6 +4677,7 @@ impl SimControl {
                     work,
                     learn: known,
                     probe: true,
+                    whole,
                 });
             }
             !self.probe.is_multiple_of(PROBE_EVERY)
@@ -4655,6 +4696,7 @@ impl SimControl {
             work,
             learn: known,
             probe: false,
+            whole,
         })
     }
 

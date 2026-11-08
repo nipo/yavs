@@ -14830,3 +14830,14 @@ the IR optimiser and lowering. Decisions:
   the same key are taken to be the same: a wrong guess changes where a batch runs, never the output. Measured
   (interpreter, all-thread instructions, no batch pooled): over one thread `lfsr64` at `--threads=4` 1.021 to 1.002,
   `rtl_bus` at `--threads=8` 1.008 to 1.001; one thread unchanged.
+- **Decision: the estimate of a batch stops once its splittable work passes `pool_ns` (`sum - max` only grows), except
+  before a probe of `--threads=auto`; the pieces of the pooled batch add up their processes' costs and the whole
+  estimate is put together after the join, so `learn_pooled` and the windows see what they saw before** (agent).
+  Why: the pass over a batch of thousands of processes ran on the kernel thread before any worker started (about
+  5 percent of the kernel thread's samples on `rtl_fan` at `--threads=4`). Measured (one PGO bench build with a
+  switch, both cells and an A/A cell against the switch off, CPUs 12-15 and 28-31, 8 rounds, paired): all-thread
+  instructions `rtl_fan` 0.93 to 0.97, `rtl_ff` 0.96 to 0.97, `rtl_lfsr` 0.97 to 0.99 (interpreter and default
+  tier, 4 and 8 threads; the designs that never pool unchanged); wall `rtl_fan` 0.82 to 0.995 in all eight
+  readings (two cells of one binary in four sittings) against 0.95 to 1.09 with the switch off, the others within
+  the A/A (whose own band reached 0.90 to 1.07).
+
