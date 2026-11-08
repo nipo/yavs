@@ -92,11 +92,7 @@ begin
   end process;
 end;
 ";
-    let tiers: &[&str] = if cfg!(feature = "llvm") {
-        &["--tier=interp", "--tier=llvm"]
-    } else {
-        &["--tier=interp"]
-    };
+    let tiers: &[&str] = &["--tier=interp"];
     for tier in tiers {
         let d = tmp("flat");
         std::fs::write(d.join("flat.vhd"), src).expect("write");

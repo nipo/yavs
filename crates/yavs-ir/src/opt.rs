@@ -158,7 +158,7 @@ pub fn keep_variables() {
 
 static COMPILED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Every function will be compiled to native code (`--tier=llvm`): the memoisation of
+/// Every function will be compiled to native code (`--tier=clift`): the memoisation of
 /// instance-constant values asks for a larger gain per copy. Call it before the first function
 /// is asked for.
 pub fn compiled_tier() {
@@ -172,7 +172,7 @@ fn compiled() -> bool {
 static LAYOUT_SLOTS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Some functions will be compiled to native code (`--tier=auto`): the frames of processes get
-/// the layout slots of `layout_cache` as under `--tier=llvm` (user, 2026-10-23: the peak memory
+/// the layout slots of `layout_cache` as under `--tier=clift` (user, 2026-10-23: the peak memory
 /// is the price of the compiled code's hits). Call it before the first function is asked for.
 pub fn layout_slots() {
     LAYOUT_SLOTS.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -211,7 +211,7 @@ pub(crate) fn external() -> bool {
 
 /// May processes get copies specialised to their instance data (`copies.rs`)? Not with the
 /// pass off, nor while a debugger keeps variables in their slots, nor when a plugin or the
-/// waveform recorder reads or writes process variables, nor under `--tier=llvm`, which compiles
+/// waveform recorder reads or writes process variables, nor under `--tier=clift`, which compiles
 /// the program before any copy exists, nor with `YAVS_NO_SPEC` (differential testing).
 pub fn specialise_on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();

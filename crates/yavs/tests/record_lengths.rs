@@ -234,9 +234,6 @@ fn every_path_checks_the_lengths() {
     if cfg!(feature = "clift") {
         tiers.push("--tier=clift");
     }
-    if cfg!(feature = "llvm") {
-        tiers.push("--tier=llvm");
-    }
     let tmp = tempdir("record_lengths");
     let mut src = PKG.to_string();
     let mut at = Vec::new();

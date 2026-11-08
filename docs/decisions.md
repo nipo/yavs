@@ -343,6 +343,9 @@ field by field (`kernel/hang.rs`).
 
 ## LLVM bindings: llvm-sys 211, no inkwell (yavs-llvm)
 
+Superseded on 2026-11-08: the LLVM tier was removed ("LLVM tier removed" below). This section and
+the LLVM sections after it are the record of how it was built.
+
 - **Choice:** `llvm-sys` `=211.1.1` (MIT), the raw LLVM 21.1 C API, features `prefer-dynamic` and
   `strict-versioning`, optional behind the crate feature `llvm` (default off, so the workspace
   builds without LLVM). Test with `cargo test -p yavs-llvm --features llvm`.
@@ -14803,4 +14806,35 @@ the IR optimiser and lowering. Decisions:
   1.04 of the base except `sc5_timestamp` 1.17 (its copies and links come earlier, wall 0.89 and 0.95, CPU 0.88);
   `grlib_leon3mp`, `neorv32_single_min` and `poc_arith_addw` ran over the gate before and decide as before
   (instructions 1.00 to 1.01; their walls moved 0.81 to 1.01 with the host's load).
+
+## LLVM tier removed (yavs, yavs-llvm, tools, user, 2026-11-08)
+
+- **Decision (user, 2026-11-08: "remove LLVM"; supersedes the earlier ruling to keep it until the
+  Cranelift tier's leave-anywhere work, CG3(b), is decided).** The LLVM tier is gone: the `llvm` cargo
+  feature of `yavs` and `yavs-llvm`, the LLVM generator, ORC JIT, object cache, code arena, lazy library
+  load and `llvm-sys`. Cranelift (`yavs-clift`, feature `clift`) is the compiled tier, as in the release
+  archives since 2026-10-28. Why: an LLVM build's `--tier=auto` took 1.2 to 1.5 times the cycles of
+  the Cranelift build's on GRLIB and Microwatt (warm and cold, measured once before the removal), it needed a manual LLVM 21 install, and it had no
+  CI job since 2026-10-30 (#898).
+- **`--tier=llvm` and `--tier=auto3` are E0120** in every build, before any analysis, with a note that
+  Cranelift is the compiled tier and a help line naming `--tier=auto`, `--tier=clift` and `interp`. The
+  two values stay hidden in `TierArg` so the error is a diagnostic, not an unknown value. E0120 was
+  widened ("a tier this yavs was built without, or one that was removed") rather than a new code.
+  `--tier=auto` maps to the Cranelift policy (`clift-auto`) in every build with `clift`; without it,
+  `auto` is E0120 as before.
+- **E0127** (the LLVM library cannot be loaded) is retired with the tier and never reused.
+- **Kept on purpose:** the crate `yavs-llvm` keeps its name and paths (a rename is a later step); its
+  shared runtime (`rt.rs`, `auto.rs`, `native.rs`, `regs.rs`, `eloop.rs`, `generator.rs`, `census.rs`,
+  `profile.rs`, `work.rs`, `hugezone.rs`, `perfmap.rs`) is what the Cranelift tier runs on. The policy's
+  branches for a second, optimising generator (`Gens::main`, `OptLevel::Fast`/`FastRa`) stay until the
+  policy work removes them. The leave-anywhere machinery stays (CG3(b) undecided).
+- **Tests and tools.** Test cases and files that ran only `--tier=llvm`, `--tier=auto3` or LLVM's
+  `--tier=auto` were deleted, not ported; the same cases under `--tier=clift` and `clift-auto` stay.
+  difftest loses `yavs-llvm`, `yavs-auto3`, `yavs-auto3-eager`, `yavs-mixed`; realbench loses the
+  tiers `llvm` and `auto3`, and its `codegen` phase now times `--tier=clift` (was `--tier=llvm`);
+  waveq's third tier is `clift`; `tools/conformance/run.py --llvm` is `--compiled` (the auto and clift
+  tiers). History (release notes, earlier decisions, `docs/STATUS.md`, conformance records) is not
+  rewritten.
+- **Dependencies:** LLVM 21 is no longer an approved manual dependency (root `AGENTS.md` rule 9,
+  `docs/plan.md`).
 

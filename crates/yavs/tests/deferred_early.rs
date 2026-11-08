@@ -112,9 +112,6 @@ fn tiers() -> Vec<&'static str> {
     if cfg!(feature = "clift") {
         tiers.push("--tier=clift");
     }
-    if cfg!(feature = "llvm") {
-        tiers.push("--tier=llvm");
-    }
     tiers
 }
 

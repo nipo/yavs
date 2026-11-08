@@ -19,7 +19,6 @@ git clone https://github.com/ru551n/yavs
 cd yavs
 cargo build                            # target/debug/yavs, interpreter only
 cargo build -p yavs --features clift   # adds the Cranelift tier, as in the release archives
-cargo build -p yavs --features llvm    # adds the LLVM tier; needs LLVM 21 installed
 ```
 
 ## Test

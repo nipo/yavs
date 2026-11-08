@@ -128,9 +128,6 @@ fn process_without_wait_is_warned_about() {
 
 fn tiers() -> Vec<&'static str> {
     let mut tiers = vec!["--tier=interp"];
-    if cfg!(feature = "llvm") {
-        tiers.extend(["--tier=llvm", "--tier=auto"]);
-    }
     if cfg!(feature = "clift") {
         tiers.extend(["--tier=clift", "--tier=clift-auto"]);
     }
@@ -199,19 +196,6 @@ fn a_long_loop_without_a_wait_runs_to_its_finish() {
         let out = String::from_utf8_lossy(&o.stdout);
         assert_eq!(o.status.code(), Some(0), "{tier}: {out}{}", clean(&o));
         assert!(out.contains("counted 3000000"), "{tier}: {out}");
-    }
-}
-
-/// The bound is 10^9 jumps back as shipped (not run in the suite: seconds in a release build
-/// with the compiled tier, minutes in the interpreter).
-#[cfg(feature = "llvm")]
-#[test]
-#[ignore = "long: 10^9 jumps back"]
-fn the_default_bound_is_a_billion_jumps_back() {
-    for last in ["999999000", "1000001000"] {
-        let o = run("stuck_count", &["--tier=llvm", &format!("-glast={last}")]);
-        let all = String::from_utf8_lossy(&o.stdout).to_string() + &clean(&o);
-        assert_eq!(all.contains("E3009"), last == "1000001000", "{last}: {all}");
     }
 }
 
@@ -357,13 +341,6 @@ fn sigint_ends_a_process_that_never_suspends() {
 #[test]
 fn sigint_ends_a_process_that_never_suspends_interpreted() {
     sigint_ends_spin(Some("--tier=interp"));
-}
-
-/// The same with the process compiled before it first runs (#737).
-#[cfg(all(unix, feature = "llvm"))]
-#[test]
-fn sigint_ends_a_process_that_never_suspends_compiled() {
-    sigint_ends_spin(Some("--tier=llvm"));
 }
 
 /// The same under the Cranelift tier (#737, #481).

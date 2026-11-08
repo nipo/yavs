@@ -1,7 +1,7 @@
 # AGENTS.md: working on yavs
 
-yavs is a production VHDL simulator in Rust: VHDL-1993, 2008 and 2019, an IR interpreter plus optional compiled tiers
-(LLVM or Cranelift), a parallel kernel, VHPI (partial) for Python testbench frameworks, external test runner support, a DAP
+yavs is a production VHDL simulator in Rust: VHDL-1993, 2008 and 2019, an IR interpreter plus an optional compiled tier
+(Cranelift), a parallel kernel, VHPI (partial) for Python testbench frameworks, external test runner support, a DAP
 server (with a VS Code extension). The name stands for "Yet Another VHDL Simulator". This file is for AI agents (and humans) changing the code. Read it
 fully before your first edit. It is short on purpose: the details live in the documents it points
 to, and those documents win over your memory.
@@ -28,7 +28,7 @@ ownership, commit identity, shared-host limits) do not apply to them.
 | kernel (`yavs-kernel`) | `crates/yavs-kernel/AGENTS.md`, `crates/yavs-kernel/DESIGN.md` |
 | CLI, libraries, test-runner integration | `crates/yavs/AGENTS.md`, `crates/yavs-lib/AGENTS.md`, `docs/cli-contract.md` (external test runners depend on it: change it deliberately) |
 | diagnostics, logic, std natives | `crates/yavs-{diag,logic,std}/AGENTS.md` |
-| FFI, VHPI, waves, DAP, coverage, LLVM, lint | `crates/yavs-{ffi,vhpi,wave,dap,cov,llvm,lint}/AGENTS.md` |
+| FFI, VHPI, waves, DAP, coverage, compiled-tier runtime, lint | `crates/yavs-{ffi,vhpi,wave,dap,cov,llvm,lint}/AGENTS.md` |
 | `lib/` (std/ieee sources) | `lib/AGENTS.md`, `lib/README.md`, `lib/SOURCES.md`, `lib/NATIVE.md` |
 | tests and tools | `tests/AGENTS.md` (and `tests/{diag,corpus,parse-corpus,discrepancies}/AGENTS.md`), `tools/AGENTS.md` (and `tools/{corpus,difftest,discrepancies}/AGENTS.md`), `fuzz/AGENTS.md` |
 | releases, version numbers, `.github/workflows/release.yml` | `RELEASING.md` (one release with every artifact, one version, `tools/release/bump.py`) |
@@ -53,8 +53,8 @@ ownership, commit identity, shared-host limits) do not apply to them.
 | `crates/yavs-dap` | Debug Adapter Protocol server (`yavs run --dap`) |
 | `crates/yavs-cov` | Code coverage: counters to a mergeable database, text, HTML and Cobertura reports |
 | `crates/yavs-lint` | `yavs lint`: rules over the analysed HIR, certainty classes, configuration, waivers, reports |
-| `crates/yavs-llvm` | LLVM 21 ORC JIT tier, behind the `llvm` feature (not a default feature; not shipped in the release archives, build it from source) |
-| `crates/yavs-clift` | Cranelift tier (#481), behind the `clift` feature (off by default; the compiled tier of the release archives); shares `yavs-llvm`'s `rt` module |
+| `crates/yavs-llvm` | The runtime of the compiled tier: tier-up policy (`auto`), host functions of compiled code (`rt`), native-frame loop, run-to-run profile, perf map. The LLVM tier it was named for was removed (user, 2026-11-08); the name stays until a rename is decided |
+| `crates/yavs-clift` | Cranelift tier (#481), behind the `clift` feature (off by default; the compiled tier of the release archives), on the runtime of `yavs-llvm` |
 | `crates/yavs` | The `yavs` binary |
 | `lib/` | Vendored IEEE std/ieee sources (2008, 2019), patched only via `tools/derive_libs.py` |
 | `tests/diag/` | Rendered-diagnostic snapshots; `tests/diag/sem/` negative suite with `-- expect:` headers |
@@ -99,15 +99,14 @@ ownership, commit identity, shared-host limits) do not apply to them.
    are the original files, byte for byte (`lib/SOURCES.md`); do not reproduce or edit third-party
    package text from memory.
 9. **Dependencies:** a crate that cargo fetches and builds by itself is fine. Anything that needs a
-   manual install must be approved by the user first. Approved so far: LLVM 21 (optional feature),
-   a C compiler at build time, reference simulators as dev-only references, qemu-user and the aarch64
+   manual install must be approved by the user first. Approved so far: a C compiler at build time, reference simulators as dev-only references, qemu-user and the aarch64
    cross linker for testing.
 
 ### Code
 10. **Lean code.** No speculative abstractions, no unused crates, features or config. Match the
     surrounding code's naming, comment density and idiom. Mark deliberate shortcuts with a
     `ponytail:` comment naming the ceiling and the upgrade path.
-11. **`unsafe` only where unavoidable** (FFI, VHPI, LLVM). Those crates opt out of the workspace
+11. **`unsafe` only where unavoidable** (FFI, VHPI, compiled code). Those crates opt out of the workspace
     `forbid` and confine `unsafe` to one module with a comment.
 12. **Ownership.** In shared crates (notably `yavs-sem`) claim your module in its `CONTRIBUTING.md`
     before editing. Changes in someone else's module must be small, additive, in their own commit,
@@ -249,7 +248,7 @@ YAVS_CORPUS=~/.cache/rsim-corpus cargo test -p yavs --features corpus   # parse 
 tools/corpus/report.sh                               # analyze all corpora, write tools/corpus/RESULTS.md
 python3 tools/difftest/difftest.py --candidate sim1   # differential corpus (see tools/difftest/README.md)
 python3 tools/discrepancies/run.py --check           # simulator discrepancy catalogue (docs/design/simulator-discrepancies.md)
-cargo test -p yavs-llvm --features llvm              # LLVM tier (needs LLVM 21)
+cargo test -p yavs-clift -p yavs --features clift    # the Cranelift tier
 cargo run -p yavs -- analyze --std=2008 --work=work:out/work file.vhd
 yavs run --profile[=out.json] --work=work:W top      # first tool for "where does a long run spend its time": busiest processes, instances, subprograms with file:line (stderr; JSON with FILE)
 ```
@@ -265,15 +264,14 @@ AArch64 under qemu and Windows under Wine: see the commands in `docs/STATUS.md` 
 asserting its own result) with `YAVS_COUNTERS=1 --tier=interp --threads 1` and checks counters of
 work against bounds: kernel (`cycles`, `process_runs`, `wakes`, `events`, update paths,
 quick and direct commits), interpreter `ops` executed, elaboration call cache hits, analysed-unit
-cache hits, recorded wave variables, and under `--features llvm` (no CI job since 2026-10-30, #898) the
-callbacks of compiled code and the instructions left to the interpreter. A bound is a ceiling
+cache hits, recorded wave variables, and under `--features clift` the callbacks of compiled code. A bound is a ceiling
 (`Max`) or, where fewer is the regression, a floor (`Min`). `ops` and `cb_*` are counted in debug
 builds and with `--features op-census` only (a release test run skips them).
 
 ```sh
 cargo test -p yavs --test perf                                   # check
 YAVS_PERF_PRINT=1 cargo test -p yavs --test perf -- --nocapture  # every counter of every design
-cargo test -p yavs --features llvm --test perf                   # plus the LLVM counters
+cargo test -p yavs --features clift --test perf                  # plus the compiled-code counters
 ```
 
 - A failure names the counter, design, value and bound. First find the change that made the

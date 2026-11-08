@@ -107,11 +107,11 @@ Syntax, command line, waveforms, coverage, debugger, plugins (E0 and W0)
    * - _`W0118`
      - ``--threads`` is above 1 and the token server named in ``YAVS_TOKENS`` cannot be reached (nothing listens on that port of 127.0.0.1, it does not answer, or the connection broke during the run; the note says which).
    * - _`E0120`
-     - ``yavs run --tier=...`` names a compiled tier that this yavs was built without.
+     - ``yavs run --tier=...`` names a compiled tier that this yavs was built without, or one that was removed.
    * - _`W0120`
      - With ``--cov-kind=fsm``, something looks like a state machine but is not one the coverage measures: a register of an enumeration type that a ``case`` does not select on, a ``case`` on a part of a signal, on a port or on a variable of a clocked process.
    * - _`E0121`
-     - A compiled tier could not compile the design for ``--tier=clift`` or ``--tier=llvm``, or could not start compiling for ``--tier=auto``.
+     - The compiled tier could not compile the design for ``--tier=clift``, or could not start compiling for ``--tier=auto``.
    * - _`W0121`
      - Coverage databases given to ``yavs cov merge`` or ``report`` embed different text for one source file (``--cov-embed-sources``): the file changed between the runs.
    * - _`E0123`
@@ -122,8 +122,6 @@ Syntax, command line, waveforms, coverage, debugger, plugins (E0 and W0)
      - ``yavs run --profile`` was combined with a debug session (``--dap``, ``--interactive``, ``--do``).
    * - _`E0126`
      - The directory of the std/ieee units shared by all libraries cannot be used: ``--std-cache`` or ``YAVS_STD_CACHE`` is empty, no user cache directory is known, or (for ``yavs analyze``) the directory cannot be created or written.
-   * - _`E0127`
-     - ``yavs run --tier=llvm`` could not load the LLVM 21 shared library (Linux).
    * - _`E0128`
      - ``--threads`` is above 1 and ``YAVS_TOKENS`` names a token server that yavs cannot use: the value is not ``<port>:<secret>``, or the server did not accept the secret (often a ``YAVS_TOKENS`` left over from a test runner that has ended).
    * - _`E0130`

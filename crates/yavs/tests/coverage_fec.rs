@@ -297,28 +297,6 @@ fn merge_keeps_tests() {
     }
 }
 
-/// The tiers count the same rows (the LLVM tier steps the counters in the interpreter).
-#[cfg(feature = "llvm")]
-#[test]
-fn tiers_agree() {
-    let tmp = setup("fec_tiers");
-    for tier in ["interp", "llvm", "auto"] {
-        run(
-            &tmp,
-            &[
-                &format!("--cov-file={tier}.ycov"),
-                "--cov-kind=condition,expression",
-                &format!("--tier={tier}"),
-            ],
-        );
-        assert_eq!(
-            rows(&read(&tmp.join(format!("{tier}.ycov")))),
-            want(),
-            "{tier}"
-        );
-    }
-}
-
 fn report(tmp: &Path, args: &[&str]) -> (Option<i32>, String, String) {
     let o = yavs(tmp, &[&["cov", "report", "a.ycov"][..], args].concat());
     (

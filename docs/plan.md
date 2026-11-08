@@ -6,17 +6,16 @@ yavs is a new VHDL simulator. The aim is that it can replace the other major sim
 Decisions made with the user:
 - Written in Rust, with **its own parser and its own semantic analysis**.
 - **VHDL-2008 and 2019 together**, designed in from the start.
-- **An LLVM backend plus an IR interpreter** (the architecture of the major open source simulators).
+- **A compiled tier plus an IR interpreter** (the architecture of the major open source simulators). The compiled tier was LLVM at first; it is Cranelift since the LLVM tier was removed (user, 2026-11-08, `docs/decisions.md` "LLVM tier removed").
 - **Process evaluation runs in parallel**, and the kernel is designed for it from the start. Parsing, analysis and compilation run on a single thread.
 - **Diagnostics with codes, source snippets, labels, notes and help**: coloured, with VHDL stacktraces.
 - **A compilation cache** (user, 2026-10-19, replaces the earlier "no incremental compilation cache" decision; `docs/decisions.md` "Compilation cache"): analysis results are kept in the work library and read back by later `elab`/`run` of the same design, results byte-identical to a run without it.
 - **Interfaces:** VHPI for Python testbench frameworks (**mandatory**), code coverage, and a DAP debug server with HDL extensions.
 - **GUI:** none (maintainer, 2026-10-29: `yavs-gui` was removed, `docs/decisions.md` "yavs-gui removed"). Debugging is the DAP server, for VS Code and any other DAP client; "designed for the GUI" below now means designed for DAP clients.
 - **Platforms (all tier 1, in CI from M0):** Linux x86_64, Linux aarch64 and Windows x86_64.
-  - Windows includes LLVM and Python testbench framework support.
+  - Windows includes the compiled tier and Python testbench framework support.
   - VHPI uses no separate DLL. `yavs.exe` exports the `vhpi_*` symbols. **No import library is built or shipped** (user, 2026-10-18): a plugin brings its own, as Python testbench frameworks do with their `.def` files.
-  - LLVM on Windows needs a pinned prebuilt LLVM 21 package with static libs; the prebuilt packages lack `llvm-config`.
-- **Dependencies** (user, 2026-10-18): any crate that cargo fetches and builds by itself is fine. For **any** dependency that has to be installed by hand, **ask the user first**. Approved so far: LLVM 21 (optional, behind the `llvm` feature) and a C compiler at build time (the VHPI variadic shim). The reference simulators are dev-only references.
+- **Dependencies** (user, 2026-10-18): any crate that cargo fetches and builds by itself is fine. For **any** dependency that has to be installed by hand, **ask the user first**. Approved so far: a C compiler at build time (the VHPI variadic shim). LLVM 21 was approved for the LLVM tier until its removal (user, 2026-11-08). The reference simulators are dev-only references.
 - **Performance:** correctness first, no speed target yet. Benchmarks are tracked, not gated.
 - **Embedded Python is deferred.** A Tcl-like `yavs` scripting module comes after the DAP server.
 - **Foreign subprograms:** yavs needs `foreign` subprograms in the VHPIDIRECT style plus `--load <lib>` (M3), so test-runner packages that call C (and Python through C) from VHDL work.
@@ -36,7 +35,6 @@ Decisions made with the user:
 What the research found locally:
 - **No Rust simulator exists to build on.**
 - **The existing Rust VHDL front end** is MPL. Its 2019 grammar is close to empty, and a global interner lock serializes parsing. It is a test-corpus and behaviour reference only, not a dependency.
-- **LLVM 21.1.8** with dev headers and static libs is in `/usr/lib/llvm-21`. Use `llvm-sys` 211.x, falling back to `prefer-dynamic`.
 - **The `wellen` crate** (BSD-3) provides public `HierarchyBuilder` and `wavemem::Encoder`. It works as yavs's in-memory waveform model and as the viewer's data source.
 - **The primary reference simulator** (GPL) is an architecture reference only; never copy its code.
   - Its VHPI model, JIT pipeline (IR generation, interpreter, LLVM backend) and coverage are the structural references.
@@ -57,7 +55,7 @@ What the research found locally:
 | `yavs-ir` | Lowers the HIR to a register-based IR. Each instruction carries a statement-location tag, used for stepping and for coverage. |
 | `yavs-elab` | Elaboration. Folds generics through the interpreter, expands generates, binds components and configurations, and resolves external names. It builds the signal net graph (drivers, resolution, port conversions). |
 | `yavs-interp` | IR interpreter. Used for elaboration-time evaluation, cold code, and debug stepping. |
-| `yavs-llvm` | IR → LLVM, JIT through the ORC C API. The machine code of every compiled module is kept in the compilation cache of the work library and linked again by later runs (#505, `docs/decisions.md` "Compiled code in the compilation cache"). Tiered: a process starts in the interpreter and moves to LLVM once it is hot. Compilation runs on a single thread, in the background, so the simulation is never blocked waiting for it. |
+| `yavs-llvm`, `yavs-clift` | The compiled tier: `yavs-clift` translates the IR with Cranelift, `yavs-llvm` (named for the LLVM tier it held until 2026-11-08) is its runtime and tier-up policy. The machine code of every compiled function is kept in the compilation cache of the work library and linked again by later runs (#481, #505). Tiered: a process starts in the interpreter and is compiled once it is hot; compilation runs on a single thread (`--tier-compile`). |
 | `yavs-rt` | The kernel. Implements the LRM 14.7 cycle with **parallel process evaluation** (described below). Holds the value heap (access types, protected types) and the native `std.standard`, `textio` and `env`. Logic values, **signals included**, use **bit-planes** everywhere (user, 2026-10-18; yavs-logic benchmarked planes as the winner). Protected-type callers run serial through M3. Foreign subprograms are supported (VHPIDIRECT style, plus `--load`). The calls go through **our own per-ABI call trampolines** (SysV x86_64, AArch64, Win64), with no libffi, so library dependencies stay minimal. |
 | `yavs-wave` | Records values into a `wellen` `Hierarchy` and signals, and writes FST. |
 | `yavs-cov` | Statement, branch and toggle counters, a database that can be merged, and HTML and Cobertura reports. |
@@ -94,7 +92,7 @@ Other open source simulators kept running into these bug classes.
 2. **Signals are addressed by sub-element.** One mapping from longest static prefix to drivers and sources is shared by drivers, views, force/deposit, VHPI, waves and coverage. Storage and event tracking work on a whole signal or a contiguous vector, not on each scalar.
 3. **Port collapsing is an optional optimisation** behind a flag, with a differential test against the uncollapsed design. Port conversions and associations become explicit implicit processes in the IR.
 4. **Elaboration is a pure, re-entrant function** of (design, generics, configuration), with no global state, so restarting in-process works. External names are bound at elaboration. Generic overrides of any type are parsed with the normal value parser. Each generic instance gets its own mangled identity.
-5. **The interpreter is the semantic reference.** LLVM must pass every suite when compared against it. The IR uses 32-bit ids and register reuse, with linear-time passes. A unit too big for LLVM stays interpreted. LLVM 21 is pinned, linking goes through ORC (no hand-written ELF loader), and code targets a portable CPU baseline.
+5. **The interpreter is the semantic reference.** The compiled tier must pass every suite when compared against it. The IR uses 32-bit ids and register reuse, with linear-time passes. A unit too big for the compiled tier stays interpreted. Its code generator (Cranelift since 2026-11-08, LLVM 21 through ORC before) is pinned, and code targets a portable CPU baseline.
 6. **The heap uses precise roots**, with handles into a growable arena and no conservative scanning. Large locals and temporaries go on the heap, not the stack. Sizes are 64-bit everywhere.
 7. **Time and integer semantics are the same in every tier.** Time resolution is a runtime setting, never baked into code. All arithmetic is checked i64, with 64-bit integers in 2019 mode. Storage is not semantics: an integer type whose range fits in 32 bits is stored in 4 bytes as an array element and in a signal (sign-extended on load, stored only after its range check), a scalar variable or record field in 8; no value changes (docs/decisions.md "Narrow integer storage"). A delta-cycle limit has a clear diagnostic.
 8. **Identifiers keep their original spelling**, with lookup by a case-folded key. VHPI `CaseName`, waves and diagnostics need it, and another simulator had to retrofit this painfully.
@@ -128,7 +126,7 @@ Other open source simulators kept running into these bug classes.
   - UNISIM/UNIMACRO, altera_mf/lpm and Lattice/Microchip primitives analyze and simulate, each with a documented test-runner recipe.
   - Python called from VHDL through VHPIDIRECT foreign subprograms and `--load` works under a test runner.
 - **M5: VHPI (mandatory).** The full VHPI object model over `SimControl` and the event bus. Install a Python testbench framework into a venv. Check: its own regression passes on yavs.
-- **M6: JIT tier.** Lower to LLVM 21 with tiering. Check: the M2 to M5 suites pass under LLVM only, and benchmarks against the primary reference simulator are tracked in `docs/STATUS.md`.
+- **M6: JIT tier.** Lower to LLVM 21 with tiering (done; replaced by the Cranelift tier, and the LLVM tier removed on 2026-11-08). Check: the M2 to M5 suites pass under LLVM only, and benchmarks against the primary reference simulator are tracked in `docs/STATUS.md`.
 - **M7: waves.** FST output through `wellen`, as an event-bus subscriber.
 - **M8: DAP server.** Interpreter stepping, signal peek/force, and the wave-stream extension. Check: scripted DAP sessions in tests, plus manual use from a DAP-capable editor.
 - **M9: coverage.** Statement, branch and toggle coverage, merge, HTML and Cobertura output.

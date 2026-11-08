@@ -3,12 +3,12 @@
 regenerates), optionally the ones that need installed reference simulators (--local), and writes
 docs/conformance.md and docs/conformance.json from the results plus the committed records.
 
-  tools/conformance/run.py [--yavs BIN] [--out DIR] [--only a,b] [--local] [--llvm] [--check]
+  tools/conformance/run.py [--yavs BIN] [--out DIR] [--only a,b] [--local] [--compiled] [--check]
   tools/conformance/run.py --report-only --out DIR      # render from the results saved in DIR
 
 Steps (--only names): difftest, discrepancies, external, corpora, uvvm, osvvm, vests, designs; with --local also
-refdiff, vhpi (reference simulators configured in tools/sims.local.conf), cocotb (tools/cocotb, a venv with cocotb); with --llvm (a build with
-the `llvm` feature) also difftest of the auto and llvm tiers and the designs under auto. A --local run stores
+refdiff, vhpi (reference simulators configured in tools/sims.local.conf), cocotb (tools/cocotb, a venv with cocotb); with --compiled (a build with
+the `clift` feature) also difftest of the auto and clift tiers and the designs under auto. A --local run stores
 what it ran in docs/conformance-local.json with date and commit; CI never writes it. --check renders into --out
 and exits 1 when the committed docs/conformance.md differs outside the `Generated:` line.
 --waveq re-renders the committed report with the current tools/waveq results (a local record written by tools/waveq).
@@ -153,9 +153,9 @@ class Run:
         j = json.loads(sorted((d / "results").glob("*.json"))[-1].read_text())
         return {n: {t: bool(c["ok"]) for t, c in v["cells"].items()} for n, v in j["tests"].items()}
 
-    # ---- local-only (reference simulators configured, or a build with the llvm feature)
+    # ---- local-only (reference simulators configured, or a build with the compiled tier)
     def step_tiers(self):
-        return {"auto": self.difftest("yavs-auto"), "llvm": self.difftest("yavs-llvm"), "designs": self.step_designs("auto", "designs-auto")}
+        return {"auto": self.difftest("yavs-auto"), "clift": self.difftest("yavs-clift"), "designs": self.step_designs("auto", "designs-auto")}
 
     def step_refdiff(self):
         res = {}
@@ -191,7 +191,7 @@ def collect(a):
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     r = Run(a)
-    names = a.only.split(",") if a.only else CI_STEPS + ([s for s in LOCAL_STEPS if s != "tiers" or a.llvm] if a.local else [])
+    names = a.only.split(",") if a.only else CI_STEPS + ([s for s in LOCAL_STEPS if s != "tiers" or a.compiled] if a.local else [])
     res = {}
     for n in names:
         print(f"conformance: {n}", flush=True)
@@ -262,7 +262,7 @@ LIMITS = [
     ("PSL", f"a subset; the rest is skipped with warning W0004 or listed in the tracking issue [#445]({GH}/issues/445)"),
     ("SDF and VITAL timing, SystemC, macOS", "out of scope (docs/plan.md, \"Out of scope\")"),
     ("Platforms", "Linux x86_64, Linux aarch64 and Windows x86_64 only"),
-    ("LLVM tier", f"the release archives use the Cranelift compiled tier (`--tier=auto` default); the LLVM tier exists only in a build from source with the `llvm` feature. CI has not built or tested it since 2026-10-30 ([#898]({GH}/issues/898))"),
+    ("LLVM tier", "removed on 2026-11-08 (maintainer decision): the compiled tier is Cranelift (`--tier=auto`, the default, and `--tier=clift`)"),
     ("Reference simulators", "the comparison is against two established open-source VHDL simulators (sim3 and sim4, two commercial simulators, vote in part of the discrepancy catalogue); where the language reference is unclear yavs is permissive and the choice is recorded below"),
     ("What a pass means", "a pass is agreement with a recorded reference output or with a suite's own verdict. It is evidence, not a proof of correctness; each known disagreement is listed in the catalogue"),
 ]
@@ -293,8 +293,8 @@ def suite_rows(R):
     if "difftest" in ci:
         add("Differential testbenches", "small testbenches of this repository; output must equal sim1's, at 1 and 4 threads", *allg(ci["difftest"]["interp"]["4 threads shuffled"]["groups"]), here, "`tools/difftest/difftest.py`")
     if "tiers" in loc:
-        for t in ("auto", "llvm"):
-            add(f"Differential testbenches, `{t}` tier", "the same testbenches with compiled code", *allg(loc["tiers"]["data"][t]["4 threads shuffled"]["groups"]), rec("tiers"), "`tools/conformance/run.py --local --llvm`")
+        for t in (t for t in loc["tiers"]["data"] if t != "designs"):
+            add(f"Differential testbenches, `{t}` tier", "the same testbenches with compiled code", *allg(loc["tiers"]["data"][t]["4 threads shuffled"]["groups"]), rec("tiers"), "`tools/conformance/run.py --local --compiled`")
     if "discrepancies" in ci:
         d = ci["discrepancies"]
         add("Known simulator differences", "one reproducer per case where simulators disagree", d["cases"] if d["yavs_matches_expected"] else 0, d["cases"], here, "`tools/discrepancies/run.py`")
@@ -364,7 +364,7 @@ tests pass; every failure is tracked as an issue. This is evidence, not a proof 
 Terms used here: *passed / total* counts the tests a suite judges itself, out of the tests that can be judged (a test whose own
 expectation is wrong or depends on the implementation is not counted, with its reason). To *analyse* a file is to
 check it and store it in a library; to *simulate* is to elaborate the design and run it. A *tier* is the interpreter or one of the
-compilers (LLVM, Cranelift) that run a design; every tier gives the same output. The *language reference* is the IEEE 1076 standard.
+compiler (Cranelift) that run a design; every tier gives the same output. The *language reference* is the IEEE 1076 standard.
 """]
     o.append("## Details\n\nThe sections below give each result in full. The last table says where and when each was produced: on CI every night on `main` "
              "and for every release tag, or by a local run with installed reference simulators, with its date and commit.\n")
@@ -386,8 +386,9 @@ compilers (LLVM, Cranelift) that run a design; every tier gives the same output.
         o.append("Failing: " + (", ".join(f"`{f}`" for f in fails) if fails else "none") + ".\n")
     for k, v in loc.items():
         if k == "tiers":
-            o.append(f"The compiled tiers must give the same output as the interpreter (local, {v['date']} at `{v['commit']}`, a build with the `llvm` feature): " +
-                     "; ".join(f"tier `{t}`: " + ", ".join(f"{lab} {frac(*allg(x['groups']))}" for lab, x in v["data"][t].items()) for t in ("auto", "llvm")) + ".\n")
+            tiers = [t for t in v["data"] if t != "designs"]  # (the record of 2026-10-26 has `auto` and `llvm`)
+            o.append(f"The compiled tiers must give the same output as the interpreter (local, {v['date']} at `{v['commit']}`, a build with the `{'llvm' if 'llvm' in tiers else 'clift'}` feature): " +
+                     "; ".join(f"tier `{t}`: " + ", ".join(f"{lab} {frac(*allg(x['groups']))}" for lab, x in v["data"][t].items()) for t in tiers) + ".\n")
         if k == "refdiff":
             o.append(f"The references against the recorded sim1 outputs (local, {v['date']} at `{v['commit']}`): " +
                      ", ".join(f"{s} {d['agree']}/{d['tests']}" for s, d in v["data"].items()) + ". "
@@ -497,9 +498,9 @@ and yavs's verdict.
     o.append("### Where and when each result was produced\n\n" + table(["suite", "where", "date, commit", "tool"], [[r["name"], r["where"] or "not run", r["when"], r["tool"]] for r in srows]))
     o.append("## How to reproduce\n\n```sh\n"
              "tools/fetch-corpus.sh                        # the external suites and libraries at pinned commits, ~/.cache/rsim-corpus\n"
-             "cargo build --release -p yavs                # add --features llvm for the LLVM tier (needs LLVM 21)\n"
+             "cargo build --release -p yavs --features clift  # with the compiled tier\n"
              "tools/conformance/run.py --yavs target/release/yavs --out ~/.cache/yavs-conformance                 # what CI runs\n"
-             "tools/conformance/run.py --yavs target/release/yavs --out ~/.cache/yavs-conformance --local --llvm  # plus the local results\n"
+             "tools/conformance/run.py --yavs target/release/yavs --out ~/.cache/yavs-conformance --local --compiled  # plus the local results\n"
              "tools/conformance/run.py --check --yavs target/release/yavs --out ~/.cache/yavs-conformance         # is the committed report current?\n"
              "```\n\nThe local results need the reference simulators, configured in the untracked `tools/sims.local.conf`; a `--local` run rewrites "
              "`docs/conformance-local.json`, which is committed with the regenerated report. Each tool in the table above documents its own options.\n")
@@ -552,7 +553,7 @@ def main():
     ap.add_argument("--out", default=os.path.expanduser("~/.cache/yavs-conformance"))
     ap.add_argument("--only", help="comma list of steps")
     ap.add_argument("--local", action="store_true", help="also run the steps that need reference simulators; store them in docs/conformance-local.json")
-    ap.add_argument("--llvm", action="store_true", help="the binary has the llvm feature: also the auto and llvm tiers")
+    ap.add_argument("--compiled", action="store_true", help="the binary has the compiled tier (clift feature): also the auto and clift tiers")
     ap.add_argument("--check", action="store_true", help="render into --out and compare with the committed report")
     ap.add_argument("--report-only", action="store_true", help="render from the step results already in --out")
     ap.add_argument("--waveq", action="store_true", help="only refresh the waveform section of the committed report from tools/waveq/RESULTS.md")
@@ -574,9 +575,9 @@ def main():
         loc = json.loads(LOCAL.read_text()) if LOCAL.exists() else {"records": {}}
         m = gen
         cmds = {"refdiff": "tools/difftest/difftest.py --candidate sim1|sim2", "vhpi": "tools/vhpi-conformance/run.py",
-                "tiers": "tools/conformance/run.py --local --llvm --only tiers (yavs built with --features llvm)",
+                "tiers": "tools/conformance/run.py --local --compiled --only tiers (yavs built with --features clift)",
                 "cocotb": "tools/cocotb/run.py"}
-        titles = {"refdiff": "References against the recorded outputs", "vhpi": "VHPI conformance", "tiers": "The auto and llvm tiers", "cocotb": "cocotb regression over VHPI"}
+        titles = {"refdiff": "References against the recorded outputs", "vhpi": "VHPI conformance", "tiers": "The compiled tiers", "cocotb": "cocotb regression over VHPI"}
         for k, d in local_now.items():
             note = (f"cocotb {d['cocotb']}, counted in jobs (test directories, examples, pytest groups) by cocotb's own verdict; {d['ran']} ran VHDL tests "
                     f"({d['tests']['pass']} tests pass), the others skip themselves (Verilog only or nothing to simulate)") if k == "cocotb" else ""

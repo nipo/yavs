@@ -486,7 +486,7 @@ Order: 1, 2, then 4 and 5 independently, 3 when a user design shows update-bound
 
 ```sh
 git switch --detach spike/mt-chunks   # in a worktree
-cargo build --release -p yavs --features llvm
+cargo build --release -p yavs --features clift
 YAVS_MT_STATS=/path/stats YAVS_MT_PROC=1 YAVS_MT_CAUSE=1 target/release/yavs run --threads 1 ...
 YAVS_MT_MODE=3 YAVS_MT_SPLIT=4 YAVS_MT_THR=15000 taskset -c 1,4,5,6 target/release/yavs run --threads 4 ...
 ```

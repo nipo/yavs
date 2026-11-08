@@ -49,12 +49,4 @@ fn edge_idioms_match_the_oracle() {
     check(&dir, &["--tier=interp"]);
     check(&dir, &["--tier=interp", "--threads=4"]);
     check(&dir, &["--tier=interp", "--cov=sbt", "--cov-file=cov.ycov"]);
-    #[cfg(feature = "llvm")]
-    for tier in [
-        vec!["--tier=llvm"],
-        vec!["--tier=auto", "--tier-heat=1,0,0"],
-        vec!["--tier=auto", "--tier-heat=1,0,0", "--threads=4"],
-    ] {
-        check(&dir, &tier);
-    }
 }

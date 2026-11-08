@@ -410,8 +410,6 @@ fn fat_pointer_layout() {
         &["--tier=clift"],
         #[cfg(feature = "clift")]
         &["--tier=clift-auto", "--tier-heat=1,0,0"],
-        #[cfg(feature = "llvm")]
-        &["--tier=llvm"],
     ];
     for tier in tiers {
         let mut args = vec!["run", "--std=2008", &lib, &load_fat, &load_len];
@@ -656,8 +654,6 @@ fn scalar_copy_back_is_range_checked() {
         &["--tier=interp"],
         #[cfg(feature = "clift")]
         &["--tier=clift"],
-        #[cfg(feature = "llvm")]
-        &["--tier=llvm"],
     ];
     for tier in tiers {
         let run = |top: &str| {

@@ -59,7 +59,7 @@ kernel's event bus or read the elaborated hierarchy; `yavs-cache` stores cache e
 * `yavs-lower` depends on `yavs-sem`, `yavs-ir` and `yavs-kernel`; it does not depend on `yavs-elab`
   or `yavs-interp` (those are dev-dependencies for its tests). `yavs-elab` depends on `yavs-lower`
   and `yavs-interp`.
-* `yavs-clift` depends on `yavs-llvm` (built without LLVM) for the shared `rt` module, the policy of
+* `yavs-clift` depends on `yavs-llvm` (the runtime crate, named for the LLVM tier it held until 2026-11-08) for the `rt` module, the policy of
   `--tier=auto` (`AutoTier`) and the `Generator` trait; the Cranelift generator is `yavs_clift::First`.
 * `yavs` (the binary) is the only place that decides which tier a run uses.
 
@@ -68,22 +68,22 @@ kernel's event bus or read the elaborated hierarchy; `yavs-cache` stores cache e
 | Tier | Where | What it does |
 |---|---|---|
 | Interpreter | `yavs-interp` | Executes IR (a predecoded form of each function in the fast loop, the plain IR when a debugger or a compiled tier is attached). The semantic reference: every other tier must give identical output (root rule 3). |
-| LLVM | `yavs-llvm`, feature `llvm`, LLVM 21 | `--tier=llvm` compiles every non-elaboration function before time 0; `--tier=auto` compiles functions the interpreter is seen to spend time in, one at a time on one background thread, and swaps them in at the next call, return or within 256 jumps. Compiled code runs on the interpreter frame's registers and returns to the interpreter for everything it does not compile. |
-| Cranelift | `yavs-clift`, feature `clift` | The same compiled-code contract with a different code generator: `--tier=clift` (everything before time 0) and `--tier=clift-auto` (the `auto` policy with Cranelift as the only generator). |
-| Both | features `llvm` and `clift` | `--tier=auto3`: Cranelift for warm functions, LLVM O2 for those that stay hot. Built in CI; not what a release archive contains. |
+| Cranelift | `yavs-clift` on the runtime of `yavs-llvm`, feature `clift` | `--tier=clift` compiles every non-elaboration function before time 0; `--tier=auto` (also `clift-auto`) compiles functions the interpreter is seen to spend time in, one at a time (`--tier-compile`), and swaps them in at the next call, return or within 256 jumps. Compiled code runs on the interpreter frame's registers and returns to the interpreter for everything it does not compile. |
+
+The LLVM tier (`--tier=llvm`, `--tier=auto3`, feature `llvm`, LLVM 21) was removed on 2026-11-08 (user,
+`docs/decisions.md` "LLVM tier removed"); sections below that describe it are history.
 
 How the CLI picks a tier, and what `--tier=auto` means in each build, is in `crates/yavs/AGENTS.md`
 and `docs/running-faster.rst` and `docs/install.rst`. Summary: `yavs` has no default cargo features, so
-a plain `cargo build -p yavs` is interpreter-only; with `llvm` or `clift` the default is `auto`
-(`auto` with LLVM when `llvm` is built in, else `clift-auto`), except under `--dap`, which never
-installs a compiled tier.
+a plain `cargo build -p yavs` is interpreter-only; with `clift` the default is `auto` (`clift-auto`),
+except under `--dap`, which never installs a compiled tier.
 
 ### Compilation cache (implemented)
 
 All entries live under `<work library>/yavs-cache/` (store: `yavs-cache`; policy: `crates/yavs/src/cache.rs`
 and `yavs-elab` `libstage.rs`): the analysed design (`sem-*.img`), analysed units (`units/`), the lowered
 design and package state (`ir-*`, `low-*`, `init-*`, and the library-prefix kinds `lib-*`, `libinit-*`,
-`libopt-*`), compiled code (`obj/obj-*.img` for LLVM, `obj/clif-*.img` and `obj/clifpre-*.img` for Cranelift) and the shared
+`libopt-*`), compiled code (`obj/clif-*.img` and `obj/clifpre-*.img`; `obj/obj-*.img` were the LLVM tier's) and the shared
 analysed `std`/`ieee` units in a per-user store. Every entry is keyed by everything it depends on, damaged or
 foreign entries are misses, and `--no-cache` neither reads nor writes. The behaviour is specified in
 `docs/cli-contract.md` and described for users in `docs/running-faster.rst`.
@@ -98,7 +98,6 @@ a shared thread budget (`docs/design/parallel-kernel.md`, `docs/parallel.md`).
 
 ### Design intent and future work (not implemented)
 
-* Replacing LLVM by Cranelift as the only bundled generator (the README states the intention; both exist today).
 * `--threads auto`, a token pool across test runs, element-range parallel update (parallel-kernel.md sections 6.4, 7).
 * A tier-up protocol based on resumption counters (section 5 below): superseded by the sampled-time policy.
 

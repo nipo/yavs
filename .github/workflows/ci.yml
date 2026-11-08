@@ -9,8 +9,8 @@
 # those names as passed when the scope leaves their job out. This workflow runs on every commit, so
 # each commit has a CI result.
 # The `check` job builds default features only; the `clift` job builds and tests the Cranelift tier
-# (`--features clift`, #481), runs the difftest smoke and the whole corpus on process copies. The LLVM tier (`--features llvm`) has no CI
-# job since 2026-10-30 (#898). The qemu/Wine ffi runs are not part of CI yet.
+# (`--features clift`, #481), runs the difftest smoke and the whole corpus on process copies (the LLVM tier was removed on
+# 2026-11-08). The qemu/Wine ffi runs are not part of CI yet.
 # The `corpus` job gates the analysis corpora (#63) and the discrepancy cases on Linux x86_64.
 # The `versions` job checks that yavs, vunit-yavs and the VS Code extension carry one version (#903).
 name: CI

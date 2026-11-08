@@ -47,13 +47,13 @@ def cap(mem):
 
 
 def bash(script, cwd, mem):
-    """(exit status, output tail, compiled code of a yavs run: functions --tier=auto compiled (its --verbose notes), IR
-    instructions --tier=llvm compiled inline (counter), else None)."""
+    """(exit status, output tail, compiled code of a yavs run: functions --tier=auto compiled (its --verbose notes) or
+    --tier=clift compiled (its --verbose summary), else None)."""
     p = subprocess.run(cap(mem) + ["bash", "-c", script], cwd=cwd, capture_output=True, text=True, errors="replace", env=os.environ | {"YAVS_COUNTERS": "1"})
     out = p.stdout + p.stderr
-    m = re.search(r"llvm_inline_insts=(\d+)", out)
-    auto = len(re.findall(r"compiled by --tier=auto", out))
-    code = f"{auto} functions" if auto else f"{m[1]} IR instructions" if m and m[1] != "0" else "0" if m else None
+    m = re.search(r"note: --tier=clift: (\d+) functions", out)
+    auto = len(re.findall(r"compiled by --tier=(?:clift-)?auto", out))
+    code = f"{auto} functions" if auto else f"{m[1]} functions" if m and m[1] != "0" else "0" if m else None
     return p.returncode, out[-1500:], code
 
 
@@ -289,11 +289,11 @@ def comparer():
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("bin", nargs="?", help="yavs binary (a build with the llvm feature for --tiers auto)")
+    ap.add_argument("bin", nargs="?", help="yavs binary (a build with the clift feature for --tiers auto,clift)")
     ap.add_argument("--designs", default="", help="comma separated design names")
     ap.add_argument("--group", default="all", choices=["h2h", "real", "all"])
     ap.add_argument("--refs", default="sim1,sim2")
-    ap.add_argument("--tiers", default="interp,auto,llvm", help="yavs tiers (auto compiles only hot code after 5 ms; llvm compiles everything first)")
+    ap.add_argument("--tiers", default="interp,auto,clift", help="yavs tiers (auto compiles only hot code after 5 ms; clift compiles everything first)")
     ap.add_argument("--jobs", type=int, default=2, help="designs at once (at most 2: heavy runs, AGENTS.md)")
     ap.add_argument("--comparer", default="", help="path of a built waveq comparer (default: build it)")
     ap.add_argument("--keep", action="store_true", help="keep the waveform files")
