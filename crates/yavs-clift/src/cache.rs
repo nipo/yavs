@@ -137,7 +137,7 @@ impl CacheKvStore for Kv {
 const PRE: &str = "clifpre";
 
 /// The switches whose value changes the code the lowering or Cranelift makes: in every pre-key.
-pub(crate) const KEYED: [&str; 14] = [
+pub(crate) const KEYED: [&str; 15] = [
     // (Read through `yavs_llvm::count_rule_on`: `**` and a layout on a native frame, or a refusal.)
     "YAVS_AUTO_POLICY",
     "YAVS_CLIFT_OPT",
@@ -153,6 +153,8 @@ pub(crate) const KEYED: [&str; 14] = [
     "YAVS_CLIFT_HOLD_CHECK",
     "YAVS_CLIFT_HOLD_DROP",
     "YAVS_LLVM_ELOOP_HELPER",
+    // (How a variant follows its list: in every key, as it is read in `blockcov.rs`.)
+    "YAVS_CLIFT_LIST_NATIVE",
 ];
 
 /// With one of these set a run has no pre-keys: they want the code made (dumps, source locations)
@@ -221,6 +223,8 @@ pub(crate) struct PreInputs<'a> {
     /// The route: per native callee, through `Mem::ntab` (`None`) or directly, with its pre-key,
     /// since its body may be inlined. By `Program::code_key`, in that order.
     pub callees: &'a [(u64, Option<Key>)],
+    /// The pcs of the blocks lowered as never run (`YAVS_CLIFT_LIST`), in order; none: all in full.
+    pub list: &'a [u32],
 }
 
 /// The key of the entry of a function, made before anything is lowered.
@@ -262,6 +266,13 @@ fn pre_key_without(i: &PreInputs, drop: &str) -> Key {
             k.text(&n.map_or(String::new(), |n| n.hex()));
         }
     }
+    // (No list: the key of a run without the switch.)
+    if on("list") && !i.list.is_empty() {
+        k.text("list");
+        for pc in i.list {
+            k.part(&pc.to_le_bytes());
+        }
+    }
     k.finish()
 }
 
@@ -281,7 +292,10 @@ impl std::hash::Hasher for HashBytes {
 /// The target and the switches of a module's pre-keys, `None` when a switch of [`NO_PRE`] is set.
 /// `inlcmp` is the mode of the compare of drives, whose default depends on the build as the verifier's does.
 pub(crate) fn pre_target(isa: &dyn TargetIsa, inlcmp: &str) -> Option<(String, String)> {
-    if NO_PRE.iter().any(|v| std::env::var_os(v).is_some()) {
+    // (A coverage run's code is not an ordinary run's; `on` puts each body's list in its key.)
+    if NO_PRE.iter().any(|v| std::env::var_os(v).is_some())
+        || crate::blockcov::list_mode() == crate::blockcov::ListMode::Write
+    {
         return None;
     }
     // (A body's Cranelift key has the instruction set, its flags and the host's features, not
@@ -425,7 +439,10 @@ pub(crate) fn compiled_list() -> std::collections::HashSet<(String, u32)> {
 
 /// Put `name` (of `len` IR instructions) in front of the list of `compiled_list`.
 pub(crate) fn add_compiled(name: &str, len: u32) {
-    let Some(store) = store() else {
+    // (A coverage run stores no code.)
+    let Some(store) =
+        store().filter(|_| crate::blockcov::list_mode() != crate::blockcov::ListMode::Write)
+    else {
         return;
     };
     let line = format!("{len}\t{name}\n");
@@ -557,6 +574,7 @@ mod tests {
             func: b"code",
             facts: b"facts",
             callees,
+            list: &[],
         };
         // (Leaked: a test, and the slices must outlive the closure above.)
         let leak = |c: Vec<(u64, Option<Key>)>| -> &'static [(u64, Option<Key>)] { c.leak() };
@@ -624,6 +642,20 @@ mod tests {
             ("callees", base(leak(vec![(4, Some(callee))]))),
             ("callees", base(leak(vec![(3, None)]))),
             ("callees", base(leak(vec![(3, Some(other))]))),
+            (
+                "list",
+                PreInputs {
+                    list: &[4],
+                    ..base(c0)
+                },
+            ),
+            (
+                "list",
+                PreInputs {
+                    list: &[4, 9],
+                    ..base(c0)
+                },
+            ),
         ];
         for (class, i) in &cases {
             assert_ne!(k0, pre_key_without(i, ""), "{class} is not in the key");

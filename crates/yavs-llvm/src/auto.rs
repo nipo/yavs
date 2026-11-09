@@ -914,6 +914,17 @@ enum Thread {
     Ended,
 }
 
+/// The compile thread of this process's tier, woken when code made with a never-run list must be
+/// made again (`rt::cheap_ran`); one tier per run, as the store.
+static AGAIN_WAKE: Mutex<Option<Sender<Msg>>> = Mutex::new(None);
+
+/// Wake the compile thread: `rt::take_again` has news.
+pub(crate) fn wake_again() {
+    if let Some(q) = &*AGAIN_WAKE.lock().unwrap_or_else(PoisonError::into_inner) {
+        let _ = q.send(Msg::Looks(Vec::new()));
+    }
+}
+
 /// What the compile thread is told.
 enum Msg {
     /// `Tier::hot`: compile this function (eager mode, tests).
@@ -3675,6 +3686,7 @@ impl AutoTier {
         let prog = rt.prog.clone();
         let funcs: Arc<[Entry]> = (0..prog.funcs.len()).map(|_| Entry::default()).collect();
         let (tx, rx) = channel::<Msg>();
+        *AGAIN_WAKE.lock().unwrap_or_else(PoisonError::into_inner) = Some(tx.clone());
         let shared = Arc::new(Shared {
             finished: (0..prog.funcs.len())
                 .map(|_| AtomicBool::new(false))
@@ -3836,6 +3848,14 @@ impl AutoTier {
                     loop {
                         while let Ok(m) = rx.try_recv() {
                             route(m, &mut pending, &mut inbox);
+                        }
+                        // Code made with blocks listed as never run that ran too much of them
+                        // (`rt::cheap_ran`): its frame-mode code again, in full, as a second compile.
+                        for id in crate::rt::take_again() {
+                            if let Some(tr) = &w.trace {
+                                tr.line(format!("{id} again in full: its blocks listed as never run ran"));
+                            }
+                            pending.later.push(id);
                         }
                         if inbox.is_empty() && (pending.asked.is_empty() || paced) {
                             match rx.recv_timeout(period) {
@@ -4109,6 +4129,7 @@ impl AutoTier {
         // (The simulation's CPU time first: the compile thread's clock is gone once it has ended.)
         let cpu = self.sim_cpu_now();
         self.shared.halt.store(true, Ordering::SeqCst);
+        *AGAIN_WAKE.lock().unwrap_or_else(PoisonError::into_inner) = None;
         // (An empty batch wakes the compile thread, which sees `halt`.)
         if let Some(q) = self
             .queue
