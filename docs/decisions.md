@@ -14568,6 +14568,14 @@ whole-signal read, the call, the result's check and copy, the wide drive).
   (agent). A run after one that did not gain starts off with its first trial after 4 s; one after a run that gained
   starts on, with four strikes and 0.1 s pauses. Written only when it changes; not with `--no-cache`. Why: a regression
   runs the same command lines again; a stale entry only shifts the first trial, it cannot change a result.
+- **Decision: the run id (`elab::run_digest`, used by this memory and the `--tier=auto` profile) is a digest of the
+  arguments with response files read, where the argument that gives a `runner_cfg` generic counts without its `seed`
+  and `output path` fields** (user, 2026-11-09). Every other generic and argument, the test cases, `tb path` and
+  `run script path` of `runner_cfg` included, still tells runs apart. Why: VUnit draws a new seed in every invocation
+  unless `--seed` is given, so a command line with `-grunner_cfg` was a first run every time; and the test runner
+  package passes everything in a response file, so the old digest of the raw arguments saw only the file's name and
+  kept one id for a test whose flags or generics changed. The `output_path` generic (a separate generic VUnit sets
+  when a testbench declares it) still counts; ids made before this change are not found again (one cold run).
 - **Decision: `--threads` keeps its default of 1** (agent, for the maintainer to confirm): `auto` could become the
   default once it is measured on more hosts and test suites; under a test runner's `-p N` without a token server the
   threads of all simulations would add up.

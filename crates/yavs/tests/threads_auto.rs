@@ -9,7 +9,7 @@ use std::process::{Command, Output, Stdio};
 
 /// 64 registers on one clock (`big`), and a design of two processes (`small`).
 const DESIGN: &str = r#"
-entity big is generic (cycles : natural := 300); end;
+entity big is generic (cycles : natural := 300; runner_cfg : string := ""); end;
 architecture a of big is
   signal clk : bit := '0';
   type arr is array (0 to 63) of natural;
@@ -158,6 +158,41 @@ fn auto_remembers_the_last_run() {
         &flip,
     );
     assert!(!note(&uncached).contains("last run"), "{}", note(&uncached));
+}
+
+#[test]
+fn auto_remembers_a_test_whatever_its_seed() {
+    if std::thread::available_parallelism().is_ok_and(|n| n.get() == 1) {
+        return;
+    }
+    let t = common::tempdir("threads_auto_runner_cfg");
+    let lib = analyze(&t);
+    let flip = [("YAVS_POOL_ALL", "1"), ("YAVS_THREADS_FLIP", "1")];
+    let cfg = |test: &str, seed: &str| {
+        format!("-grunner_cfg=enabled_test_cases : {test},output path : out/{seed}/,seed : {seed}")
+    };
+    let first = run(
+        &lib,
+        &["--threads=auto", "--verbose", "big", &cfg("a", "1111")],
+        &flip,
+    );
+    assert!(!note(&first).contains("last run"), "{}", note(&first));
+    // As a test runner runs it again: a response file, a new seed and output path.
+    let rsp = t.join("args.rsp");
+    let lines = ["--threads=auto", "--verbose", "big", &cfg("a", "2222")];
+    std::fs::write(&rsp, lines.join("\n") + "\n").expect("write");
+    let second = run(&lib, &[&format!("@{}", rsp.display())], &flip);
+    assert!(
+        note(&second).contains("(the last run did not gain)"),
+        "{}",
+        note(&second)
+    );
+    let other = run(
+        &lib,
+        &["--threads=auto", "--verbose", "big", &cfg("b", "1111")],
+        &flip,
+    );
+    assert!(!note(&other).contains("last run"), "{}", note(&other));
 }
 
 #[test]

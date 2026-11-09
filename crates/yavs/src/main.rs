@@ -356,6 +356,9 @@ fn main() -> ExitCode {
     real_main()
 }
 
+/// The arguments with their response files read (`elab::run_id`).
+static ARGS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+
 #[inline(never)]
 fn real_main() -> ExitCode {
     yavs_cache::huge_heap();
@@ -378,8 +381,9 @@ fn real_main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    let cli = parse_hot(&args).unwrap_or_else(|| {
-        Cli::try_parse_from(&args).unwrap_or_else(|e| suggest_in(e, &args).exit())
+    let args = ARGS.get_or_init(|| args);
+    let cli = parse_hot(args).unwrap_or_else(|| {
+        Cli::try_parse_from(args).unwrap_or_else(|e| suggest_in(e, args).exit())
     });
     if let Some(text) = cli.top.explain.as_ref().and_then(|c| lint::explain_text(c)) {
         println!("{text}");
@@ -444,7 +448,7 @@ fn real_main() -> ExitCode {
         Command::Elab(a) => return guard(format, color, || elab::elab(a, format, color, encoding)),
         Command::Run(a) => {
             return guard(format, color, || {
-                elab::run(a, args, format, color, encoding)
+                elab::run(a, args.clone(), format, color, encoding)
             });
         }
         Command::Cov(c) => return guard(format, color, || cov::run(c, format, color)),

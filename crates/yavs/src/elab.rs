@@ -1169,7 +1169,7 @@ fn clift_cache(a: &RunArgs) {
     if !a.common.no_cache && !work.is_empty() {
         yavs_clift::set_cache(Some(std::path::Path::new(work)));
         // The run-to-run profile of the tier-up policy is of this command line (#754).
-        yavs_llvm::set_run_id(Some(&run_id()));
+        yavs_llvm::set_run_id(Some(&run_id(&a.common.generics)));
     }
 }
 
@@ -1279,12 +1279,93 @@ fn use_clift(
 }
 
 /// A name for this run in the profiles of `--tier=auto` and `--threads=auto`: a digest of the
-/// command line.
-fn run_id() -> String {
+/// command line with its response files read (`run_digest`).
+fn run_id(generics: &[(String, String)]) -> String {
+    let args = crate::ARGS
+        .get()
+        .map_or(&[][..], |a| a.get(1..).unwrap_or_default());
+    format!("{:016x}", run_digest(args, generics))
+}
+
+/// The digest of `run_id`: `args` (after the program name), where the argument that gives a
+/// `runner_cfg` generic counts without the fields a test runner makes new in every run, `seed`
+/// and `output path`. The test cases, testbench and every other argument still tell runs apart.
+fn run_digest(args: &[String], generics: &[(String, String)]) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::hash::DefaultHasher::new();
-    std::env::args_os().skip(1).for_each(|a| a.hash(&mut h));
-    format!("{:016x}", h.finish())
+    let cfgs: Vec<&str> = generics
+        .iter()
+        .filter(|(n, v)| n.eq_ignore_ascii_case("runner_cfg") && !v.is_empty())
+        .map(|(_, v)| v.as_str())
+        .collect();
+    for a in args {
+        match cfgs.iter().find(|v| a.ends_with(**v)) {
+            Some(v) => {
+                a[..a.len() - v.len()].hash(&mut h);
+                cfg_fields(v)
+                    .iter()
+                    .filter(|(k, _)| k != "seed" && k != "output path")
+                    .for_each(|f| f.hash(&mut h));
+            }
+            None => a.hash(&mut h),
+        }
+    }
+    h.finish()
+}
+
+#[test]
+fn a_run_id_leaves_out_the_seed_and_output_path_of_runner_cfg() {
+    let cfg = |test: &str, seed: &str, out: &str| {
+        format!("enabled_test_cases : {test},output path : {out},seed : {seed},tb path : C::/tb/")
+    };
+    // The arguments, and the generics they give as the CLI parses them.
+    let id = |args: &[&str], g: &[(&str, &str)]| {
+        let args: Vec<String> = args.iter().map(|a| a.to_string()).collect();
+        let g: Vec<(String, String)> = g
+            .iter()
+            .map(|(n, v)| (n.to_string(), v.to_string()))
+            .collect();
+        run_digest(&args, &g)
+    };
+    let one = |c: &str| {
+        id(
+            &["--threads=auto", "tb", &format!("-grunner_cfg={c}")],
+            &[("runner_cfg", c)],
+        )
+    };
+    let a = cfg("lib.tb.a", "1111", "C::/o1/");
+    assert_eq!(one(&cfg("lib.tb.a", "2222", "C::/o2/")), one(&a));
+    assert_ne!(
+        one(&cfg("lib.tb.b", "1111", "C::/o1/")),
+        one(&a),
+        "another test case"
+    );
+    assert_ne!(
+        one(&a.replace("C::/tb/", "C::/tb2/")),
+        one(&a),
+        "another testbench"
+    );
+    let g = [("runner_cfg", a.as_str()), ("w", "8")];
+    let ga = format!("-grunner_cfg={a}");
+    assert_ne!(
+        id(&["--threads=auto", "tb", &ga, "-gw=8"], &g),
+        one(&a),
+        "another generic"
+    );
+    assert_ne!(
+        id(&["--threads=1", "tb", &ga], &g[..1]),
+        one(&a),
+        "another argument"
+    );
+    // The two-argument form, the name in any case.
+    let b = cfg("lib.tb.a", "3333", "/o3/");
+    let two = |c: &str| {
+        id(
+            &["tb", "-g", &format!("RUNNER_CFG={c}")],
+            &[("RUNNER_CFG", c)],
+        )
+    };
+    assert_eq!(two(&b), two(&b.replace("3333", "4")));
 }
 
 /// Set up the compiled tier (`--tier`): compile the program now or start tier-up, stopped when
@@ -1949,7 +2030,13 @@ fn run_design(
     let memory = sim
         .threads_verdict()
         .is_some_and(|v| v != yavs_kernel::AutoVerdict::Static)
-        .then(|| crate::threads::Memory::open(&a.common.work, a.common.no_cache, &run_id()))
+        .then(|| {
+            crate::threads::Memory::open(
+                &a.common.work,
+                a.common.no_cache,
+                &run_id(&a.common.generics),
+            )
+        })
         .flatten();
     if let Some(m) = &memory {
         sim.set_threads_hint(m.hint);
@@ -2743,12 +2830,11 @@ fn test_name(top: &str, generics: &[(String, String)]) -> String {
         .iter()
         .find(|(n, _)| n.eq_ignore_ascii_case("runner_cfg"))
         .and_then(|(_, v)| {
-            let v = v.trim_matches('"').replace(",,", "\u{0}");
-            v.split(',').find_map(|f| {
-                let (k, val) = f.split_once(':')?;
-                (k.trim() == "enabled_test_cases").then(|| val.trim().replace('\u{0}', ","))
-            })
+            cfg_fields(v)
+                .into_iter()
+                .find(|(k, _)| k == "enabled_test_cases")
         })
+        .map(|(_, t)| t)
         .filter(|t| !t.is_empty());
     if let Some(t) = cfg {
         return t;
@@ -2758,6 +2844,20 @@ fn test_name(top: &str, generics: &[(String, String)]) -> String {
     }
     let g: Vec<String> = generics.iter().map(|(n, v)| format!("{n}={v}")).collect();
     format!("{top}({})", g.join(","))
+}
+
+/// The `key : value` fields of a `runner_cfg` value, trimmed (the test runner's encoding: a
+/// doubled `,` or `:` is the character itself).
+fn cfg_fields(v: &str) -> Vec<(String, String)> {
+    let v = v
+        .trim_matches('"')
+        .replace(",,", "\0")
+        .replace("::", "\u{1}");
+    let back = |s: &str| s.trim().replace('\0', ",").replace('\u{1}', ":");
+    v.split(',')
+        .filter_map(|f| f.split_once(':'))
+        .map(|(k, x)| (back(k), back(x)))
+        .collect()
 }
 
 #[test]
@@ -2774,6 +2874,8 @@ fn default_test_names() {
     );
     let cfg = "\"enabled_test_cases : lib.tb.a,,b,output path : x,\"";
     assert_eq!(test_name("tb", &g(&[("runner_cfg", cfg)])), "lib.tb.a,b");
+    let cfg = "enabled_test_cases : lib.tb.a::b,seed : 1";
+    assert_eq!(test_name("tb", &g(&[("runner_cfg", cfg)])), "lib.tb.a:b");
 }
 
 /// `10ms`, `1.5 ns`: a TIME literal.

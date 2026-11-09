@@ -65,6 +65,9 @@ With ``--threads=auto`` yavs uses more threads only while they make the run fast
   two hardware threads of one core can be slower than one.
 * It remembers what the last run of the same command line found, in the work library's cache (not with
   ``--no-cache``): a test that did not gain starts on one thread, one that gained starts with the threads on.
+  The arguments in a response file count as given on the command line. In a ``runner_cfg`` generic the seed and
+  output path a test runner gives each run do not count, so a VUnit test is the same test in every run, whatever
+  its seed. The compiled tier's profile of the last run is kept the same way.
 * ``--verbose`` says what it decided at the end of the run.
 * The output is the same whatever it decides.
 

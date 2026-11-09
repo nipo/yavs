@@ -139,7 +139,8 @@ The kernel decides while the run goes (`crates/yavs-kernel/src/kernel/auto.rs`; 
   inline, calibrated by timed probe batches; losing windows turn the threads off (the code of
   `--threads=1`), a pause of 1 s doubling to 16 s (0.1 s once a window won) brings the next trial.
   Now and then a window runs on half the threads and the faster count is kept.
-* **Memory:** what the last run of the same command line found is kept in the work library's cache:
+* **Memory:** what the last run of the same command line found (a `runner_cfg` generic counted without its
+  seed and output path) is kept in the work library's cache:
   after a run that gained the threads start on, after one that did not they start off with the first
   trial after 4 s.
 

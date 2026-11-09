@@ -705,7 +705,9 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   again after 1 s, doubling up to 16 s (0.1 s once a window won). The worker threads start when
   the first batch goes to them. What the last run of the same command line found (gained or not)
   is kept in the work library's cache, kind `thr` (not with `--no-cache` or without a work
-  directory). After the first window that wins, and then after every 16 that win, one window
+  directory). The command line is the arguments with response files read, where a `runner_cfg`
+  generic counts without its `seed` and `output path` fields (the `--tier=auto` profile is
+  keyed alike). After the first window that wins, and then after every 16 that win, one window
   runs on the other thread count (all of them, or half) and the count whose pooled batches ran
   faster against the inline time of that window's timed probe batches is kept, all of them only
   when 5 percent faster: hardware threads of one core or a shared cache make some designs faster
