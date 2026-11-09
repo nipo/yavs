@@ -4,7 +4,7 @@
 //! per lane) are driven alike. Both against the interpreter under each code generator (#766: a
 //! batch kept across such a vector drive was measured and not kept, decisions.md "Compiled
 //! clocked RTL processes, round 11"). Needs the `llvm` or the `clift` feature.
-#![cfg(any(feature = "llvm", feature = "clift"))]
+#![cfg(feature = "clift")]
 
 mod common;
 use common::tempdir;
@@ -100,10 +100,6 @@ fn kept_scalar_drives_and_vector_drives_of_merged_slots_keep_their_order() {
     let want = run(&dir, &["--tier=interp"]);
     assert!(want.contains('L') && !want.contains('H'), "{want}");
     for flags in [
-        #[cfg(feature = "llvm")]
-        vec!["--tier=llvm"],
-        #[cfg(feature = "llvm")]
-        vec!["--tier=auto", "--tier-heat=1,0,0"],
         #[cfg(feature = "clift")]
         vec!["--tier=clift"],
         #[cfg(feature = "clift")]

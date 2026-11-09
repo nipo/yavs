@@ -15,19 +15,6 @@ pub fn start() {
     OPS_BEFORE.store(n, std::sync::atomic::Ordering::Relaxed);
 }
 
-/// What `--tier=llvm` compiled: IR instructions inline, IR instructions the interpreter still
-/// executes from compiled code, functions callable on native frames.
-#[cfg(feature = "llvm")]
-static LLVM: [std::sync::atomic::AtomicU64; 3] =
-    [const { std::sync::atomic::AtomicU64::new(0) }; 3];
-
-#[cfg(feature = "llvm")]
-pub fn llvm_compiled(inline: usize, interpreted: usize, native_frames: usize) {
-    for (a, v) in LLVM.iter().zip([inline, interpreted, native_frames]) {
-        a.store(v as u64, std::sync::atomic::Ordering::Relaxed);
-    }
-}
-
 /// Print the counters when `YAVS_COUNTERS` is set; `s` is the kernel's.
 pub fn report(s: yavs_kernel::Stats, rt: Option<&yavs_interp::Runtime>) {
     // (A measurement switch of the Cranelift tier, `YAVS_CLIFT_BLOCKCOV`: writes the blocks that ran.)
@@ -45,6 +32,8 @@ pub fn report(s: yavs_kernel::Stats, rt: Option<&yavs_interp::Runtime>) {
         ("single_runs", s.single_runs),
         ("pooled_batches", s.pooled_batches),
         ("threads_windows", s.threads_windows),
+        ("estimates_skipped", s.estimates_skipped),
+        ("estimates_cut", s.estimates_cut),
         ("threads_gained", s.threads_gained),
         ("wakes", s.wakes),
         ("idle_skips", s.idle_skips),
@@ -75,6 +64,7 @@ pub fn report(s: yavs_kernel::Stats, rt: Option<&yavs_interp::Runtime>) {
         ("ecall_session_hits", session_hits),
         ("opt_funcs", yavs_ir::optimised_functions()),
         ("dopes_scans", yavs_ir::opt::dopes_scans()),
+        ("flat_elem_results", yavs_ir::flat_elem_results()),
         ("opt_huge", yavs_ir::opt::huge_bodies()),
         ("elab_restarts", yavs_ir::restarted_calls()),
         ("gc_collections", yavs_interp::gc_collections()),
@@ -139,13 +129,6 @@ pub fn report(s: yavs_kernel::Stats, rt: Option<&yavs_interp::Runtime>) {
     let ieee: Vec<(String, u64)> = rt
         .map(|rt| yavs_interp::ieee_general(&rt.prog))
         .unwrap_or_default();
-    #[cfg(feature = "llvm")]
-    {
-        let l = |i: usize| LLVM[i].load(std::sync::atomic::Ordering::Relaxed);
-        rows.push(("llvm_inline_insts", l(0)));
-        rows.push(("llvm_interpreted_insts", l(1)));
-        rows.push(("llvm_native_frames", l(2)));
-    }
     // Copies of subprograms in Cranelift code: linked by a pre-key, lowered, compiled, and the id
     // symbols lowered code named.
     #[cfg(feature = "clift")]
@@ -167,12 +150,12 @@ pub fn report(s: yavs_kernel::Stats, rt: Option<&yavs_interp::Runtime>) {
         eprintln!("counters: ieee_general.{key}={v}");
     }
     // The callbacks of compiled code, by kind (debug builds and `op-census`; both generators).
-    #[cfg(any(feature = "llvm", feature = "clift"))]
+    #[cfg(feature = "clift")]
     for (name, v) in yavs_llvm::callback_counts().into_iter().flatten() {
         eprintln!("counters: cb_{name}={v}");
     }
     // Skips of compiled drives held against the kernel's full test (`YAVS_INLCMP=check`).
-    #[cfg(any(feature = "llvm", feature = "clift"))]
+    #[cfg(feature = "clift")]
     {
         let n = yavs_llvm::rt::GATE_CHECKED.load(std::sync::atomic::Ordering::Relaxed);
         if n != 0 {

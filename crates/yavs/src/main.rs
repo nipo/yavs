@@ -71,11 +71,7 @@ macro_rules! build_line {
     };
 }
 
-const VERSION: &str = if cfg!(all(feature = "llvm", feature = "clift")) {
-    version!(" (compiled tier: llvm, cranelift)")
-} else if cfg!(feature = "llvm") {
-    version!(" (compiled tier: llvm)")
-} else if cfg!(feature = "clift") {
+const VERSION: &str = if cfg!(feature = "clift") {
     version!(" (compiled tier: cranelift)")
 } else {
     version!(" (interpreter only, no compiled tier)")
@@ -656,11 +652,6 @@ mod tests {
         let v = Cli::command().render_version();
         let head = format!("yavs {} (", env!("CARGO_PKG_VERSION"));
         assert!(v.starts_with(&head), "{v}");
-        assert_eq!(
-            v.contains("compiled tier: llvm"),
-            cfg!(feature = "llvm"),
-            "{v}"
-        );
         assert_eq!(v.contains("cranelift"), cfg!(feature = "clift"), "{v}");
         let lines: Vec<&str> = v.trim_end().split('\n').collect();
         assert_eq!(lines.len(), 3, "{v}");
@@ -677,7 +668,7 @@ mod tests {
         assert_eq!(lines[2], "Copyright (c) 2026 Sebastian Abrahamsson", "{v}");
     }
 
-    /// The default tier (#125): `auto` with a compiled tier (`llvm` or `clift`), also under
+    /// The default tier (#125): `auto` with the compiled tier (`clift`), also under
     /// `--vhpi`; `interp` under `--dap` and without one; an explicit `--tier=` wins.
     #[test]
     fn default_tier() {
@@ -689,17 +680,15 @@ mod tests {
                 _ => unreachable!(),
             }
         };
-        let auto = if cfg!(all(feature = "clift", not(feature = "llvm"))) {
+        let auto = if cfg!(feature = "clift") {
             elab::TierArg::CliftAuto
-        } else if cfg!(feature = "llvm") {
-            elab::TierArg::Auto
         } else {
             elab::TierArg::Interp
         };
         assert!(tier(&[]) == auto);
         assert!(tier(&["--vhpi=plugin.so"]) == auto);
         assert!(tier(&["--dap=stdio"]) == elab::TierArg::Interp);
-        if cfg!(all(feature = "clift", not(feature = "llvm"))) {
+        if cfg!(feature = "clift") {
             assert!(tier(&["--tier=auto"]) == elab::TierArg::CliftAuto);
         }
         assert!(tier(&["--vhpi=plugin.so", "--tier=interp"]) == elab::TierArg::Interp);

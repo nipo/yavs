@@ -3,7 +3,7 @@
 //! under each code generator and every clock-edge form; a process that calls a subprogram does
 //! not. A debug build checks that a lean activation never reaches the table (it panics). Needs
 //! the `llvm` or the `clift` feature.
-#![cfg(any(feature = "llvm", feature = "clift"))]
+#![cfg(feature = "clift")]
 
 mod common;
 use common::tempdir;
@@ -78,10 +78,6 @@ fn run(dir: &Path, flags: &[&str]) -> (String, u64) {
 
 fn tiers() -> Vec<Vec<&'static str>> {
     vec![
-        #[cfg(feature = "llvm")]
-        vec!["--tier=llvm"],
-        #[cfg(feature = "llvm")]
-        vec!["--tier=auto", "--tier-heat=1,0,0"],
         #[cfg(feature = "clift")]
         vec!["--tier=clift"],
         #[cfg(feature = "clift")]

@@ -94,12 +94,10 @@ fn formats_are_stored_and_applied() {
     assert_eq!(want.0, Some(1), "{want:?}");
     for (tier, threads) in [
         ("interp", "4"),
-        #[cfg(any(feature = "llvm", feature = "clift"))]
+        #[cfg(feature = "clift")]
         ("auto", "1"),
         #[cfg(feature = "clift")]
         ("clift", "1"),
-        #[cfg(all(feature = "llvm", feature = "clift"))]
-        ("auto3", "4"),
     ] {
         assert_eq!(run(&dir, tier, threads), want, "{tier} {threads}");
     }

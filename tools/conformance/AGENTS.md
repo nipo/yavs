@@ -51,7 +51,7 @@ The CI parts need no local run: download the `conformance-report` artifact of a 
 
 ```sh
 tools/fetch-corpus.sh
-cargo build --release -p yavs        # --features llvm for the auto and llvm tiers
-tools/conformance/run.py --yavs target/release/yavs --out ~/.cache/yavs-conformance [--local --llvm]
+cargo build --release -p yavs        # --features clift for the auto and clift tiers
+tools/conformance/run.py --yavs target/release/yavs --out ~/.cache/yavs-conformance [--local --compiled]
 tools/conformance/run.py --check --yavs target/release/yavs --out ~/.cache/yavs-conformance
 ```

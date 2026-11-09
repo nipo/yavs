@@ -57,31 +57,20 @@ BLESS_REF = "sim1"  # the label whose output the checked-in .expected files hold
 YAVS = ('R=${{YAVS_BIN:-yavs}}; o=$("$R" analyze --std={std} --work=work:{work} {relaxed} {psl} {file} 2>&1) || {{ printf \'%s\\n\' "$o" >&2; exit 97; }}; '
         '"$R" elab --std={std} --work=work:{work} {relaxed} {psl} {top} || exit 98; '
         '"$R" run --std={std} --work=work:{work} {relaxed} {psl} {stop_flag} {res_flag} --threads={threads} {shuffle_on} $YAVS_RUN_FLAGS {top}')
-# yavs with the interpreter alone (`--tier=interp`): the default tier is `auto` in a build with the `llvm` feature.
+# yavs with the interpreter alone (`--tier=interp`): the default tier is `auto` in a build with the `clift` feature.
 YAVS_INTERP = YAVS.replace("--threads=", "--tier=interp --threads=")
-# yavs with every function compiled by the LLVM tier (needs a yavs built with `--features llvm`);
-# compared with the same `.expected`, so it must match the interpreter (rule 5).
-YAVS_LLVM = YAVS.replace("--threads=", "--tier=llvm --threads=")
-# yavs compiling hot functions in the background (`--tier=auto`): identical output whenever
-# compilation finishes.
+# yavs compiling hot functions (`--tier=auto`): compared with the same `.expected`, so it must match the
+# interpreter (rule 5) whenever compilation finishes.
 YAVS_AUTO = YAVS.replace("--threads=", "--tier=auto --threads=")
 # `--tier=auto` after a dropped first pass (in its own directory: file_append, #806), comparing a second `elab` and
 # `run`: `.expected` holds both stages (#1030). The run links what the first compiled by pre-keys of the compilation
-# cache (with YAVS_LLVM_PREKEY_CHECK or YAVS_CLIFT_PREKEY_CHECK set it generates the code anyway and checks it, #785).
+# cache (with YAVS_CLIFT_PREKEY_CHECK set it generates the code anyway and checks it, #785).
 _ELAB = YAVS_AUTO.index('"$R" elab')
 YAVS_AUTO_WARM = (YAVS_AUTO[:_ELAB] + "mkdir w1; (cd w1 && " + YAVS_AUTO[_ELAB:] + ") >/dev/null 2>&1; " + YAVS_AUTO[_ELAB:])
 # yavs with the Cranelift tier (needs a yavs built with `--features clift`): every function
 # compiled before time 0, and hot functions compiled in the background.
 YAVS_CLIFT = YAVS.replace("--threads=", "--tier=clift --threads=")
 YAVS_CLIFT_AUTO = YAVS.replace("--threads=", "--tier=clift-auto --threads=")
-# yavs with Cranelift as the first level of tier-up and LLVM O2 for what stays hot (needs both
-# features); eager (`--tier-heat=0,0,0`) so every function is compiled at its first call and again
-# at O2 during the run.
-YAVS_AUTO3 = YAVS.replace("--threads=", "--tier=auto3 --threads=")
-YAVS_AUTO3_EAGER = YAVS.replace("--threads=", "--tier=auto3 --tier-heat=0,0,0 --threads=")
-# `auto3` eager with LLVM compiling the functions of even id and Cranelift the others, calls through
-# the native-frame table (`YAVS_MIXED`, `YAVS_CLIFT_NTAB`): the two generators call each other.
-YAVS_MIXED = "export YAVS_MIXED=1 YAVS_CLIFT_NTAB=1; " + YAVS_AUTO3_EAGER
 # Cranelift with a copy of every process that can have one from its third activation, every skip of
 # a drive in generated code held against the kernel's full test: what `gate_checked` counts. The
 # other templates reach that compare on hardly any test of the corpus, whose runs are short.
@@ -90,7 +79,7 @@ YAVS_CLIFT_CHECK = "export YAVS_SPEC_ALL=1 YAVS_SPEC_AFTER=2 YAVS_INLCMP=check Y
 # every process that can have one from its second activation, the run waiting for what it asks
 # (`YAVS_AUTO_SYNC`), so the rule's paths run on every test however short.
 YAVS_CLIFT_COUNT1 = "export YAVS_AUTO_COUNT=1 YAVS_AUTO_GATE=0 YAVS_AUTO_SYNC=1 YAVS_SPEC_ALL=1; " + YAVS_CLIFT_AUTO
-TEMPLATES = {"yavs-clift-count1": YAVS_CLIFT_COUNT1, "yavs-clift-check": YAVS_CLIFT_CHECK, "yavs-mixed": YAVS_MIXED, "yavs": YAVS, "yavs-interp": YAVS_INTERP, "yavs-llvm": YAVS_LLVM, "yavs-auto": YAVS_AUTO, "yavs-auto-warm": YAVS_AUTO_WARM, "yavs-clift": YAVS_CLIFT, "yavs-clift-auto": YAVS_CLIFT_AUTO, "yavs-auto3": YAVS_AUTO3, "yavs-auto3-eager": YAVS_AUTO3_EAGER}
+TEMPLATES = {"yavs-clift-count1": YAVS_CLIFT_COUNT1, "yavs-clift-check": YAVS_CLIFT_CHECK, "yavs": YAVS, "yavs-interp": YAVS_INTERP, "yavs-auto": YAVS_AUTO, "yavs-auto-warm": YAVS_AUTO_WARM, "yavs-clift": YAVS_CLIFT, "yavs-clift-auto": YAVS_CLIFT_AUTO}
 # yavs repeats analysis warnings when it loads the units: W1904 (a shared variable of a
 # non-protected type) and W1302 (a 1993 homograph pair) are the warnings `relaxed` tests are about.
 _RX = "--relaxed -Wno-W1904 -Wno-W1325 -Wno-W1501 -Wno-W1302"
@@ -465,7 +454,7 @@ def candidate_error(cand):
 def main():
     global CORPUS
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--candidate", default=BLESS_REF, help="a reference label (sim1, sim2, ...), yavs (the default tier), yavs-interp, yavs-llvm, yavs-auto, yavs-auto-warm or a bash command template (see README)")
+    ap.add_argument("--candidate", default=BLESS_REF, help="a reference label (sim1, sim2, ...), yavs (the default tier), yavs-interp, yavs-auto, yavs-auto-warm, yavs-clift, yavs-clift-auto or a bash command template (see README)")
     ap.add_argument("--bless", action="store_true", help="regenerate .expected from sim1 (candidate must be sim1)")
     ap.add_argument("--jobs", type=int, default=8, help=f"parallel simulations (max {MAX_JOBS})")
     ap.add_argument("--filter", default="", help="regex on the corpus-relative path")

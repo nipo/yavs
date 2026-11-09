@@ -705,6 +705,15 @@ pub fn restarted_calls() -> u64 {
     RESTARTED.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+pub(crate) static FLAT_ELEM_RESULTS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
+/// How many functions built in this process return an array of composite elements as its data
+/// address and `RetBounds` (`Func::ret_flat`; a work counter: `YAVS_COUNTERS`).
+pub fn flat_elem_results() -> u64 {
+    FLAT_ELEM_RESULTS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// How many functions the optimiser ran on in this process (a work counter: `YAVS_COUNTERS`).
 pub fn optimised_functions() -> u64 {
     OPTIMISED.load(std::sync::atomic::Ordering::Relaxed)

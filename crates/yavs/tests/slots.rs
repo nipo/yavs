@@ -180,10 +180,3 @@ fn byte_drives_run_as_one_op_and_replay_what_the_fast_path_leaves() {
         "{dump}"
     );
 }
-
-#[cfg(feature = "llvm")]
-#[test]
-fn the_same_in_compiled_code() {
-    same_output_with_and_without_the_pass("llvm");
-    same_output_with_and_without_the_pass("auto");
-}

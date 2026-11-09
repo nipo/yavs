@@ -1,0 +1,1 @@
+The LLVM tier and `--tier=auto3` are removed: Cranelift is the compiled tier (`--tier=auto`, the default, and `--tier=clift`). `--tier=llvm` and `--tier=auto3` now stop with error E0120, which says so, and a build from source no longer has an `llvm` feature.

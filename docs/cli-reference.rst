@@ -497,18 +497,16 @@ Arguments:
 
    May be repeated.
 
-.. option:: --tier=interp|llvm|auto|clift|clift-auto|auto3
+.. option:: --tier=interp|auto|clift|clift-auto
 
-   Execution tier: ``interp`` runs the interpreter alone; ``auto`` runs it and compiles the functions that become hot (see ``--tier-compile``); ``clift`` and ``llvm`` compile every function before time 0; ``clift-auto`` is ``auto`` with Cranelift; ``auto3`` has Cranelift compile warm functions and LLVM O2 those that stay hot. A tier needs its code generator in the build (error E0120 otherwise): this yavs has the tiers ``yavs --version`` names. Default: ``auto`` with a compiled tier, ``interp`` with ``--dap``, ``--interactive`` or ``--do``, and without one.
+   Execution tier: ``interp`` runs the interpreter alone; ``auto`` runs it and compiles the functions that become hot (see ``--tier-compile``); ``clift`` compiles every function before time 0; ``clift-auto`` is another name for ``auto``. A tier needs its code generator in the build (error E0120 otherwise): this yavs has the tiers ``yavs --version`` names. Default: ``auto`` with a compiled tier, ``interp`` with ``--dap``, ``--interactive`` or ``--do``, and without one.
 
    Values:
 
    * ``interp``: The interpreter alone
-   * ``llvm``: LLVM: every function before time 0 (the ``llvm`` feature)
    * ``auto``: The interpreter, and the functions that become hot compiled during the run
    * ``clift``: Cranelift: every function before time 0 (the ``clift`` feature)
    * ``clift-auto``: Cranelift: the functions that become hot, during the run
-   * ``auto3``: Three tiers: the interpreter, Cranelift for warm functions, LLVM O2 for those that stay hot (needs the ``llvm`` and ``clift`` features)
 
 .. option:: --tier-max-size=N
 

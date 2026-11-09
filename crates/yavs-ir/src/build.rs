@@ -784,6 +784,13 @@ impl FuncBuilder<'_> {
     }
 
     pub fn finish(self) {
+        let types = self.pb.types();
+        if self.ret_flat
+            && let Some(Ty::Array { elem, .. }) = self.ret_ty.and_then(|t| types.get(t))
+            && matches!(types.get(*elem), Some(Ty::Array { .. } | Ty::Record { .. }))
+        {
+            crate::program::FLAT_ELEM_RESULTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
         let mut code = Vec::new();
         let mut loc = Vec::new();
         let mut blocks = IdVec::new();

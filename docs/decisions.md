@@ -343,6 +343,9 @@ field by field (`kernel/hang.rs`).
 
 ## LLVM bindings: llvm-sys 211, no inkwell (yavs-llvm)
 
+Superseded on 2026-11-08: the LLVM tier was removed ("LLVM tier removed" below). This section and
+the LLVM sections after it are the record of how it was built.
+
 - **Choice:** `llvm-sys` `=211.1.1` (MIT), the raw LLVM 21.1 C API, features `prefer-dynamic` and
   `strict-versioning`, optional behind the crate feature `llvm` (default off, so the workspace
   builds without LLVM). Test with `cargo test -p yavs-llvm --features llvm`.
@@ -14116,7 +14119,7 @@ Chosen over a second entry of native variants only: a shared convention leaves o
 
 `opt/dopes.rs` then reads descriptors in registers: one a block allocates and fills with `MakeDope`, a local's own in its slot, and the words of a parameter. `DopeLen` is the new `BoundsLen`, `Pos` `BoundsPos`, `SlicePos` `BoundsSlice`, a one-dimensional `SubtypeCheck` a length `Check` (the same text, when its message names no subtype), `LayoutOf` with the one `Load` of its size arithmetic on the length, a `Copy` of the descriptor another `MakeDope`; `dce` drops the block. A function with a loop keeps `Pos` and `SlicePos` of the frame's descriptors: the element loops and fused runs of the interpreter and the tiers read those, and a known frame address is a few loads in compiled code. A body about to be inlined takes everything in registers, so its bounds become the caller's.
 
-A result of such a type with scalar elements and no `ieee` native (`Func::ret_flat`, decided from the declaration on both sides: `Fx::flat_result`) is its data address, the words left in the machine by `RetBounds` right before the `Ret` and read by `TakeBounds` right after the `Call`. Nothing runs between the two but moves, so one set of words per machine does; the caller makes a descriptor of them for readers that want one, and the pass drops it where they can use the registers. A function with an `ieee` native keeps the pair, because the caller cannot tell whether the native or the body it fell back to answered; so do arrays of composites (`is_general`: a descriptor of many levels). The pair kept the data's heap object alive to the end of the caller's statement: `return_` still stores it in a pair and roots it (`fat_root`), and `drop_clean_roots` removes both when it proves the data off the heap.
+A result of such a type whose elements hold no handle and no `ieee` native (`Func::ret_flat`, decided from the declaration on both sides: `Fx::flat_result`) is its data address, the words left in the machine by `RetBounds` right before the `Ret` and read by `TakeBounds` right after the `Call`. Nothing runs between the two but moves, so one set of words per machine does; the caller makes a descriptor of them for readers that want one, and the pass drops it where they can use the registers. A function with an `ieee` native keeps the pair, because the caller cannot tell whether the native or the body it fell back to answered; so do arrays whose elements hold access or protected handles (`Ty::has_handles`). Arrays of composite elements with one level of bounds (`array of signed(15 downto 0)`, of a record) were kept on the pair at first and take the words since #1122 (2026-11-08): the type already says their descriptor is the three words, their `return` goes through the plain array check instead of the general one (same error texts), and a call of a small function on such an array no longer allocates and copies the pair and the descriptor. The pair kept the data's heap object alive to the end of the caller's statement: `return_` still stores it in a pair and roots it (`fat_root`), and `drop_clean_roots` removes both when it proves the data off the heap.
 
 Reads the same IR in every tier: interpreter first, and the failures are the interpreter's by construction (`Bounds*` share its checks). `TempRoot` of a pair whose data is a `NewFrame`'s goes: that memory is temporary, no heap object to keep. Inlining bodies that allocate was tried on Microwatt forced and dropped: no gain over the call (0.996 against 0.995 at the first stage, 1.003 at the second), since the inliner runs on code whose registers are already shared. Measurements: plans notes, local.
 
@@ -14787,6 +14790,62 @@ the IR optimiser and lowering. Decisions:
   `grlib_leon3mp`, `neorv32_single_min` and `poc_arith_addw` ran over the gate before and decide as before
   (instructions 1.00 to 1.01; their walls moved 0.81 to 1.01 with the host's load).
 
+## LLVM tier removed (yavs, yavs-llvm, tools, user, 2026-11-08)
+
+- **Decision (user, 2026-11-08: "remove LLVM"; supersedes the earlier ruling to keep it until the
+  Cranelift tier's leave-anywhere work, CG3(b), is decided).** The LLVM tier is gone: the `llvm` cargo
+  feature of `yavs` and `yavs-llvm`, the LLVM generator, ORC JIT, object cache, code arena, lazy library
+  load and `llvm-sys`. Cranelift (`yavs-clift`, feature `clift`) is the compiled tier, as in the release
+  archives since 2026-10-28. Why: an LLVM build's `--tier=auto` took 1.2 to 1.5 times the cycles of
+  the Cranelift build's on GRLIB and Microwatt (warm and cold, measured once before the removal), it needed a manual LLVM 21 install, and it had no
+  CI job since 2026-10-30 (#898).
+- **`--tier=llvm` and `--tier=auto3` are E0120** in every build, before any analysis, with a note that
+  Cranelift is the compiled tier and a help line naming `--tier=auto`, `--tier=clift` and `interp`. The
+  two values stay hidden in `TierArg` so the error is a diagnostic, not an unknown value. E0120 was
+  widened ("a tier this yavs was built without, or one that was removed") rather than a new code.
+  `--tier=auto` maps to the Cranelift policy (`clift-auto`) in every build with `clift`; without it,
+  `auto` is E0120 as before.
+- **E0127** (the LLVM library cannot be loaded) is retired with the tier and never reused.
+- **Kept on purpose:** the crate `yavs-llvm` keeps its name and paths (a rename is a later step); its
+  shared runtime (`rt.rs`, `auto.rs`, `native.rs`, `regs.rs`, `eloop.rs`, `generator.rs`, `census.rs`,
+  `profile.rs`, `work.rs`, `hugezone.rs`, `perfmap.rs`) is what the Cranelift tier runs on. The policy's
+  branches for a second, optimising generator (`Gens::main`, `OptLevel::Fast`/`FastRa`) stay until the
+  policy work removes them. The leave-anywhere machinery stays (CG3(b) undecided).
+- **Tests and tools.** Test cases and files that ran only `--tier=llvm`, `--tier=auto3` or LLVM's
+  `--tier=auto` were deleted, not ported; the same cases under `--tier=clift` and `clift-auto` stay.
+  difftest loses `yavs-llvm`, `yavs-auto3`, `yavs-auto3-eager`, `yavs-mixed`; realbench loses the
+  tiers `llvm` and `auto3`, and its `codegen` phase now times `--tier=clift` (was `--tier=llvm`);
+  waveq's third tier is `clift`; `tools/conformance/run.py --llvm` is `--compiled` (the auto and clift
+  tiers). History (release notes, earlier decisions, `docs/STATUS.md`, conformance records) is not
+  rewritten.
+- **Dependencies:** LLVM 21 is no longer an approved manual dependency (root `AGENTS.md` rule 9,
+  `docs/plan.md`).
+
+## `--threads=auto` round 4 (yavs-kernel, #884, 2026-11-08)
+
+- **Decision: the batch last estimated at or below the lowest pool threshold (`SimControl::stay`: its length, first
+  and last process) is taken as `small` the next 15 times it comes: no estimate, timed in one batch in 16** (agent).
+  Why: a batch near the threshold passes the bound of `small` (one dear process anywhere sets `cost_hi`), so it was
+  estimated at every delta cycle and a sixteenth of its activations timed, though it stays inline. Two batches with
+  the same key are taken to be the same: a wrong guess changes where a batch runs, never the output. Measured
+  (interpreter, all-thread instructions, no batch pooled): over one thread `lfsr64` at `--threads=4` 1.021 to 1.002,
+  `rtl_bus` at `--threads=8` 1.008 to 1.001; one thread unchanged.
+- **Decision: the estimate of a batch stops once its splittable work passes `pool_ns` (`sum - max` only grows), except
+  before a probe of `--threads=auto`; the pieces of the pooled batch add up their processes' costs and the whole
+  estimate is put together after the join, so `learn_pooled` and the windows see what they saw before** (agent).
+  Why: the pass over a batch of thousands of processes ran on the kernel thread before any worker started (about
+  5 percent of the kernel thread's samples on `rtl_fan` at `--threads=4`). Measured (one PGO bench build with a
+  switch, both cells and an A/A cell against the switch off, CPUs 12-15 and 28-31, 8 rounds, paired): all-thread
+  instructions `rtl_fan` 0.93 to 0.97, `rtl_ff` 0.96 to 0.97, `rtl_lfsr` 0.97 to 0.99 (interpreter and default
+  tier, 4 and 8 threads; the designs that never pool unchanged); wall `rtl_fan` 0.82 to 0.995 in all eight
+  readings (two cells of one binary in four sittings) against 0.95 to 1.09 with the switch off, the others within
+  the A/A (whose own band reached 0.90 to 1.07).
+- **Decision: the trace line of `--tier=auto` that serves the calibration of `work::INSTR_PER_US` pairs the kernel
+  thread's instructions with the kernel thread's CPU time** (agent). Why: since round 3 the CPU time is the kernel
+  thread's; the instructions were the sum over the threads running at the last look, which counted the pool's
+  workers and read 0 whenever none ran at that look (it did on `rtl_lfsr` at one and at four threads). Measured
+  (`rtl_lfsr`, default tier, first run, loaded host): about 9 600 instructions per CPU microsecond at one thread and
+  9 000 at four; `INSTR_PER_US` (16 000) is not changed here.
 
 ## `--tier-compile=wait`: compiles priced as measured, a budget, the hottest per price first, and what the rest of the run repays (yavs-llvm `auto.rs`, wave 3 policy, 2026-11-08)
 

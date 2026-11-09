@@ -47,12 +47,6 @@ fn tiers() -> Vec<Vec<&'static str>> {
         vec!["--tier=clift", "--threads=4"],
         vec!["--tier=clift-auto", "--tier-heat=1,0,0", "--threads=4"],
     ]);
-    #[cfg(feature = "llvm")]
-    v.extend([
-        vec!["--tier=llvm"],
-        vec!["--tier=llvm", "--threads=4"],
-        vec!["--tier=auto", "--tier-heat=1,0,0", "--threads=4"],
-    ]);
     v
 }
 

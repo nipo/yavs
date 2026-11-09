@@ -210,16 +210,6 @@ fn the_build_replays_the_calls_in_the_same_order() {
     ));
 }
 
-#[cfg(feature = "llvm")]
-#[test]
-fn llvm_tiers_keep_the_order() {
-    let dir = design("late-pkg-llvm");
-    for tier in ["--tier=llvm", "--tier=auto"] {
-        check(&run(&dir, &[tier]));
-        check_values(&run(&dir, &[tier, "--cov=sbt", "--cov-file=l.ycov"]));
-    }
-}
-
 #[cfg(feature = "clift")]
 #[test]
 fn clift_tiers_keep_the_order() {

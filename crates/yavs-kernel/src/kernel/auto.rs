@@ -561,6 +561,66 @@ mod tests {
         );
     }
 
+    /// A batch estimated below the threshold is not estimated again at once, and is then timed as
+    /// rarely as a small one, also when one dear process makes the bound of `small` useless.
+    #[test]
+    fn a_batch_below_the_threshold_stays_unestimated() {
+        let mut b = crate::Builder::new();
+        for i in 0..16 {
+            let f = |c: &mut Ctx<'_>| c.wait_for(Time::ns(1));
+            b.process(&format!("p{i}"), crate::ProcFlags::default(), &[], f);
+        }
+        let cfg = Config {
+            threads: 4,
+            ..Config::default()
+        };
+        let mut sim = b.build(cfg).unwrap();
+        sim.run_until(Time::ns(2)).unwrap();
+        sim.cost.fill(1000);
+        // 15 x 1000 ns is below the threshold; 15 x this is not.
+        sim.cost_hi = 10_000_000;
+        sim.run_until(Time::ns(17)).unwrap();
+        assert_eq!(sim.stay.0, [16, 0, 15]);
+        assert!(sim.stats().estimates_skipped >= 13, "{:?}", sim.stats());
+        let timed = sim.cost.iter().filter(|&&c| c != 1000).count();
+        assert!(
+            timed <= 2,
+            "{timed} processes timed in 15 batches: {:?}",
+            sim.cost
+        );
+    }
+
+    /// The estimate stops once a batch passes the threshold, and the pieces of the pooled batch
+    /// add up the rest: the window sees the estimate of the whole batch.
+    #[test]
+    fn a_pooled_batch_is_estimated_whole() {
+        let mut b = crate::Builder::new();
+        for i in 0..64 {
+            let f = |c: &mut Ctx<'_>| c.wait_for(Time::ns(1));
+            b.process(&format!("p{i}"), crate::ProcFlags::default(), &[], f);
+        }
+        let cfg = Config {
+            threads: 4,
+            auto: true,
+            ..Config::default()
+        };
+        let mut sim = b.build(cfg).unwrap();
+        sim.set_threads_hint(Some(true));
+        // Counted already: a host of one CPU would end `auto` at the first batch.
+        sim.auto.as_deref_mut().unwrap().counted = true;
+        sim.tick_mask = u64::MAX;
+        sim.run_until(Time::ns(1)).unwrap();
+        sim.cost.fill(1000);
+        // The sum passes the threshold after 7 of the 64 processes; not a probe.
+        (sim.cost_hi, sim.pool_ns, sim.calib, sim.probe) = (1000, 5000, 0, 5);
+        sim.auto.as_deref_mut().unwrap().want = 0;
+        let s = sim.stats();
+        sim.run_until(Time::ns(2)).unwrap();
+        assert_eq!(sim.stats().pooled_batches, s.pooled_batches + 1);
+        assert_eq!(sim.stats().estimates_cut, s.estimates_cut + 1);
+        assert_eq!(sim.auto.as_ref().unwrap().want, 64_000);
+    }
+
     /// A few pooled batches far slower than their estimate do not raise the threshold of a
     /// design whose batches gain; a run of batches no faster than inline does.
     #[test]
@@ -571,6 +631,7 @@ mod tests {
             work: 90_000,
             learn: true,
             probe: false,
+            whole: true,
         };
         for _ in 0..32 {
             sim.learn_pooled(e, 35_000);

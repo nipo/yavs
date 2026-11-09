@@ -7,7 +7,7 @@ Read the root `AGENTS.md` first. This file is for an agent about to change `crat
 - The store of the compilation cache (`docs/decisions.md` "Compilation cache", #407): a [`Key`]
   (sha256 over everything an entry depends on, built with `KeyBuilder`) maps to a byte string in
   `<library dir>/yavs-cache/<kind>-<key>.img`. Atomic writes, validation of everything read,
-  a size limit that does not churn (`MAX_BYTES`, `STALE_AFTER`, `IN_USE`), `Store::clean`. The compiled code of the LLVM tier has a
+  a size limit that does not churn (`MAX_BYTES`, `STALE_AFTER`, `IN_USE`), `Store::clean`. The compiled code of the compiled tier has a
   store of its own in the subdirectory `obj/` (`Store::objects_of_library`, #505).
 - Does not: know VHDL, `Db`, or when to cache (`crates/yavs/src/cache.rs` decides; `yavs-sem`
   `image.rs` makes the bytes), lock anything, or ever fail a run: a write error is silent (`YAVS_LOG=debug`

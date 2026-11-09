@@ -75,8 +75,6 @@ fn run(dir: &Path, top: &str, flags: &[&str], lean: &str) -> Run {
 fn tiers() -> Vec<Vec<&'static str>> {
     vec![
         vec!["--tier=interp", "--threads", "4"],
-        #[cfg(feature = "llvm")]
-        vec!["--tier=llvm"],
         #[cfg(feature = "clift")]
         vec!["--tier=clift"],
         #[cfg(feature = "clift")]

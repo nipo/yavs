@@ -299,6 +299,33 @@ reproduce in 37 runs on 8 or 4 cores (all 4920 batches pooled). The designs that
 thread unchanged within 0.001 except `rtl_ram` (1.012 to 1.004); `lfsr64` keeps 2 percent, its batches are estimated
 just under the threshold.
 
+## Round 4 (2026-11-08)
+
+Two changes to the choice of where a batch runs (`docs/decisions.md` "`--threads=auto` round 4"): the batch last
+estimated below the threshold is not estimated again for its next 15 batches, and the estimate of a batch that pools
+stops once it passes the threshold, the threads adding up the rest while they run it.
+
+Measured with one PGO bench build (Cranelift) whose switch turns each change off, every cell its own copy of the binary,
+plus an A/A cell, on CPUs 12-15 and 28-31, 8 rounds, paired ratios per round, interpreter and default tier, 4 and 8
+threads. Instructions of all threads against both changes off:
+
+| Design | Pools | Instructions | Wall |
+|---|---|---|---|
+| rtl_fan | yes | 0.93 to 0.97 | 0.82 to 0.995 (both cells in all four sittings), 0.95 to 1.09 with the stop off |
+| rtl_ff | yes | 0.96 to 0.97 | within the A/A |
+| rtl_lfsr | yes | 0.97 to 0.99 | within the A/A |
+| lfsr64 | no | 0.96 to 0.98 | within the A/A |
+| rtl_bus | no | 0.99 | within the A/A |
+
+The A/A cell's own walls moved 0.87 to 1.14 on this busy host, so only `rtl_fan` is resolved in wall time. Over one
+thread (interpreter, nothing pooled): `lfsr64` at `--threads=4` 1.021 to 1.002 of the instructions, `rtl_bus` at
+`--threads=8` 1.008 to 1.001.
+
+An earlier first trial of `--threads=auto` (2 or 5 ms into the run instead of 10) was measured and not changed: on
+first runs (fresh command lines, interpreter) `rtl_lfsr` cut to 16 us of simulated time read 0.90 of the wall time at
+2 ms and the full designs 0.97 to 1.04 (A/A 0.98 to 1.04); `lfsr64`, which does not gain, read 1.06 (A/A 1.02) and its
+short cuts were within their wide A/A. The default-tier sitting was too loaded to read.
+
 ## Details
 
 * **Why mid-size batches no longer slow down.** Handing a batch to the threads has a fixed cost of

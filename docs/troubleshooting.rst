@@ -83,8 +83,9 @@ Common problems
      - A time needs a unit: ``--stop-time=10us``, not ``10``.
    * - ``E0120``, tier not available
      - ``--tier`` names a compiled tier this yavs was built without (``yavs --version`` lists the
-       tiers it has; ``yavs --explain E0120`` says which tier needs which build). Use a tier it
-       has or ``--tier=interp``, or rebuild (:ref:`installation`).
+       tiers it has; ``yavs --explain E0120`` says which tier needs which build), or ``llvm`` or
+       ``auto3``, which were removed: Cranelift is the compiled tier. Use a tier it has
+       (``--tier=auto``, ``--tier=clift``) or ``--tier=interp``, or rebuild (:ref:`installation`).
    * - "this build of yavs needs a CPU with x86-64-v3", exit status 1
      - The x86_64 release archives without ``-compat`` in their name need AVX2, BMI1, BMI2, FMA, F16C, LZCNT
        and MOVBE; the message lists the ones this CPU lacks. Install the ``-compat`` archive of the same

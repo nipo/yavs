@@ -188,6 +188,14 @@ case!(frame_slices, "x=", &[], [("ops", Max(11400))]);
 // looks at each instruction a few times, not once per vector (a scan per vector made the
 // optimiser cost grow with the square of the function).
 case!(dopes_scan, "t=", &[], [("dopes_scans", Max(19000))]);
+// A function on an array of vectors called every cycle: its result is data and bounds (#1122), so
+// each call skips the result pair and the descriptor copy; the floor shows a slide back to the pair.
+case!(
+    elem_result,
+    "sum=8316",
+    &[],
+    [("flat_elem_results", Min(1)), ("ops", Max(75200))]
+);
 case!(
     pkg_table,
     "sum=212",
@@ -1278,11 +1286,7 @@ fn byte_codes_change_nothing() {
     let run = |mode: &str, tier: &str| {
         run_design_env(&d, "elem_codes", src, tier, &[], &[("YAVS_CODES", mode)])
     };
-    let tiers: &[&str] = if cfg!(feature = "llvm") {
-        &["interp", "auto"]
-    } else {
-        &["interp"]
-    };
+    let tiers: &[&str] = &["interp"];
     for &tier in tiers {
         let (all, some) = (run("all", tier), run("", tier));
         assert_eq!((all.code, some.code), (0, 0), "{}", some.all());
@@ -1309,11 +1313,7 @@ fn connections_and_sensitivity_need_no_byte_codes() {
             &[("YAVS_CODES", mode)],
         )
     };
-    let tiers: &[&str] = if cfg!(feature = "llvm") {
-        &["interp", "auto"]
-    } else {
-        &["interp"]
-    };
+    let tiers: &[&str] = &["interp"];
     for &tier in tiers {
         let (all, some) = (run("all", tier), run("", tier));
         assert_eq!((all.code, some.code), (0, 0), "{}", some.all());
@@ -1533,231 +1533,6 @@ fn wave_vars() {
             ("wave_var_idle_skips", Min(242)),
         ],
     );
-}
-
-/// Under the LLVM tier (`--tier=llvm`, compiled before the run, so the same every time): the
-/// callbacks compiled code makes and what it leaves to the interpreter. Formerly run by the `llvm` job of
-/// CI (`cargo test -p yavs --features llvm`).
-#[cfg(feature = "llvm")]
-mod llvm {
-    use super::*;
-
-    macro_rules! llvm_case {
-        ($name:ident, $says:expr, [$(($c:literal, $b:expr)),* $(,)?]) => {
-            #[test]
-            fn $name() {
-                check(
-                    stringify!($name),
-                    include_str!(concat!("perf/", stringify!($name), ".vhd")),
-                    $says,
-                    "llvm",
-                    &[],
-                    &[$(($c, $b)),*],
-                );
-            }
-        };
-    }
-
-    llvm_case!(
-        llvm_sigread,
-        "wide=",
-        [
-            ("cb_signal", Max(56)),
-            ("cb_step", Max(12)),
-            ("cb_native", Max(56)),
-            ("cb_drive", Max(263)),
-            ("cb_troot", Max(53)),
-            ("cb_endstmt", Max(53)),
-            ("cb_lcopy", Max(53)),
-            ("cb_fast", Max(1)),
-            ("llvm_inline_insts", Min(586)),
-            ("llvm_interpreted_insts", Max(50)),
-            ("llvm_native_frames", Min(1)),
-        ]
-    );
-    llvm_case!(
-        llvm_frames,
-        "acc=76800",
-        [
-            ("cb_signal", Max(2)),
-            ("cb_step", Max(4)),
-            ("cb_native", Max(2)),
-            ("llvm_inline_insts", Min(157)),
-            ("llvm_interpreted_insts", Max(11)),
-            ("llvm_native_frames", Min(4)),
-        ]
-    );
-    llvm_case!(
-        llvm_wide_fill,
-        "fills=",
-        [
-            ("cb_deopt", Max(3)),
-            ("cb_xstep", Min(390)),
-            // One frame is materialised later in the first activation (the temporary area has
-            // room from the start, #730), so the interpreter finishes a longer stretch of it.
-            ("ops", Max(1460)),
-            ("llvm_native_frames", Min(3)),
-        ]
-    );
-    // A process without a wait runs its jumps back in compiled code, leaving every 2^20th (#583).
-    llvm_case!(
-        llvm_nowait,
-        "jumps=",
-        [("cb_step", Max(4)), ("cb_signal", Max(2))]
-    );
-    // Constants found once stay for the run (#679).
-    llvm_case!(llvm_hostless, "acc=", [("cb_host", Max(2))]);
-    // A deallocation drops only the freed object from compiled code's table (#520): 600 `cb_fast`
-    // before (every `deallocate` made both `Deref`s of the table after it ask the host again), 201 now.
-    llvm_case!(llvm_heap_free, "acc=", [("cb_fast", Max(207))]);
-    // Functions and procedures that read signals run on native frames (#519): 900 calls, no step.
-    llvm_case!(
-        llvm_sigfun,
-        "acc=",
-        [
-            ("cb_step", Max(4)),
-            ("cb_signal", Max(4)),
-            ("llvm_native_frames", Min(2))
-        ]
-    );
-    // Procedures that drive signals and a function that reads a vector run on native frames
-    // (#730): 900 calls, no step, no frame materialised.
-    llvm_case!(
-        llvm_sigdrive,
-        "acc=",
-        [
-            ("cb_step", Max(2)),
-            ("cb_signal", Max(302)),
-            ("cb_deopt", Max(0)),
-            ("llvm_native_frames", Min(3))
-        ]
-    );
-    // `uniform` is computed in compiled code (#519): 400 calls, no callback for them.
-    llvm_case!(
-        llvm_uniform,
-        "acc=",
-        [("cb_native", Max(4)), ("cb_host", Max(2))]
-    );
-    // The memo of pure calls (#701) answers the compiled calls too: the same hits as the interpreter.
-    #[test]
-    fn llvm_pure_memo() {
-        check(
-            "pure_memo",
-            include_str!("perf/pure_memo.vhd"),
-            "q=9",
-            "llvm",
-            &[],
-            &[
-                ("pmemo_hits", Min(420)),
-                ("pmemo_runs", Max(14)),
-                ("cb_memo", Max(470)),
-            ],
-        );
-    }
-    llvm_case!(
-        llvm_ieee,
-        "acc=",
-        [
-            ("cb_native", Max(5)),
-            ("cb_host", Max(3)),
-            ("llvm_native_frames", Min(1)),
-        ]
-    );
-    // A field of a record whose layout depends on a generic, read on a native frame: one call of
-    // the layout memo per field instead of a step of the `LayoutOf` (#679).
-    llvm_case!(
-        llvm_layout_field,
-        "acc=38682",
-        [
-            ("cb_xstep", Max(0)),
-            ("cb_step", Max(5)),
-            ("cb_layout", Max(1648))
-        ]
-    );
-    llvm_case!(
-        llvm_eloop,
-        "acc=",
-        [
-            // The fills of `ones`; the row copies (one plane block each side) are inline: a
-            // copy that takes the runtime call again raises it (180 before #757 round 2).
-            ("cb_eloop", Min(20)),
-            ("cb_eloop", Max(20)),
-            ("cb_step", Max(6)),
-            ("cb_deopt", Max(0)),
-            // The planned loops find their vectors and descriptors inline (fresh frames, the
-            // caller's temporaries, held parameter regions, the object table): no lookup call.
-            ("cb_host", Max(0)),
-            // The descriptor parameter's region is found in the object table at the entry.
-            ("cb_region", Max(1)),
-            ("llvm_native_frames", Min(2)),
-        ]
-    );
-    llvm_case!(
-        llvm_drive_batch,
-        "q=",
-        [
-            ("cb_drive", Max(158)),
-            ("llvm_interpreted_insts", Max(32)),
-            // Kept drives of unchanged elements make no kernel entry, as in the interpreter.
-            ("direct_codes", Max(107)),
-        ]
-    );
-    llvm_case!(
-        llvm_clocked,
-        "q=",
-        [
-            ("cb_signal", Max(4)),
-            ("cb_step", Max(26)),
-            ("cb_native", Max(4)),
-            ("cb_drive", Max(998)),
-            ("cb_wait", Max(19)),
-            ("cb_wait_same", Max(1018)),
-            ("llvm_inline_insts", Min(600)),
-            ("llvm_interpreted_insts", Max(48)),
-            ("llvm_native_frames", Min(1)),
-        ]
-    );
-
-    /// `edge_cost_parity` compiled (#772): the `wait until` form ends its wait on the kernel as
-    /// the sensitivity-list forms do (`static_wait_edge`), so all four make the same callbacks.
-    #[test]
-    fn llvm_edge_cost_parity() {
-        let forms = [
-            "process (clk) begin if rising_edge(clk) then q(i) <= not q(i); end if; end process;",
-            "process (clk) begin if clk'event and clk = '1' then q(i) <= not q(i); end if; end process;",
-            "process (clk) begin if not clk'stable and clk = '1' then q(i) <= not q(i); end if; end process;",
-            "process begin wait until rising_edge(clk); q(i) <= not q(i); end process;",
-        ];
-        let template = include_str!("perf/edge_cost.vhd");
-        let mut cbs = Vec::new();
-        for (k, form) in forms.iter().enumerate() {
-            let d = tempdir(&format!("llvm_edge_cost_{k}"));
-            let r = run_design(
-                &d,
-                "edge_cost",
-                &template.replace(forms[0], form),
-                "llvm",
-                &[],
-            );
-            assert_eq!(r.code, 0, "{form}: {}", r.all());
-            assert!(r.all().contains("ones=8"), "{form}: {}", r.all());
-            check_bounds(
-                &format!("llvm_edge_cost/{k}"),
-                &r,
-                &[("cb_wait_same", Max(1050)), ("cb_signal", Max(16))],
-            );
-            let sum: u64 = (r.counters.iter())
-                .filter(|(c, _)| c.starts_with("cb_"))
-                .map(|(_, &n)| n)
-                .sum();
-            cbs.push(sum);
-        }
-        // The wait form waits in full at its first activation (no edge resumed it yet).
-        assert!(
-            cbs.iter().all(|&n| n <= cbs[0] + 16 && n + 16 >= cbs[0]),
-            "callbacks per form: {cbs:?}"
-        );
-    }
 }
 
 /// Under the Cranelift tier (`--tier=clift`, compiled before the run): the callbacks compiled code

@@ -1,0 +1,54 @@
+exit	0
+diag	note	0	0	:array_result_elems:_p0	C 0 4 00A2 0001 0026
+diag	note	1000000	0	:array_result_elems:_p0	l1 0 6 0000 0000 0000
+diag	note	1000000	0	:array_result_elems:_p0	l2 0 3 0000 0000 0000
+diag	note	1000000	0	:array_result_elems:_p0	l3 0 1 0000 0000 0000
+diag	note	1000000	0	:array_result_elems:_p0	lw 10 13 0000 0000 0000
+diag	note	1000000	0	:array_result_elems:_p0	v 0 3 005C 0005 0029
+diag	note	1000000	0	:array_result_elems:_p0	w 0 1 005C 0016 0046
+diag	note	1000000	0	:array_result_elems:_p0	halves 0 0 00F7 00F7 00F7
+diag	note	1000000	0	:array_result_elems:_p0	cat 0 5 0016 0005 0000
+diag	note	1000000	0	:array_result_elems:_p0	eq true true
+diag	note	1000000	0	:array_result_elems:_p0	acc 0 3 005C 0005 0029
+diag	note	1000000	0	:array_result_elems:_p0	memo 0 2 FFEC FFF5 FFFE
+diag	note	1000000	0	:array_result_elems:_p0	memo 0 2 FFEC FFF5 FFFE
+diag	note	2000000	0	:array_result_elems:_p0	l1 0 6 00F7 0005 0025
+diag	note	2000000	0	:array_result_elems:_p0	l2 0 3 0000 0000 0000
+diag	note	2000000	0	:array_result_elems:_p0	l3 0 1 0000 0000 0000
+diag	note	2000000	0	:array_result_elems:_p0	lw 10 13 0000 0000 0000
+diag	note	2000000	0	:array_result_elems:_p0	v 0 3 00C0 000C 0054
+diag	note	2000000	0	:array_result_elems:_p0	w 0 1 00C0 0030 0090
+diag	note	2000000	0	:array_result_elems:_p0	halves 0 0 01FB 01FB 01FB
+diag	note	2000000	0	:array_result_elems:_p0	cat 0 5 0127 000C 0025
+diag	note	2000000	0	:array_result_elems:_p0	eq false true
+diag	note	2000000	0	:array_result_elems:_p0	acc 0 3 011C 0011 007D
+diag	note	2000000	0	:array_result_elems:_p0	memo 0 2 FFFB FFF8 0003
+diag	note	2000000	0	:array_result_elems:_p0	memo 0 2 FFFB FFF8 0003
+diag	note	3000000	0	:array_result_elems:_p0	l1 0 6 01FB 000C 004B
+diag	note	3000000	0	:array_result_elems:_p0	l2 0 3 00F7 0016 0025
+diag	note	3000000	0	:array_result_elems:_p0	l3 0 1 00F7 005C 009B
+diag	note	3000000	0	:array_result_elems:_p0	lw 10 13 00F7 0016 0025
+diag	note	3000000	0	:array_result_elems:_p0	v 0 3 012C 0015 0081
+diag	note	3000000	0	:array_result_elems:_p0	w 0 1 012C 004E 00DE
+diag	note	3000000	0	:array_result_elems:_p0	halves 0 0 030C 030C 030C
+diag	note	3000000	0	:array_result_elems:_p0	cat 0 5 0249 0015 004B
+diag	note	3000000	0	:array_result_elems:_p0	eq false true
+diag	note	3000000	0	:array_result_elems:_p0	acc 0 3 0248 0026 00FE
+diag	note	3000000	0	:array_result_elems:_p0	memo 0 2 000A FFFB 0008
+diag	note	3000000	0	:array_result_elems:_p0	memo 0 2 000A FFFB 0008
+diag	note	4000000	0	:array_result_elems:_p0	l1 0 6 030C 0015 0072
+diag	note	4000000	0	:array_result_elems:_p0	l2 0 3 01FB 0030 004B
+diag	note	4000000	0	:array_result_elems:_p0	l3 0 1 01FB 00C0 013B
+diag	note	4000000	0	:array_result_elems:_p0	lw 10 13 01FB 0030 004B
+diag	note	4000000	0	:array_result_elems:_p0	v 0 3 01A0 0020 00B0
+diag	note	4000000	0	:array_result_elems:_p0	w 0 1 01A0 0070 0130
+diag	note	4000000	0	:array_result_elems:_p0	halves 0 0 042A 042A 042A
+diag	note	4000000	0	:array_result_elems:_p0	cat 0 5 037C 0020 0072
+diag	note	4000000	0	:array_result_elems:_p0	eq false true
+diag	note	4000000	0	:array_result_elems:_p0	acc 0 3 03E8 0046 01AE
+diag	note	4000000	0	:array_result_elems:_p0	memo 0 2 0019 FFFE 000D
+diag	note	4000000	0	:array_result_elems:_p0	memo 0 2 0019 FFFE 000D
+diag	note	4000000	0	:array_result_elems:_p0	flip 1 6 B
+diag	note	4000000	0	:array_result_elems:_p0	flip 2 4 D
+diag	note	4000000	0	:array_result_elems:_p0	flip 3 2 E
+diag	note	5000000	0	:array_result_elems:_p0	pv 6 E
