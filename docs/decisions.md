@@ -14985,7 +14985,7 @@ Written by Claude. Landed with wave 3 batch 2 (maintainer's ruling of 2026-11-09
   copies that never ran compiled. `compiled_gate.rs` `whole_values_at_run_time_elements_of_copies` fails with that
   lowering bug put back.
 
-## `--tier-compile=wait`: past a second, the first run still holds a process it hardly ran (yavs-llvm `auto.rs`, 2026-11-09, on a branch for the maintainer)
+## `--tier-compile=wait`: past a second, the first run still holds a process it hardly ran (yavs-llvm `auto.rs`, 2026-11-09, landed with the next entry)
 
 - **Finding** (agent). `uvvm_axistream_vvc`'s first run under `wait` took 1.62 to 1.69 times the wall of the pinned
   baseline with a second free core (the cold cap is 1.20); `background` 1.08, `--tier=interp` level with the
@@ -14994,7 +14994,7 @@ Written by Claude. Landed with wave 3 batch 2 (maintainer's ruling of 2026-11-09
   the command executor (seen 2 percent of its price) and, now called from compiled code, the BFM procedures and
   some 100 callees seen 0: 1.85 s of compiles in a 2.3 s run, paid on the critical path; compiled code saved almost
   nothing in the rest of the run.
-- **Change** (agent; the maintainer decides, below). Past `WAIT_LONG` the first run holds a process (`unpaid`)
+- **Change** (agent; landed by the user's ruling of 2026-11-09, with the later-run credit below). Past `WAIT_LONG` the first run holds a process (`unpaid`)
   while the looks saw it and its copies (`bseen` of its base) for less than `WAIT_LONG_FLOOR` (0.1) of its price;
   a subprogram is not held by it (it waits until compiled code calls it, as before). Holding by the function's own
   time instead held GRLIB's copies (seen 0, their time is the base's) and native callees of compiled processes, and
@@ -15012,7 +15012,7 @@ Written by Claude. Landed with wave 3 batch 2 (maintainer's ruling of 2026-11-09
   (no `overdue`), the bodies the first run skips never compile and the test settled at 1.34 times main's
   instructions. The next section adds the later-run credit that fixes this, and gives the combined numbers.
 
-## `--tier-compile=wait`: a later run credits a held caller with the callees it unlocks (yavs-llvm `auto.rs`, 2026-11-09, on a branch for the maintainer)
+## `--tier-compile=wait`: a later run credits a held caller with the callees it unlocks (yavs-llvm `auto.rs`, 2026-11-09, user ruling: landed)
 
 - **Finding** (agent). With the first-run floor above, `uvvm_axistream_vvc`'s later runs settled at 1.34 times
   main's instructions: the floor holds the sequencer `p_main` and the command executor in run 1, and the later-run
@@ -15033,7 +15033,9 @@ Written by Claude. Landed with wave 3 batch 2 (maintainer's ruling of 2026-11-09
   and `neorv32_single_cache` to run 8 within the A/A (the credit fires there only once, in two of five `osvvm_axi4_random` second runs). Cold cap with a free core
   (plain bench builds, 10 pairs): `uvvm_axistream_vvc` 1.13 of the pinned baseline (main 1.72), the other five
   level with main; GRLIB's first run level.
-- **Not landed**: the bar (every run within the A/A of main) fails on `uvvm_axistream_vvc` runs 2 to 6. Main pays
-  the dispatcher's subtree in run 1, over the cap; any rule that keeps run 1 under the cap pays it in a later run,
-  and compiling everything the count asks for in run 2 costs that run 1.5 to 1.6 times main's (measured with
-  `YAVS_AUTO_WAIT_GAIN=0`). The maintainer decides.
+- **Decided** (user, 2026-11-09, option (a)): land the floor and the credit together, accepting
+  `uvvm_axistream_vvc` runs 2 to 6 above main (the ruling's own bar, every run within the A/A, fails there: main
+  pays the dispatcher's subtree in run 1, over the cap, and compiling everything the count asks for in run 2
+  measured 1.5 to 1.6 times main's run 2). `YAVS_AUTO_WAIT_SUBTREE` and `tier_unlocked` stay. Reach: the corpus test
+  `process/dispatch_subtree` (a dispatcher over two waiting procedures, the inner one large) has the second run of
+  `yavs-auto-warm` compile the dispatcher and the outer procedure for what they unlock (`tier_unlocked` 2).
