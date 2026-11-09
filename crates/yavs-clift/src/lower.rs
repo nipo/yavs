@@ -131,7 +131,7 @@ pub struct Jit {
     deopt_slots: ClifId,
     deopt_end: ClifId,
     /// The kernel-facing callbacks of `rt.rs`, in the order of `KERNEL`.
-    kernel: [ClifId; 27],
+    kernel: [ClifId; 28],
     /// `yavs_rt_host` and the `Deref` of `yavs_rt_fast` through stubs that keep every register
     /// (`cold_stub`).
     cold_host: ClifId,
@@ -565,6 +565,7 @@ impl Jit {
             (DRIVE_F, yavs_rt_drive_f as *const u8),
             (SCATTER, yavs_rt_scatter as *const u8),
             (GATHER, yavs_rt_gather as *const u8),
+            (DRIVE_SRC, yavs_rt_drive_src as *const u8),
             (GATE_CHECK, yavs_rt_gate_check as *const u8),
             (IMAGE_CHECK, yavs_rt_image_check as *const u8),
             (ELOOP_EXEC, yavs_rt_eloop_exec as *const u8),
@@ -662,6 +663,7 @@ impl Jit {
             imp(ELOOP_EXEC, &[I64; 8], Some(I64))?,
             imp(SCATTER, &[I64, I32, I32, I64, I64, I64], Some(I32))?,
             imp(GATHER, &[I64, I32, I64, I64, I64], Some(I32))?,
+            imp(DRIVE_SRC, &[I64, I32, I64, I64, I64, I64], Some(I32))?,
         ];
         let hold_check = imp(HOLD_CHECK, &[I64, I64, I64, I64, I64, I32, I64, I64], None)?;
         let rare = imp(RARE, &[I32], None)?;
@@ -1695,6 +1697,9 @@ impl Jit {
             gather: self
                 .module
                 .declare_func_in_func(self.kernel[26], &mut ctx.func),
+            drive_src: self
+                .module
+                .declare_func_in_func(self.kernel[27], &mut ctx.func),
             tables: tabs,
             consts: cons,
             natives,
@@ -1879,6 +1884,9 @@ struct Imports {
     /// `yavs_rt_gather(mem, pc, out, size, direct) -> u32`: a whole record read whose plan has no
     /// image.
     gather: FuncRef,
+    /// `yavs_rt_drive_src(mem, driver, lo, len, data, n) -> u32`: a fused whole-value drive from
+    /// the value itself (`yavs_interp::FusedCopy`), 0 when not taken.
+    drive_src: FuncRef,
     tables: HashMap<Vec<u8>, GlobalValue>,
     /// Copies of the constants (up to 4 KiB of bytes) the function takes the address of, which
     /// never change: reads of them need no lookup.
@@ -2696,7 +2704,7 @@ fn gen_func(
     };
     // The scalar logic assignments the interpreter runs as one op (their waveform is not made here
     // either) and those without a delay kept for one host call (`Batch`).
-    let (scalar_drives, batched) = if !native && f.kind == FuncKind::Process {
+    let (scalar_drives, batched, copies) = if !native && f.kind == FuncKind::Process {
         batched_drives(prog, f, &fixed_consts(f))
     } else {
         Default::default()
@@ -2926,6 +2934,7 @@ fn gen_func(
                 .chain([d.lset])
                 .filter(|&p| p != u32::MAX)
         })
+        .chain(copies.iter().flat_map(|c| [c.zero, c.copy]))
         .collect();
     // Element loops (`yavs_interp::elem_loops`) of a variant whose frame is registered ask
     // `yavs_rt_eloop` for all their iterations but the last at the head (#757).
@@ -3228,6 +3237,9 @@ fn gen_func(
                 } else {
                     g.drive_bit(pc, d)
                 }
+            }
+            Inst::Drive { .. } if let Some(c) = copies.iter().find(|c| c.drive == pc) => {
+                g.drive_copy(f, c)?
             }
             Inst::Const { dst, v } => {
                 let x = g.c64(v);
@@ -3736,26 +3748,7 @@ fn gen_func(
                 let (sa, da) = (g.ld(src), g.ld(dst));
                 let ps = g.host(sa, Some(src), Op::C(0), Op::C(n), false, slow);
                 let pd = g.host(da, Some(dst), Op::C(0), Op::C(n), true, slow);
-                let words: Vec<Value> = (0..n / 8)
-                    .map(|k| g.b.ins().load(I64, g.gf, ps, k as i32 * 8))
-                    .collect();
-                // Pairs of words are stored as 16 bytes, so a reader's 16-byte load of a pair
-                // (the plane block of a waveform element) is forwarded from one store.
-                let mut parts: Vec<(i32, Value)> = Vec::new();
-                for (k, pair) in words.chunks(2).enumerate() {
-                    let at = k as i32 * 16;
-                    match *pair {
-                        [lo, hi] => {
-                            let v = g.b.ins().scalar_to_vector(types::I64X2, lo);
-                            parts.push((at, g.b.ins().insertlane(v, hi, 1)));
-                        }
-                        [w] => parts.push((at, w)),
-                        _ => {}
-                    }
-                }
-                for (at, v) in parts {
-                    g.b.ins().store(g.gf, v, pd, at);
-                }
+                g.copy_words(pd, ps, n);
                 g.join(join);
             }
             Inst::Copy { dst, src, bytes } => {
@@ -9957,15 +9950,28 @@ impl Gen<'_> {
     /// Whether the waveform element at `w` has delay zero and is what the elements of `sv` hold:
     /// nonzero when not. A run of elements across two plane words goes to `other`.
     fn cur_differs(&mut self, sv: SigConst, f: yavs_ir::SigFact, w: Value, other: Block) -> Value {
+        let delay = self.b.ins().load(I64, MemFlagsData::trusted(), w, 0);
+        self.value_differs(sv, f, delay, w, 8, other)
+    }
+
+    /// `cur_differs` of the `delay` and the value at `at` bytes into `w`.
+    fn value_differs(
+        &mut self,
+        sv: SigConst,
+        f: yavs_ir::SigFact,
+        delay: Value,
+        w: Value,
+        at: i32,
+        other: Block,
+    ) -> Value {
         let tab = self
             .b
             .ins()
             .load(I64, self.mf.with_readonly(), self.mem, MEM_SIGTAB as i32);
-        let at = i64::from(sv.sig) * SIG_ENT;
+        let at_sig = i64::from(sv.sig) * SIG_ENT;
         let ero = MemFlagsData::trusted().with_readonly();
         let t = MemFlagsData::trusted();
-        let field = |g: &mut Self, k: i64| g.b.ins().load(I64, ero, tab, (at + k) as i32);
-        let delay = self.b.ins().load(I64, t, w, 0);
+        let field = |g: &mut Self, k: i64| g.b.ins().load(I64, ero, tab, (at_sig + k) as i32);
         let first = field(self, SIG_OFF);
         let o = self.sv_off(sv);
         let e = self.b.ins().iadd(first, o);
@@ -9976,16 +9982,19 @@ impl Gen<'_> {
             let (a, b) = match f.es {
                 1 => (
                     self.b.ins().uload8(I64, t, p, 0),
-                    self.b.ins().uload8(I64, t, w, 8),
+                    self.b.ins().uload8(I64, t, w, at),
                 ),
                 2 => (
                     self.b.ins().uload16(I64, t, p, 0),
-                    self.b.ins().uload16(I64, t, w, 8),
+                    self.b.ins().uload16(I64, t, w, at),
                 ),
-                4 => (self.b.ins().uload32(t, p, 0), self.b.ins().uload32(t, w, 8)),
+                4 => (
+                    self.b.ins().uload32(t, p, 0),
+                    self.b.ins().uload32(t, w, at),
+                ),
                 _ => (
                     self.b.ins().load(I64, t, p, 0),
-                    self.b.ins().load(I64, t, w, 8),
+                    self.b.ins().load(I64, t, w, at),
                 ),
             };
             let x = self.b.ins().bxor(a, b);
@@ -10006,7 +10015,7 @@ impl Gen<'_> {
         let mut acc = self.c64(0);
         for k in 0..4 {
             let c = self.b.ins().load(I64, t, pb, 8 * k);
-            let v = self.b.ins().load(I64, t, w, 8 + 8 * k);
+            let v = self.b.ins().load(I64, t, w, at + 8 * k);
             let v = self.b.ins().ishl(v, sh);
             let x = self.b.ins().bxor(c, v);
             acc = self.b.ins().bor(acc, x);
@@ -10424,6 +10433,134 @@ impl Gen<'_> {
         self.b.ins().jump(after, &[]);
         self.b.switch_to_block(after);
         self.clear();
+    }
+
+    /// Copy `n` bytes (a multiple of 8, up to 64) from `ps` to `pd` in words, all loads before
+    /// the stores, so overlapping ranges copy as `memmove` does.
+    fn copy_words(&mut self, pd: Value, ps: Value, n: u64) {
+        let words: Vec<Value> = (0..n / 8)
+            .map(|k| self.b.ins().load(I64, self.gf, ps, k as i32 * 8))
+            .collect();
+        // Pairs of words are stored as 16 bytes, so a reader's 16-byte load of a pair (the plane
+        // block of a waveform element) is forwarded from one store.
+        let mut parts: Vec<(i32, Value)> = Vec::new();
+        for (k, pair) in words.chunks(2).enumerate() {
+            let at = k as i32 * 16;
+            match *pair {
+                [lo, hi] => {
+                    let v = self.b.ins().scalar_to_vector(types::I64X2, lo);
+                    parts.push((at, self.b.ins().insertlane(v, hi, 1)));
+                }
+                [w] => parts.push((at, w)),
+                _ => {}
+            }
+        }
+        for (at, v) in parts {
+            self.b.ins().store(self.gf, v, pd, at);
+        }
+    }
+
+    /// The `Drive` of a fused whole-value assignment (`yavs_interp::FusedCopy`), whose `Zero` and
+    /// `Copy` were not made: the kernel takes the value where it is (`yavs_rt_drive_src`), else
+    /// the waveform is made here and driven as usual. An address the interpreter must look at
+    /// leaves at the `Copy`, where the interpreter's fused op makes the waveform itself.
+    fn drive_copy(&mut self, f: &Func, c: &yavs_interp::FusedCopy) -> Result<(), String> {
+        let at = |p: u32| f.code.get(p as usize).copied();
+        let (
+            Some(Inst::Zero { addr, bytes: zb }),
+            Some(Inst::Copy { src, bytes, .. }),
+            Some(Inst::Drive {
+                driver,
+                target: Some(t),
+                wave,
+                n,
+                mode,
+                reject: None,
+            }),
+        ) = (at(c.zero), at(c.copy), at(c.drive))
+        else {
+            return Err(format!("fused drive at pc {} without its parts", c.drive));
+        };
+        let pc = c.drive;
+        let (make, done, out) = (
+            self.b.create_block(),
+            self.b.create_block(),
+            self.b.create_block(),
+        );
+        self.b.set_cold_block(make);
+        self.b.set_cold_block(out);
+        // (A byte signal is never the kernel's here: straight to the waveform.)
+        let known = self.sig_known(t);
+        let nb = self
+            .kint(bytes)
+            .filter(|&k| k > 0 && known.is_none_or(|(_, f)| f.es == 0));
+        if let Some(nb) = nb {
+            // (What `call_go` stores: the ways past the call must have it stored too.)
+            self.spill(self.pc);
+            let sa = self.ld(src);
+            let ps = self.host(sa, Some(src), Op::C(0), Op::C(nb as u64), false, make);
+            // (Loaded here: the compare below loads in blocks the call does not always follow.)
+            let (drv, lo, len, nv) = (
+                self.c32(driver),
+                self.ld(t),
+                self.ld(Reg(t.0 + 1)),
+                self.c64(nb),
+            );
+            // The value the signal holds already: no call at all (`TierFrame::gate`).
+            if let Some((sv, f)) = known
+                && sv.len <= 64
+                && f.planes
+                && let Some(g) = self.gate_for(driver)
+            {
+                let call = self.b.create_block();
+                self.gate_test(g, driver, call);
+                let zero = self.c64(0);
+                let x = self.value_differs(sv, f, zero, ps, 0, call);
+                let hit = self.b.create_block();
+                self.b.ins().brif(x, call, &[], hit, &[]);
+                self.b.switch_to_block(hit);
+                let w = self.b.ins().iadd_imm_s(ps, -8);
+                self.gate_hit(pc, driver, t, w, 1);
+                self.b.ins().jump(done, &[]);
+                self.b.switch_to_block(call);
+            }
+            let call = self
+                .b
+                .ins()
+                .call(self.imp.drive_src, &[self.mem, drv, lo, len, ps, nv]);
+            let r = self.b.inst_results(call)[0];
+            self.brif_split(r, done, make);
+        } else {
+            self.b.ins().jump(make, &[]);
+        }
+        // The waveform as the `Zero` (time 0) and the `Copy` make it.
+        self.b.switch_to_block(make);
+        self.clear();
+        let (wa, sa) = (self.ld(addr), self.ld(src));
+        let pw = self.host(wa, Some(addr), Op::C(0), Op::C(u64::from(zb)), true, out);
+        self.zero_range(pw, 0, u64::from(zb));
+        match self.kint(bytes).filter(|&k| k > 0 && k <= 64 && k % 8 == 0) {
+            Some(k) => {
+                let k = k as u64;
+                let ps = self.host(sa, Some(src), Op::C(0), Op::C(k), false, out);
+                let pd = self.host(wa, Some(addr), Op::C(8), Op::C(k), true, out);
+                self.copy_words(pd, ps, k);
+            }
+            None => {
+                let nv = self.ld(bytes);
+                let ps = self.host(sa, Some(src), Op::C(0), Op::V(nv), false, out);
+                let pd = self.host(wa, Some(addr), Op::C(8), Op::V(nv), true, out);
+                self.b.ins().call(self.imp.mov, &[pd, ps, nv]);
+            }
+        }
+        self.drive_block(pc, Ok(driver), t, wave, n, mode);
+        self.b.ins().jump(done, &[]);
+        self.b.switch_to_block(out);
+        self.clear();
+        self.leave_at(c.copy);
+        self.b.switch_to_block(done);
+        self.clear();
+        Ok(())
     }
 
     /// The temporary area's length the native frame's statements trim to.

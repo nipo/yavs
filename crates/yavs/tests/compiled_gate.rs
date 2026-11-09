@@ -73,6 +73,15 @@ architecture a of unit is
   signal at2 : std_logic_vector(31 downto 0) := x"00000000";
   signal at3 : ints := (others => 0);
   signal atx : std_logic := '0';
+  -- Whole values out of a function or an operator, held and changed, at a run-time element.
+  type vec4 is array (0 to 3) of unsigned(7 downto 0);
+  signal at4 : vec4 := (others => x"00");
+  signal at5 : vec4 := (others => x"00");
+  signal hf : std_logic_vector(15 downto 0) := x"0000";
+  function slow(k : natural) return std_logic_vector is
+  begin
+    return std_logic_vector(to_unsigned(k / 16, 16));
+  end function;
 begin
   clk <= not clk after 5 ns;
 
@@ -382,6 +391,18 @@ begin
         at3(k mod 8) <= at3((k + 1) mod 8) + 1;
       end if;
       atx <= at1(k) xor at2(k);
+      at4(k mod 4) <= at4(k mod 4) + 0;
+      if n mod 13 = 4 then
+        at4(k mod 4) <= at4((k + 1) mod 4) + 1;
+      end if;
+      hf <= slow(n);
+      for i in at5'range loop
+        if n mod 13 = 4 + i then
+          at5(i) <= at5(i) + 1;
+        else
+          at5(i) <= at5(i) + 0;
+        end if;
+      end loop;
     end if;
   end process;
 
@@ -422,7 +443,8 @@ begin
         & " " & std_logic'image(f1) & to_hstring(fv) & integer'image(fi)
         & " " & std_logic'image(rs) & to_hstring(rv) & " " & to_hstring(part)
         & " " & to_hstring(at1) & to_hstring(at2) & " " & integer'image(at3(0) + 3 * at3(5))
-        & std_logic'image(atx);
+        & std_logic'image(atx) & to_hstring(at4(0)) & to_hstring(at4(3)) & to_hstring(hf)
+        & to_hstring(at5(1)) & to_hstring(at5(2));
       if n = 150 then
         std.env.finish;
       end if;
@@ -443,6 +465,73 @@ end architecture;
 
 /// A run that only assigns values held keeps its delta: the report of the postponed process names
 /// it, so a skip the kernel does not hear of moves the number.
+/// An adder tree written as loops over elements at a run-time position, in a copy per instance:
+/// whole values from `+` and from reads of an element, some held, driven through the compare.
+const TREE: &str = r#"
+library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+
+entity unit is
+  generic (g : natural);
+end entity;
+
+architecture a of unit is
+  type t_arr is array (natural range <>) of signed(15 downto 0);
+  signal clk : std_logic := '0';
+  signal n : natural := 0;
+  signal t : t_arr(0 to 12) := (others => (others => '0'));
+  signal l1 : t_arr(0 to 6) := (others => (others => '0'));
+  signal l2 : t_arr(0 to 3) := (others => (others => '0'));
+  signal l3 : t_arr(0 to 1) := (others => (others => '0'));
+  signal l4 : signed(15 downto 0) := (others => '0');
+begin
+  clk <= not clk after 5 ns;
+  process (clk) is
+  begin
+    if rising_edge(clk) then
+      n <= n + 1;
+      for k in t'range loop
+        if (n + k) mod 4 = g then
+          t(k) <= t(k) + to_signed(g + 3 * k + 1, 16);
+        else
+          t(k) <= t(k);
+        end if;
+      end loop;
+      for k in l1'range loop
+        if 2 * k + 1 <= t'high then l1(k) <= t(2 * k) + t(2 * k + 1); else l1(k) <= t(2 * k); end if;
+      end loop;
+      for k in l2'range loop
+        if 2 * k + 1 <= l1'high then l2(k) <= l1(2 * k) + l1(2 * k + 1); else l2(k) <= l1(2 * k); end if;
+      end loop;
+      for k in l3'range loop
+        if 2 * k + 1 <= l2'high then l3(k) <= l2(2 * k) + l2(2 * k + 1); else l3(k) <= l2(2 * k); end if;
+      end loop;
+      l4 <= l3(0) + l3(1);
+    end if;
+  end process;
+  process (clk) is
+  begin
+    if falling_edge(clk) then
+      report integer'image(g) & " " & integer'image(n) & " " & to_hstring(l4) & " " & to_hstring(l3(1))
+        & to_hstring(l2(3)) & to_hstring(l1(6)) & to_hstring(t(12));
+      if n = 60 then
+        std.env.finish;
+      end if;
+    end if;
+  end process;
+end architecture;
+
+entity top is
+end entity;
+
+architecture a of top is
+begin
+  u0 : entity work.unit generic map (0);
+  u1 : entity work.unit generic map (1);
+end architecture;
+"#;
+
 const DELTAS: &str = r#"
 library ieee;
 use ieee.std_logic_1164.all;
@@ -1243,6 +1332,11 @@ fn against_interp(name: &str, text: &str) -> u64 {
 fn skips_in_compiled_code_change_no_result() {
     let hits = against_interp("compiled_gate", DESIGN);
     assert!(hits > 100, "the compare took only {hits} skips");
+}
+
+#[test]
+fn whole_values_at_run_time_elements_of_copies() {
+    against_interp("compiled_gate_tree", TREE);
 }
 
 #[test]

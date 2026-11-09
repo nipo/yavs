@@ -2692,3 +2692,101 @@ end;
         }
     }
 }
+
+/// Whole values from functions driven at once (no delay: the kernel takes the value where it
+/// is, else the waveform is made): targets wider than 64 elements, of exactly 64, of 1, an array
+/// of vectors, a slice, values that stay the same, metavalues, a resolved signal of two
+/// drivers, an integer array, and the same with a delay, inertial and transport.
+#[test]
+fn whole_values_driven_from_functions_match() {
+    all_tiers_match(
+        "compiled_fused_copy",
+        r#"
+library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+entity y is end;
+architecture a of y is
+  type t_arr is array (natural range <>) of signed(15 downto 0);
+  type i_arr is array (0 to 3) of integer;
+  signal clk : std_logic := '0';
+  signal wide : unsigned(111 downto 0) := (others => '0');
+  signal w64 : unsigned(63 downto 0) := (others => '0');
+  signal w16 : std_logic_vector(15 downto 0) := (others => '0');
+  signal w1 : std_logic_vector(0 downto 0) := "0";
+  signal arr : t_arr(0 to 6) := (others => (others => '0'));
+  signal sl : unsigned(31 downto 0) := (others => '0');
+  signal held : unsigned(47 downto 0) := (others => '0');
+  signal res : std_logic_vector(15 downto 0);
+  signal ia : i_arr := (others => 0);
+  signal dl, tr : unsigned(79 downto 0) := (others => '0');
+  signal dn : std_logic_vector(15 downto 0) := (others => '0');
+  function mix(v : unsigned; k : natural) return unsigned is
+    variable r : unsigned(v'range);
+  begin
+    r := rotate_left(v, 3) xor to_unsigned(k * 7 + 1, v'length);
+    return r;
+  end function;
+  function meta(k : natural) return std_logic_vector is
+    variable r : std_logic_vector(15 downto 0) := std_logic_vector(to_unsigned(k * 37, 16));
+  begin
+    if k mod 5 = 0 then r(3) := 'X'; r(9) := 'U'; end if;
+    if k mod 7 = 0 then r(0) := 'Z'; end if;
+    return r;
+  end function;
+  function bit1(k : natural) return std_logic_vector is
+  begin
+    if k mod 3 = 0 then return "1"; elsif k mod 3 = 1 then return "X"; else return "0"; end if;
+  end function;
+  function step(s : t_arr; k : natural) return t_arr is
+    variable r : t_arr(0 to 6);
+  begin
+    for i in r'range loop r(i) := s(i) + to_signed(i * 3 + k, 16); end loop;
+    return r;
+  end function;
+  function inc(a : i_arr; k : natural) return i_arr is
+    variable r : i_arr;
+  begin
+    for i in r'range loop r(i) := a(i) + i + k; end loop;
+    return r;
+  end function;
+  function keep(k : natural) return unsigned is
+  begin
+    return to_unsigned(k / 8, 48);
+  end function;
+begin
+  clk <= not clk after 5 ns when now < 400 ns;
+  process (clk) is
+    variable k : natural := 0;
+  begin
+    if rising_edge(clk) then
+      k := k + 1;
+      wide <= mix(wide, k);
+      w64 <= mix(w64, k);
+      w16 <= meta(k);
+      w1 <= bit1(k);
+      arr <= step(arr, k);
+      sl(23 downto 8) <= mix(sl(23 downto 8), k);
+      held <= keep(k);
+      res <= meta(k + 1);
+      ia <= inc(ia, k);
+      dl <= mix(dl, k) after 2 ns;
+      tr <= transport mix(tr, k) after 7 ns;
+      dn <= meta(k + 2) after 0 ns;
+    end if;
+  end process;
+  res <= (others => 'Z'), x"00F0" after 101 ns, (others => 'L') after 203 ns;
+  process (clk) is
+  begin
+    if falling_edge(clk) then
+      report to_hstring(wide) & " " & to_hstring(w64) & " " & to_hstring(w16) & " " &
+             to_string(w1) & " " & to_hstring(sl) & " " & to_hstring(held);
+      report to_hstring(arr(0)) & to_hstring(arr(6)) & " " & to_string(res) & " " &
+             integer'image(ia(0)) & "," & integer'image(ia(3)) & " " & to_hstring(dl) & " " &
+             to_hstring(tr) & " " & to_string(dn);
+    end if;
+  end process;
+end;
+"#,
+    );
+}

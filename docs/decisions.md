@@ -14856,3 +14856,34 @@ the IR optimiser and lowering. Decisions:
   workers and read 0 whenever none ran at that look (it did on `rtl_lfsr` at one and at four threads). Measured
   (`rtl_lfsr`, default tier, first run, loaded host): about 9 600 instructions per CPU microsecond at one thread and
   9 000 at four; `INSTR_PER_US` (16 000) is not changed here.
+
+## Whole values driven from where they are (yavs-clift, yavs-interp, #1122, 2026-11-09)
+
+- **Decision: a zero-delay assignment of a whole value that the interpreter fuses with its waveform in the frame
+  (`Op::CopyDrive`, listed as `yavs_interp::FusedCopy` by `fused_drives`, kept by `batched_drives` when its time
+  register is a constant 0) is driven in Cranelift code from the value's own bytes** (maintainer ruling 2026-11-08:
+  no signal by reference, no caller-provided result storage; drive from the result as the interpreter's fused op
+  does). The `Zero` of the waveform and the `Copy` of the value are not made; at the `Drive`, `Gen::drive_copy`
+  calls `yavs_rt_drive_src(mem, driver, lo, len, data, n)`, which takes a logic target whose plane blocks are the
+  `n` bytes (`direct_drive_now`, `direct_drive_wide`) and answers 0 for anything else. A constant reference of up
+  to 64 logic elements in a process copy is compared first (`value_differs`, the skip of `cur_differs` with the
+  delay known to be 0). A 0, a byte signal, or a value `host` cannot reach inline makes the waveform and drives as
+  before; an address the interpreter must look at leaves at the `Copy`, where `Op::CopyDrive` makes the waveform
+  itself (`wave_at`). The sites are the interpreter's or fewer, as for `ScalarDrive`.
+  Why: every `q <= a + b;` and `l1 <= reduce(t);` zeroed its waveform (72 bytes for 112 elements) and copied the
+  value into it before the kernel read it back. Measured (exact instructions, slope 20 k to 100 k cycles of the
+  adder-tree testbench, 16 units, Cranelift bench builds): `--tier=clift` loop form 29.36 G to 27.78 G (0.946),
+  function form 32.22 G to 31.31 G (0.972, about 236 instructions fewer per call with its element drives); default
+  tier (fresh library, the same compiled set as the base, two warm pairs) loop 29.35 G to 27.76 to 27.80 G, function
+  32.07 G to 31.13 to 31.30 G. Function over loop is 1.13 on both tiers now (1.10 before): the loop form gains more.
+  A held-value design (vectors of 16 to 64 elements and an integer array assigned whole every cycle) 14.45 G to
+  14.40 G on `--tier=clift`, level on the default tier. Cycles were not measured (the timing cores were taken).
+- **Decision: the zeroing of the waveform is kept whole on the way that makes it** (agent). The idea of zeroing only
+  its time word does not apply where the drive is fused (nothing is zeroed), and the other way must match the
+  interpreter's `wave_at`.
+- **Decision: a compile thread that died in a compile is joined when the run ends, so its panic is the run's
+  internal error** (agent; `AutoTier::stop`). Why: a panic of the tier-up thread (the verifier's in debug builds)
+  left the function interpreted and the run's result unchanged, so no test saw it: a lowering bug of this change
+  (target registers loaded inside the skip's compare, in blocks the call does not always follow) only showed as
+  copies that never ran compiled. `compiled_gate.rs` `whole_values_at_run_time_elements_of_copies` fails with that
+  lowering bug put back.

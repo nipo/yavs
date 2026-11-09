@@ -39,9 +39,11 @@ pub(crate) enum Cb {
     /// call of an in-place `ieee` op.
     RareCodes,
     RareNative,
+    /// `yavs_rt_drive_src`: a whole value driven from where it is, with no waveform.
+    DriveSrc,
 }
 
-const N: usize = 25;
+const N: usize = 26;
 
 /// Whether this build counts (the generators emit the calls of `yavs_rt_rare` only then).
 pub const COUNTING: bool = cfg!(any(debug_assertions, feature = "op-census"));
@@ -72,6 +74,7 @@ const NAMES: [&str; N] = [
     "direct",
     "rare_codes",
     "rare_native",
+    "drive_src",
 ];
 
 #[cfg(any(debug_assertions, feature = "op-census"))]

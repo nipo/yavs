@@ -2922,11 +2922,47 @@ pub struct ScalarDrive {
     pub inertial: bool,
 }
 
-/// The scalar logic assignments of `f` that the interpreter's predecoder fuses (`ScalarDrive`).
-pub fn scalar_drives(prog: &Program, f: &Func) -> Vec<ScalarDrive> {
+/// An assignment of a whole value the predecoder runs as one op (`Op::CopyDrive`) whose waveform
+/// is in the frame: the IR pcs of its `Zero`, of the `Copy` of the value into it and of the
+/// one-element `Drive` of it, which nothing else reads, and the register of its time. A tier may
+/// drive from the value and leave the `Zero` and the `Copy` alone at these sites only, as for
+/// `ScalarDrive`; the interpreter, entered at the `Copy`, makes the waveform itself.
+#[derive(Clone, Copy, Debug)]
+pub struct FusedCopy {
+    pub zero: u32,
+    pub copy: u32,
+    pub drive: u32,
+    pub time: yavs_ir::Reg,
+}
+
+/// The scalar logic assignments (`ScalarDrive`) and the whole-value ones (`FusedCopy`) of `f`
+/// that the interpreter's predecoder fuses.
+pub fn fused_drives(prog: &Program, f: &Func) -> (Vec<ScalarDrive>, Vec<FusedCopy>) {
     let pre = Pre::new(f, prog, false);
     let mut out = Vec::new();
+    let mut copies = Vec::new();
     for (k, op) in pre.code.ops.iter().enumerate() {
+        if let Op::CopyDrive { size, w, time, .. } = *op
+            && size & FRAME_WAVE != 0
+        {
+            let copy = pre.code.at[k] as usize;
+            let w = u32::from(w);
+            let zero = (0..copy)
+                .rev()
+                .find(|&p| matches!(f.code[p], Inst::Zero { addr, .. } if addr.0 == w));
+            if let Some(zero) = zero
+                && matches!(f.code[copy], Inst::Copy { .. })
+                && matches!(f.code.get(copy + 1), Some(Inst::Drive { .. }))
+            {
+                copies.push(FusedCopy {
+                    zero: zero as u32,
+                    copy: copy as u32,
+                    drive: copy as u32 + 1,
+                    time: yavs_ir::Reg(u32::from(time)),
+                });
+            }
+            continue;
+        }
         let Op::LSetDrive {
             v,
             driver,
@@ -2988,7 +3024,7 @@ pub fn scalar_drives(prog: &Program, f: &Func) -> Vec<ScalarDrive> {
             inertial,
         });
     }
-    out
+    (out, copies)
 }
 
 /// Where an operand of an element loop comes from: a register the loop does not write, the

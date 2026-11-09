@@ -1598,8 +1598,10 @@ mod clift {
             ("cb_signal", Max(60)),
             ("cb_step", Max(9)),
             ("cb_native", Max(56)),
-            ("cb_drive", Max(263)),
-            ("cb_drive", Min(230)),
+            // Whole values from an operator are driven from where they are (`yavs_rt_drive_src`).
+            ("cb_drive", Max(160)),
+            ("cb_drive", Min(140)),
+            ("cb_drive_src", Min(95)),
             ("cb_lcopy", Max(55)),
         ]
     );
@@ -1721,8 +1723,9 @@ mod clift {
         [
             ("cb_signal", Max(5)),
             ("cb_step", Max(10)),
-            ("cb_drive", Max(416)),
-            ("cb_drive", Min(380)),
+            ("cb_drive", Max(212)),
+            ("cb_drive", Min(190)),
+            ("cb_drive_src", Min(190)),
             ("cb_native", Max(4)),
         ]
     );
