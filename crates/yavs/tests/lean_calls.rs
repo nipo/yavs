@@ -108,7 +108,11 @@ fn lean_calls_of_references_and_nested_subprograms_keep_their_values() {
         "lean_calls.vhd",
     ]);
     assert!(a.status.success(), "{a:?}");
-    let tiers: &[&str] = &["--tier=interp"];
+    let tiers: &[&str] = &[
+        "--tier=interp",
+        #[cfg(feature = "clift")]
+        "--tier=clift",
+    ];
     for tier in tiers {
         let o = yavs(&["run", "--std=2008", "--work=work:work", tier, "lean_calls"]);
         assert!(o.status.success(), "{tier}: {o:?}");

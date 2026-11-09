@@ -948,6 +948,152 @@ fn files_left_open_are_written() {
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
+/// `--tier=auto` (#125): whenever the hot functions are compiled and swapped in, the output,
+/// a file the design leaves open, and the text of a runtime error in compiled code are the
+/// interpreter's (rule 3), at 1 and 4 threads.
+#[cfg(feature = "clift")]
+#[test]
+fn tier_auto_matches_interp() {
+    let tmp = tempdir("tierauto");
+    std::fs::write(
+        tmp.join("hot.vhd"),
+        "use std.textio.all;\n\
+         entity hot is end;\n\
+         architecture t of hot is\n\
+           function mix(a, b : integer) return integer is\n\
+           begin assert a >= 0 report \"mix\"; return (a * 31 + b) mod 1000003; end function;\n\
+           signal s : integer := 0;\n\
+         begin\n\
+           p0 : process\n\
+             file f : text open write_mode is \"out.txt\";\n\
+             variable l : line;\n\
+             variable acc : integer := 0;\n\
+           begin\n\
+             for i in 1 to 20000 loop\n\
+               acc := mix(acc, i);\n\
+               if i mod 5000 = 0 then\n\
+                 write(l, acc); writeline(f, l);\n\
+                 report \"acc=\" & integer'image(acc);\n\
+               end if;\n\
+             end loop;\n\
+             s <= acc;\n\
+             wait for 1 ns;\n\
+             acc := 2;\n\
+             for i in 1 to 100 loop acc := acc * 3; end loop;\n\
+             wait;\n\
+           end process;\n\
+           p1 : process (s) begin report \"s=\" & integer'image(s); end process;\n\
+         end;\n",
+    )
+    .expect("write");
+    let yavs = |args: &[&str]| {
+        let _ = std::fs::remove_file(tmp.join("out.txt"));
+        let o = Command::new(env!("CARGO_BIN_EXE_yavs"))
+            .current_dir(&tmp)
+            .args(["--color", "never"])
+            .args(args)
+            .output()
+            .expect("run");
+        let file = std::fs::read_to_string(tmp.join("out.txt")).unwrap_or_default();
+        (
+            o.status.code().expect("exit code"),
+            String::from_utf8_lossy(&o.stderr).into_owned(),
+            String::from_utf8_lossy(&o.stdout).into_owned(),
+            file,
+        )
+    };
+    assert_eq!(yavs(&["analyze", "--work=work:lib", "hot.vhd"]).0, 0);
+    let interp = yavs(&["run", "--work=work:lib", "hot", "--tier=interp"]);
+    assert_eq!(interp.0, 1, "{}", interp.1);
+    assert!(interp.1.contains("cannot be represented"), "{}", interp.1);
+    assert_eq!(interp.3.lines().count(), 4, "{}", interp.3);
+    for heat in [
+        "--tier-heat=1,0,0",
+        "--tier-heat=2000,10,12",
+        "--tier-heat=1000000,20000,12",
+    ] {
+        for threads in ["--threads=1", "--threads=4"] {
+            let args = [
+                "run",
+                "--work=work:lib",
+                "hot",
+                "--tier=auto",
+                heat,
+                threads,
+            ];
+            assert_eq!(yavs(&args), interp, "{heat} {threads}");
+        }
+    }
+    // Compiled from the first call or jump: both functions run compiled.
+    let (_, err, _, _) = yavs(&[
+        "run",
+        "--work=work:lib",
+        "hot",
+        "--tier=auto",
+        "--tier-heat=1,0,0",
+        "--verbose",
+    ]);
+    for f in ["`mix`", "`p0`"] {
+        assert!(
+            err.contains(&format!("note: {f}")) && err.contains("is hot: compiled"),
+            "{err}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+/// A waveform whose value comes from a call (#542): the interpreter's fast loop drops the
+/// waveform's setup and fuses the `Copy` and `Drive` after the call, so compiled code taking
+/// over at the call's return (every function compiled from its first call) must not need it.
+#[cfg(feature = "clift")]
+#[test]
+fn tier_auto_call_between_waveform_and_drive() {
+    let tmp = tempdir("tierwave");
+    std::fs::write(
+        tmp.join("w.vhd"),
+        "entity w is end;\n\
+         architecture t of w is\n\
+           function shl(x : bit_vector) return bit_vector is\n\
+           begin return x(x'left + 1 to x'right) & '1'; end function;\n\
+           signal s : bit_vector(0 to 3) := \"0000\";\n\
+         begin\n\
+           process begin\n\
+             s <= shl(s);\n\
+             wait for 1 ns;\n\
+             report to_string(s);\n\
+             wait;\n\
+           end process;\n\
+         end;\n",
+    )
+    .expect("write");
+    let yavs = |args: &[&str]| {
+        let o = Command::new(env!("CARGO_BIN_EXE_yavs"))
+            .current_dir(&tmp)
+            .args(["--color", "never"])
+            .args(args)
+            .output()
+            .expect("run");
+        (
+            o.status.code().expect("exit code"),
+            String::from_utf8_lossy(&o.stderr).into_owned(),
+            String::from_utf8_lossy(&o.stdout).into_owned(),
+        )
+    };
+    assert_eq!(yavs(&["analyze", "--work=work:lib", "w.vhd"]).0, 0);
+    let interp = yavs(&["run", "--work=work:lib", "w", "--tier=interp"]);
+    assert_eq!(interp.0, 0, "{}", interp.1);
+    assert!(interp.2.contains("0001"), "{}", interp.2);
+    let auto = yavs(&[
+        "run",
+        "--work=work:lib",
+        "w",
+        "--tier=auto",
+        "--tier-heat=1,0,0",
+    ]);
+    assert_eq!(auto, interp);
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
 /// `yavs elab` and `yavs run` (cli-contract section 5): exit codes and diagnostic codes.
 #[test]
 fn elab_and_run() {

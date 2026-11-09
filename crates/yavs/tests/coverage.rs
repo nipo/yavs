@@ -892,6 +892,52 @@ fn toggles_of_collapsed_ports() {
 
 /// Under `--cov` the simulation replays the elaboration-time calls of package functions; those
 /// ran as lowered, and the process calls after them run the optimised code (#705).
+/// Statements, branches and toggles count the same in the interpreter and the Cranelift tier
+/// (compiled counters), at any number of threads (`coverage_fec.rs` has the other kinds).
+#[cfg(feature = "clift")]
+#[test]
+fn tiers_agree() {
+    let tmp = tempdir("tiers");
+    cov_dbs(
+        &tmp,
+        "cov_run.vhd",
+        "cov_run",
+        &[
+            ("i.ycov", &["--tier=interp"]),
+            ("l.ycov", &["--tier=clift"]),
+            ("l4.ycov", &["--tier=clift", "--threads=4"]),
+            ("a.ycov", &["--tier=clift-auto", "--tier-heat=1,0,0"]),
+        ],
+    );
+    let want = std::fs::read(tmp.join("i.ycov")).expect("i");
+    for db in ["l.ycov", "l4.ycov", "a.ycov"] {
+        assert!(
+            want == std::fs::read(tmp.join(db)).expect("db"),
+            "{db} differs from the interpreter's"
+        );
+    }
+    // The design with copies, memoised blocks and inlined functions.
+    cov_dbs(
+        &tmp,
+        "cov_copies.vhd",
+        "cov_copies",
+        &[
+            ("ci.ycov", &["--tier=interp"]),
+            ("cl.ycov", &["--tier=clift"]),
+            ("cl4.ycov", &["--tier=clift", "--threads=4"]),
+            ("ca.ycov", &["--tier=clift-auto", "--tier-heat=1,0,0"]),
+        ],
+    );
+    let want = std::fs::read(tmp.join("ci.ycov")).expect("ci");
+    for db in ["cl.ycov", "cl4.ycov", "ca.ycov"] {
+        assert!(
+            want == std::fs::read(tmp.join(db)).expect("db"),
+            "{db} differs from the interpreter's (cov_copies)"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
 #[test]
 fn replayed_calls_run_optimised() {
     let tmp = tempdir("replay");

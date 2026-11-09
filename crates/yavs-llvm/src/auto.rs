@@ -4348,6 +4348,9 @@ impl Tier for AutoTier {
 }
 
 #[cfg(test)]
+mod policy_tests;
+
+#[cfg(test)]
 mod tests {
     /// The simulation CPU is the kernel thread's: a pool worker that spins while the kernel
     /// thread waits does not make the run look dearer to the policy.
