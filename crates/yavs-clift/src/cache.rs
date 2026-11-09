@@ -705,6 +705,8 @@ mod tests {
             "YAVS_CLIFT_HUGE",
             "YAVS_CLIFT_PREKEY_CHECK",
             "YAVS_CLIFT_PREKEY_DROP",
+            // (When a function is compiled again, not what its code is.)
+            "YAVS_CLIFT_AGAIN",
             "YAVS_LOG",
         ];
         for (file, text) in [
