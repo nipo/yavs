@@ -1,0 +1,1 @@
+Under the default `--tier-compile=wait`, the runs after the first compile only what the rest of the run is expected to repay, the busiest functions for their compile time first, and keep compiling to about a quarter of a run's time, so short tests that run again stop much less for compiles.

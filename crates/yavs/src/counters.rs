@@ -115,6 +115,8 @@ pub fn report(s: yavs_kernel::Stats, rt: Option<&yavs_interp::Runtime>) {
             later,
             waited,
             alongside,
+            unrepaid,
+            over_budget,
         ] = rt.native_flags().count_stats();
         rows.push(("count_asked", asked));
         rows.push(("count_held", held));
@@ -125,6 +127,8 @@ pub fn report(s: yavs_kernel::Stats, rt: Option<&yavs_interp::Runtime>) {
         rows.push(("count_frame_later", later));
         rows.push(("tier_waited", waited));
         rows.push(("tier_alongside", alongside));
+        rows.push(("tier_unrepaid", unrepaid));
+        rows.push(("tier_over_budget", over_budget));
     }
     // The calls of each native `ieee` subprogram that ran its general path (every build).
     let ieee: Vec<(String, u64)> = rt

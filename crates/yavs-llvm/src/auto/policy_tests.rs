@@ -252,6 +252,7 @@ fn two_loops(n: usize) -> (yavs_ir::Program, yavs_ir::FuncId, yavs_ir::FuncId) {
 fn what_is_hot_depends_on_the_looks_only() {
     let look = |ms: u64| super::Look {
         running: vec![(yavs_ir::FuncId(0), false, ms * 1000)],
+        cpu: ms * 1000,
     };
     let hot_after = |pause: bool| {
         let (mut w, f) = worker(100);
@@ -343,6 +344,7 @@ fn the_profile_makes_a_function_a_candidate_at_its_first_look() {
     let (mut w, f) = worker(100);
     let look = |us: u64| super::Look {
         running: vec![(f, false, us)],
+        cpu: us,
     };
     let mut pending = super::Pending::default();
     w.see(&look(10), false, &mut pending);
@@ -382,6 +384,7 @@ fn the_snapshot_names_the_processes_that_are_hot_and_would_gain() {
     let (mut w, f) = worker(100);
     let look = |us: u64| super::Look {
         running: vec![(f, false, us)],
+        cpu: us,
     };
     let mut pending = super::Pending::default();
     // 19 ms: not yet; 21 ms: hot.
@@ -417,6 +420,7 @@ fn the_snapshot_names_the_processes_that_are_hot_and_would_gain() {
     );
     let look = |us: u64| super::Look {
         running: vec![(p, false, us)],
+        cpu: us,
     };
     w.see(&look(100_000), false, &mut pending);
     for (kind, named) in [
@@ -463,6 +467,7 @@ fn a_function_below_the_base_threshold_is_not_analysed() {
     let at = super::Heat::DEFAULT.threshold(w.prog.func(f).unwrap());
     let look = |us: u64| super::Look {
         running: vec![(f, false, us)],
+        cpu: us,
     };
     let mut pending = super::Pending::default();
     w.see(&look(at - 1), false, &mut pending);
@@ -483,6 +488,7 @@ fn a_copy_repays_its_own_compile() {
     assert!(!w.is_rtl(c1));
     let look = |id: yavs_ir::FuncId, us: u64| super::Look {
         running: vec![(id, false, us)],
+        cpu: us,
     };
     let mut pending = super::Pending::default();
     let need = w.need(c2);
@@ -514,6 +520,7 @@ fn the_profile_takes_a_process_with_a_big_loop_copy() {
     let mut w = worker_of(prog);
     let look = |id: yavs_ir::FuncId, us: u64| super::Look {
         running: vec![(id, false, us)],
+        cpu: us,
     };
     let mut pending = super::Pending::default();
     w.see(&look(c1, 100_000), false, &mut pending);

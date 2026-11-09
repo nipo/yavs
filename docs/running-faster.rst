@@ -17,7 +17,9 @@ Tiers
   alongside the run instead, at the lowest priority of the system: with idle cores a run that compiles a lot ends
   sooner, but each run then wants one core more while it compiles. Since a compile stops the run under ``wait``,
   in its first second of simulation work the first run of a design compiles a function only once it has spent
-  about that function's compile time interpreting it; the runs after it compile the rest. A run of about half a second of simulation work or less compiles little: such a
+  about that function's compile time interpreting it; the runs after it compile what the rest of the run, as
+  long as the run before, repays over a few runs. Compiles take at most about a quarter of a short run's time, the
+  busiest functions for their compile time first, so the cache of a short test fills over its first few runs. A run of about half a second of simulation work or less compiles little: such a
   run would not get the compile time back. Longer runs compile the processes that keep waking up and
   what compiled code calls, and loops that run for long.
 * ``--tier=clift`` compiles everything before time 0. It can pay off for a long run of a

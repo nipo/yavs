@@ -151,3 +151,55 @@ fn the_background_compile_thread_runs_at_the_lowest_priority() {
         "no compile thread at nice 19 within the run"
     );
 }
+
+/// `wait`'s budget: with no room (`YAVS_AUTO_WAIT_SHARE=0`) a function the cache does not hold never
+/// compiles (`tier_over_budget`), and the output is the interpreter's.
+#[test]
+fn a_compile_waits_for_room_in_the_budget() {
+    let dir = setup("tier-compile-budget", 300_000);
+    let interp = run(&dir, &["--tier=interp"]);
+    let mut c = yavs(&dir, &[&RUN[..], &["--tier=clift-auto", "tc"]].concat());
+    let o = c
+        .env("YAVS_AUTO_WAIT_SHARE", "0")
+        .output()
+        .expect("run yavs");
+    assert!(o.status.success(), "{o:?}");
+    assert_eq!(o.stdout, interp.stdout);
+    assert!(counter(&o, "tier_over_budget") > 0, "{o:?}");
+    assert_eq!(counter(&o, "count_compiled"), 0, "{o:?}");
+}
+
+/// `wait` in a run after the first: a function the cache does not hold waits while the rest of the run
+/// the last run's profile predicts would not repay it (`tier_unrepaid`; a gain of almost nothing makes
+/// that every function, and `YAVS_AUTO_PRICE=model` keeps what the first run's sampler compiled from
+/// counting as a link), and the output is the same.
+#[test]
+fn a_later_run_compiles_only_what_its_rest_repays() {
+    let dir = setup("tier-compile-rest", 3_000_000);
+    let cached = [
+        "run",
+        "--work=work:work",
+        "--threads=1",
+        "--tier=clift-auto",
+        "tc",
+    ];
+    // The first run compiles nothing and lasts long enough (100 ms of simulation CPU) for a profile.
+    let first = yavs(&dir, &cached)
+        .env("YAVS_AUTO_COUNT", "4000000000")
+        .output()
+        .expect("run yavs");
+    assert!(first.status.success(), "{first:?}");
+    let second = yavs(&dir, &cached)
+        .env("YAVS_AUTO_WAIT_GAIN", "0.000000001")
+        .env("YAVS_AUTO_PRICE", "model")
+        .output()
+        .expect("run yavs");
+    assert!(second.status.success(), "{second:?}");
+    assert_eq!(second.stdout, first.stdout);
+    assert!(counter(&second, "tier_unrepaid") > 0, "{second:?}");
+    // At the default gain it compiles or links as before.
+    let third = yavs(&dir, &cached).output().expect("run yavs");
+    assert!(third.status.success(), "{third:?}");
+    assert_eq!(third.stdout, first.stdout);
+    assert!(counter(&third, "tier_waited") > 0, "{third:?}");
+}
