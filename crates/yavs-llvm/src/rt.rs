@@ -3128,7 +3128,7 @@ pub fn cheap_ran(func: u32, n: u32, len: u32) {
     if was < limit && c.0[k] >= limit {
         c.1.push(func);
         drop(c);
-        crate::auto::wake_again();
+        crate::auto::wake_again(func);
     }
 }
 

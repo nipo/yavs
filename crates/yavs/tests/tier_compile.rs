@@ -61,7 +61,12 @@ fn setup(name: &str, iter: u32) -> common::Tmp {
 const RUN: [&str; 4] = ["run", "--work=work:work", "--no-cache", "--threads=1"];
 
 fn run(dir: &Path, extra: &[&str]) -> Output {
+    run_with(dir, extra, &[])
+}
+
+fn run_with(dir: &Path, extra: &[&str], env: &[(&str, &str)]) -> Output {
     let o = yavs(dir, &[&RUN[..], extra, &["tc"]].concat())
+        .envs(env.iter().copied())
         .output()
         .expect("run yavs");
     assert!(o.status.success(), "{o:?}");
@@ -80,11 +85,17 @@ fn counter(o: &Output, name: &str) -> u64 {
 fn the_run_waits_for_its_compiles_by_default_and_prints_the_same() {
     let dir = setup("tier-compile", 300_000);
     let interp = run(&dir, &["--tier=interp"]);
-    let wait = run(&dir, &["--tier=clift-auto"]);
+    // `YAVS_AUTO_SYNC`: the run waits for each compile it asks for, so it cannot end first.
+    let sync = [("YAVS_AUTO_SYNC", "1")];
+    let wait = run_with(&dir, &["--tier=clift-auto"], &sync);
     assert_eq!(wait.stdout, interp.stdout);
     assert!(counter(&wait, "tier_waited") > 0, "{wait:?}");
     assert_eq!(counter(&wait, "tier_alongside"), 0);
-    let bg = run(&dir, &["--tier=clift-auto", "--tier-compile=background"]);
+    let bg = run_with(
+        &dir,
+        &["--tier=clift-auto", "--tier-compile=background"],
+        &sync,
+    );
     assert_eq!(bg.stdout, interp.stdout);
     assert_eq!(counter(&bg, "tier_waited"), 0);
     assert!(counter(&bg, "tier_alongside") > 0, "{bg:?}");

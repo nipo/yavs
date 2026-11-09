@@ -916,12 +916,38 @@ enum Thread {
 
 /// The compile thread of this process's tier, woken when code made with a never-run list must be
 /// made again (`rt::cheap_ran`); one tier per run, as the store.
-static AGAIN_WAKE: Mutex<Option<Sender<Msg>>> = Mutex::new(None);
+static AGAIN_WAKE: Mutex<Option<(Sender<Msg>, Arc<Shared>)>> = Mutex::new(None);
 
-/// Wake the compile thread: `rt::take_again` has news.
-pub(crate) fn wake_again() {
-    if let Some(q) = &*AGAIN_WAKE.lock().unwrap_or_else(PoisonError::into_inner) {
-        let _ = q.send(Msg::Looks(Vec::new()));
+thread_local! {
+    /// Set on the compile thread, which must not wait for itself.
+    static ON_COMPILE_THREAD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Wake the compile thread: `rt::take_again` has news about `func`. With `YAVS_AUTO_SYNC` (tests)
+/// the run goes on once `func` was made again, so it cannot end before the compile.
+pub(crate) fn wake_again(func: u32) {
+    let Some((q, sh)) = AGAIN_WAKE
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone()
+    else {
+        return;
+    };
+    let _ = q.send(Msg::Looks(Vec::new()));
+    if !sh.sync.load(Ordering::Relaxed) || ON_COMPILE_THREAD.get() {
+        return;
+    }
+    while !sh.halt.load(Ordering::SeqCst)
+        && !sh.ended.load(Ordering::Acquire)
+        && !sh
+            .again_done
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .contains(&func)
+    {
+        // (`--tier-compile=wait`: the compile this waits for holds the simulation.)
+        yavs_interp::pause_point();
+        std::thread::sleep(Duration::from_micros(50));
     }
 }
 
@@ -1011,6 +1037,21 @@ struct Shared {
     profile: Mutex<Option<ProfileJob>>,
     /// Where functions compile (`COMPILE_*`, `AutoTier::set_compile`).
     compile: std::sync::atomic::AtomicU8,
+    /// `YAVS_AUTO_SYNC`: the run waits for the compiles it asks for (`Tier::hot`, `wake_again`).
+    sync: AtomicBool,
+    /// The compile thread has ended (or died).
+    ended: AtomicBool,
+    /// Functions made again in full after they tripped (`wake_again` waits for them).
+    again_done: Mutex<Vec<u32>>,
+}
+
+/// Sets `Shared::ended` when the compile thread ends, by panic too.
+struct Ends(Arc<Shared>);
+
+impl Drop for Ends {
+    fn drop(&mut self) {
+        self.0.ended.store(true, Ordering::Release);
+    }
 }
 
 /// The profile of a run in the making: where it goes, what the runs before left, the simulation CPU
@@ -3957,7 +3998,6 @@ impl AutoTier {
         let prog = rt.prog.clone();
         let funcs: Arc<[Entry]> = (0..prog.funcs.len()).map(|_| Entry::default()).collect();
         let (tx, rx) = channel::<Msg>();
-        *AGAIN_WAKE.lock().unwrap_or_else(PoisonError::into_inner) = Some(tx.clone());
         let shared = Arc::new(Shared {
             finished: (0..prog.funcs.len())
                 .map(|_| AtomicBool::new(false))
@@ -3988,7 +4028,10 @@ impl AutoTier {
         // rule was measured on Cranelift only), and not in the test mode without a budget.
         let counted = count_rule_on() && heat.budget != 0 && main.is_none() && first.is_some();
         let (count, gate, sync) = count_knobs();
+        *AGAIN_WAKE.lock().unwrap_or_else(PoisonError::into_inner) =
+            Some((tx.clone(), shared.clone()));
         let sync = counted && sync;
+        shared.sync.store(sync, Ordering::Relaxed);
         if counted {
             rt.native_flags().arm_count(
                 &rt.prog,
@@ -4054,6 +4097,8 @@ impl AutoTier {
                     // Nothing a run of a few milliseconds samples pays for a compile, and moving the
                     // thread, reading the cache's list and waking every millisecond cost a tenth of
                     // such a run: do none of it before `START_AFTER` (#426). `stop` ends the wait.
+                    let _ends = Ends(sh.clone());
+                    ON_COMPILE_THREAD.set(true);
                     let mut pending = Pending::default();
                     let mut looks: Vec<Look> = Vec::new();
                     let t0 = std::time::Instant::now();
@@ -4147,7 +4192,10 @@ impl AutoTier {
                             }
                             pending.later.push(id);
                         }
-                        if inbox.is_empty() && (pending.asked.is_empty() || paced) {
+                        if inbox.is_empty()
+                            && pending.later.is_empty()
+                            && (pending.asked.is_empty() || paced)
+                        {
                             match rx.recv_timeout(period) {
                                 Ok(m) => route(m, &mut pending, &mut inbox),
                                 Err(RecvTimeoutError::Timeout) => {}
@@ -4194,6 +4242,7 @@ impl AutoTier {
                                 break;
                             }
                             let over = std::cell::Cell::new(false);
+                            let again = std::cell::Cell::new(None);
                             let probe = if pending.asked.is_empty() {
                                 pending.probes.pop()
                             } else {
@@ -4239,7 +4288,10 @@ impl AutoTier {
                                     pending
                                         .later
                                         .pop()
-                                        .map(|id| (w.upgrade_tree(id), true, false))
+                                        .map(|id| {
+                                            again.set(crate::rt::tripped(id).then_some(id));
+                                            (w.upgrade_tree(id), true, false)
+                                        })
                                 })
                                 .or_else(|| {
                                     w.next_early(&mut pending).map(|ids| {
@@ -4318,6 +4370,12 @@ impl AutoTier {
                             }
                             w.early_root = false;
                             drop(held);
+                            if let Some(id) = again.get() {
+                                sh.again_done
+                                    .lock()
+                                    .unwrap_or_else(PoisonError::into_inner)
+                                    .push(id.0);
+                            }
                             if let (Some(id), true) = (first, w.counted && root_done && !sampled && !o2) {
                                 w.native.count_stat(CountStat::Compiled);
                                 if w.prog.base_of(id) != id {
