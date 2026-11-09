@@ -172,7 +172,9 @@ fn a_compile_waits_for_room_in_the_budget() {
 /// `wait` in a run after the first: a function the cache does not hold waits while the rest of the run
 /// the last run's profile predicts would not repay it (`tier_unrepaid`; a gain of almost nothing makes
 /// that every function, and `YAVS_AUTO_PRICE=model` keeps what the first run's sampler compiled from
-/// counting as a link), and the output is the same.
+/// counting as a link), and the output is the same. Linux only: a run writes a profile only where the
+/// kernel thread has a CPU clock (`sim_cpu`), and without one no later run has a rest to judge.
+#[cfg(target_os = "linux")]
 #[test]
 fn a_later_run_compiles_only_what_its_rest_repays() {
     let dir = setup("tier-compile-rest", 3_000_000);
