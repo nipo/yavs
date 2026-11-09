@@ -1260,11 +1260,10 @@ const WAIT_LONG_SHARE: f64 = 1.0;
 /// percent more.
 const WAIT_GAIN: f64 = 0.3;
 /// `Worker::unrepaid`: the runs in a row a function's process is held before it compiles anyway
-/// (`Worker::overdue`), outside the budget (`WAIT_HELD_FREE`). Measured (series to run 6, all-thread
-/// instructions): never, `neorv32_dual_full` settled 1.04 to 1.12 dearer (about 30 bodies the rest
-/// rule never compiles); after one run, outside the budget, its runs 4 and 6 within the A/A and run 5
-/// 1.07 to 1.17 (what the earlier runs left compiles there); in the budget, run 5 and 6 1.03 to 1.27.
-const WAIT_HELD_RUNS: u32 = 1;
+/// (`Worker::overdue`), outside the budget (`WAIT_HELD_FREE`). Never by default: a held body compiles
+/// once the time the runs saw it in repays it, so no later run pays the earlier runs' bodies at once
+/// (after one run, `neorv32_dual_full` run 5 was 1.13 and `neorv32_single_cache` run 4 1.07).
+const WAIT_HELD_RUNS: u32 = u32::MAX;
 const WAIT_HELD_FREE: bool = true;
 /// `Worker::next_asked` orders by heat per price: in oldest-first order a large one-shot sequencer held
 /// the budget (`uvvm_axistream_vvc` run 2 29.4 G against 25.0).
@@ -4925,8 +4924,10 @@ mod tests {
         assert_eq!(w.next_asked(&q), None, "none fits");
         // A function whose process the earlier runs held needs no room.
         w.earlier.base = Some(1);
+        w.wait_held_runs = 1;
         w.carried.insert(w.prog.base_of(caller), (0, 1));
         assert_eq!(w.next_asked(&q), Some(0), "overdue");
+        w.wait_held_runs = super::WAIT_HELD_RUNS;
         (w.earlier.base, w.carried) = (None, Default::default());
         // A long run gets the long run's budget.
         (w.wait_long_share, w.total) = (2.0, super::WAIT_LONG);

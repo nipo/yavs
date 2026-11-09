@@ -340,9 +340,9 @@ Each one turns a fast path off or changes its threshold, to compare a run with a
      - ``0.3``
      - ``run``
    * - ``YAVS_AUTO_WAIT_HELD_RUNS``
-     - With ``--tier-compile=wait``: after how many runs in a row in which the rule of ``YAVS_AUTO_WAIT_GAIN`` held a function back it compiles anyway (the runs a program left in its profile).
+     - With ``--tier-compile=wait``: after how many runs in a row in which the rule of ``YAVS_AUTO_WAIT_GAIN`` held a function back it compiles anyway (the runs a program left in its profile). Unset, it never does: a held function compiles once the time the runs saw it in pays for its compile.
      - a number
-     - ``1``
+     - unset
      - ``run``
    * - ``YAVS_AUTO_WAIT_HELD_FREE``
      - With ``--tier-compile=wait``: ``1`` lets such a function compile outside the budget of ``YAVS_AUTO_WAIT_SHARE``, ``0`` keeps it in the budget.
