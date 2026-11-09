@@ -1,1 +1,0 @@
-What `--threads=auto` and the default compiled tier remember of a test's last run now follows the arguments inside a response file too, leaving out only the seed and output path a test runner gives each run: a VUnit test keeps its memory whatever its seed, and starts afresh when its flags or generics change.
