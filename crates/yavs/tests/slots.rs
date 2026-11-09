@@ -83,6 +83,13 @@ fn same_output_with_and_without_the_pass(tier: &str) {
     assert_eq!(with, without, "{tier}");
 }
 
+#[cfg(feature = "clift")]
+#[test]
+fn the_same_in_compiled_code() {
+    same_output_with_and_without_the_pass("clift");
+    same_output_with_and_without_the_pass("clift-auto");
+}
+
 #[test]
 fn frame_temporaries_change_nothing_anyone_sees() {
     same_output_with_and_without_the_pass("interp");

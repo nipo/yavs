@@ -65,10 +65,19 @@ fn counter(s: &str, name: &str) -> u64 {
 #[test]
 fn tables_change_nothing_but_the_work() {
     let d = tmp("casetab");
-    let cases = vec![
+    #[allow(unused_mut)]
+    let mut cases = vec![
         (vec!["--tier=interp", "--threads", "1"], vec![]),
         (vec!["--tier=interp", "--threads", "4"], vec![]),
     ];
+    #[cfg(feature = "clift")]
+    cases.extend([
+        (vec!["--tier=clift", "--threads", "1"], vec![]),
+        (
+            vec!["--tier=clift-auto", "--tier-heat=1,0,0", "--threads", "4"],
+            vec![],
+        ),
+    ]);
     for (args, env) in cases {
         let (c0, o0, e0) = run(&d, true, &args, &env);
         let (c1, o1, e1) = run(&d, false, &args, &env);

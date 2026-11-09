@@ -259,7 +259,11 @@ fn check(name: &str, src: &str, top: &str, want: &str) {
         .output()
         .expect("analyze");
     assert!(a.status.success(), "{}", String::from_utf8_lossy(&a.stderr));
-    let tiers: &[&str] = &["interp"];
+    let tiers: &[&str] = &[
+        "interp",
+        #[cfg(feature = "clift")]
+        "clift",
+    ];
     for tier in tiers {
         let o = Command::new(yavs)
             .current_dir(&d)

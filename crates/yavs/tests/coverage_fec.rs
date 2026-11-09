@@ -158,6 +158,29 @@ fn want() -> Vec<(String, u32, String, u64)> {
         .collect()
 }
 
+/// The tiers count the same rows.
+#[cfg(feature = "clift")]
+#[test]
+fn tiers_agree() {
+    let tmp = setup("fec_tiers");
+    for tier in ["interp", "clift", "clift-auto"] {
+        run(
+            &tmp,
+            &[
+                &format!("--cov-file={tier}.ycov"),
+                "--cov-kind=condition,expression",
+                &format!("--tier={tier}"),
+                "--tier-heat=1,0,0",
+            ],
+        );
+        assert_eq!(
+            rows(&read(&tmp.join(format!("{tier}.ycov")))),
+            want(),
+            "{tier}"
+        );
+    }
+}
+
 #[test]
 fn counts_threads_and_reports() {
     let tmp = setup("fec");

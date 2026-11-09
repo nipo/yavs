@@ -231,6 +231,12 @@ fn a_message_built_for_a_check_changes_nothing_anyone_sees() {
     same_output_with_and_without_the_optimiser("interp");
 }
 
+#[cfg(feature = "clift")]
+#[test]
+fn the_same_in_compiled_code() {
+    same_output_with_and_without_the_optimiser("clift");
+}
+
 #[test]
 fn the_second_to_integer_is_a_replay_behind_a_guard() {
     let d = tmp("sink");

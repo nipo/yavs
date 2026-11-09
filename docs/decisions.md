@@ -14812,7 +14812,17 @@ the IR optimiser and lowering. Decisions:
   branches for a second, optimising generator (`Gens::main`, `OptLevel::Fast`/`FastRa`) stay until the
   policy work removes them. The leave-anywhere machinery stays (CG3(b) undecided).
 - **Tests and tools.** Test cases and files that ran only `--tier=llvm`, `--tier=auto3` or LLVM's
-  `--tier=auto` were deleted, not ported; the same cases under `--tier=clift` and `clift-auto` stay.
+  `--tier=auto` were deleted with the tier; the same cases under `--tier=clift` and `clift-auto` stay.
+  The user ruled the same day that they are ported, and they were: `crates/yavs/tests/clift_parity.rs`
+  (the designs of the deleted `compiled_*` and `auto_warm` tests, each against the interpreter on
+  `clift`, `clift-auto` and four threads, with the host-call counters where the test is about a path
+  compiled code takes alone), the `--tier=auto` cases of `cli.rs` and `vhpi_run.rs`, the Cranelift
+  tiers added back to the lists of `edge_idioms`, `casetab`, `coverage`, `coverage_fec`, `sink`,
+  `slots`, `lean_calls`, `rss` and `value_move`, and the policy tests of the sampled model that
+  needed a generator (`crates/yavs-llvm/src/auto/policy_tests.rs`, on a stub first-level generator,
+  with the prices of Cranelift). Not ported, because the mechanism is gone: the object cache of the
+  LLVM tier, its measuring aids (`YAVS_LLVM_KINDS`, `YAVS_LLVM_ABLATE`), the mixed LLVM and Cranelift
+  calls, `level_for` and the `FastRa` recompile of the optimising generator.
   difftest loses `yavs-llvm`, `yavs-auto3`, `yavs-auto3-eager`, `yavs-mixed`; realbench loses the
   tiers `llvm` and `auto3`, and its `codegen` phase now times `--tier=clift` (was `--tier=llvm`);
   waveq's third tier is `clift`; `tools/conformance/run.py --llvm` is `--compiled` (the auto and clift

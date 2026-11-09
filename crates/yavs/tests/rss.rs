@@ -92,7 +92,11 @@ begin
   end process;
 end;
 ";
-    let tiers: &[&str] = &["--tier=interp"];
+    let tiers: &[&str] = &[
+        "--tier=interp",
+        #[cfg(feature = "clift")]
+        "--tier=clift",
+    ];
     for tier in tiers {
         let d = tmp("flat");
         std::fs::write(d.join("flat.vhd"), src).expect("write");
