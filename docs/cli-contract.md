@@ -653,7 +653,8 @@ The test runner passes everything after `run`/`elab` in a response file (Convent
   simulation work, a function the count rule asks for and the cache does not hold compiles only once it was seen
   interpreted for its modelled compile time. In the runs after it, such a function compiles only when its share of
   the looks, over the rest of the run that the last run's length predicts, times what compiled code saves and the
-  few runs the cache serves, pays for its compile. `background`: the tier-up thread compiles alongside
+  few runs the cache serves, pays for its compile; what the earlier runs saw of it counts too, and a function
+  held back in the run before (the program's profile keeps them) compiles anyway. `background`: the tier-up thread compiles alongside
   the run at the lowest OS priority (Linux nice 19, Windows `THREAD_PRIORITY_LOWEST`; nothing else
   elsewhere), one busy thread more than `--threads` while it compiles. What is hot is judged the same way
   in both (the policy's clocks count the simulation threads only), but `wait` paces its compiles (above), so

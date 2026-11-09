@@ -33,7 +33,11 @@ pub(crate) const LOST_MAX: usize = 256;
 /// the link: they are lost.
 pub(crate) const GAIN_PERCENT: u64 = 3;
 
-const HEAD: &str = "yavs-auto-profile 3";
+/// The functions `Worker::unrepaid` held kept (the most seen first).
+pub(crate) const HELD_MAX: usize = 1024;
+
+/// Version 4 adds the `held` lines; a profile of an earlier version is no profile (`parse`).
+const HEAD: &str = "yavs-auto-profile 4";
 
 /// What the earlier runs of a program left.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -47,6 +51,10 @@ pub(crate) struct Profile {
     /// Functions not compiled early: a trial took their compiled code back, or the run that
     /// compiled them early was not better. The oldest first.
     pub lost: Vec<u32>,
+    /// Functions a run that waits for its compiles held because the rest of the run would not repay
+    /// them (`Worker::unrepaid`), and that stayed uncompiled: id, microseconds the runs saw them
+    /// interpreted (summed over the runs they were held in), and in how many runs in a row.
+    pub held: Vec<(u32, u64, u32)>,
 }
 
 impl Profile {
@@ -62,6 +70,9 @@ impl Profile {
         for id in &self.lost {
             s += &format!("lost {id}\n");
         }
+        for (id, us, runs) in &self.held {
+            s += &format!("held {id} {us} {runs}\n");
+        }
         s
     }
 
@@ -73,6 +84,11 @@ impl Profile {
             .filter_map(|&(id, us, ok)| Some((f(id)?, us, ok)))
             .collect();
         self.lost = self.lost.iter().filter_map(|&id| f(id)).collect();
+        self.held = self
+            .held
+            .iter()
+            .filter_map(|&(id, us, runs)| Some((f(id)?, us, runs)))
+            .collect();
     }
 
     /// The profile in `text`, `None` for anything this version did not write.
@@ -97,6 +113,10 @@ impl Profile {
                     p.hot.push((id, us, ok));
                 }
                 "lost" => p.lost.push(u32::try_from(num(&mut w)?).ok()?),
+                "held" => {
+                    let (id, us) = (u32::try_from(num(&mut w)?).ok()?, num(&mut w)?);
+                    p.held.push((id, us, u32::try_from(num(&mut w)?).ok()?));
+                }
                 _ => return None,
             }
             if w.next().is_some() {
@@ -120,6 +140,9 @@ pub(crate) struct Snapshot {
     pub lost: Vec<u32>,
     /// The functions compiled at once because of the profile.
     pub early: Vec<u32>,
+    /// The functions `Worker::unrepaid` held and that stay uncompiled, with the microseconds they
+    /// were seen interpreted.
+    pub held: Vec<(u32, u64)>,
 }
 
 /// The profile after a run that took `cpu` simulation CPU microseconds, from the one before it. The
@@ -169,6 +192,22 @@ pub(crate) fn next(earlier: &Profile, snap: &Snapshot, cpu: u64) -> Profile {
     }
     p.hot.sort_by_key(|h| (std::cmp::Reverse(h.1), h.0));
     p.hot.truncate(HOT_MAX);
+    // A function held again adds this run to its earlier ones; one not held now (compiled, or not
+    // asked for) starts over.
+    p.held = snap
+        .held
+        .iter()
+        .map(|&(f, us)| {
+            let (eus, runs) = earlier
+                .held
+                .iter()
+                .find(|h| h.0 == f)
+                .map_or((0, 0), |h| (h.1, h.2));
+            (f, eus.saturating_add(us), runs.saturating_add(1))
+        })
+        .collect();
+    p.held.sort_by_key(|h| (std::cmp::Reverse(h.1), h.0));
+    p.held.truncate(HELD_MAX);
     p.lost.drain(..p.lost.len().saturating_sub(LOST_MAX));
     p
 }
@@ -188,6 +227,7 @@ mod tests {
             base: Some(1_500_000),
             hot: vec![(12, 900_000, true), (7, 40_000, false)],
             lost: vec![3, 9],
+            held: vec![(4, 3_000, 2)],
         };
         assert_eq!(Profile::parse(&p.render()), Some(p.clone()));
         assert_eq!(
@@ -197,11 +237,15 @@ mod tests {
         for bad in [
             "",
             "yavs-auto-profile 2\n",
-            "yavs-auto-profile 3\nhot 1 2\n",
-            "yavs-auto-profile 3\nhot 1 2 x\n",
-            "yavs-auto-profile 3\nhot 1 2 a 3\n",
-            "yavs-auto-profile 3\nhot x 2 a\n",
-            "yavs-auto-profile 3\nwarm 1 2\n",
+            // A profile of version 3 (no `held` lines) is a miss, not read as this one.
+            "yavs-auto-profile 3\nbase 5\n",
+            "yavs-auto-profile 4\nheld 1 2\n",
+            "yavs-auto-profile 4\nheld 1 2 3 4\n",
+            "yavs-auto-profile 4\nhot 1 2\n",
+            "yavs-auto-profile 4\nhot 1 2 x\n",
+            "yavs-auto-profile 4\nhot 1 2 a 3\n",
+            "yavs-auto-profile 4\nhot x 2 a\n",
+            "yavs-auto-profile 4\nwarm 1 2\n",
         ] {
             assert_eq!(Profile::parse(bad), None, "{bad:?}");
         }
@@ -216,7 +260,26 @@ mod tests {
             seen: seen.to_vec(),
             lost: lost.to_vec(),
             early: early.to_vec(),
+            held: Vec::new(),
         }
+    }
+
+    /// The held functions carry their seen time and their count of runs while they stay held.
+    #[test]
+    fn held_functions_add_up_over_the_runs_they_are_held_in() {
+        let held = |h: &[(u32, u64)]| Snapshot {
+            held: h.to_vec(),
+            ..snap(&[], &[], &[])
+        };
+        let one = next(&Profile::default(), &held(&[(3, 100), (4, 50)]), 2_000_000);
+        assert_eq!(one.held, [(3, 100, 1), (4, 50, 1)]);
+        let two = next(&one, &held(&[(4, 70), (5, 10)]), 2_000_000);
+        assert_eq!(
+            two.held,
+            [(4, 120, 2), (5, 10, 1)],
+            "3 was compiled: it starts over"
+        );
+        assert_eq!(Profile::parse(&two.render()), Some(two));
     }
 
     /// The first run only lists what was hot; the next compiles it early and is judged against the

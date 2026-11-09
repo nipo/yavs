@@ -1248,6 +1248,13 @@ const WAIT_LONG_SHARE: f64 = 1.0;
 /// Half and double: 0.15 level with 0.3, 0.6 lets `osvvm_axi4_random` run 2 and 3 cost 10 and 20
 /// percent more.
 const WAIT_GAIN: f64 = 0.3;
+/// `Worker::unrepaid`: the runs in a row a function's process is held before it compiles anyway
+/// (`Worker::overdue`), outside the budget (`WAIT_HELD_FREE`). Measured (series to run 6, all-thread
+/// instructions): never, `neorv32_dual_full` settled 1.04 to 1.12 dearer (about 30 bodies the rest
+/// rule never compiles); after one run, outside the budget, its runs 4 and 6 within the A/A and run 5
+/// 1.07 to 1.17 (what the earlier runs left compiles there); in the budget, run 5 and 6 1.03 to 1.27.
+const WAIT_HELD_RUNS: u32 = 1;
+const WAIT_HELD_FREE: bool = true;
 /// `Worker::next_asked` orders by heat per price: in oldest-first order a large one-shot sequencer held
 /// the budget (`uvvm_axistream_vvc` run 2 29.4 G against 25.0).
 const WAIT_ORDER: bool = true;
@@ -1432,8 +1439,12 @@ struct Worker {
     /// Functions asked for that wait (`waits`), and those that did at some time.
     waiting: Vec<FuncId>,
     held: Vec<bool>,
-    /// Functions `unrepaid` held at some time (`CountStat::Unrepaid`).
+    /// Functions `unrepaid` held at some time (`CountStat::Unrepaid`), in the order held; and what the
+    /// earlier runs' profile says of those it held: interpreted microseconds seen summed over them,
+    /// and in how many runs in a row (`Profile::held`), by process (`Program::base_of`).
     unrepaid_seen: Vec<bool>,
+    unrepaid_ids: Vec<FuncId>,
+    carried: std::collections::HashMap<FuncId, (u64, u32)>,
     /// Callees that keep compiled native-frame code unpublished, to ask for (`publish`), and whether
     /// they were.
     want: Vec<FuncId>,
@@ -1468,6 +1479,14 @@ struct Worker {
     wait_long_share: f64,
     wait_gain: f64,
     wait_order: bool,
+    /// The runs in a row `unrepaid` holds a function before it compiles it anyway
+    /// (`YAVS_AUTO_WAIT_HELD_RUNS`): the count asked for it in each of them.
+    wait_held_runs: u32,
+    /// An overdue function (`overdue`) needs no room in the budget (`YAVS_AUTO_WAIT_HELD_FREE`).
+    wait_held_free: bool,
+    /// `unrepaid` holds only a body that costs more than this part of the rest of the run
+    /// (`YAVS_AUTO_WAIT_BIG`, the inverse part; 0: every body).
+    wait_big: f64,
     trace: Option<Trace>,
 }
 
@@ -1715,6 +1734,8 @@ impl Worker {
             waiting: Vec::new(),
             held: vec![false; nfuncs],
             unrepaid_seen: vec![false; nfuncs],
+            unrepaid_ids: Vec::new(),
+            carried: Default::default(),
             want: Vec::new(),
             wanted: vec![false; nfuncs],
             gate: 0,
@@ -1733,6 +1754,9 @@ impl Worker {
             wait_long_share: WAIT_LONG_SHARE,
             wait_gain: WAIT_GAIN,
             wait_order: WAIT_ORDER,
+            wait_held_runs: WAIT_HELD_RUNS,
+            wait_held_free: WAIT_HELD_FREE,
+            wait_big: 0.0,
             wait_payback: WAIT_PAYBACK,
             trace: std::env::var_os("YAVS_AUTO_TRACE").map(|_| Trace {
                 t0: std::time::Instant::now(),
@@ -1824,15 +1848,27 @@ impl Worker {
         if !self.stops || self.wait_gain <= 0.0 || self.cached(id) {
             return false;
         }
+        if self.overdue(id) {
+            return false;
+        }
+        let carried = self.carried.get(&self.prog.base_of(id)).map_or(0, |c| c.0);
         let rest = base.saturating_sub(self.sim_us) as f64;
+        // (A body that takes a small part of the rest of the run is not held: only a dear one is.)
+        if self.wait_big > 0.0 && (self.body_price(id) as f64) * self.wait_big <= rest {
+            return false;
+        }
         let share = self.time[id.0 as usize][0] as f64 / self.total.max(1) as f64;
-        share * rest * self.wait_gain * (profile::EARLY_RUNS as f64) < self.body_price(id) as f64
+        // (The time the earlier runs saw it in, in this run's CPU per look microsecond.)
+        let before = carried as f64 * self.sim_us.max(1) as f64 / self.total.max(1) as f64;
+        (share * rest * (profile::EARLY_RUNS as f64) + before) * self.wait_gain
+            < self.body_price(id) as f64
     }
 
     /// Count `id` once as held by `unrepaid` (`CountStat::Unrepaid`).
     fn note_unrepaid(&mut self, id: FuncId) {
         if self.unrepaid(id) && !std::mem::replace(&mut self.unrepaid_seen[id.0 as usize], true) {
             self.native.count_stat(CountStat::Unrepaid);
+            self.unrepaid_ids.push(id);
         }
     }
 
@@ -1844,6 +1880,15 @@ impl Worker {
         } else {
             self.wait_share
         }
+    }
+
+    /// The earlier runs held `id`'s process for `wait_held_runs` runs in a row: it compiles now.
+    fn overdue(&self, id: FuncId) -> bool {
+        self.earlier.base.is_some()
+            && self
+                .carried
+                .get(&self.prog.base_of(id))
+                .is_some_and(|c| c.1 >= self.wait_held_runs)
     }
 
     /// `cpu_price` of what the count compiles of `id` (`asked_part`), a link when the cache holds it.
@@ -1872,7 +1917,10 @@ impl Worker {
             return (!asked.is_empty()).then_some(0);
         }
         let room = self.sim_us as f64 * self.share();
-        let fits = |id: FuncId| (self.paid + self.body_price(id)) as f64 <= room;
+        let fits = |id: FuncId| {
+            (self.wait_held_free && self.overdue(id))
+                || (self.paid + self.body_price(id)) as f64 <= room
+        };
         if !self.wait_order {
             return asked
                 .front()
@@ -3099,6 +3147,11 @@ impl Worker {
                 p.base
             ));
         }
+        self.carried = p
+            .held
+            .iter()
+            .map(|&(id, us, runs)| (FuncId(id), (us, runs)))
+            .collect();
         self.earlier = p;
     }
 
@@ -3153,11 +3206,39 @@ impl Worker {
             .collect();
         early.sort_unstable();
         early.dedup();
+        // (What an earlier run held and this one has not compiled yet stays, its run counted again.)
+        let mut ids = self.unrepaid_ids.clone();
+        ids.extend(self.carried.keys().filter(|b| {
+            self.prog.func(**b).is_some()
+                && !self
+                    .copy_compiled
+                    .get(b.0 as usize)
+                    .copied()
+                    .unwrap_or(false)
+        }));
+        ids.sort_unstable();
+        ids.dedup();
+        let held = ids
+            .iter()
+            .filter(|&&f| {
+                let k = f.0 as usize;
+                !self.done[k][0] && self.nat[k].0 == 0
+            })
+            .fold(Vec::<(u32, u64)>::new(), |mut v, &f| {
+                // (By process: a copy's id is new in every run, the process's is not.)
+                let (b, us) = (self.prog.base_of(f).0, self.time[f.0 as usize][0]);
+                match v.iter_mut().find(|e| e.0 == b) {
+                    Some(e) => e.1 += us,
+                    None => v.push((b, us)),
+                }
+                v
+            });
         Snapshot {
             total: self.total,
             seen,
             lost: self.lost_bases.clone(),
             early,
+            held,
         }
     }
 
@@ -3942,6 +4023,15 @@ impl AutoTier {
         }
         if let Some(p) = knob("YAVS_AUTO_WAIT_GAIN") {
             w.wait_gain = p;
+        }
+        if let Some(p) = knob("YAVS_AUTO_WAIT_HELD_RUNS") {
+            w.wait_held_runs = p as u32;
+        }
+        if let Some(p) = knob("YAVS_AUTO_WAIT_BIG") {
+            w.wait_big = p;
+        }
+        if let Some(p) = knob("YAVS_AUTO_WAIT_HELD_FREE") {
+            w.wait_held_free = p != 0.0;
         }
         if let Some(p) = knob("YAVS_AUTO_WAIT_ORDER") {
             w.wait_order = p != 0.0;
@@ -4770,6 +4860,16 @@ mod tests {
         assert!(!w.waits(caller));
         w.sim_us = 10;
         assert!(w.waits(caller), "the run went on");
+        // What the earlier runs that held it saw counts, and so do the runs it was held in.
+        w.wait_held_runs = u32::MAX;
+        let before = (body / 0.5).ceil() as u64 * w.total / w.sim_us;
+        w.carried.insert(caller, (before, 1));
+        assert!(!w.waits(caller), "the earlier runs saw it for its price");
+        w.carried.insert(caller, (0, 2));
+        assert!(w.waits(caller));
+        w.wait_held_runs = 2;
+        assert!(!w.waits(caller), "held in two runs");
+        (w.wait_held_runs, w.carried) = (super::WAIT_HELD_RUNS, Default::default());
         w.wait_gain = 0.0;
         assert!(!w.waits(caller), "off");
         w.wait_gain = 0.5;
@@ -4797,6 +4897,11 @@ mod tests {
         assert_eq!(w.next_asked(&q), Some(1), "the callee is hotter per price");
         w.sim_us = a.min(b) - 1;
         assert_eq!(w.next_asked(&q), None, "none fits");
+        // A function whose process the earlier runs held needs no room.
+        w.earlier.base = Some(1);
+        w.carried.insert(w.prog.base_of(caller), (0, 1));
+        assert_eq!(w.next_asked(&q), Some(0), "overdue");
+        (w.earlier.base, w.carried) = (None, Default::default());
         // A long run gets the long run's budget.
         (w.wait_long_share, w.total) = (2.0, super::WAIT_LONG);
         assert_eq!(w.next_asked(&q), Some(1));
