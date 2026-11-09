@@ -6,7 +6,7 @@
 use yavs_diag::Span;
 use yavs_ir::{Dir, Inst, Mode, ParamClass, Reg, RegTy, RootKind, Ty, TyId, Width};
 use yavs_sem::decl::{Body, DeclKind, ObjClass, ObjRole};
-use yavs_sem::hir::{Arg, AttrPrefix, ExprKind, PredefAttr};
+use yavs_sem::hir::Arg;
 use yavs_sem::types::TypeKind;
 use yavs_sem::{Db, DeclId, ExprId, ScopeId, SubtypeId, TypeId};
 
@@ -464,8 +464,8 @@ impl Fx<'_, '_> {
     pub(crate) fn prot_name(&mut self, d: DeclId, t: TypeId, h: Reg, span: Span) -> R<()> {
         let db = self.db;
         let vars = state_vars(db, t);
-        // (One scan of the expressions per `Db`, not one per variable: it was most of the
-        // lowering of a testbench with many protected objects.)
+        // The facts of the analysis name them (once per `Db`: a scan of the expressions here
+        // decoded every expression of the units replayed from the unit cache).
         let key = (
             std::ptr::from_ref(db) as usize,
             db.exprs.len(),
@@ -477,22 +477,13 @@ impl Fx<'_, '_> {
             .as_ref()
             .is_none_or(|(k, _)| *k != key)
         {
-            let named = db
-                .exprs
-                .iter()
-                .filter_map(|(_, x)| match x.kind {
-                    ExprKind::Attr {
-                        attr: PredefAttr::PathName | PredefAttr::InstanceName,
-                        prefix: AttrPrefix::Entity(v),
-                        ..
-                    } => Some(v),
-                    _ => None,
-                })
-                .collect();
-            self.cx.named_entities = Some((key, named));
+            self.cx.named_entities = Some((key, db.facts().entity_names.clone()));
         }
         let named = self.cx.named_entities.as_ref().map(|(_, n)| n);
-        if !vars.iter().any(|v| named.is_some_and(|n| n.contains(v))) {
+        if !vars
+            .iter()
+            .any(|v| named.is_some_and(|n| n.binary_search(v).is_ok()))
+        {
             return Ok(());
         }
         let mut cells = vec![h];

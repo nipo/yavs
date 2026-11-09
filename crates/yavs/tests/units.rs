@@ -1,7 +1,7 @@
 //! The analysed-unit cache (`docs/decisions.md` "Analysed-unit cache"): `yavs analyze` of one
 //! file per call reads the units it depends on from their entries; the diagnostics and results
 //! are those of an analysis from source, an edited dependency invalidates everything below it,
-//! read-only libraries and damaged entries still work, and `run` never writes an entry.
+//! read-only libraries and damaged entries still work, and `run` stores what it had to analyse.
 
 mod common;
 use common::tempdir;
@@ -386,17 +386,147 @@ fn damaged_entries_are_misses() {
     assert!(e.run(&[]).stdout.contains("K=7 M=8 f=28"));
 }
 
+/// The entries of the work library by file name, with their bytes.
+fn entry_bytes(e: &Env) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
+    e.units("work")
+        .into_iter()
+        .map(|f| {
+            let b = std::fs::read(&f).expect("read");
+            (f, b)
+        })
+        .collect()
+}
+
+fn entry_names(e: &Env) -> Vec<PathBuf> {
+    entry_bytes(e).into_keys().collect()
+}
+
+/// `yavs analyze` of `files` with the check mode on (every file analysed again without the
+/// cache and compared): what the entries replay is what source gives.
+fn checked_analysis(e: &Env, files: &[&str]) {
+    let o = Command::new(env!("CARGO_BIN_EXE_yavs"))
+        .current_dir(&e.tmp)
+        .env_remove("YAVS_STDLIB")
+        .env("YAVS_UNIT_CHECK", "1")
+        .args(["analyze", "--work", &e.lib("work")])
+        .args(files)
+        .output()
+        .expect("run");
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+}
+
+/// A unit `run` had to analyse from source (here: its entry was removed) is stored under the
+/// name `analyze` gives it (the bytes may differ: symbols and owners are numbered in the order
+/// of the session), the next run and analysis read it, and a warm `analyze` verifies the files
+/// from those entries as from its own; parallel runs agree.
 #[test]
-fn run_never_writes_entries() {
+fn run_stores_the_units_it_analysed() {
     let e = Env::new("units_run");
-    e.analyze(&ALL, &[]);
-    let before: Vec<_> = e.units("work");
-    for f in &before {
+    let all = e.abs(&ALL);
+    let all: Vec<&str> = all.iter().map(String::as_str).collect();
+    e.analyze(&all, &[]);
+    let warm = |e: &Env| -> Vec<(i32, String, String, usize)> {
+        e.analyze(&all, &[])
+            .iter()
+            .map(|o| {
+                let (c, out, err) = o.visible();
+                (c, out, err, o.notes("verified "))
+            })
+            .collect()
+    };
+    let reference = warm(&e);
+    // `pkg.vhd` and `mid.vhd`; `tb.vhd` warns, so it is replayed.
+    assert_eq!(
+        reference.iter().map(|w| w.3).sum::<usize>(),
+        2,
+        "{reference:?}"
+    );
+    let made = entry_names(&e);
+    assert_eq!(made.len(), 5, "{made:?}");
+    for f in &made {
         std::fs::remove_file(f).expect("remove");
     }
     let r = e.run(&[]);
     assert_eq!(r.code, 0, "{r:?}");
-    assert!(e.units("work").is_empty(), "{r:?}");
+    assert!(r.stdout.contains("K=7 M=8 f=28"), "{r:?}");
+    assert_eq!(r.notes("store work "), 5, "{r:?}");
+    assert_eq!(entry_names(&e), made, "{r:?}");
+    let again = e.run(&[]);
+    assert_eq!(again.visible(), r.visible());
+    assert_eq!(again.notes("miss "), 0, "{again:?}");
+    assert_eq!(again.notes("store "), 0, "{again:?}");
+    assert_eq!(warm(&e), reference);
+    checked_analysis(&e, &all);
+    // Cold again (no image of the closure either), four at once.
+    let work = e.lib("work");
+    let c = e.yavs(&["cache", "clean", "--work", &work, "--std-cache=off"]);
+    assert_eq!(c.code, 0, "{c:?}");
+    assert!(entry_names(&e).is_empty());
+    let runs: Vec<Out> = std::thread::scope(|s| {
+        let hs: Vec<_> = (0..4).map(|_| s.spawn(|| e.run(&[]))).collect();
+        hs.into_iter().map(|h| h.join().expect("join")).collect()
+    });
+    for p in &runs {
+        assert_eq!(p.visible(), r.visible());
+    }
+    assert_eq!(entry_names(&e), made);
+    checked_analysis(&e, &all);
+}
+
+/// An architecture analysed before the entity its component binds to by default asked for that
+/// entity and was told there is none; that answer is stale once the entity is analysed, and
+/// `analyze` does not analyse the architecture again. The first run analyses it from source and
+/// stores it, so the runs after it read it.
+#[test]
+fn a_run_restores_a_unit_whose_library_answer_went_stale() {
+    let e = Env::new("units_stale_answer");
+    let top = "entity top is end;\narchitecture a of top is\n  component sub is end component;\n\
+begin\n  u : sub;\nend;\n";
+    let sub = "entity sub is end;\narchitecture a of sub is\nbegin\n  process begin report \"sub ran\"; wait; end process;\nend;\n";
+    std::fs::write(e.tmp.join("top.vhd"), top).expect("write");
+    std::fs::write(e.tmp.join("sub.vhd"), sub).expect("write");
+    let files = e.abs(&["top.vhd", "sub.vhd"]);
+    let files: Vec<&str> = files.iter().map(String::as_str).collect();
+    e.analyze(&files, &[]);
+    let work = e.lib("work");
+    let first = e.yavs(&["run", "--work", &work, "top"]);
+    assert_eq!(first.code, 0, "{first:?}");
+    assert!(first.stdout.contains("sub ran"), "{first:?}");
+    assert_eq!(first.notes("miss work.top/a"), 1, "{first:?}");
+    assert_eq!(first.notes("store work "), 1, "{first:?}");
+    let second = e.yavs(&["run", "--work", &work, "top"]);
+    assert_eq!(second.visible(), first.visible());
+    assert_eq!(second.notes("miss "), 0, "{second:?}");
+    assert_eq!(second.notes("hit work.top/a ("), 1, "{second:?}");
+}
+
+/// An entry a run stores for a file that was edited and analysed again meanwhile (the run lost
+/// the race to `analyze`) names the content it was made from: the next run misses it and
+/// analyses the edited file, never replays the old unit.
+#[test]
+fn a_late_entry_of_an_old_file_is_a_miss() {
+    let e = Env::new("units_run_race");
+    let all = e.abs(&ALL);
+    let all: Vec<&str> = all.iter().map(String::as_str).collect();
+    e.analyze(&all, &[]);
+    let old = entry_bytes(&e);
+    std::fs::write(e.tmp.join("mid.vhd"), MID.replace("K + 1", "K + 2")).expect("write");
+    e.analyze(&all[1..], &[]);
+    let new = entry_bytes(&e);
+    let mut late = 0;
+    for (f, b) in &old {
+        if new.get(f).is_some_and(|n| n != b) {
+            std::fs::write(f, b).expect("write");
+            late += 1;
+        }
+    }
+    assert!(late >= 1);
+    let r = e.run(&[]);
+    assert_eq!(r.code, 0, "{r:?}");
+    assert!(r.stdout.contains("K=7 M=9 f=28"), "{r:?}");
+    assert_eq!(r.notes("miss work."), late, "{r:?}");
+    assert_eq!(r.notes("store work "), late, "{r:?}");
+    checked_analysis(&e, &all);
 }
 
 #[cfg(unix)]
@@ -443,6 +573,54 @@ fn read_only_libraries_are_read_and_never_fail() {
     assert!(r.stdout.contains("K=7 M=8 f=28"), "{r:?}");
 }
 
+/// A run that analyses a unit of a read-only library from source (it has no entry) passes and
+/// leaves the library as it was.
+#[cfg(unix)]
+#[test]
+fn a_run_stores_nothing_into_a_read_only_library() {
+    use std::os::unix::fs::PermissionsExt;
+    let e = Env::new("units_ro_run");
+    let shared = e.lib("common");
+    for f in ["pkg.vhd", "mid.vhd"] {
+        let f = e.tmp.join(f).display().to_string();
+        assert_eq!(e.yavs(&["analyze", "--work", &shared, &f]).code, 0);
+    }
+    let other = format!("other:{}", e.tmp.join("other").display());
+    let tb = format!("library common;\n{}", TB.replace("work.", "common."));
+    std::fs::write(e.tmp.join("tb_ro.vhd"), tb).expect("write");
+    assert_eq!(
+        e.yavs(&["analyze", "--work", &other, "--map", &shared, "tb_ro.vhd"])
+            .code,
+        0
+    );
+    for f in e.units("common") {
+        std::fs::remove_file(f).expect("remove");
+    }
+    let lib = e.tmp.join("common");
+    let tree = [
+        lib.join("yavs-cache").join("units"),
+        lib.join("yavs-cache"),
+        lib.clone(),
+    ];
+    let mode = |m: u32| {
+        for d in &tree {
+            std::fs::set_permissions(d, std::fs::Permissions::from_mode(m)).expect("chmod");
+        }
+    };
+    mode(0o555);
+    let writable = std::fs::File::create(lib.join("probe")).is_ok();
+    let r = e.yavs(&["run", "--work", &other, "--map", &shared, "tb"]);
+    let left = e.units("common");
+    mode(0o755);
+    if writable {
+        return; // running as a user the mode does not bind
+    }
+    assert_eq!(r.code, 0, "{r:?}");
+    assert!(r.stdout.contains("K=7 M=8 f=28"), "{r:?}");
+    assert!(r.notes("miss common.p") >= 1, "{r:?}");
+    assert!(left.is_empty(), "{left:?}");
+}
+
 /// Forces, `'active` reads and a package-path external name are facts of the elaborator
 /// (`Db::facts`); an entry stores them, so a replayed unit need not be scanned. The check mode
 /// compares them with those of an analysis from source.
@@ -477,6 +655,48 @@ entity ftb is end;\narchitecture a of ftb is\n  signal t : std_logic;\nbegin\n  
     let r = e.yavs(&["run", "--work", &work, "ftb"]);
     assert_eq!(r.code, 0, "{r:?}");
     assert!(r.stdout.contains("S=") || r.stderr.contains("S="), "{r:?}");
+}
+
+/// The variables a protected body names with `'path_name` are a fact of the analysis too: a
+/// replayed package body brings them, so an object of the type keeps its name in a run that
+/// replays every unit (and the check mode finds the same set as an analysis from source).
+#[test]
+fn entries_carry_the_named_entities_of_their_unit() {
+    let e = Env::new("units_named");
+    let pk = "package pk is\n  type t is protected\n    procedure inc;\n  end protected;\nend;\n\
+package body pk is\n  type t is protected body\n    variable n : natural;\n    procedure inc is\n    begin\n\
+      report \"P=\" & n'path_name & \" I=\" & n'instance_name;\n      n := n + 1;\n    end procedure;\n\
+  end protected body;\nend;\n";
+    let sh = "package sh is\n  shared variable s : work.pk.t;\nend;\n";
+    let tb = "entity ntb is end;\narchitecture a of ntb is\nbegin\n  p : process\n    variable v : work.pk.t;\n\
+  begin\n    v.inc;\n    work.sh.s.inc;\n    wait;\n  end process;\nend;\n";
+    for (f, t) in [("pk.vhd", pk), ("sh.vhd", sh), ("ntb.vhd", tb)] {
+        std::fs::write(e.tmp.join(f), t).expect("write");
+    }
+    let paths: Vec<String> = ["pk.vhd", "sh.vhd", "ntb.vhd"]
+        .iter()
+        .map(|f| e.tmp.join(f).display().to_string())
+        .collect();
+    let files: Vec<&str> = paths.iter().map(String::as_str).collect();
+    e.analyze(&files, &["--std=2019"]);
+    let o = Command::new(env!("CARGO_BIN_EXE_yavs"))
+        .current_dir(&e.tmp)
+        .env_remove("YAVS_STDLIB")
+        .env("YAVS_UNIT_CHECK", "1")
+        .args(["analyze", "--std=2019", "--work", &e.lib("work")])
+        .args(&files)
+        .output()
+        .expect("run");
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let work = e.lib("work");
+    for _ in 0..3 {
+        let r = e.yavs(&["run", "--std=2019", "--work", &work, "ntb"]);
+        assert_eq!(r.code, 0, "{r:?}");
+        assert_eq!(r.notes("miss "), 0, "{r:?}");
+        let all = format!("{}{}", r.stdout, r.stderr);
+        assert!(all.contains("P=:ntb:p:v:n I=:ntb(a):p:v:n"), "{r:?}");
+        assert!(all.contains("P=:work:sh:s:n I=:work:sh:s:n"), "{r:?}");
+    }
 }
 
 #[test]
@@ -688,24 +908,29 @@ fn relaxed_is_inherited_from_a_unit_loaded_before() {
     e.both_settings_hit();
 }
 
-/// `run` loads the units at run time and writes nothing: a library analysed under one setting gives
-/// the source's result under the other, and the entries of the first stay as they were.
+/// A run under the other setting than the library's analysis analyses `e` and `e/a` (they asked)
+/// from source and stores them under its setting: the next such run reads them, and the entries
+/// of the first setting stay as they were.
 #[test]
-fn relaxed_runs_load_units_at_run_time() {
+fn relaxed_runs_store_the_units_of_their_setting() {
     let (e, ef, af) = Env::relaxed_design("units_relaxed_run", "(x'range => '0')");
     e.analyze(&[&ef], &[]);
     e.analyze(&[&af], &[]);
     let work = e.lib("work");
-    for _ in 0..2 {
-        let r = e.yavs(&["run", "--relaxed", "--work", &work, "e"]);
-        assert_eq!(r.code, 0, "{r:?}");
-        assert!(r.stdout.contains("v=0000"), "{r:?}");
-        assert_eq!(r.notes("hit work.e/a ("), 0, "{r:?}");
-    }
-    let r = e.yavs(&["run", "--work", &work, "e"]);
-    assert!(r.stdout.contains("v=0000"), "{r:?}");
+    let first = e.yavs(&["run", "--relaxed", "--work", &work, "e"]);
+    assert_eq!(first.code, 0, "{first:?}");
+    assert!(first.stdout.contains("v=0000"), "{first:?}");
+    assert_eq!(first.notes("hit work.e/a ("), 0, "{first:?}");
+    assert_eq!(first.notes("store work "), 2, "{first:?}");
+    let r = e.yavs(&["run", "--relaxed", "--work", &work, "e"]);
+    assert_eq!(r.visible(), first.visible());
     assert_eq!(r.notes("miss work."), 0, "{r:?}");
     assert_eq!(r.notes("hit work.e/a ("), 1, "{r:?}");
+    let strict = e.yavs(&["run", "--work", &work, "e"]);
+    assert!(strict.stdout.contains("v=0000"), "{strict:?}");
+    assert_eq!(strict.notes("miss work."), 0, "{strict:?}");
+    assert_eq!(strict.notes("store "), 0, "{strict:?}");
+    assert_eq!(strict.notes("hit work.e/a ("), 1, "{strict:?}");
 }
 
 /// What only `--relaxed` accepts (an `others` aggregate assigned to an unconstrained target, R5)

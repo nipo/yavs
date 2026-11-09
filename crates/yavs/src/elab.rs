@@ -55,7 +55,8 @@ pub struct Common {
     /// `length` (default) or `fat-pointer` (E0136 for any other).
     #[arg(long, value_name = "LIB[:args=LAYOUT]")]
     load: Vec<String>,
-    /// Neither read nor write the compilation cache of the work library.
+    /// Neither read nor write the compilation cache of the work library nor the analysed units of
+    /// the libraries.
     #[arg(long)]
     no_cache: bool,
     /// Directory of the std/ieee units shared by all libraries, or `off` (default: `$YAVS_STD_CACHE`,

@@ -57,7 +57,7 @@ use crate::{LangRev, UnitStore};
 pub type Hash = [u8; 32];
 
 /// The layout of entries; part of every identity.
-const FORMAT: u32 = 16;
+const FORMAT: u32 = 17;
 
 /// Entries of `Db::new` (index 0 of these arenas): the same in every session.
 const BASE: [u32; KINDS] = [0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0];
@@ -2714,6 +2714,7 @@ impl Db {
             != (b.reads_activity, &b.forces, &b.package_paths, b.history_all)
             || (&a.history_parts, &a.history_wholes) != (&b.history_parts, &b.history_wholes)
             || (&a.elem_reads, a.elem_reads_all) != (&b.elem_reads, b.elem_reads_all)
+            || a.entity_names != b.entity_names
         {
             return Some("facts".into());
         }

@@ -5708,8 +5708,8 @@ dependencies; this overrides "no incremental compilation cache" for analysis too
 - **One manifest entry per file (#1031).** `Session::record_deferred` drops the entries of the file under another spelling (`Manifest::remove_other_spellings`, `same_file`), else a unit dropped from the file stays under the old entry and reports `L0034` instead of `L0031`. The manifest still records `absolute(spelling)`, not the resolved path: resolved text would make a retargeted symlink keep reading the old file and change what `elab` and `run` print. The index holds the resolved path too (`real`, written only when it differs from `path`; library `FORMAT` 5, #1044), taken once per recorded file, so finding the other spellings of a file compares text and makes no system call per entry; this covers a symlink of another name, which the first version (candidates by file name or hash) missed. An entry's `real` is as of its analysis: a symlink retargeted since is not noticed. A library of format 4 is `L0004` (delete it, analyze again).
 - **One entry per design unit**, `<lib dir>/yavs-cache/units/unit-<key>.img`, written by `analyze` when it
   analyses the unit from source (also a dependency it had to analyse, into that library's directory, and
-  `std`/`ieee` units into the shared store, see "Shared std/ieee units", before 2026-10-26 into the work library's), read by `analyze`, `elab` and `run`; `elab` and `run` never
-  write one (plan rule 14). The key names the library, the unit, its file path, the design revision, the
+  `std`/`ieee` units into the shared store, see "Shared std/ieee units", before 2026-10-26 into the work library's), read by `analyze`, `elab` and `run`; since
+  2026-11-08 `elab` and `run` write one too, for a unit they had to analyse from source (next bullet). The key names the library, the unit, its file path, the design revision, the
   options and the build (`yavs-cache` adds the build); the entry holds the *address* (path, content hash,
   standard of the file) and the *full key* (the address and the full keys of the units it loaded, the
   libraries it named and the answers it got about libraries, below). A reader computes the address
@@ -5717,6 +5717,21 @@ dependencies; this overrides "no incremental compilation cache" for analysis too
   the entry loaded with the unit loaded now or the one its own entry would give: an edit upstream
   invalidates everything below it. Limits of their own (16384 entries, 512 MiB) beside the 96 entries;
   a read does not refresh the entry's time (a call reads a hundred).
+- **`elab` and `run` store the units they analyse from source** (user ruling 2026-11-07, wave 3 of the performance
+  work; it replaces "`elab` and `run` never write one", which came from plan rule 14). A unit misses at run time when
+  its entry is stale and `analyze` has no reason to make it again: an architecture analysed before the entity its
+  component binds to by default keeps the answer "no such entity" (6 units of a fletcher closure, 1 of a neorv32 one,
+  analysed from source on every first and second run of every closure), a library analysed without `--relaxed` and run
+  with it (the units that asked, and the `std`/`ieee` bodies that asked, every run until the closure's image), or an
+  entry pruned at the limit. The run records and stores such a unit like `analyze` (`Units::store_for(.., true)` in
+  `cache::analyze_closure`), so the next closure replays it. Plan rule 14 still holds: no manifest, no lock, only unit
+  entries, which `yavs-cache` writes atomically (create whole, or temporary file and rename) and which readers check
+  in full, as `analyze` already wrote the units of libraries other than its work library. Two runs that store the same
+  unit write the same analysis (the bytes may differ: symbols and owners are numbered in session order); a run that
+  read a file before an edit and stores after `analyze` stored the edited unit leaves an entry whose address is the old
+  content, which is a miss, never a wrong replay (`tests/units.rs` `a_late_entry_of_an_old_file_is_a_miss`). A
+  read-only library is never written and never fails. `lint` keeps reading only. Cost: recording the few units a run
+  analyses from source (the table logs and the encode), paid once per entry.
 - **An entry is the recorded analysis, replayed id for id.** The ids of `yavs-sem` index arenas shared by
   all units, so an entry is not a free-standing tree: it records, in order, segments of the unit's own
   arena entries, diagnostics and TIME unit uses, separated by the points where the unit loaded another
@@ -5800,7 +5815,9 @@ dependencies; this overrides "no incremental compilation cache" for analysis too
   every entry (as `differs_from` does) gives the same `Db`. A decode error is an internal error (as for a page of an
   image): the entry was checksummed when it was read and the plan checked its owners, so a failure is a bug in yavs.
 - **An entry holds the elaborator's facts about its own expressions and statements** (`Db::facts`: `'active` reads,
-  force and release statements, package-path external names; format 2). They are found when the entry is made, from the
+  force and release statements, package-path external names; format 2; since format 17 also the named entities that
+  prefix `'path_name`/`'instance_name`, which `Fx::prot_name` read by scanning every expression of the `Db`: on a cold
+  run of a library testbench that scan decoded every replayed expression, 6 to 18 percent of its elaboration). They are found when the entry is made, from the
   unit's own segments (those entries are decoded then anyway), written last in the body as ids (so they are mapped by the
   replay like the other ids) and kept in `Db::unit_facts` by load until `settle`. `Db::scan_facts` skips the entries of
   those loads and merges their facts (sorted by id, equal to a scan), so a cold `settle` reads no page of a replayed

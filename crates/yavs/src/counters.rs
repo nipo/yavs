@@ -73,6 +73,10 @@ pub fn report(s: yavs_kernel::Stats, rt: Option<&yavs_interp::Runtime>) {
         ("pmemo_off", yavs_interp::pmemo_off()),
         ("wave_var_reads", reads),
         ("wave_var_idle_skips", idle),
+        (
+            "units_stored",
+            crate::cache::UNITS_STORED.load(std::sync::atomic::Ordering::Relaxed),
+        ),
     ];
     // Only builds that count them (debug, or `op-census`).
     if let Some(n) = yavs_interp::ops_executed() {
