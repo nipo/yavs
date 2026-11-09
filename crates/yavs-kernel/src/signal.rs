@@ -266,6 +266,26 @@ pub(crate) struct Waiters {
     /// used): an event on a wide signal looks only at these, not at every chunk it spans.
     chunk_ix: SmallVec<[u32; 4]>,
     chunk_over: bool,
+    /// The wake plan (`Plan`), for a signal of at most 64 elements.
+    plan: Plan,
+}
+
+/// What an event of a signal of at most 64 elements wakes, worked out once from its waiter
+/// lists and kept until they change: `add`, `drop_cache` and a scan that removes waiters
+/// forget it. `Slow`: an alive waiter is plain or has an edge trigger, or the signal is wider.
+#[derive(Default)]
+enum Plan {
+    #[default]
+    Unknown,
+    Slow,
+    List(Vec<PlanWaiter>),
+}
+
+/// A resident waiter in a plan: its process, the elements it waits for as bits, its epoch.
+pub(crate) struct PlanWaiter {
+    pub proc: u32,
+    pub mask: u64,
+    pub perm: u64,
 }
 
 /// `Cache::batch`: the plain processes (one suspension point, not postponed) in list order,
@@ -317,6 +337,7 @@ impl Waiters {
             chunked: false,
             chunk_ix: SmallVec::new(),
             chunk_over: false,
+            plan: Plan::Unknown,
         }
     }
 
@@ -381,9 +402,84 @@ impl Waiters {
         self.only().filter(|l| l.len() <= max)
     }
 
-    /// Forget the wake list (a waiter changed).
+    /// Forget the wake list and the plan (a waiter changed).
     pub fn drop_cache(&mut self) {
         self.cache = None;
+        self.plan = Plan::Unknown;
+    }
+
+    /// The wake plan: every alive waiter, once, in registration order, when all of them are
+    /// resident and without an edge trigger (`triggers`: edge triggers are on) on a signal of at
+    /// most 64 elements. Dead waiters are left out: epochs and generations only grow.
+    #[inline]
+    pub fn plan(
+        &mut self,
+        live: impl Fn(&Waiter) -> bool,
+        triggers: bool,
+    ) -> Option<&[PlanWaiter]> {
+        if let Plan::Unknown = self.plan {
+            self.plan = self.build_plan(live, triggers);
+        }
+        match &self.plan {
+            Plan::List(l) => Some(l),
+            _ => None,
+        }
+    }
+
+    /// The plan is out of date: a process in it changed its wait.
+    pub fn forget_plan(&mut self) {
+        self.plan = Plan::Unknown;
+    }
+
+    #[cold]
+    fn build_plan(&self, live: impl Fn(&Waiter) -> bool, triggers: bool) -> Plan {
+        if self.len > 64 {
+            return Plan::Slow;
+        }
+        let mut l: Vec<(u64, PlanWaiter)> = Vec::new();
+        for w in self.iter() {
+            if !live(w) {
+                continue;
+            }
+            if w.perm == 0 || triggers && w.tid != 0 {
+                return Plan::Slow;
+            }
+            l.push((
+                w.seq,
+                PlanWaiter {
+                    proc: w.proc,
+                    mask: w.mask,
+                    perm: w.perm,
+                },
+            ));
+        }
+        // A waiter of a few elements sits in the list of each.
+        l.sort_unstable_by_key(|e| e.0);
+        l.dedup_by_key(|e| e.0);
+        Plan::List(l.into_iter().map(|e| e.1).collect())
+    }
+
+    /// The distinct processes of the alive waiters an event of `runs` hits, sorted, and whether
+    /// one of them has an edge trigger (`YAVS_WAKE_CHECK`: what a scan would look at).
+    #[cold]
+    pub fn hit_by(
+        &self,
+        runs: &[Range],
+        live: impl Fn(&Waiter) -> bool,
+        triggers: bool,
+    ) -> (Vec<u32>, bool) {
+        let hits = Hits::of(self.len, runs);
+        let mut out = Vec::new();
+        let mut trig = false;
+        for w in self.iter() {
+            if hits.hit(w) && live(w) {
+                out.push(w.proc);
+                trig |= triggers && w.tid != 0;
+            }
+        }
+        out.sort_unstable();
+        out.dedup();
+        (out, trig)
     }
 
     /// The edge trigger of every waiter, when the signal has one list of waiters and they all
@@ -461,6 +557,8 @@ impl Waiters {
         if self.lists.is_empty() {
             self.init();
         }
+        // A plain waiter is gone at its first wake: no plan until a scan removes it.
+        self.plan = if perm == 0 { Plan::Slow } else { Plan::Unknown };
         self.trig = match (self.trig, trigger) {
             (Trig::Empty, Some(t)) => Trig::Same(t),
             (Trig::Same(u), Some(t)) if u == t => Trig::Same(u),
@@ -577,6 +675,7 @@ impl Waiters {
                     if !live(w) {
                         l.clear();
                         *n = 0;
+                        self.plan = Plan::Unknown;
                     } else if !hold(w) {
                         out.push((w.seq, w.proc));
                     }
@@ -588,6 +687,8 @@ impl Waiters {
         let mut scanned = 0;
         // A list that went empty: the index of chunks with waiters is out of date.
         let mut emptied = false;
+        // Waiters were removed: the plan may be possible now.
+        let mut removed = false;
         // One list: the waiters hit are taken in list order.
         let mut scan = |(l, n): &mut (SmallVec<[Waiter; 1]>, usize)| {
             if l.is_empty() {
@@ -613,6 +714,7 @@ impl Waiters {
             if remove {
                 l.retain(|w| !hits.hit(w) || (live(w) && (hold(w) || w.perm != 0)));
                 emptied |= l.is_empty();
+                removed = true;
             }
             *n = l.len();
         };
@@ -659,6 +761,9 @@ impl Waiters {
                 last = i;
                 scan(&mut self.lists[i]);
             }
+        }
+        if removed {
+            self.plan = Plan::Unknown;
         }
         if self.only().is_some_and(|l| l.is_empty()) {
             self.trig = Trig::Empty;

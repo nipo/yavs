@@ -873,6 +873,9 @@ case!(
         ("cycles", Min(402)),
         ("direct_codes", Max(275)),
         ("ops", Max(15900)),
+        // The wake plan (170 signals): 7 scans of waiter lists before, 2 now.
+        ("wake_plans", Min(165)),
+        ("wake_scans", Max(3)),
     ]
 );
 // Implicit signals in the design do not take the other signals off the fast update paths: only
@@ -920,8 +923,19 @@ case!(
         ("events", Max(870)),
     ]
 );
-// A one-element aggregate choice is straight code and conversion copies run in the kernel.
-case!(agg_carry, "acc=", &[], [("ops", Max(6310))]);
+// A one-element aggregate choice is straight code and conversion copies run in the kernel. The
+// signals with several resident waiters wake from their wake plan where the update finishes (394
+// of them; 0 before, all through `cycle`).
+case!(
+    agg_carry,
+    "acc=",
+    &[],
+    [
+        ("ops", Max(6310)),
+        ("wake_plans", Min(380)),
+        ("wake_scans", Max(7)),
+    ]
+);
 // An element of a signal parameter is read as that element of the actual, its bounds from the
 // actual's descriptor: no read of the whole signal per element (#1121).
 case!(sigparam_tree, "q=5CA0", &[], [("ops", Max(70700))]);

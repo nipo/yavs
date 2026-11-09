@@ -93,6 +93,9 @@ pub struct Config {
     /// Run the activations `idle_skip` would skip anyway and panic when one does not do what
     /// the last one did (tests).
     pub idle_check: bool,
+    /// Check every wake done when a value is finished (`wake_sole`) against what a scan of the
+    /// signal's waiter lists finds, and fail with an internal error when they differ.
+    pub wake_check: bool,
     /// A signal of more than 64 elements that processes wait on parts of lists the changes
     /// per cell (the stretch between two boundaries of the waited ranges), not per run of
     /// changed elements (`Signal::watch_part`). Value-change observers still get exact runs.
@@ -129,6 +132,7 @@ impl Default for Config {
             skip_unchanged: false,
             idle_skip: true,
             idle_check: false,
+            wake_check: false,
             cells: true,
             pool_all: false,
             lazy_pool: false,
@@ -273,6 +277,8 @@ pub struct Stats {
     /// Changed signals `wake_sole` left in `changed_sigs` while idle skip was on, so `cycle`
     /// arms their readers (debug and `op-census` builds only, else 0).
     pub sole_left: u64,
+    /// Changed signals whose waiters `wake_sole` woke from the wake plan (`Waiters::plan`).
+    pub wake_plans: u64,
     /// Batches not estimated for the pool because the same batch was estimated below the
     /// threshold a few batches before (`SimControl::stay`).
     pub estimates_skipped: u64,
@@ -1272,6 +1278,8 @@ pub struct SimControl {
     work: Option<Box<UpdateWork>>,
     /// Scratch lists of the cycle, kept to save their allocations.
     woken_buf: Vec<(u64, u32)>,
+    /// `Config::wake_check`: the first wake that differed from a scan, for `finish_direct`.
+    wake_bad: Option<String>,
     indep_buf: Vec<(u32, u32)>,
     /// The distinct edge triggers of the processes (`ProcMeta::tid`).
     triggers: Vec<crate::EdgeTrigger>,
@@ -1756,6 +1764,7 @@ impl SimControl {
             empty_delta: false,
             perm_epoch: 0,
             woken_buf: Vec::new(),
+            wake_bad: None,
             indep_buf: Vec::new(),
             triggers,
             trig_ids: ids,
@@ -3478,7 +3487,7 @@ impl SimControl {
             if changed && !(!self.watch_changes && self.wake_sole(s)) {
                 mark_changed!(self, s);
             }
-            return Ok(());
+            return self.wake_checked();
         }
         for i in 0..self.direct_sigs.len() {
             let s = self.direct_sigs[i];
@@ -3500,7 +3509,50 @@ impl SimControl {
             }
         }
         self.direct_sigs.clear();
-        Ok(())
+        self.wake_checked()
+    }
+
+    /// `Config::wake_check`: a wake of `wake_sole` that differed from a scan is an internal error.
+    #[inline(always)]
+    fn wake_checked(&mut self) -> Result<(), ErrorKind> {
+        if !self.cfg.wake_check {
+            return Ok(());
+        }
+        self.wake_bad
+            .take()
+            .map_or(Ok(()), |m| Err(ErrorKind::Internal(m)))
+    }
+
+    /// `Config::wake_check`: the processes `wake_sole` took for the event of signal `s` (sorted,
+    /// distinct) against what a scan of its waiter lists finds.
+    #[cold]
+    fn check_wake(&mut self, s: u32, took: &[u32]) {
+        let (want, trig) = self.waiters[s as usize].hit_by(
+            &self.signals[s as usize].changed,
+            |w| alive(&self.procs, w),
+            self.cfg.edge_triggers,
+        );
+        if (want[..] != *took || trig) && self.wake_bad.is_none() {
+            let names = |l: &[u32]| {
+                let l: Vec<&str> = l.iter().map(|&p| &*self.names[p as usize]).collect();
+                if l.is_empty() {
+                    "none".to_string()
+                } else {
+                    l.join(", ")
+                }
+            };
+            let trig = if trig {
+                " (one with an edge trigger)"
+            } else {
+                ""
+            };
+            self.wake_bad = Some(format!(
+                "signal {} changed and woke {}, but the processes waiting on the changed elements are {}{trig}",
+                self.signals[s as usize].name,
+                names(took),
+                names(&want),
+            ));
+        }
     }
 
     /// The resumption of `cycle` for signal `s` done at once when one element of it changed and
@@ -3536,17 +3588,21 @@ impl SimControl {
                 [] => return false,
                 _ => None,
             };
-            let Some(w) = (match one {
-                Some(w) => Some(w),
-                None => waiters.sole_whole(),
-            }) else {
-                return false;
-            };
             // An edge trigger reads signals this update may not have finished yet.
-            if self.cfg.edge_triggers && w.tid != 0 || !alive(&self.procs, w) {
-                return false;
+            let sole = one
+                .or_else(|| waiters.sole_whole())
+                .filter(|w| !(self.cfg.edge_triggers && w.tid != 0) && alive(&self.procs, w))
+                .map(|w| w.proc);
+            match sole {
+                Some(p) => {
+                    if self.cfg.wake_check {
+                        self.check_wake(s, &[p]);
+                    }
+                    Some(p)
+                }
+                None if self.wake_plan(s) => None,
+                None => return false,
             }
-            Some(w.proc)
         };
         // Armed here only when the signal leaves `changed_sigs`; else `cycle` arms it once.
         if self.idle_active {
@@ -3561,6 +3617,63 @@ impl SimControl {
         sig.changed.clear();
         if let Some(p) = p {
             self.wake(p, false);
+        }
+        true
+    }
+
+    /// Wake the waiters of signal `s` that its changed elements hit from its wake plan
+    /// (`Waiters::plan`): resident processes without an edge trigger, so the result does not
+    /// depend on signals not finished yet. Not in a shuffled run (the wake order is its run
+    /// order) or with a re-armed clock generator waiting (`skip_wake`). False (nothing done)
+    /// when there is no plan or a process in it left its wait.
+    #[inline(always)]
+    fn wake_plan(&mut self, s: u32) -> bool {
+        if self.rng.is_some() || self.skip_n != 0 {
+            return false;
+        }
+        let sig = &self.signals[s as usize];
+        if sig.ty.len > 64 {
+            return false;
+        }
+        let hits = sig
+            .changed
+            .iter()
+            .fold(0, |m, r| m | nmask(r.len as usize) << r.offset);
+        let procs = &self.procs;
+        let Some(plan) = self.waiters[s as usize].plan(|w| alive(procs, w), self.cfg.edge_triggers)
+        else {
+            return false;
+        };
+        let mut took = Vec::new();
+        for e in plan {
+            if e.mask & hits == 0 {
+                continue;
+            }
+            // Left its wait: `drop_cache` forgot the plan then, so this does not happen; the
+            // scan in `cycle` wakes the rest (waking is idempotent).
+            if self.procs[e.proc as usize].perm != e.perm {
+                self.waiters[s as usize].forget_plan();
+                return false;
+            }
+            wake_proc(
+                &mut self.procs,
+                &mut self.postponed,
+                &mut self.ready_several,
+                &mut self.ready_mono,
+                &mut self.ready,
+                &mut self.stats.wakes,
+                e.proc,
+                false,
+            );
+            if self.cfg.wake_check {
+                took.push(e.proc);
+            }
+        }
+        self.stats.wake_plans += 1;
+        if self.cfg.wake_check {
+            took.sort_unstable();
+            took.dedup();
+            self.check_wake(s, &took);
         }
         true
     }

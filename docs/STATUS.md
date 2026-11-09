@@ -46,6 +46,10 @@ Every guard condition has its reads, also one that names an instance elaborated 
 
 A block guard that reads `'event`, `'active`, `'last_event`, `'last_value`, `'last_active`, an edge function or a function with a signal parameter elaborates (it was `E2106`), and one on `'stable` or `'quiet` starts TRUE (it started FALSE). The kernel runs the `_guard` processes first at initialisation and takes what they assign as GUARD's initial value (`Builder::guard_init`); guarded concurrent assignments test GUARD again (LRM 11.6), and a guard on an implicit signal changes in the cycle of that signal. Corpus `delta/guard_signal_attributes` (reference output) on every tier at 1 and 4 threads; three new catalogue cases (`guard-*`).
 
+### Wake plan (branch `perf/w3-k1`, 2026-11-08)
+
+A signal of at most 64 elements whose waiters are all resident processes without an edge trigger wakes them from a wake plan when its value is finished (`wake_sole`), not through `changed_sigs` and a scan in `cycle`. `YAVS_WAKE_CHECK=1` checks every such wake against a scan. Main-thread instructions: Microwatt 0.973, neorv32_single_cache 0.992 (compiled), GRLIB 1.000; results unchanged. Numbers: `docs/decisions.md` "Wake plan".
+
 ### Compiled activations: one function per tier (branch `perf/w3-k0`, 2026-11-07)
 
 `InterpProcess::run` jumps to the tier's entry (`Tier::direct`, `rt::direct_entry`) with no frame of its own, and the entry holds the view, the object table's start and end and the call of the compiled code. Natives called from compiled code hand their result back without a store-forwarding stall, and `wake_sole` arms the idle-skip readers of a signal once. Main-thread instructions: Microwatt 0.991, GRLIB 0.995, results unchanged. Cycles are undecided: a quiet sitting decides. Numbers: `docs/decisions.md` "Compiled clocked RTL processes, round 12".

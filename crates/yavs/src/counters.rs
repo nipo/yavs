@@ -59,6 +59,7 @@ pub fn report(s: yavs_kernel::Stats, rt: Option<&yavs_interp::Runtime>) {
         ("image_bytes", s.image_bytes),
         ("copy_forwards", s.copy_forwards),
         ("wake_scans", s.wake_scans),
+        ("wake_plans", s.wake_plans),
         ("ecall_hits", hits),
         ("ecall_runs", runs),
         ("ecall_session_hits", session_hits),
