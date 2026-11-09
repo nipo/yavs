@@ -1305,6 +1305,10 @@ const WAIT_GAIN: f64 = 0.3;
 /// once the time the runs saw it in repays it, so no later run pays the earlier runs' bodies at once
 /// (after one run, `neorv32_dual_full` run 5 was 1.13 and `neorv32_single_cache` run 4 1.07).
 const WAIT_HELD_RUNS: u32 = u32::MAX;
+/// `Worker::unrepaid` judges a held function with the callees that wait only for it
+/// (`Worker::unlocked`): `uvvm_axistream_vvc`'s command executor seen 0.2 percent of its price by
+/// itself frees about a second of callees a run.
+const WAIT_SUBTREE: bool = true;
 const WAIT_HELD_FREE: bool = true;
 /// `Worker::next_asked` orders by heat per price: in oldest-first order a large one-shot sequencer held
 /// the budget (`uvvm_axistream_vvc` run 2 29.4 G against 25.0).
@@ -1403,6 +1407,9 @@ struct Worker {
     /// Who calls each function (any `Call` or `CallProt` in its code), worked out once, so without the
     /// copies of processes made since: under the count rule `copy_compiled` stands for those, per process.
     callers: std::cell::OnceCell<Vec<Vec<u32>>>,
+    /// Whom each function calls, as `callers` the other way round, and the marks of `unlocked`'s walk.
+    callees: std::cell::OnceCell<Vec<Vec<u32>>>,
+    walked: std::cell::RefCell<Vec<bool>>,
     copy_compiled: Vec<bool>,
     /// Per function: the address of its `CallFn` (0: none), published with `nat`.
     calls: Vec<usize>,
@@ -1499,8 +1506,10 @@ struct Worker {
     /// earlier runs' profile says of those it held: interpreted microseconds seen summed over them,
     /// and in how many runs in a row (`Profile::held`), by process (`Program::base_of`).
     unrepaid_seen: Vec<bool>,
-    /// Functions `unpaid` held past `WAIT_LONG` at some time (`CountStat::UnpaidLong`).
+    /// Functions `unpaid` held past `WAIT_LONG` at some time (`CountStat::UnpaidLong`), and the ones
+    /// compiled because of the callees they unlock (`CountStat::Unlocked`).
     unpaid_long_seen: Vec<bool>,
+    unlocked_seen: Vec<bool>,
     unrepaid_ids: Vec<FuncId>,
     carried: std::collections::HashMap<FuncId, (u64, u32)>,
     /// Callees that keep compiled native-frame code unpublished, to ask for (`publish`), and whether
@@ -1539,6 +1548,9 @@ struct Worker {
     wait_long_share: f64,
     wait_gain: f64,
     wait_order: bool,
+    /// `unrepaid` judges a function with the callees it unlocks (`unlocked`,
+    /// `YAVS_AUTO_WAIT_SUBTREE`; 0: by its own time and price).
+    wait_subtree: bool,
     /// The runs in a row `unrepaid` holds a function before it compiles it anyway
     /// (`YAVS_AUTO_WAIT_HELD_RUNS`): the count asked for it in each of them.
     wait_held_runs: u32,
@@ -1745,6 +1757,8 @@ impl Worker {
             refusals: 0,
             declined: vec![false; nfuncs],
             callers: Default::default(),
+            callees: Default::default(),
+            walked: std::cell::RefCell::new(vec![false; nfuncs]),
             copy_compiled: vec![false; nfuncs],
             calls: vec![0; nfuncs],
             prog,
@@ -1795,6 +1809,7 @@ impl Worker {
             held: vec![false; nfuncs],
             unrepaid_seen: vec![false; nfuncs],
             unpaid_long_seen: vec![false; nfuncs],
+            unlocked_seen: vec![false; nfuncs],
             unrepaid_ids: Vec::new(),
             carried: Default::default(),
             want: Vec::new(),
@@ -1814,6 +1829,7 @@ impl Worker {
             wait_share: WAIT_SHARE,
             wait_long_share: WAIT_LONG_SHARE,
             wait_gain: WAIT_GAIN,
+            wait_subtree: WAIT_SUBTREE,
             wait_order: WAIT_ORDER,
             wait_held_runs: WAIT_HELD_RUNS,
             wait_held_free: WAIT_HELD_FREE,
@@ -1904,6 +1920,12 @@ impl Worker {
     /// the time) and `profile::EARLY_RUNS` (the cache serves the runs after). Read from the looks
     /// and the profile; `wait_gain` 0 turns it off.
     fn unrepaid(&self, id: FuncId) -> bool {
+        self.unrepaid_by(id, self.wait_subtree)
+    }
+
+    /// `unrepaid`, and when `subtree` judged again with the callees `id` unlocks (`unlocked`): held
+    /// only if neither repays, so the credit never holds what its own time repays.
+    fn unrepaid_by(&self, id: FuncId, subtree: bool) -> bool {
         let Some(base) = self.earlier.base else {
             return false;
         };
@@ -1915,21 +1937,96 @@ impl Worker {
         }
         let carried = self.carried.get(&self.prog.base_of(id)).map_or(0, |c| c.0);
         let rest = base.saturating_sub(self.sim_us) as f64;
-        // (A body that takes a small part of the rest of the run is not held: only a dear one is.)
-        if self.wait_big > 0.0 && (self.body_price(id) as f64) * self.wait_big <= rest {
-            return false;
-        }
-        let share = self.time[id.0 as usize][0] as f64 / self.total.max(1) as f64;
         // (The time the earlier runs saw it in, in this run's CPU per look microsecond.)
         let before = carried as f64 * self.sim_us.max(1) as f64 / self.total.max(1) as f64;
-        (share * rest * (profile::EARLY_RUNS as f64) + before) * self.wait_gain
-            < self.body_price(id) as f64
+        let held = |(us, price): (u64, u64)| {
+            // (A body that takes a small part of the rest of the run is not held: only a dear one is.)
+            if self.wait_big > 0.0 && (price as f64) * self.wait_big <= rest {
+                return false;
+            }
+            let share = us as f64 / self.total.max(1) as f64;
+            (share * rest * (profile::EARLY_RUNS as f64) + before) * self.wait_gain < price as f64
+        };
+        held((self.time[id.0 as usize][0], self.body_price(id)))
+            && (!subtree || held(self.unlocked(id)))
+    }
+
+    /// The interpreted time and `body_price` of `id` with those of the subprograms that wait only
+    /// for it: not compiled, called by no compiled code (`entered_from_code`), and so on down; a
+    /// callee's share split among its uncompiled callers that ran. The sampler books a call's time
+    /// to the callee, so a dispatcher looks cold by its own time, and compiling it is what lets its
+    /// callees compile. A callee never seen adds no price: it would not compile.
+    fn unlocked(&self, id: FuncId) -> (u64, u64) {
+        let callees = self.callees.get_or_init(|| {
+            let mut v = vec![Vec::new(); self.prog.funcs.len()];
+            for (c, callers) in self.callers().iter().enumerate() {
+                for &k in callers {
+                    v[k as usize].push(c as u32);
+                }
+            }
+            v
+        });
+        let mut walked = self.walked.borrow_mut();
+        let (mut us, mut price) = (self.time[id.0 as usize][0], self.body_price(id));
+        let mut todo = vec![id.0];
+        walked[id.0 as usize] = true;
+        let mut i = 0;
+        while let Some(&f) = todo.get(i) {
+            i += 1;
+            for &c in &callees[f as usize] {
+                let k = c as usize;
+                if walked[k]
+                    || self.done[k][0]
+                    || self.nat[k].0 != 0
+                    || self
+                        .prog
+                        .func(FuncId(c))
+                        .is_none_or(|g| g.kind == FuncKind::Process)
+                    || self.entered_from_code(FuncId(c))
+                {
+                    continue;
+                }
+                walked[k] = true;
+                todo.push(c);
+                let t = self.time[k][0];
+                if t == 0 {
+                    continue;
+                }
+                let n = self.callers()[k]
+                    .iter()
+                    .filter(|&&g| {
+                        let g = g as usize;
+                        !self.done[g][0] && (self.held[g] || self.time[g][0] > 0)
+                    })
+                    .count()
+                    .max(1) as u64;
+                us += t / n;
+                price += self.body_price(FuncId(c)) / n;
+            }
+        }
+        for &f in &todo {
+            walked[f as usize] = false;
+        }
+        (us, price)
+    }
+
+    /// Count `id` once as compiled because of the callees it unlocks (`CountStat::Unlocked`).
+    fn note_unlocked(&mut self, id: FuncId) {
+        if self.wait_subtree
+            && !self.unlocked_seen[id.0 as usize]
+            && self.unrepaid_by(id, false)
+            && !self.unrepaid_by(id, true)
+        {
+            self.unlocked_seen[id.0 as usize] = true;
+            self.native.count_stat(CountStat::Unlocked);
+        }
     }
 
     /// Count `id` once as held by `unrepaid` (`CountStat::Unrepaid`), and by `unpaid` past `WAIT_LONG`
     /// (`CountStat::UnpaidLong`).
     fn note_unrepaid(&mut self, id: FuncId) {
-        if self.unrepaid(id) && !std::mem::replace(&mut self.unrepaid_seen[id.0 as usize], true) {
+        if !self.unrepaid_seen[id.0 as usize] && self.unrepaid(id) {
+            self.unrepaid_seen[id.0 as usize] = true;
             self.native.count_stat(CountStat::Unrepaid);
             self.unrepaid_ids.push(id);
         }
@@ -2011,7 +2108,7 @@ impl Worker {
         let f = self.prog.func(id);
         let sub = f.is_some_and(|f| f.kind != FuncKind::Process);
         format!(
-            "held f{} `{}` ({} IR): gate {}, uncalled subprogram {}, unpaid {} (seen {} of price {} us, cached {}), unrepaid {} (body {} us), seen total {} us",
+            "held f{} `{}` ({} IR): gate {}, uncalled subprogram {}, unpaid {} (seen {} of price {} us, cached {}), unrepaid {} (body {} us, with what it unlocks {:?} us), seen total {} us",
             id.0,
             f.map_or("?", |f| f.name.as_str()),
             f.map_or(0, |f| f.code.len()),
@@ -2023,6 +2120,7 @@ impl Worker {
             self.cached(id),
             self.unrepaid(id),
             self.body_price(id),
+            self.unlocked(id),
             self.total
         )
     }
@@ -3384,7 +3482,20 @@ impl Worker {
     /// Whether a function that calls `id` has compiled code that `id` is called from: frame-mode
     /// code, or native-frame code that is published.
     fn entered_from_code(&self, id: FuncId) -> bool {
-        let callers = self.callers.get_or_init(|| {
+        self.callers()[id.0 as usize].iter().any(|&c| {
+            c != id.0
+                && (self.table[c as usize].run.load(Ordering::Relaxed) != 0
+                    || self.nat[c as usize].1
+                    || self.copy_compiled[c as usize]
+                    // (Native-frame code waits to be published for what it calls, so under the count
+                    // rule made is enough, or each would wait for the other.)
+                    || (self.counted && self.nat[c as usize].0 != 0))
+        })
+    }
+
+    /// Who calls each function (`callers`).
+    fn callers(&self) -> &[Vec<u32>] {
+        self.callers.get_or_init(|| {
             let mut v = vec![Vec::new(); self.prog.funcs.len()];
             for k in 0..self.prog.funcs.len() {
                 let Some(f) = self.prog.func(FuncId(k as u32)) else {
@@ -3400,15 +3511,6 @@ impl Worker {
                 }
             }
             v
-        });
-        callers[id.0 as usize].iter().any(|&c| {
-            c != id.0
-                && (self.table[c as usize].run.load(Ordering::Relaxed) != 0
-                    || self.nat[c as usize].1
-                    || self.copy_compiled[c as usize]
-                    // (Native-frame code waits to be published for what it calls, so under the count
-                    // rule made is enough, or each would wait for the other.)
-                    || (self.counted && self.nat[c as usize].0 != 0))
         })
     }
 
@@ -4107,6 +4209,9 @@ impl AutoTier {
         if let Some(p) = knob("YAVS_AUTO_WAIT_GAIN") {
             w.wait_gain = p;
         }
+        if let Some(p) = knob("YAVS_AUTO_WAIT_SUBTREE") {
+            w.wait_subtree = p != 0.0;
+        }
         if let Some(p) = knob("YAVS_AUTO_WAIT_HELD_RUNS") {
             w.wait_held_runs = p as u32;
         }
@@ -4311,6 +4416,7 @@ impl AutoTier {
                                         return None;
                                     };
                                     let id = pending.asked.remove(k)?;
+                                    w.note_unlocked(id);
                                     Some((vec![(id, w.ask(id))], false, false))
                                 })
                                 .or_else(|| {
@@ -4998,6 +5104,40 @@ mod tests {
         w.in_cache = vec![Default::default(); w.in_cache.len()];
         w.in_cache[k].set(true).unwrap();
         assert!(!w.waits(caller), "a link");
+    }
+
+    /// A later run judges a held caller with the callees that wait only for it (`unlocked`): their
+    /// time and their price; not once compiled code calls them, nor with the rule off.
+    #[test]
+    fn a_later_run_credits_a_caller_with_the_callees_it_unlocks() {
+        let (prog, caller, callee) = caller_callee();
+        let mut w = counted(prog, 0);
+        let (k, j) = (caller.0 as usize, callee.0 as usize);
+        let price = w.body_price(caller) + w.body_price(callee);
+        (w.stops, w.wait_gain, w.wait_payback) = (true, 0.5, 0.0);
+        (w.total, w.sim_us, w.time[k][0]) = (1000, 10, 1);
+        w.earlier.base = Some(10 + (price as f64 / (0.5 * 0.5 * 4.0)).ceil() as u64 + 1);
+        assert_eq!(super::profile::EARLY_RUNS, 4);
+        assert_eq!(
+            w.unlocked(caller),
+            (1, w.body_price(caller)),
+            "a callee never seen"
+        );
+        assert!(w.waits(caller));
+        w.time[j][0] = 499;
+        assert_eq!(w.unlocked(caller), (500, price));
+        assert!(!w.waits(caller), "half of the looks are in what it unlocks");
+        w.note_unlocked(caller);
+        assert_eq!(
+            w.native.count_stats()[yavs_interp::CountStat::Unlocked as usize],
+            1
+        );
+        w.wait_subtree = false;
+        assert!(w.waits(caller), "by its own time");
+        w.wait_subtree = true;
+        w.nat[j].0 = 64;
+        assert_eq!(w.unlocked(caller).0, 1, "a compiled callee");
+        assert!(w.waits(caller));
     }
 
     /// The next compile of a run that stops for them (`next_asked`): links first, then the most seen

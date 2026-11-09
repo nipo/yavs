@@ -344,6 +344,11 @@ Each one turns a fast path off or changes its threshold, to compare a run with a
      - a number
      - ``0.3``
      - ``run``
+   * - ``YAVS_AUTO_WAIT_SUBTREE``
+     - With ``--tier-compile=wait``, in the runs after the first: the rule of ``YAVS_AUTO_WAIT_GAIN`` judges a function together with the subprograms that wait only for it (called by no compiled code), their time and their compile, so a process whose time goes to the subprograms it calls can pay for its compile. ``0`` judges each function by itself.
+     - ``0`` or ``1``
+     - ``1``
+     - ``run``
    * - ``YAVS_AUTO_WAIT_HELD_RUNS``
      - With ``--tier-compile=wait``: after how many runs in a row in which the rule of ``YAVS_AUTO_WAIT_GAIN`` held a function back it compiles anyway (the runs a program left in its profile). Unset, it never does: a held function compiles once the time the runs saw it in pays for its compile.
      - a number

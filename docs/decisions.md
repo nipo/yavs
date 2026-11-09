@@ -15008,8 +15008,32 @@ Written by Claude. Landed with wave 3 batch 2 (maintainer's ruling of 2026-11-09
   (instructions 0.997 to 1.002). GRLIB runs 1 to 3 level (instructions 0.995 to 1.001), Microwatt cold level
   (0.1 percent), `neorv32_dual_full` and `osvvm_axi4_random` level in runs 1 to 3, the OSVVM suite (314 tests,
   cold then warm) 1.00 and 0.985.
-- **Cost: run 3 of `uvvm_axistream_vvc`** (series in one world from a pristine one, 4 reps, instructions against
-  main): run 1 0.70, run 2 1.08, run 3 2.06, runs 4 to 6 0.99 to 1.02. What the first run skips, run 2 holds
-  (`unrepaid`, about 80 bodies) and run 3 compiles at once (`overdue`); over six runs 1.06 times main's
-  instructions. Not landed for that reason; options for the maintainer: land as is, wait for the later-run work on
-  `overdue` and carried heat, or have the first run carry what the floor held into the profile so run 2 pays it.
+- **Cost: the later runs of `uvvm_axistream_vvc`.** Once held bodies compile only when their own time repays them
+  (no `overdue`), the bodies the first run skips never compile and the test settled at 1.34 times main's
+  instructions. The next section adds the later-run credit that fixes this, and gives the combined numbers.
+
+## `--tier-compile=wait`: a later run credits a held caller with the callees it unlocks (yavs-llvm `auto.rs`, 2026-11-09, on a branch for the maintainer)
+
+- **Finding** (agent). With the first-run floor above, `uvvm_axistream_vvc`'s later runs settled at 1.34 times
+  main's instructions: the floor holds the sequencer `p_main` and the command executor in run 1, and the later-run
+  rule (`unrepaid`) judges each body by its own time. The sampler books a call's time to the callee, so the executor
+  (seen 0 to 2 percent of its price) never repays, and its callees (the BFM procedures, about a second of
+  interpreted time a run) wait for a compiled caller for good.
+- **Change** (agent; user ruling 2026-11-09: build subtree credit together with the floor). `unrepaid` holds a
+  function only if neither its own time nor the time of what it unlocks repays: `Worker::unlocked` sums the time
+  and `body_price` of the subprograms that wait only for it (not compiled, called by no compiled code, transitively;
+  a callee's share split among its uncompiled callers that ran; a callee never seen adds no price). The credit never
+  holds what the own-time rule lets go. `WAIT_SUBTREE`, knob `YAVS_AUTO_WAIT_SUBTREE`, counter `tier_unlocked`. A
+  first version that judged by the subtree alone held more than main on `osvvm_axi4_random` run 2 and walked the
+  subtree on every look; the own rule first fixed both.
+- **Measured** (PGO bench builds, two builds of main as the A/A, 5 reps per series from pristine worlds on two free
+  timing cores; all-thread instructions against main): `uvvm_axistream_vvc` run 1 0.71 (A/A 0.99), run 2 1.22,
+  run 3 1.07, runs 4 to 6 1.03 to 1.07 (A/A 0.99 to 1.01): settled about 3 percent above main, which compiles the
+  sequencer in run 1; six-run sum 0.98 of main, wall sum level. `osvvm_axi4_random` to run 12, `neorv32_dual_full`
+  and `neorv32_single_cache` to run 8 within the A/A (the credit fires there only once, in two of five `osvvm_axi4_random` second runs). Cold cap with a free core
+  (plain bench builds, 10 pairs): `uvvm_axistream_vvc` 1.13 of the pinned baseline (main 1.72), the other five
+  level with main; GRLIB's first run level.
+- **Not landed**: the bar (every run within the A/A of main) fails on `uvvm_axistream_vvc` runs 2 to 6. Main pays
+  the dispatcher's subtree in run 1, over the cap; any rule that keeps run 1 under the cap pays it in a later run,
+  and compiling everything the count asks for in run 2 costs that run 1.5 to 1.6 times main's (measured with
+  `YAVS_AUTO_WAIT_GAIN=0`). The maintainer decides.
