@@ -41,9 +41,11 @@ pub(crate) enum Cb {
     RareNative,
     /// `yavs_rt_steps`: the instructions of a block compiled code was told never ran.
     Steps,
+    /// `yavs_rt_drive_src`: a whole value driven from where it is, with no waveform.
+    DriveSrc,
 }
 
-const N: usize = 26;
+const N: usize = 27;
 
 /// Whether this build counts (the generators emit the calls of `yavs_rt_rare` only then).
 pub const COUNTING: bool = cfg!(any(debug_assertions, feature = "op-census"));
@@ -75,6 +77,7 @@ const NAMES: [&str; N] = [
     "rare_codes",
     "rare_native",
     "steps",
+    "drive_src",
 ];
 
 #[cfg(any(debug_assertions, feature = "op-census"))]

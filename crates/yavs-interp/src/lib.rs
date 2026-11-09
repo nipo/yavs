@@ -63,7 +63,7 @@ pub use heap::{HEAP_LOG, Heap, collections as gc_collections};
 pub use ieee::{code_table, edge_native};
 pub use pmemo::{pmemo_off, pmemo_stats};
 pub use pre::{
-    ScalarDrive, light_ieee as light_native, retreating_brs, scalar_drives, static_wait,
+    FusedCopy, ScalarDrive, fused_drives, light_ieee as light_native, retreating_brs, static_wait,
     static_wait_edge,
 };
 pub use state::{restore_state, restore_state_prefix};

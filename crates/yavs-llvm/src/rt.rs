@@ -58,6 +58,7 @@ pub const DRIVE_BIT: &str = "yavs_rt_drive_bit";
 pub const DRIVE_F: &str = "yavs_rt_drive_f";
 pub const SCATTER: &str = "yavs_rt_scatter";
 pub const GATHER: &str = "yavs_rt_gather";
+pub const DRIVE_SRC: &str = "yavs_rt_drive_src";
 pub const GATE_CHECK: &str = "yavs_rt_gate_check";
 pub const IMAGE_CHECK: &str = "yavs_rt_image_check";
 
@@ -1066,6 +1067,38 @@ pub unsafe extern "C" fn yavs_rt_drive_f(
         return GO;
     }
     drive_f_rest(mem, pc, driver, lo, wave, lf)
+}
+
+/// The `Drive` of a fused whole-value assignment (`yavs_interp::FusedCopy`) at zero delay, from
+/// the `n` bytes of the value at `data` (the plane blocks of a logic target), on the kernel
+/// itself: 1 when taken, 0 when compiled code must make the waveform and drive as usual.
+pub unsafe extern "C" fn yavs_rt_drive_src(
+    mem: *mut Mem,
+    driver: u32,
+    lo: u64,
+    len: u64,
+    data: *const u8,
+    n: u64,
+) -> u32 {
+    cb(Cb::DriveSrc);
+    // SAFETY: `mem` is the running activation's; compiled code checked the `n` bytes at `data`.
+    let Some((c, ds, ss)) = (unsafe { direct(&(*mem).fr) }) else {
+        return 0;
+    };
+    let logic = ss
+        .get((lo >> 32) as usize)
+        .is_some_and(|s| s.bytes == 0 && s.codes | s.planes != 0);
+    if !logic || len == 0 || n != len.div_ceil(64) * 32 {
+        return 0;
+    }
+    let done = if len <= 64 {
+        let block = unsafe { std::ptr::read_unaligned(data.cast::<[u64; 4]>()) };
+        yavs_interp::direct_drive_now(c, ds, ss, driver, [lo, len], 0, block)
+    } else {
+        let planes = unsafe { std::slice::from_raw_parts(data, n as usize) };
+        yavs_interp::direct_drive_wide(c, ds, ss, driver, [lo, len], 0, planes)
+    };
+    u32::from(done)
 }
 
 /// A whole zero-delay `SigScatter` at `pc` through driver slot `driver` whose plan compares no
@@ -3606,10 +3639,11 @@ pub fn resumes(prog: &Program, f: &Func, i: &Inst) -> bool {
     }
 }
 
-/// The scalar logic assignments of the process `f` (`yavs_interp::scalar_drives`) and the pcs of
+/// The scalar logic assignments of the process `f` (`yavs_interp::fused_drives`), the pcs of
 /// those `Gen::drive_bit` keeps for one host call (`Batch`): no delay, a driver index the entry has
 /// room for, and another such assignment (or itself, in a loop) can follow it within the
-/// activation. A process that drives once per activation gains nothing and keeps the direct call.
+/// activation, and the fused whole-value assignments without a delay. A process that drives once
+/// per activation gains nothing and keeps the direct call.
 pub fn batched_drives(
     prog: &Program,
     f: &Func,
@@ -3617,8 +3651,10 @@ pub fn batched_drives(
 ) -> (
     Vec<yavs_interp::ScalarDrive>,
     std::collections::HashSet<u32>,
+    Vec<yavs_interp::FusedCopy>,
 ) {
-    let all = yavs_interp::scalar_drives(prog, f);
+    let (all, mut copies) = yavs_interp::fused_drives(prog, f);
+    copies.retain(|c| fixed.get(c.time.0 as usize) == Some(&Some(0)));
     let cand: std::collections::HashSet<u32> = all
         .iter()
         .filter(|d| fixed.get(d.time.0 as usize) == Some(&Some(0)) && d.driver <= 0xffff)
@@ -3627,7 +3663,7 @@ pub fn batched_drives(
     let n = f.code.len();
     // ponytail: a search per candidate, quadratic; above the cap every candidate stays.
     if cand.len() * n > 4_000_000 {
-        return (all, cand);
+        return (all, cand, copies);
     }
     let kept = cand
         .iter()
@@ -3655,7 +3691,7 @@ pub fn batched_drives(
             false
         })
         .collect();
-    (all, kept)
+    (all, kept, copies)
 }
 
 /// Instructions that neither drive a signal, look at a driver, wait nor run other code, on any

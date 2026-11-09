@@ -14943,3 +14943,34 @@ Written by Claude. Landed with wave 3 batch 2 (maintainer's ruling of 2026-11-09
 - **Decision: per-function heat carried across runs** (user, 2026-11-09: build it first; land the policy with batch 2 only if `neorv32_dual_full`'s runs 4 to 6 no longer lose beyond the A/A while the other gains hold). The run-to-run profile is format 4 (`yavs-auto-profile 4`; a profile of format 3 is no profile, never misread): `held <rank> <us> <runs>` lines name the processes (`Program::base_of`: a copy's id is new in every run) whose functions `unrepaid` held and that stayed uncompiled, with the interpreted time the runs saw them summed and the runs in a row they were held in (`Profile::held`, `Snapshot::held`, `Worker::carried`, at most `HELD_MAX` 1 024). `unrepaid` adds the earlier runs' time (in this run's CPU per look microsecond) to what the rest of the run would save, and a process held in `WAIT_HELD_RUNS` (1) runs in a row compiles anyway, outside the budget (`Worker::overdue`, `WAIT_HELD_FREE`). The carried time alone changed nothing measurable (the held bodies are seen 0 to 25 ms a run against prices of 50 to 120 ms); the overdue rule is what compiles them.
 - **Measured against the ruling** (series to run 6, all-thread instructions against main, 2 to 3 rounds per sitting, five sittings; `base2` the A/A): `neorv32_dual_full` with the default, runs 4 / 5 / 6: 0.98 [0.93-1.02] / 1.09 [1.07-1.17] / 1.00 [0.94-1.00] against the A/A's 0.96 [0.94-1.00] / 0.97 [0.96-1.00] / 1.06 [0.94-1.07] in the same sitting; run 5 stays dearer in every variant tried (the bodies the earlier runs left compile there): without the overdue rule 1.02 to 1.12 at runs 5 and 6, overdue in the budget 1.11 to 1.15 at run 5, after two runs 1.04 to 1.15, holding only bodies dearer than a quarter or a sixteenth of the rest of the run (`YAVS_AUTO_WAIT_BIG`) 1.05 to 1.09 at run 5 and 1.00 to 1.05 at run 6. `osvvm_axi4_random` run 2 0.71 holds, its later runs 0.68 to 0.98 (A/A 0.68 to 1.13); `uvvm_axistream_vvc` runs 1 and 2 0.96 and 0.94, later level. **The ruling's bar is not met at run 5: the policy does not land with batch 2.**
 - Tuning aids: `YAVS_AUTO_WAIT_SHARE`, `YAVS_AUTO_WAIT_LONG_SHARE`, `YAVS_AUTO_WAIT_GAIN` (0: off), `YAVS_AUTO_WAIT_ORDER`, `YAVS_AUTO_WAIT_HELD_RUNS`, `YAVS_AUTO_WAIT_HELD_FREE`, `YAVS_AUTO_WAIT_BIG`. `YAVS_AUTO_TRACE` now says why a held function waits (`held f..: gate, uncalled subprogram, unpaid, unrepaid`) and when pacing turns on and off.
+
+## Whole values driven from where they are (yavs-clift, yavs-interp, #1122, 2026-11-09)
+
+- **Decision: a zero-delay assignment of a whole value that the interpreter fuses with its waveform in the frame
+  (`Op::CopyDrive`, listed as `yavs_interp::FusedCopy` by `fused_drives`, kept by `batched_drives` when its time
+  register is a constant 0) is driven in Cranelift code from the value's own bytes** (maintainer ruling 2026-11-08:
+  no signal by reference, no caller-provided result storage; drive from the result as the interpreter's fused op
+  does). The `Zero` of the waveform and the `Copy` of the value are not made; at the `Drive`, `Gen::drive_copy`
+  calls `yavs_rt_drive_src(mem, driver, lo, len, data, n)`, which takes a logic target whose plane blocks are the
+  `n` bytes (`direct_drive_now`, `direct_drive_wide`) and answers 0 for anything else. A constant reference of up
+  to 64 logic elements in a process copy is compared first (`value_differs`, the skip of `cur_differs` with the
+  delay known to be 0). A 0, a byte signal, or a value `host` cannot reach inline makes the waveform and drives as
+  before; an address the interpreter must look at leaves at the `Copy`, where `Op::CopyDrive` makes the waveform
+  itself (`wave_at`). The sites are the interpreter's or fewer, as for `ScalarDrive`.
+  Why: every `q <= a + b;` and `l1 <= reduce(t);` zeroed its waveform (72 bytes for 112 elements) and copied the
+  value into it before the kernel read it back. Measured (exact instructions, slope 20 k to 100 k cycles of the
+  adder-tree testbench, 16 units, Cranelift bench builds): `--tier=clift` loop form 29.36 G to 27.78 G (0.946),
+  function form 32.22 G to 31.31 G (0.972, about 236 instructions fewer per call with its element drives); default
+  tier (fresh library, the same compiled set as the base, two warm pairs) loop 29.35 G to 27.76 to 27.80 G, function
+  32.07 G to 31.13 to 31.30 G. Function over loop is 1.13 on both tiers now (1.10 before): the loop form gains more.
+  A held-value design (vectors of 16 to 64 elements and an integer array assigned whole every cycle) 14.45 G to
+  14.40 G on `--tier=clift`, level on the default tier. Cycles were not measured (the timing cores were taken).
+- **Decision: the zeroing of the waveform is kept whole on the way that makes it** (agent). The idea of zeroing only
+  its time word does not apply where the drive is fused (nothing is zeroed), and the other way must match the
+  interpreter's `wave_at`.
+- **Decision: a compile thread that died in a compile is joined when the run ends, so its panic is the run's
+  internal error** (agent; `AutoTier::stop`). Why: a panic of the tier-up thread (the verifier's in debug builds)
+  left the function interpreted and the run's result unchanged, so no test saw it: a lowering bug of this change
+  (target registers loaded inside the skip's compare, in blocks the call does not always follow) only showed as
+  copies that never ran compiled. `compiled_gate.rs` `whole_values_at_run_time_elements_of_copies` fails with that
+  lowering bug put back.

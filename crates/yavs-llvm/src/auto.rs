@@ -4477,7 +4477,12 @@ impl AutoTier {
                 }
             );
         }
-        if !wait && self.shared.busy.load(Ordering::SeqCst) {
+        // A compile thread that died in a compile (a panic) is joined: its panic is the run's.
+        let dead = matches!(
+            &*self.worker.lock().unwrap_or_else(PoisonError::into_inner),
+            Thread::Running(h) if h.is_finished()
+        );
+        if !wait && !dead && self.shared.busy.load(Ordering::SeqCst) {
             return false;
         }
         let worker = std::mem::replace(

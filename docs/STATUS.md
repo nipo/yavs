@@ -29,6 +29,10 @@
 
 The LLVM tier is gone (user decision): the `llvm` cargo feature, the LLVM generator, ORC JIT, object cache, code arena and `llvm-sys`. `--tier=llvm` and `--tier=auto3` stop with E0120 before any analysis, with a note and help naming the tiers to use (`crates/yavs/tests/cli.rs`, `dap.rs`); `--tier=auto` is the Cranelift policy in every build with `clift`; E0127 is retired. `yavs-llvm` keeps its name and its shared runtime for `yavs-clift`. Tests that ran only an LLVM tier were deleted; difftest lost its LLVM templates, realbench its `llvm` and `auto3` tiers (`codegen` now times `--tier=clift`), waveq and the conformance tool use `clift`. Not verified: a Windows or aarch64 build (CI does them).
 
+### Whole values driven from where they are (#1122, 2026-11-09)
+
+Cranelift code drives a zero-delay assignment of a whole value that the interpreter fuses with its waveform (`q <= a + b;`, `l1 <= reduce(t);`) from the value's own bytes, with no waveform made (`yavs_rt_drive_src`); the kernel's refusals make the waveform as before. Exact instructions of the adder-tree testbench: loop form 0.946, function form 0.972 on `--tier=clift`, about the same on the default tier; the function form is still 1.13 times the loop. Cycles not measured. A panic of the compile thread is now the run's internal error when the run ends (it was lost). `docs/decisions.md` "Whole values driven from where they are".
+
 ### A function on an array, the call (#1122, 2026-11-06)
 
 A function result whose subtype adds no constraint keeps the value's descriptor with no check, a check of a result against a target with static bounds compares with a constant length in Cranelift code, and the size of a local array of a static layout is computed in registers. The adder-tree function form runs 1.11 times the instructions of the same loop in the process on both `--tier=clift` and the default tier (from 1.12 and 1.13); the rest is the call itself (`docs/decisions.md` "A function on an array, the call's fixed cost, round 2").
