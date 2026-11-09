@@ -50,6 +50,14 @@ A block guard that reads `'event`, `'active`, `'last_event`, `'last_value`, `'la
 
 A signal of at most 64 elements whose waiters are all resident processes without an edge trigger wakes them from a wake plan when its value is finished (`wake_sole`), not through `changed_sigs` and a scan in `cycle`. `YAVS_WAKE_CHECK=1` checks every such wake against a scan. Main-thread instructions: Microwatt 0.973, neorv32_single_cache 0.992 (compiled), GRLIB 1.000; results unchanged. Numbers: `docs/decisions.md` "Wake plan".
 
+### A stored list of the code that never ran (branch `perf/w3-cg2`, 2026-11-09, lab switch only)
+
+`YAVS_CLIFT_LIST=write` makes a run a coverage run that stores, per design, the blocks of each compiled function that never ran; `YAVS_CLIFT_LIST=on` lowers those blocks cheaply in code made later, and a function whose listed blocks run too much is compiled again in full and leaves the list. With a list from a run that compiles every function at its first entry, the cold run after it compiles less (`uvvm_axistream_vvc`, 8 rounds on one binary: 0.95 of the instructions and 0.93 of the cycles with native variants leaving at listed blocks, 0.98 without); the other designs and later runs are within about 2 percent, except GRLIB's run 2 at 1.05, where three functions ran listed blocks and were compiled again; the coverage run itself costs about a cold run on large designs and 4 to 10 times one on small tests. Who runs the coverage run is open. Details: `docs/decisions.md` "Cranelift: a stored list of the blocks that never ran".
+
+### Code that never ran, lowered cheaply (branch `perf/w3-cg3a`, 2026-11-08, lab switch only)
+
+`YAVS_CLIFT_CHEAP=<coverage file>|all|alt` lowers the blocks a block coverage dump lists as never run as one interpreter call for their instructions (frame-mode code) or a leave at their start (native frames). With a list from a coverage run of the same design, cold runs compile less (`uvvm_axistream_vvc`: compile CPU about half, cycles about 0.8); nothing in an ordinary run uses it, since no run keeps a list yet. Difftest `yavs-clift-cheap` and `yavs-clift-cheapalt` (every block, every second block): 662/662. `docs/decisions.md` "Cranelift: code that never ran, lowered cheaply".
+
 ### Compiled activations: one function per tier (branch `perf/w3-k0`, 2026-11-07)
 
 `InterpProcess::run` jumps to the tier's entry (`Tier::direct`, `rt::direct_entry`) with no frame of its own, and the entry holds the view, the object table's start and end and the call of the compiled code. Natives called from compiled code hand their result back without a store-forwarding stall, and `wake_sole` arms the idle-skip readers of a signal once. Main-thread instructions: Microwatt 0.991, GRLIB 0.995, results unchanged. Cycles are undecided: a quiet sitting decides. Numbers: `docs/decisions.md` "Compiled clocked RTL processes, round 12".

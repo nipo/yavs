@@ -140,6 +140,7 @@ pub struct Jit {
     cold_region: ClifId,
     hold_check: ClifId,
     rare: ClifId,
+    steps: ClifId,
     /// Module data by its bytes and whether it is 8-byte aligned.
     tables: HashMap<(Vec<u8>, bool), DataId>,
     /// What a body's reference to module data names in another run (`Name::Data`), by data id.
@@ -191,9 +192,16 @@ pub struct Jit {
     /// bodies defined and not yet listed at `finalize`.
     last_cov: Option<(DataId, Vec<crate::blockcov::BlockInfo>)>,
     cov_n: u32,
-    covs: Vec<(String, String, DataId, Vec<crate::blockcov::BlockInfo>)>,
+    covs: Vec<(String, String, u64, DataId, Vec<crate::blockcov::BlockInfo>)>,
     /// The addresses of the tables registered, frozen when the module goes (`Drop`).
     cov_at: Vec<usize>,
+    /// `YAVS_CLIFT_LIST`: per function and variant, the never-run pcs its body follows, as `build`
+    /// decided (`lower` and `body_of` make the same body).
+    lists: HashMap<(FuncId, bool), Option<Rc<HashSet<u32>>>>,
+    /// Frame-mode code made again in full after its cheap blocks ran too much (`rt::tripped`),
+    /// under a symbol of its own; `redo` while one is built.
+    redone: HashSet<FuncId>,
+    redo: bool,
 }
 
 /// The native-frame variant `n<id>` of a function, in the calling convention of the LLVM tier
@@ -437,7 +445,10 @@ fn srcmap() -> bool {
 /// generated code stores a byte into a table of its body.
 fn blockcov() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("YAVS_CLIFT_BLOCKCOV").is_some())
+    *ON.get_or_init(|| {
+        std::env::var_os("YAVS_CLIFT_BLOCKCOV").is_some()
+            || crate::blockcov::list_mode() == crate::blockcov::ListMode::Write
+    })
 }
 
 fn flag(name: &str, default: &str) -> String {
@@ -584,6 +595,7 @@ impl Jit {
             (REGION, yavs_rt_region as *const u8),
             (HOLD_CHECK, yavs_rt_hold_check as *const u8),
             (RARE, yavs_rt_rare as *const u8),
+            (STEPS, yavs_rt_steps as *const u8),
             (WAIT_EDGE, yavs_rt_wait_edge as *const u8),
             (SCAN, yavs_rt_scan as *const u8),
         ] {
@@ -665,6 +677,7 @@ impl Jit {
         ];
         let hold_check = imp(HOLD_CHECK, &[I64, I64, I64, I64, I64, I32, I64, I64], None)?;
         let rare = imp(RARE, &[I32], None)?;
+        let steps = imp(STEPS, &[I64, I64, I64, I32, I32, I32, I32], Some(I32))?;
         let mut stubs = Vec::new();
         let cold_host = cold_stub(
             &mut module,
@@ -726,6 +739,7 @@ impl Jit {
             cold_region,
             hold_check,
             rare,
+            steps,
             tables: HashMap::new(),
             table_names: HashMap::new(),
             sig,
@@ -752,6 +766,9 @@ impl Jit {
             cov_n: 0,
             covs: Vec::new(),
             cov_at: Vec::new(),
+            lists: HashMap::new(),
+            redone: HashSet::new(),
+            redo: false,
         })
     }
 
@@ -765,15 +782,34 @@ impl Jit {
         if let Some(r) = bad_reg(f) {
             return Err(format!("register r{} beyond the frame", r.0));
         }
-        if let Some(&c) = self.frames.get(&id) {
+        // Made with listed blocks that then ran too much: made again in full, once.
+        let again = self.lists.get(&(id, false)).is_some_and(Option::is_some)
+            && yavs_llvm::rt::tripped(id)
+            && !self.redone.contains(&id);
+        if let Some(&c) = self.frames.get(&id).filter(|_| !again) {
             return Ok((c, Vec::new()));
         }
         if std::env::var_os("YAVS_CLIFT_DUMP").is_some() {
             eprintln!("{}", prog.dump_func(id));
         }
-        let b = self.build(prog, id, f, false)?;
+        if again {
+            self.redone.insert(id);
+            self.lists.remove(&(id, false));
+            crate::blockcov::AGAIN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        self.redo = again;
+        let b = self.build(prog, id, f, false);
+        self.redo = false;
+        let b = b?;
         self.frames.insert(id, b.fid);
         Ok((b.fid, b.stepped))
+    }
+
+    /// The symbol of the frame-mode code (or `native` variant) of `id`; frame-mode code made again
+    /// in full has one of its own (`define`).
+    fn symbol_for(&self, prog: &Program, native: bool, id: FuncId) -> String {
+        let s = symbol(prog, if native { "n" } else { "f" }, id);
+        if self.redo { s + "_full" } else { s }
     }
 
     /// `Generator::cached_only`: from now on compile nothing the compilation cache does not have.
@@ -829,7 +865,9 @@ impl Jit {
     /// Compile `ctx` into `fid`: linked from the compilation cache when it has the function
     /// (`cache.rs`), else compiled, and stored when there is a cache.
     fn define_code_in(&mut self, fid: ClifId, ctx: &mut Context) -> Result<(), String> {
-        let Some(store) = crate::cache::store() else {
+        // (A coverage run's code stores what ran: no other run links it.)
+        let write = crate::blockcov::list_mode() == crate::blockcov::ListMode::Write;
+        let Some(store) = crate::cache::store().filter(|_| !write) else {
             return self
                 .module
                 .define_function(fid, ctx)
@@ -886,9 +924,12 @@ impl Jit {
         self.allowed = Some(ids.iter().copied().collect());
     }
 
-    /// Store the routes of the functions made since the last call.
+    /// Store the routes of the functions made since the last call (not in a coverage run, whose
+    /// routes follow its own policy).
     pub fn flush_routes(&mut self) {
-        self.routes.flush();
+        if crate::blockcov::list_mode() != crate::blockcov::ListMode::Write {
+            self.routes.flush();
+        }
     }
 
     /// `native_set` of `id` alone.
@@ -1130,8 +1171,37 @@ impl Jit {
         let mut route_of: Vec<(FuncId, bool)> =
             nats.iter().map(|(&g, n)| (g, n.is_some())).collect();
         route_of.sort_unstable_by_key(|r| r.0.0);
-        let pre = self.pre_key(prog, id, f, native, &nats);
-        let stored = pre.as_ref().and_then(crate::cache::pre_get);
+        // `YAVS_CLIFT_LIST`: the listed blocks are lowered cheaply, unless code of the function in
+        // full is stored already (a world that has it keeps it: no compile for the list's sake).
+        let mut list = self
+            .allowed
+            .is_some()
+            .then(|| crate::blockcov::listed(prog, id, f))
+            .flatten();
+        let mut pre = self.pre_key(prog, id, f, native, &nats, list.as_deref());
+        let mut stored = pre.as_ref().and_then(crate::cache::pre_get);
+        if list.is_some() && stored.is_none() {
+            let full = self.pre_key(prog, id, f, native, &nats, None);
+            if let Some(e @ Pre::Code { .. }) = full.as_ref().and_then(crate::cache::pre_get) {
+                (list, pre, stored) = (None, full, Some(e));
+            }
+        }
+        if self.allowed.is_some()
+            && crate::blockcov::list_mode() == crate::blockcov::ListMode::Write
+        {
+            crate::blockcov::list_open(prog);
+        }
+        if list.is_some() {
+            crate::blockcov::LISTED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        // (A variant that leaves at its listed blocks: its leaves there count as steps.)
+        if native
+            && crate::blockcov::list_native_cheap()
+            && let Some(l) = &list
+        {
+            yavs_llvm::rt::note_cheap_leaves(id, l.iter().copied(), f.code.len() as u32);
+        }
+        self.lists.insert((id, native), list);
         let check = crate::cache::check();
         let linked = |jit: &mut Jit, stored: &Option<Pre>| -> Result<Option<Built>, Error> {
             let Some(Pre::Code {
@@ -1230,7 +1300,7 @@ impl Jit {
         let fid = self
             .module
             .declare_function(
-                &symbol(prog, if native { "n" } else { "f" }, id),
+                &self.symbol_for(prog, native, id),
                 Linkage::Export,
                 &ctx.func.signature,
             )
@@ -1238,7 +1308,12 @@ impl Jit {
         if let Some((did, blocks)) = cov {
             let name = self.symbol_of(fid);
             let key = crate::blockcov::key(prog, id, native);
-            self.covs.push((name, key, did, blocks));
+            let hash = if crate::blockcov::list_mode() == crate::blockcov::ListMode::Write {
+                crate::blockcov::body_hash(prog, f)
+            } else {
+                0
+            };
+            self.covs.push((name, key, hash, did, blocks));
         }
         // `YAVS_CLIFT_ASM=<function id>`: the machine code of that function (variant) on stderr.
         let asm = std::env::var("YAVS_CLIFT_ASM")
@@ -1306,6 +1381,7 @@ impl Jit {
         f: &Func,
         native: bool,
         nats: &HashMap<FuncId, Option<Rc<NatInfo>>>,
+        list: Option<&HashSet<u32>>,
     ) -> Option<yavs_cache::Key> {
         let (target, switches) = self.pre_target.as_ref()?;
         let identity = prog.identity.as_deref()?;
@@ -1327,6 +1403,8 @@ impl Jit {
         let func = prog.code_key_bytes(f)?;
         let mut facts = HashBytes(Vec::new());
         prog.facts(id).hash(&mut facts);
+        let mut list: Vec<u32> = list.into_iter().flatten().copied().collect();
+        list.sort_unstable();
         Some(crate::cache::pre_key(&PreInputs {
             fingerprint: &yavs_ir::opt::fingerprint(),
             target,
@@ -1337,6 +1415,7 @@ impl Jit {
             func: &func,
             facts: &facts.0,
             callees: &callees,
+            list: &list,
         }))
     }
 
@@ -1405,7 +1484,7 @@ impl Jit {
         } else {
             self.sig.clone()
         };
-        let name = symbol(prog, if native { "n" } else { "f" }, id);
+        let name = self.symbol_for(prog, native, id);
         let fid = self
             .module
             .declare_function(&name, Linkage::Export, &signature)
@@ -1514,6 +1593,21 @@ impl Jit {
     ) -> Result<(Context, Vec<String>), Error> {
         let mut ctx = self.module.make_context();
         let mut fctx = FunctionBuilderContext::new();
+        // `YAVS_CLIFT_LIST` (as `build` decided), else the lab switches.
+        let listed = self.lists.get(&(id, native)).cloned().flatten();
+        let (cheap, cold) = match &listed {
+            Some(l) if !native || crate::blockcov::list_native_cheap() => {
+                (Some(crate::blockcov::Cheap::Set(l.clone())), None)
+            }
+            Some(l) => (None, Some(l.clone())),
+            None => (
+                crate::blockcov::cheap(&crate::blockcov::key(prog, id, native)).filter(|_| {
+                    !native || std::env::var_os("YAVS_CLIFT_CHEAP_NATIVE").is_none_or(|v| v != "0")
+                }),
+                crate::blockcov::cold(&crate::blockcov::key(prog, id, native))
+                    .map(|c| Rc::new(c.clone())),
+            ),
+        };
         // Data for the table natives this function uses.
         let mut tabs = HashMap::new();
         for i in &f.code {
@@ -1569,7 +1663,8 @@ impl Jit {
         // The id symbols of the copies of subprograms the code names: its own frames' and its
         // callees' (`Gen::fid`).
         let mut ids = HashMap::new();
-        let own = (native && prog.is_sub_copy(id)).then_some(id);
+        // (Frame-mode code with cheap blocks names its own id too: `yavs_rt_steps` counts by it.)
+        let own = ((native || cheap.is_some()) && prog.is_sub_copy(id)).then_some(id);
         for g in own.into_iter().chain(order.iter().map(|(g, _)| **g)) {
             if prog.is_sub_copy(g) && !ids.contains_key(&g) {
                 let c = self.slot(prog, g)?;
@@ -1604,6 +1699,9 @@ impl Jit {
                 .module
                 .declare_func_in_func(self.hold_check, &mut ctx.func),
             rare: self.module.declare_func_in_func(self.rare, &mut ctx.func),
+            steps: cheap
+                .is_some()
+                .then(|| self.module.declare_func_in_func(self.steps, &mut ctx.func)),
             signal: self.module.declare_func_in_func(self.signal, &mut ctx.func),
             lcopy: self.module.declare_func_in_func(self.lcopy, &mut ctx.func),
             zero: self.module.declare_func_in_func(self.zero, &mut ctx.func),
@@ -1724,7 +1822,8 @@ impl Jit {
             id,
             native,
             cov.map(|c| c.1).zip(Some(&mut blocks)),
-            crate::blockcov::cold(&crate::blockcov::key(prog, id, native)),
+            cold.as_deref(),
+            cheap,
         )?;
         if let Some((did, _)) = cov {
             let mut dd = DataDescription::new();
@@ -1765,10 +1864,10 @@ impl Jit {
         self.module
             .finalize_definitions()
             .map_err(|e| e.to_string())?;
-        for (name, key, did, blocks) in std::mem::take(&mut self.covs) {
+        for (name, key, hash, did, blocks) in std::mem::take(&mut self.covs) {
             let (at, _) = self.module.get_finalized_data(did);
             self.cov_at.push(at as usize);
-            crate::blockcov::register(name, key, at as usize, blocks);
+            crate::blockcov::register(name, key, hash, at as usize, blocks);
         }
         if let Some(list) = self.perfmap.take() {
             // With `PERF_BUILDID_DIR` set (`perf record` sets it) the JIT module lists every
@@ -1836,6 +1935,8 @@ struct Imports {
     cold_region: FuncRef,
     hold_check: FuncRef,
     rare: FuncRef,
+    /// `yavs_rt_steps`, declared only in a body with a block that never ran (`YAVS_CLIFT_CHEAP`).
+    steps: Option<FuncRef>,
     drive_bit: FuncRef,
     codes: FuncRef,
     planes: FuncRef,
@@ -2504,6 +2605,7 @@ fn gen_func(
     native: bool,
     cov: Option<(GlobalValue, &mut Vec<crate::blockcov::BlockInfo>)>,
     cold: Option<&std::collections::HashSet<u32>>,
+    cheap: Option<crate::blockcov::Cheap>,
 ) -> Result<Vec<String>, String> {
     let mut cov = cov;
     let mut b = FunctionBuilder::new(&mut ctx.func, fctx);
@@ -2771,7 +2873,10 @@ fn gen_func(
     let mut base_known: Vec<Option<Known<Value>>> = vec![None; f.reg_ty.len()];
     let mut pre: Vec<Option<(AddrSpace, u32)>> = vec![None; f.reg_ty.len()];
     let mut preset = vec![false; f.reg_ty.len()];
-    for (r, addr, _) in preloads(f) {
+    // What each preloaded register holds: a run of a block that never ran stores those it reads.
+    let mut pdef: Vec<Option<Preload>> = vec![None; f.reg_ty.len()];
+    for (r, addr, v) in preloads(f) {
+        pdef[r.0 as usize] = Some((r, addr, v));
         preset[r.0 as usize] = !native;
         base_known[r.0 as usize] = match addr {
             Some((AddrSpace::Frame, off)) => Some(Known::Frame(off.into())),
@@ -2957,8 +3062,26 @@ fn gen_func(
     });
     let mut open = false;
     let mut prev = None;
+    // `YAVS_CLIFT_CHEAP`: the block being made never ran; frame code steps its instructions up to
+    // `run_to` in one host call.
+    let (mut cheap_now, mut nth, mut run_to) = (false, 0usize, 0usize);
+    let ends_run = |i: &Inst| {
+        matches!(
+            i,
+            Inst::Br { .. }
+                | Inst::CondBr { .. }
+                | Inst::Case { .. }
+                | Inst::Ret { .. }
+                | Inst::Unreachable { .. }
+        )
+    };
     for (i, &inst) in f.code.iter().enumerate() {
         let pc = i as u32;
+        if bbs[i].is_some() {
+            // A native frame's first block stays: `all` would leave every call at once.
+            cheap_now = cheap.as_ref().is_some_and(|c| c.has(pc, nth)) && !(native && nth == 0);
+            nth += 1;
+        }
         if srcmap() {
             g.b.set_srcloc(ir::SourceLoc::new(pc + 1));
         }
@@ -3075,7 +3198,11 @@ fn gen_func(
                 }
             }
         }
-        if native {
+        // A native frame leaves at the start of a block that never ran: nothing else of it is made.
+        if native && cheap_now && bbs[i].is_none() {
+            continue;
+        }
+        if native && !cheap_now {
             for t in targets(&inst) {
                 if ways[t] == 1 {
                     inherit[t] = Some(g.known.clone());
@@ -3108,7 +3235,7 @@ fn gen_func(
                 }
             }
             g.b.switch_to_block(bb);
-            if cold.is_some_and(|c| c.contains(&pc)) {
+            if cold.is_some_and(|c| c.contains(&pc)) || cheap_now {
                 g.b.set_cold_block(bb);
             }
             if let Some((gv, blocks)) = cov.as_mut() {
@@ -3149,6 +3276,65 @@ fn gen_func(
         // interpreter would.
         g.pc = pc;
         g.sigval = g.sigval_next.take().filter(|_| bbs[i].is_none());
+        if cheap_now && native {
+            g.leave_at(pc);
+            open = false;
+            continue;
+        }
+        if cheap_now && i < run_to {
+            continue;
+        }
+        if cheap_now && !ends_run(&inst) {
+            // Everything up to the jump or the next block start, as the interpreter does it; no
+            // fusion reaches past a block start, so none is split.
+            let end = (i + 1..n)
+                .find(|&j| bbs[j].is_some() || leader[j] || ends_run(&f.code[j]))
+                .unwrap_or(n);
+            if g.batch.is_some() {
+                g.batch_flush();
+            }
+            // Compiled code never stores what the interpreter preloads, and the interpreter does
+            // not preload everything (a parameter's slot address): the run gets what it reads.
+            let mut done = vec![false; f.reg_ty.len()];
+            for j in i..end {
+                let (uses, defs) = yavs_interp::inst_regs(f, &f.code[j]);
+                for u in uses {
+                    let k = u.0 as usize;
+                    if let Some(Some((_, addr, val))) = pdef.get(k).copied()
+                        && g.preset[k]
+                        && !done[k]
+                    {
+                        done[k] = true;
+                        let v = match addr {
+                            Some((sp, off)) => {
+                                let a = ok(addr_const(sp, off), "preload")?;
+                                g.addr_value(f, sp, off, a)
+                            }
+                            None => g.c64(val),
+                        };
+                        g.b.ins().store(g.rf, v, g.regs, u.0 as i32 * 8);
+                    }
+                }
+                for d in defs {
+                    if let Some(x) = done.get_mut(d.0 as usize) {
+                        *x = true;
+                    }
+                }
+            }
+            let steps = ok(g.imp.steps, "cheap block without yavs_rt_steps")?;
+            let (p, k, fv, len) = (
+                g.c32(pc),
+                g.c32((end - i) as u32),
+                g.fid(id),
+                g.c32(f.code.len() as u32),
+            );
+            g.call_go(steps, &[p, k, fv, len], true);
+            g.known.clone_from(&base_known);
+            g.iv.fill(None);
+            g.objnew = None;
+            run_to = end;
+            continue;
+        }
         let fixed = match inst {
             Inst::SigReadScalar { sig, .. } => g
                 .sigval
@@ -3513,29 +3699,8 @@ fn gen_func(
                 g.st(dst, v);
             }
             Inst::AddrOf { dst, space, off } => match addr_const(space, off) {
-                Some(_)
-                    if space == AddrSpace::Frame
-                        && yavs_ir::frame_object_addr(f, off).is_some() =>
-                {
-                    let (i, o) = yavs_ir::frame_object_addr(f, off).expect("tested");
-                    let hi = u64::from(space::FRAME) << 29 | u64::from(i);
-                    let v = g.c64((hi << 32 | u64::from(o)) as i64);
-                    g.st(dst, v);
-                }
-                Some(a) if space == AddrSpace::Frame => {
-                    let hi = match &g.nat {
-                        Some(n) => {
-                            let d = n.depth;
-                            g.b.ins().bor_imm_s(d, i64::from(space::FRAME) << 29)
-                        }
-                        None => g.mem_ld(MEM_FRAME),
-                    };
-                    let hi = g.b.ins().ishl_imm_s(hi, 32);
-                    let v = g.b.ins().bor_imm_s(hi, a as i64);
-                    g.st(dst, v);
-                }
                 Some(a) => {
-                    let v = g.c64(a as i64);
+                    let v = g.addr_value(f, space, off, a);
                     g.st(dst, v)
                 }
                 None => match space {
@@ -4906,6 +5071,26 @@ impl Gen<'_> {
             }
             None => self.b.use_var(self.vars[r.0 as usize]),
         }
+    }
+
+    /// The address an `AddrOf` of `space` and `off` makes, `a` its `addr_const`.
+    fn addr_value(&mut self, f: &Func, space: AddrSpace, off: u32, a: u64) -> Value {
+        if space != AddrSpace::Frame {
+            return self.c64(a as i64);
+        }
+        if let Some((i, o)) = yavs_ir::frame_object_addr(f, off) {
+            let hi = u64::from(space::FRAME) << 29 | u64::from(i);
+            return self.c64((hi << 32 | u64::from(o)) as i64);
+        }
+        let hi = match &self.nat {
+            Some(n) => {
+                let d = n.depth;
+                self.b.ins().bor_imm_s(d, i64::from(space::FRAME) << 29)
+            }
+            None => self.mem_ld(MEM_FRAME),
+        };
+        let hi = self.b.ins().ishl_imm_s(hi, 32);
+        self.b.ins().bor_imm_s(hi, a as i64)
     }
 
     fn st(&mut self, r: Reg, v: Value) {
@@ -6333,7 +6518,7 @@ impl Gen<'_> {
             self.imp.wait,
             self.imp.wait_same,
         ];
-        let regs = if unused.contains(&f) {
+        let regs = if unused.contains(&f) || self.imp.steps == Some(f) {
             self.c64(0)
         } else {
             self.regs

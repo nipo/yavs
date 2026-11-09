@@ -498,6 +498,31 @@ Compiled tiers: Cranelift
      - a ``cov-<pid>.tsv`` file
      - unset
      - ``run``
+   * - ``YAVS_CLIFT_CHEAP``
+     - Measurement: the blocks a ``YAVS_CLIFT_BLOCKCOV`` file lists as never run get the least code: frame-mode code hands the instructions of such a block to the interpreter in one call, a native-frame variant leaves at its start. ``all`` treats every block so (but a variant's first), ``alt`` every second block; those two are test modes. Compiled code is made again, not found by its key before it is made.
+     - a ``cov-<pid>.tsv`` file, ``all``, ``alt``
+     - unset
+     - ``run``
+   * - ``YAVS_CLIFT_CHEAP_NATIVE``
+     - Measurement: ``0`` keeps the full code of native-frame variants under ``YAVS_CLIFT_CHEAP`` (only frame-mode code is made cheaply).
+     - ``0``
+     - unset
+     - ``run``
+   * - ``YAVS_CLIFT_LIST``
+     - Measurement, ``--tier=auto``: a list of the blocks of each function that never ran, kept in the work library's cache per design. ``write`` makes this run a coverage run: its compiled code records the blocks it runs (and is not kept), and at the end the blocks that never ran replace the list. ``on``: compiled code made from now on lowers the listed blocks cheaply (as ``YAVS_CLIFT_CHEAP`` does in frame-mode code; native-frame variants only lay them out as cold code), unless full code of the function is in the cache already; a function whose listed blocks step more than ``YAVS_CLIFT_AGAIN`` instructions per IR instruction, in one run or in several together, is compiled again in full and leaves the list. ``all`` lists every block (a test mode).
+     - ``write``, ``on``, ``all``, ``off``
+     - unset (``off``)
+     - ``run``
+   * - ``YAVS_CLIFT_LIST_NATIVE``
+     - Measurement: ``cheap`` makes native-frame variants leave at their listed blocks under ``YAVS_CLIFT_LIST`` too, instead of only laying them out as cold code. Each such leave counts as 64 stepped instructions against the function's limit (``YAVS_CLIFT_AGAIN``); past it the function leaves the list for the next run, but the variant is not compiled again during the run.
+     - ``cheap``
+     - unset
+     - ``run``
+   * - ``YAVS_CLIFT_AGAIN``
+     - Measurement: the instructions a function may step in its blocks listed as never run (``YAVS_CLIFT_LIST``), per IR instruction of the function, before it is compiled again in full.
+     - a number
+     - ``500``
+     - ``run``
    * - ``YAVS_CLIFT_CLIF``
      - Prints the Cranelift IR of that function on standard error.
      - a function id, ``all``
