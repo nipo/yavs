@@ -1405,6 +1405,11 @@ impl Jit {
         prog.facts(id).hash(&mut facts);
         let mut list: Vec<u32> = list.into_iter().flatten().copied().collect();
         list.sort_unstable();
+        // Cheap blocks pass the function's id to the step counter as a constant (`Gen::fid`), so
+        // copies of one body with a list differ by id; a copy of a subprogram names its id slot.
+        if !list.is_empty() && !prog.is_sub_copy(id) {
+            list.insert(0, id.0);
+        }
         Some(crate::cache::pre_key(&PreInputs {
             fingerprint: &yavs_ir::opt::fingerprint(),
             target,

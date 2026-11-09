@@ -114,3 +114,54 @@ fn a_wrong_list_is_made_again_in_full_and_leaves_the_list() {
     );
     assert_eq!(leave.stdout, want);
 }
+
+/// Copies of one process with every block listed: the cheap code names the copy's id (the step
+/// counter's), so two copies of one body must not share a pre-key. Debug builds check every
+/// pre-key hit against the lowering and abort on a difference.
+#[test]
+fn copies_with_a_list_do_not_share_a_pre_key() {
+    for t in ["held/held_active", "process/edge_alias"] {
+        let d = tempdir(&format!("clift_list_copies_{}", t.replace('/', "_")));
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../../tests/corpus/{t}.vhd"));
+        let top = t.rsplit('/').next().unwrap();
+        let a = Command::new(env!("CARGO_BIN_EXE_yavs"))
+            .args(["analyze", "--std=2008", "--work=work:work"])
+            .arg(&src)
+            .current_dir(&d)
+            .output()
+            .expect("analyze");
+        assert!(a.status.success(), "{a:?}");
+        let run = |list: &str, args: &[&str]| {
+            let o = Command::new(env!("CARGO_BIN_EXE_yavs"))
+                .args([
+                    "--color",
+                    "never",
+                    "run",
+                    "--std=2008",
+                    "--work=work:work",
+                    "--threads=1",
+                ])
+                .args(args)
+                .arg(top)
+                .env("YAVS_COUNTERS", "1")
+                .env("YAVS_CLIFT_LIST", list)
+                .env("YAVS_CLIFT_AGAIN", "1")
+                .env("YAVS_AUTO_COUNT", "1")
+                .env("YAVS_AUTO_GATE", "0")
+                .env("YAVS_AUTO_SYNC", "1")
+                .env("YAVS_SPEC_ALL", "1")
+                .env_remove("YAVS_AUTO_POLICY")
+                .current_dir(&d)
+                .output()
+                .expect("run yavs");
+            assert!(o.status.success(), "{t}: {o:?}");
+            o.stdout
+        };
+        let want = run("off", &["--tier=interp", "--stop-time=120ns"]);
+        assert_eq!(
+            run("all", &["--tier=clift-auto", "--stop-time=120ns"]),
+            want,
+            "{t}"
+        );
+    }
+}
