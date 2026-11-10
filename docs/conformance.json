@@ -271,8 +271,8 @@
        2
       ],
       "process": [
-       48,
-       48
+       50,
+       50
       ],
       "protected": [
        27,
@@ -376,8 +376,8 @@
        2
       ],
       "process": [
-       48,
-       48
+       50,
+       50
       ],
       "protected": [
        27,
@@ -481,8 +481,8 @@
        2
       ],
       "process": [
-       48,
-       48
+       50,
+       50
       ],
       "protected": [
        27,
@@ -546,10 +546,9 @@
     "classes": {
      "analysis": 23,
      "elab": 7,
-     "oracle": 25,
+     "oracle": 26,
      "pass": 1014,
-     "skip": 403,
-     "timeout": 1
+     "skip": 403
     },
     "pass_list": 995,
     "pass_list_regressions": [],
@@ -626,9 +625,9 @@
   }
  },
  "generated": {
-  "commit": "9a9e5e03ee",
-  "commit_date": "2026-11-09",
-  "version": "0.18.0"
+  "commit": "9bbdb36189",
+  "commit_date": "2026-11-10",
+  "version": "0.19.0"
  },
  "local": {
   "records": {

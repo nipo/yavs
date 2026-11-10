@@ -1,14 +1,14 @@
 # yavs conformance report
 
-Generated: yavs 0.18.0 at commit `9a9e5e03ee` (2026-11-09) by `tools/conformance/run.py`; do not edit by hand.
+Generated: yavs 0.19.0 at commit `9bbdb36189` (2026-11-10) by `tools/conformance/run.py`; do not edit by hand.
 
 yavs is checked by running the test suites of VHDL libraries, a VHDL language test suite and real designs on it, and by comparing its output
-with two established open-source VHDL simulators, called sim1 and sim2 here. Each suite judges its own tests. Over the suites below, 15071 of 15174
+with two established open-source VHDL simulators, called sim1 and sim2 here. Each suite judges its own tests. Over the suites below, 15073 of 15176
 tests pass; every failure is tracked as an issue. This is evidence, not a proof of correctness.
 
 | Project or suite | What it is | Passed / total |
 | --- | --- | ---: |
-| Differential testbenches | small testbenches of this repository; output must equal sim1's, at 1 and 4 threads | 665/665 |
+| Differential testbenches | small testbenches of this repository; output must equal sim1's, at 1 and 4 threads | 667/667 |
 | Known simulator differences | one reproducer per case where simulators disagree | 271/271 |
 | sim1's regression tests | a reference simulator's own self-checking tests (runnable ones) | 1014/1070 |
 | sim2's regression tests | a reference simulator's own self-checking tests (runnable ones) | 463/504 |
@@ -50,7 +50,7 @@ Every testbench of `tests/corpus` runs on yavs and its normalised output is comp
 | ieee | 21/21 | 21/21 | 21/21 |
 | implicit | 6/6 | 6/6 | 6/6 |
 | postponed | 2/2 | 2/2 | 2/2 |
-| process | 48/48 | 48/48 | 48/48 |
+| process | 50/50 | 50/50 | 50/50 |
 | protected | 27/27 | 27/27 | 27/27 |
 | psl | 16/16 | 16/16 | 16/16 |
 | reflect | 14/14 | 14/14 | 14/14 |
@@ -63,7 +63,7 @@ Every testbench of `tests/corpus` runs on yavs and its normalised output is comp
 | std93 | 6/6 | 6/6 | 6/6 |
 | synopsys | 20/20 | 20/20 | 20/20 |
 | textio | 19/19 | 19/19 | 19/19 |
-| total | 665/665 | 665/665 | 665/665 |
+| total | 667/667 | 667/667 | 667/667 |
 
 Failing: none.
 

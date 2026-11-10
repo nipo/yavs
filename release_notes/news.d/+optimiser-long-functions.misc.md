@@ -1,1 +1,0 @@
-Long subprograms, such as a function with hundreds of statements or a long `if`/`elsif` chain, are optimised much faster when they are first called, so testbenches built on such library code start sooner.
