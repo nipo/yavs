@@ -7072,11 +7072,12 @@ Measured with `tools/realbench` `--compare` (41 tests, all phases, cold and warm
 instructions, cycles and page faults as medians of every timed run, 2 to 5 runs) and the `tools/bench` h2h designs (9 runs):
 see docs/STATUS.md "Huge pages for the heap". No test or phase gets slower beyond noise.
 
-### The rest of the heap: a thread marks each later step (perf/b4-hugeheap, 2026-11-10; not decided)
+### The rest of the heap: a thread marks each later step (perf/b4-hugeheap; user, 2026-11-10: landed)
 
 The first step covers 64 MiB. glibc takes every later step as a new `brk` mapping, which does not inherit the advice, so a large design
-runs on small pages from the 65th MiB: GRLIB (about 370 MiB peak) had 63 of 228 MiB of its heap on huge pages. Decisions, for the
-maintainer to confirm:
+runs on small pages from the 65th MiB: GRLIB (about 370 MiB peak) had 63 of 228 MiB of its heap on huge pages. Landed on the data-TLB and page-fault counters (user, 2026-11-10); the cycle gain was not shown on a busy host,
+the costs below are as measured, and a re-timing on a quiet host is pending. The reach gate for this path is the `hg` test in
+`crates/yavs-cache/tests/huge_heap.rs` (no corpus test grows the heap past the first step). Decisions:
 
 - **`yavs-hugepoll`, a detached thread, marks the heap again as it grows.** It reads the end of the heap (`sbrk(0)`), looks again after
   1 ms while the end moves, doubling up to 64 ms while it does not, and each time calls `madvise(MADV_HUGEPAGE)` on the whole heap from
@@ -7084,7 +7085,7 @@ maintainer to confirm:
   allocator's own trim give memory back, and what grows back is a new mapping below the old end. Started only when `huge_heap()` advised
   the first step, so a system without THP in `madvise` mode, `YAVS_HUGE_HEAP=0` and other platforms never have it. It runs for the
   life of the process. No new library symbol: the Linux archives built for glibc 2.17 link the same set as before.
-- **A user's tuning stands.** `huge_heap()` does nothing when `GLIBC_TUNABLES` names `glibc.malloc.top_pad`, `trim_threshold`,
+- **A user's tuning stands** (accepted by the user, 2026-11-10, although it also turns off the first-step marking). `huge_heap()` does nothing when `GLIBC_TUNABLES` names `glibc.malloc.top_pad`, `trim_threshold`,
   `mmap_threshold` or `hugetlb` (or `MALLOC_TOP_PAD_`, `MALLOC_TRIM_THRESHOLD_`, `MALLOC_MMAP_THRESHOLD_` is set): its `mallopt` calls
   would override the first three, and `hugetlb` gives the allocator's own marking of the whole heap. Other tunables change nothing.
 - **What it gets, and what not.** Pages touched before the thread comes round stay small, so coverage depends on how fast the heap is
