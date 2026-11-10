@@ -284,6 +284,9 @@ pub struct Stats {
     pub estimates_skipped: u64,
     /// Estimates that stopped once the batch passed the pool threshold (`pool_batch`).
     pub estimates_cut: u64,
+    /// Bus copies of `forward_copy` onto a block boundary (`mark_words`; debug and `op-census`
+    /// builds only, else 0).
+    pub block_copies: u64,
 }
 
 /// A pending observer wake-up (`Hook::wake_at`). Ordered by time, then registration.
@@ -4202,6 +4205,10 @@ impl SimControl {
                     let Buf::Planes { b, .. } = &src.cur else {
                         unreachable!("copy part checked at build: logic source");
                     };
+                    #[cfg(any(debug_assertions, feature = "op-census"))]
+                    if f.dst_off.is_multiple_of(64) {
+                        self.stats.block_copies += 1;
+                    }
                     dst.commit_copy(b, f.src_off, f.dst_off, f.len)
                 } else {
                     // A bus onto itself, or with a driver value of its own: its blocks as one run,

@@ -85,6 +85,7 @@ pub fn report(s: yavs_kernel::Stats, rt: Option<&yavs_interp::Runtime>) {
         rows.push(("ops_elab", before));
         rows.push(("ops", n - before));
         rows.push(("wake_sole_left", s.sole_left));
+        rows.push(("block_copies", s.block_copies));
     }
     if let Some(n) = yavs_interp::lean_late_calls() {
         rows.push(("lean_late", n));

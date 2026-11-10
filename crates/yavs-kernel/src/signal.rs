@@ -1074,6 +1074,18 @@ fn mark_bits(pend: &mut [u64], words: &mut Vec<u32>, elem: u32, len: u32) {
     }
 }
 
+/// The `len` elements from the start of word `w` into the pending bit mask and its list of words:
+/// `mark_bits` of a run on a block boundary, a word at a time.
+#[inline(always)]
+fn mark_words(pend: &mut [u64], words: &mut Vec<u32>, w: usize, len: usize) {
+    for (k, p) in pend[w..w + len.div_ceil(64)].iter_mut().enumerate() {
+        if *p == 0 {
+            words.push((w + k) as u32);
+        }
+        *p |= nmask(len - 64 * k);
+    }
+}
+
 /// The pending words of a signal in element order. Processes of the elements of a vector
 /// often commit in descending element order (the batch is in process order): reversed, not
 /// sorted.
@@ -2407,8 +2419,12 @@ impl Signal {
         };
         let drv: &mut [Block] = drv;
         yavs_logic::wide::copy_range(drv, elem as usize, src, src_off as usize, len as usize);
-        for k in (0..len).step_by(64) {
-            mark_bits(pend, pend_words, elem + k, (len - k).min(64));
+        if elem.is_multiple_of(64) {
+            mark_words(pend, pend_words, elem as usize / 64, len as usize);
+        } else {
+            for k in (0..len).step_by(64) {
+                mark_bits(pend, pend_words, elem + k, (len - k).min(64));
+            }
         }
         first
     }
@@ -4085,7 +4101,8 @@ mod tests {
     }
 
     /// `commit_copy` against `commit_planes_run` of the same elements in blocks: the same driving
-    /// value and pending bits, at every alignment of source and target.
+    /// value and pending bits, at every alignment of source and target, with nothing pending
+    /// before and with an element of the first and of the last block pending.
     #[test]
     fn a_bus_copy_is_its_run_of_entries() {
         let ty = SignalType::logic(300);
@@ -4097,7 +4114,7 @@ mod tests {
             x
         };
         let src: Vec<Block> = (0..5).map(|_| [next(), next(), next(), next()]).collect();
-        for (so, dst, len) in [
+        for c in [
             (0, 0, 300),
             (0, 0, 128),
             (64, 64, 192),
@@ -4110,10 +4127,32 @@ mod tests {
             (0, 235, 65),
             (235, 0, 65),
             (64, 7, 129),
-        ] {
+        ]
+        .into_iter()
+        .flat_map(|c| [(c, false), (c, true)])
+        {
+            let ((so, dst, len), before) = c;
             let mk = || {
                 let mut s = Signal::new("s".into(), ty, Buf::zeroed(ty.elem, 300), None);
                 s.pend_words.clear();
+                if before {
+                    s.commit_planes_run(&[
+                        crate::process::OutV {
+                            sig: 0,
+                            slot: 0,
+                            elem: dst,
+                            len: 1,
+                            planes: [1, 0, 0, 0],
+                        },
+                        crate::process::OutV {
+                            sig: 0,
+                            slot: 0,
+                            elem: 299,
+                            len: 1,
+                            planes: [0, 1, 0, 0],
+                        },
+                    ]);
+                }
                 s
             };
             let (mut a, mut b) = (mk(), mk());
