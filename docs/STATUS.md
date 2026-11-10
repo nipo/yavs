@@ -1044,6 +1044,16 @@ first run with hits reads the stored program instead of lowering and compiling t
 world, runs 1 to 5 at auto, all-thread instructions 52.9, 28.3, 19.8, 19.8, 19.7 G (before: run 3 at 50.1 G). Corpus test
 `generics/elab_call_table` reaches the path (`ecall_session_hits`).
 
+### Optimiser round 2: one optimised body per function (perf/b4-optpass2, 2026-11-10)
+
+`docs/decisions.md` "IR optimiser, round 2". The optimised body of a function is made once per program and handed
+out again to every level of inlining and to the function's own optimisation (`opt_bodies_kept`, perf design
+`body_once`); two reader searches per candidate and a few scans per register or call site are gone. The same IR
+(`YAVS_DUMPIR` over the corpus) and the same machine code (`YAVS_CLIFT_CODEDIR` over the corpus). Cold
+`--tier=interp --threads 1` main thread: `hdlm_fifo_sync` 0.808 to 0.773 G, `vunit_logging` 0.580 to 0.543 G,
+`olo_axi_master_full` 1.861 to 1.805 G, `uvvm_func_cov` 3.965 to 3.935 G, `osvvm_axi4_random` 7.488 to 7.415 G,
+Microwatt to 2 us 5.61 to 5.52 G, GRLIB to 2 us level. A function of 600 vector statements: 4.1 to 0.65 G.
+
 ### Optimiser passes linear in the size of a function (perf/b3-optpass, 2026-11-10)
 
 `docs/decisions.md` "IR optimiser: passes linear in the size of a function". The same IR (`YAVS_DUMPIR` over the

@@ -113,6 +113,10 @@ the same commit (root `AGENTS.md` rule 24).
   sweep from the last block (backward) takes a walk per arm of the chain: library functions have hundreds. Forward
   ones go in reverse postorder (`Opt::rpo`), backward ones switch to `opt::postorder` at `POSTORDER_ROUND`
   (`docs/decisions.md` "IR optimiser: passes linear in the size of a function").
+- **An optimised body is made once per program and handed out again** (`opt::optimize_body`, kept in
+  `FwdCache`; counter `opt_bodies_kept`): inlining's forwarders and the function's own optimisation share it. So the
+  result of optimising a function without instance data must depend on the program alone, never on what was optimised
+  before or on state that changes during a run (`docs/decisions.md` "IR optimiser, round 2").
 - Verifier errors are ICEs of the producer: never relax the verifier to make lowering pass
   without an ir.md note.
 - The descriptor format, the four cells of a `Param::flat` array and the fat pair `[data, dope]` for unconstrained results are shared with

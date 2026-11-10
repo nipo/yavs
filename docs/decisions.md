@@ -15234,3 +15234,31 @@ over the corpus):
 - **Not changed:** `Opt::kill` and `kill_all` scan a table capped at 64 facts (#1059): their share of the optimiser
   stays flat from 300 to 1200 statements, with as many escaping variables. The dense bit sets of the liveness
   analyses stay (blocks times registers / 64 per round) with their caps.
+
+## IR optimiser, round 2: one optimised body per function, readers indexed once (yavs-ir `opt`, perf/b4-optpass2, 2026-11-10)
+
+Written by Claude. A cold-run profile (frame pointers, all threads) put the optimiser at 37 to 57 percent of the
+cycles of the small library testbenches, 14 to 19 percent of `osvvm_axi4_random`, 4 percent of `uvvm_axistream_vvc`,
+3.6 percent of GRLIB (where Cranelift takes 13 percent on the compile threads) and 0.3 percent of Microwatt. Each
+change below computes what the code did before (the same IR by `YAVS_DUMPIR` over the corpus, the same machine code by
+`YAVS_CLIFT_CODEDIR` over the corpus in `--tier=clift` and in `auto` with every function compiled):
+
+- **Kept bodies.** `opt::optimize_body` (a function optimised without inlining) is kept per program next to the
+  forwarders (`FwdCache`) and handed out again: inlining asked for the same small callee at level 0, at level 1, for
+  the wide variant and again when the callee itself was optimised, so a fifth to a third of the bodies of a small
+  testbench were optimised two to four times. Counter `opt_bodies_kept`, design `body_once` in `perf.rs`. Not kept:
+  copies (instance data, descriptors of a subprogram copy) and reserved copy slots. This relies on the rule stated at
+  `optimize_func`: the result reads only what lowering produced, so it does not depend on when it is made.
+- **Readers indexed once.** `gate_results` and `forward_frame_copies` searched the whole function for the readers of
+  each candidate (37 and 12 percent of a function of 600 vector statements); each now indexes the readers at its first
+  candidate and keeps the index right as it rewrites (a reader is checked against the code before use).
+  `forward_frame_copies` also keeps, per block, whether it may change the source.
+- **Smaller ones.** `inline::run_with` scanned the function for a string concatenation once per call site, now once;
+  `undefined_promoted` tested each promoted register against every block, now one pass over the blocks;
+  `promote_cleanup` used a SipHash set for its promoted registers (a flag per register now) and cleared the copies of
+  a promoted register one by one at each definition (numbered by register now, a run of bits).
+- **Tried, not kept:** liveness per register by walking back from its reads (`share::plan`) was slower on a chain of
+  `if`s (0.85 to 1.05 G for 1200 statements): constants merged at the entry are live from there to their one use, so
+  the walks sum to the square of the length where the bit sets divide it by 64. A sorted slot table for
+  `in_descriptor` and `own_slot` and one successor list per function for `share`, `slots` and `memo` stay ideas: each
+  is under half a percent of every profiled design.

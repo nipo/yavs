@@ -189,6 +189,9 @@ case!(frame_slices, "x=", &[], [("ops", Max(11400))]);
 // looks at each instruction a few times, not once per vector (a scan per vector made the
 // optimiser cost grow with the square of the function).
 case!(dopes_scan, "t=", &[], [("dopes_scans", Max(19000))]);
+// A small function inlined at two levels: its optimised body is made once and handed out again,
+// not optimised at each level (the floor shows a slide back).
+case!(body_once, "s=672", &[], [("opt_bodies_kept", Min(1))]);
 // A function reading its string parameter's descriptor in the frame: its calls are lean from the
 // 128th on (`Pre::late`), 2 x 300 calls, so about 470 lean ones.
 case!(lean_late, "n=", &[], [("lean_late", Min(450))]);

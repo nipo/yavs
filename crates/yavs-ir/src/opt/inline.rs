@@ -81,9 +81,14 @@ impl Forwarder {
     }
 }
 
-/// Forwarders by callee, made once per program (a copy of the program starts without them).
+/// Forwarders by callee, made once per program (a copy of the program starts without them),
+/// and the optimised bodies they were made from (`opt::optimize_body`), which every level, the
+/// wide variant and the callee's own optimisation start from.
 #[derive(Default, Debug)]
-pub struct FwdCache(Mutex<HashMap<(u32, u8), Fwd>>);
+pub struct FwdCache(
+    Mutex<HashMap<(u32, u8), Fwd>>,
+    pub(super) Mutex<HashMap<u32, Box<crate::Func>>>,
+);
 
 type Fwd = Option<Arc<Forwarder>>;
 
@@ -1215,6 +1220,11 @@ fn run_with(
     // The calls to inline and their callees.
     let mut sites: HashMap<usize, Site> = HashMap::new();
     let mut added = 0usize;
+    // (Once per function, not per call: the code does not change in this loop.)
+    let has_cat = f
+        .code
+        .iter()
+        .any(|i| matches!(i, Inst::Cat { logic: false, .. }));
     for (pc, i) in f.code.iter().enumerate() {
         let (func, args, obj, dst) = match *i {
             Inst::Call { func, args, dst } => (func, args, None, dst),
@@ -1238,12 +1248,7 @@ fn run_with(
         // A call that hands over a string built just before it (the message of a check): a
         // callee of up to four times the usual raw size, because sinking can then skip
         // building it (`opt/sink.rs`).
-        let wide = || {
-            f.code
-                .iter()
-                .any(|i| matches!(i, Inst::Cat { logic: false, .. }))
-                && builds_string(f, pc, args, obj)
-        };
+        let wide = || has_cat && builds_string(f, pc, args, obj);
         let fw = if round == Round::Tabs {
             forwarder(prog, func, 0, false)
         } else if wide_only {

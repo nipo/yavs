@@ -352,7 +352,13 @@ fn optimize_func_with(
     inst: Option<InstView<'_>>,
 ) -> Option<Box<crate::Func>> {
     let mut facts = None;
-    let mut f = optimize_body_with(prog, id, inst, Some(&mut facts))?;
+    let mut f = match inst {
+        None => match kept_body(prog, id) {
+            Some(f) => f,
+            None => optimize_body_with(prog, id, None, None)?,
+        },
+        Some(_) => optimize_body_with(prog, id, inst, Some(&mut facts))?,
+    };
     if inline::run(prog, id, &mut f, 1) | inline::run_wide(prog, id, &mut f) {
         // The inlined bodies are code of this function now: what is known at the call decides
         // their branches and repeated reads are shared.
@@ -450,9 +456,44 @@ pub fn keep_variables_on() -> bool {
     KEEP_VARS.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-/// The function optimised, without inlining: the copy [`optimize_func`] starts from.
+/// The function optimised, without inlining: the copy [`optimize_func`] starts from. Made once
+/// per program and kept (inlining asks for the bodies of small callees at each level).
 pub(crate) fn optimize_body(prog: &Program, id: FuncId) -> Option<Box<crate::Func>> {
-    optimize_body_with(prog, id, None, None)
+    if let Some(f) = kept_body(prog, id) {
+        return Some(f);
+    }
+    let f = optimize_body_with(prog, id, None, None)?;
+    // (Not a reserved slot: a copy made there later is another function.)
+    if prog.funcs.get(id).is_some_and(|r| !r.spare) {
+        prog.fwd
+            .1
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(id.0, f.clone());
+    }
+    Some(f)
+}
+
+/// The body [`optimize_body`] kept for `id`, if it made one (the lock is not held while
+/// optimising: the optimiser takes the program's other locks).
+fn kept_body(prog: &Program, id: FuncId) -> Option<Box<crate::Func>> {
+    let f = prog
+        .fwd
+        .1
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(&id.0)
+        .cloned()?;
+    BODIES_KEPT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    Some(f)
+}
+
+static BODIES_KEPT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Bodies [`optimize_body`] handed out again instead of optimising the function once more (a
+/// work counter: `YAVS_COUNTERS`).
+pub fn bodies_kept() -> u64 {
+    BODIES_KEPT.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 fn optimize_body_with(
@@ -2033,16 +2074,42 @@ impl<'a> Opt<'a> {
     /// of its own (#1063): no fat pair, no descriptor, the same elements, and nothing the native
     /// could report (lengths that differ keep the call).
     fn gate_results(&mut self) -> bool {
-        let reads = |s: &Self, i: &Inst, r: Reg| {
-            let mut hit = false;
-            i.visit(&mut |x, role, _| hit |= role == Role::Use && x == r);
+        // The registers an instruction reads, each once.
+        let read_by = |s: &Self, i: &Inst| {
+            let mut rs: Vec<u32> = Vec::new();
+            i.visit(&mut |x, role, _| {
+                if role == Role::Use {
+                    rs.push(x.0);
+                }
+            });
             if let Some(l) = i.list() {
-                hit |= s
-                    .operands
-                    .get(l.start as usize..(l.start + l.len) as usize)
-                    .is_some_and(|rs| rs.contains(&r));
+                rs.extend(
+                    s.operands
+                        .get(l.start as usize..(l.start + l.len) as usize)
+                        .unwrap_or(&[])
+                        .iter()
+                        .map(|r| r.0),
+                );
             }
-            hit
+            rs.sort_unstable();
+            rs.dedup();
+            rs
+        };
+        // Per register, the instructions reading it: how many, and the sum of their pcs (the
+        // pc itself when there is one). Made at the first candidate, kept up to date.
+        let mut readers: Vec<(u32, u64)> = Vec::new();
+        let count = |readers: &mut Vec<(u32, u64)>, rs: &[u32], pc: usize, add: bool| {
+            for &r in rs {
+                if readers.len() <= r as usize {
+                    readers.resize(r as usize + 1, (0, 0));
+                }
+                let e = &mut readers[r as usize];
+                if add {
+                    *e = (e.0 + 1, e.1 + pc as u64);
+                } else {
+                    *e = (e.0 - 1, e.1 - pc as u64);
+                }
+            }
         };
         let mut done = false;
         for b in 0..self.blocks.len() {
@@ -2086,10 +2153,17 @@ impl<'a> Opt<'a> {
                     continue;
                 }
                 // One reader, in this block: the load of the data pointer.
-                let mut readers = (0..self.code.len()).filter(|&q| reads(self, &self.code[q], p));
-                let (Some(lpc), None) = (readers.next(), readers.next()) else {
+                if readers.is_empty() {
+                    readers.resize(self.defs.len(), (0, 0));
+                    for q in 0..self.code.len() {
+                        let rs = read_by(self, &self.code[q]);
+                        count(&mut readers, &rs, q, true);
+                    }
+                }
+                let Some(&(1, lpc)) = readers.get(p.0 as usize) else {
                     continue;
                 };
+                let lpc = lpc as usize;
                 let Inst::Load {
                     dst: x,
                     w: Width::B8,
@@ -2105,6 +2179,10 @@ impl<'a> Opt<'a> {
                 let q = self.fresh(RegTy::Ptr, 1);
                 self.inserts.push((pc, Inst::Alloc { dst: q, size }));
                 let cnt = self.const_reg(b, pc, n as i64);
+                for at in [pc, lpc] {
+                    let rs = read_by(self, &self.code[at]);
+                    count(&mut readers, &rs, at, false);
+                }
                 self.code[pc] = Inst::LogicOp {
                     op,
                     dst: q,
@@ -2113,6 +2191,10 @@ impl<'a> Opt<'a> {
                     n: cnt,
                 };
                 self.code[lpc] = Inst::Move { dst: x, src: q };
+                for at in [pc, lpc] {
+                    let rs = read_by(self, &self.code[at]);
+                    count(&mut readers, &rs, at, true);
+                }
                 self.changed = true;
                 done = true;
             }
@@ -2269,6 +2351,37 @@ impl<'a> Opt<'a> {
                 block_of[pc] = b;
             }
         }
+        // The instructions reading each register (made at the first candidate; a rewrite adds
+        // the instructions that read the source now). Each is looked at again before use.
+        let mut users: Vec<Vec<u32>> = Vec::new();
+        let read_regs = |s: &Self, i: &Inst, f: &mut dyn FnMut(u32)| {
+            i.visit(&mut |r, role, _| {
+                if role == Role::Use {
+                    f(r.0);
+                }
+            });
+            if let Some(l) = i.list() {
+                for r in s
+                    .operands
+                    .get(l.start as usize..(l.start + l.len) as usize)
+                    .unwrap_or(&[])
+                {
+                    f(r.0);
+                }
+            }
+        };
+        let add_user = |users: &mut Vec<Vec<u32>>, r: u32, pc: usize| {
+            if users.len() <= r as usize {
+                users.resize(r as usize + 1, Vec::new());
+            }
+            let u = &mut users[r as usize];
+            if u.last() != Some(&(pc as u32)) {
+                u.push(pc as u32);
+            }
+        };
+        // Whether a whole block has an instruction that may change or free the source, by
+        // `stmt_ok` (a block's answer changes only where a copy goes).
+        let mut bad_block: [Vec<Option<bool>>; 2] = [vec![None; nb], vec![None; nb]];
         for pc0 in 0..self.code.len() {
             let Inst::NewFrame {
                 dst: q,
@@ -2295,18 +2408,27 @@ impl<'a> Opt<'a> {
             }
             // The registers that hold an address inside the copy: q and what is indexed from
             // it by constants (offset from q), each defined once.
+            if users.is_empty() {
+                for pc in 0..self.code.len() {
+                    read_regs(self, &self.code[pc], &mut |r| add_user(&mut users, r, pc));
+                }
+            }
+            let users_of = |users: &Vec<Vec<u32>>, r: u32| -> Vec<u32> {
+                users.get(r as usize).cloned().unwrap_or_default()
+            };
+            // (Each register is defined once, so its offset is the same whatever the order.)
             let mut at: FxMap<u32, i64> = FxMap::default();
             at.insert(q.0, 0);
-            let mut grew = true;
-            while grew {
-                grew = false;
-                for pc in 0..self.code.len() {
+            let mut work = vec![q.0];
+            while let Some(r) = work.pop() {
+                for pc in users_of(&users, r) {
                     if let Inst::Index {
                         dst,
                         base,
                         pos,
                         stride,
-                    } = self.code[pc]
+                    } = self.code[pc as usize]
+                        && base.0 == r
                         && !at.contains_key(&dst.0)
                         && let Some(&o) = at.get(&base.0)
                         && let Some(c) = konst(self, pos)
@@ -2316,14 +2438,21 @@ impl<'a> Opt<'a> {
                         && self.defs.get(dst.0 as usize) == Some(&1)
                     {
                         at.insert(dst.0, d);
-                        grew = true;
+                        work.push(dst.0);
                     }
                 }
             }
             // Every reader is an `Index` that is one of those or a load inside the copy.
             let mut loads: Vec<usize> = Vec::new();
             let mut ok = true;
-            for pc in 0..self.code.len() {
+            let mut near: Vec<u32> = Vec::new();
+            for &r in at.keys() {
+                near.extend(users_of(&users, r));
+            }
+            near.sort_unstable();
+            near.dedup();
+            for pc in near {
+                let pc = pc as usize;
                 let i = self.code[pc];
                 if is_dead(&i) || pc == pc0 {
                     continue;
@@ -2403,6 +2532,9 @@ impl<'a> Opt<'a> {
                     )
             };
             let bad = |code: &[Inst]| code.iter().any(|i| !harmless(i));
+            let cache = &mut bad_block[usize::from(stmt_ok)];
+            let mut bad_at =
+                |s: &Self, b: usize| *cache[b].get_or_insert_with(|| bad(&s.code[s.range(b)]));
             let mut dirty_in = vec![false; nb];
             let mut seen = vec![false; nb];
             let mut work: Vec<usize> = Vec::new();
@@ -2417,7 +2549,7 @@ impl<'a> Opt<'a> {
                 }
             }
             while let Some(b) = work.pop() {
-                let d = dirty_in[b] || bad(&self.code[self.range(b)]);
+                let d = dirty_in[b] || bad_at(self, b);
                 let mut k = 0;
                 while let Some(s) = self.succ(b, k) {
                     k += 1;
@@ -2444,7 +2576,8 @@ impl<'a> Opt<'a> {
                 continue;
             }
             // Read the source instead.
-            for pc in 0..self.code.len() {
+            for pc in users_of(&users, q.0) {
+                let pc = pc as usize;
                 match self.code[pc] {
                     Inst::Load { dst, addr, w } if addr == q => {
                         self.code[pc] = Inst::Load { dst, addr: data, w };
@@ -2462,10 +2595,13 @@ impl<'a> Opt<'a> {
                             stride,
                         };
                     }
-                    _ => {}
+                    _ => continue,
                 }
+                add_user(&mut users, data.0, pc);
             }
             self.code[pc0] = dead();
+            bad_block[0][b0] = None;
+            bad_block[1][b0] = None;
             self.changed = true;
         }
     }
@@ -5713,13 +5849,14 @@ impl<'a> Opt<'a> {
                 }
             }
         }
-        (0..m)
-            .map(|k| {
-                (0..nb).any(|b| {
-                    exposed[b][k / 64] >> (k % 64) & 1 == 1 && input[b][k / 64] >> (k % 64) & 1 == 0
-                })
-            })
-            .collect()
+        // Read somewhere before any path defines it: one pass over the blocks for all of them.
+        let mut undef = vec![0u64; w];
+        for (e, i) in exposed.iter().zip(&input) {
+            for ((u, e), i) in undef.iter_mut().zip(e).zip(i) {
+                *u |= e & !i;
+            }
+        }
+        (0..m).map(|k| undef[k / 64] >> (k % 64) & 1 == 1).collect()
     }
 
     /// Fold the moves a promotion left: the copy of a promoted register that a load made is
@@ -5758,7 +5895,11 @@ impl<'a> Opt<'a> {
                 }
             }
         }
-        let is_p: std::collections::HashSet<u32> = pregs.iter().map(|r| r.0).collect();
+        let mut pset = vec![false; pregs.iter().map(|r| r.0 as usize + 1).max().unwrap_or(0)];
+        for r in pregs {
+            pset[r.0 as usize] = true;
+        }
+        let is_p = |r: u32| pset.get(r as usize).copied().unwrap_or(false);
         let ptype: FxMap<u32, Option<RegTy>> = pregs.iter().map(|r| (r.0, self.rty(*r))).collect();
         let rtys: Vec<Option<RegTy>> = (0..n as u32).map(|r| self.rty(Reg(r))).collect();
         let nb = self.blocks.len();
@@ -5766,32 +5907,43 @@ impl<'a> Opt<'a> {
         // The copies: `d := p` with `d` defined once and `p` promoted.
         let mut copies: Vec<(u32, u32)> = Vec::new();
         let mut copy_of: FxMap<u32, usize> = FxMap::default();
-        let mut by_p: FxMap<u32, Vec<usize>> = FxMap::default();
         for (b, &r) in reach.iter().enumerate() {
             if !r {
                 continue;
             }
             for pc in self.range(b) {
                 if let Inst::Move { dst: d, src: p } = self.code[pc]
-                    && is_p.contains(&p.0)
-                    && !is_p.contains(&d.0)
+                    && is_p(p.0)
+                    && !is_p(d.0)
                     && ndefs[d.0 as usize] == 1
                     && !copy_of.contains_key(&d.0)
                 {
                     copy_of.insert(d.0, copies.len());
-                    by_p.entry(p.0).or_default().push(copies.len());
                     copies.push((d.0, p.0));
                 }
             }
         }
+        // Numbered by the promoted register: a definition of one forgets a run of bits, not
+        // each of its copies (a variable read in every statement has as many).
+        copies.sort_by_key(|c| c.1);
+        let mut by_p: FxMap<u32, (usize, usize)> = FxMap::default();
+        for (k, &(d, p)) in copies.iter().enumerate() {
+            copy_of.insert(d, k);
+            by_p.entry(p).or_insert((k, k)).1 = k + 1;
+        }
+        let forget = |avail: &mut [u64], (mut k, hi): (usize, usize)| {
+            while k < hi {
+                let n = (64 - k % 64).min(hi - k);
+                avail[k / 64] &= !((!0u64 >> (64 - n)) << (k % 64));
+                k += n;
+            }
+        };
         let w = copies.len().div_ceil(64).max(1);
         // The copies available after instruction `i`, given those before it.
         let step = |avail: &mut Vec<u64>, i: &Inst| {
             for_defs(i, |r| {
-                if let Some(ks) = by_p.get(&r.0) {
-                    for &k in ks {
-                        avail[k / 64] &= !(1 << (k % 64));
-                    }
+                if let Some(&ks) = by_p.get(&r.0) {
+                    forget(avail, ks);
                 }
             });
             if let Inst::Move { dst: d, src: p } = *i
@@ -5884,8 +6036,8 @@ impl<'a> Opt<'a> {
                 }
                 // A store's move: let the defining instruction write the register.
                 if let Inst::Move { dst: p, src: s } = i
-                    && is_p.contains(&p.0)
-                    && !is_p.contains(&s.0)
+                    && is_p(p.0)
+                    && !is_p(s.0)
                     && ndefs[s.0 as usize] == 1
                     && uses[s.0 as usize] == 1
                     && let Some(&pd) = def_at.get(&s.0)
@@ -5910,17 +6062,15 @@ impl<'a> Opt<'a> {
                     self.code[pd] = d;
                     self.code[pc] = dead();
                     uses[s.0 as usize] = 0;
-                    if let Some(ks) = by_p.get(&p.0) {
-                        for &k in ks {
-                            avail[k / 64] &= !(1 << (k % 64));
-                        }
+                    if let Some(&ks) = by_p.get(&p.0) {
+                        forget(&mut avail, ks);
                     }
                     touched.insert(p.0, pc);
                     continue;
                 }
                 // Reads and writes of promoted registers, and the definitions of this block.
                 i.visit(&mut |r, _, _| {
-                    if is_p.contains(&r.0) {
+                    if is_p(r.0) {
                         touched.insert(r.0, pc);
                     }
                 });
@@ -5930,7 +6080,7 @@ impl<'a> Opt<'a> {
                         .get(l.start as usize..(l.start + l.len) as usize)
                         .unwrap_or(&[])
                     {
-                        if is_p.contains(&r.0) {
+                        if is_p(r.0) {
                             touched.insert(r.0, pc);
                         }
                     }

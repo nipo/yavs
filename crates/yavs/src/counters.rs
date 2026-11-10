@@ -67,6 +67,7 @@ pub fn report(s: yavs_kernel::Stats, rt: Option<&yavs_interp::Runtime>) {
         ("dopes_scans", yavs_ir::opt::dopes_scans()),
         ("flat_elem_results", yavs_ir::flat_elem_results()),
         ("opt_huge", yavs_ir::opt::huge_bodies()),
+        ("opt_bodies_kept", yavs_ir::opt::bodies_kept()),
         ("elab_restarts", yavs_ir::restarted_calls()),
         ("gc_collections", yavs_interp::gc_collections()),
         ("pmemo_hits", memo_hits),
