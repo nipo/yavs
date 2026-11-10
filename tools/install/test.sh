@@ -157,30 +157,30 @@ if command -v script > /dev/null; then
   rcis 0; has "installing yavs 0.14.0 into $H/.local/bin"; has "is not on your PATH"; has "export PATH=\"\$HOME/.local/bin:\$PATH\""; lacks "added by the yavs installer"
   cond "no terminal: no startup file was written" '[ ! -e "$H/.bashrc" ]'
   cur="PATH question: yes"
-  term y
+  term y --version 0.14.0
   has "already at 0.14.0"; has "Add \$HOME/.local/bin to PATH in ~/.bashrc? [y/N]"; has "added to ~/.bashrc"
   cond ".bashrc has the line once" '[ "$(grep -c "added by the yavs installer" "$H/.bashrc")" = 1 ]'
-  term y
+  term y --version 0.14.0
   # shellcheck disable=SC2088 # a literal tilde
   has "~/.bashrc already has the line"
   cond ".bashrc still has the line once" '[ "$(grep -c "added by the yavs installer" "$H/.bashrc")" = 1 ]'
   cur="PATH question: no"
   H=$work/h3; mkdir -p "$H"; cp -r "$work/h2/.local" "$H/.local"; rm -f "$H/.bashrc"
-  term n
+  term n --version 0.14.0
   has "Not changed"
   cond "no startup file was written" '[ ! -e "$H/.bashrc" ]'
-  term ""
+  term "" --version 0.14.0
   has "Not changed"
   cur="PATH question: other shells name their file"
   mkdir "$work/fake"; ln -s "$SH" "$work/fake/zsh"; ln -s "$SH" "$work/fake/fish"
-  E=(SHELL="$work/fake/zsh"); term n; has "in ~/.zshrc?"
-  E=(SHELL="$work/fake/fish"); term n; has "in ~/.config/fish/config.fish?"; has "fish_add_path"
+  E=(SHELL="$work/fake/zsh"); term n --version 0.14.0; has "in ~/.zshrc?"
+  E=(SHELL="$work/fake/fish"); term n --version 0.14.0; has "in ~/.config/fish/config.fish?"; has "fish_add_path"
   E=(SHELL=/bin/bash)
   cur="PATH question: already on PATH"
-  PATHV=$H/.local/bin:$PATH term y
+  PATHV=$H/.local/bin:$PATH term y --version 0.14.0
   lacks "[y/N]"; lacks "not on your PATH"
   cur="PATH question: YAVS_NO_MODIFY_PATH"
-  E=(SHELL=/bin/bash YAVS_NO_MODIFY_PATH=1); term y
+  E=(SHELL=/bin/bash YAVS_NO_MODIFY_PATH=1); term y --version 0.14.0
   lacks "[y/N]"; has "YAVS_NO_MODIFY_PATH is set"
   cond "no startup file was written" '[ ! -e "$H/.bashrc" ]'
 else echo "skipped: $cur: no script command here"; fi
