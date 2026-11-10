@@ -53,7 +53,9 @@ use yavs_kernel::{
 use yavs_std::arith::TimeResolution;
 use yavs_std::types::Revision;
 
-pub use census::{dump as census_dump, ieee_general, lean_late_calls, ops_executed};
+pub use census::{
+    booked_returns, dump as census_dump, ieee_general, lean_late_calls, ops_executed,
+};
 pub use debug::{
     DebugSession, Debugger, FrameView, HitCond, Hits, LineBp, LocalView, ProcState, ProcStatus,
     Resume, SignalBreak, Stop, StopReason, Watches, format_scalar,
