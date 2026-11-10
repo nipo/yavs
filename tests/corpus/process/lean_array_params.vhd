@@ -62,6 +62,32 @@ architecture a of lean_array_params is
     return s'left;
   end function;
 
+  function count_char(s : string; c : character) return natural is
+    variable n : natural := 0;
+  begin
+    for i in s'range loop
+      if s(i) = c then
+        n := n + 1;
+      end if;
+    end loop;
+    return n;
+  end function;
+
+  -- A result whose bounds are those of the parameter or of a new string.
+  function quote_msg(msg : string) return string is
+  begin
+    if msg'length /= 0 then
+      if count_char(msg, ' ') /= 1 then
+        if msg(msg'left) = ':' then
+          return " " & msg;
+        else
+          return " :" & msg & ":";
+        end if;
+      end if;
+    end if;
+    return "";
+  end function;
+
   -- Passes its parameter on: to another function, to a report and to a line.
   function describe(msg : string; tag : integer) return string is
     variable l : line;
@@ -152,11 +178,13 @@ begin
       down(4) := character'val(65 + k mod 26);
       off(7) := character'val(48 + k mod 10);
       l.all(4) := character'val(97 + k mod 7);
-      acc := acc + pos_first(':', up) + pos_first(':', down) + pos_first('z', off, 99);
+      -- Arguments that differ in every round (a count, a built string): no memo answers.
+      acc := acc + pos_first(':', up, k) + pos_first(':', down, k) + pos_first('z', off, 99 + k);
       acc := acc + shape(up, k, k) + shape(down, -k, 1) + shape(l.all, 0, 2);
-      acc := acc + slen(trim_first(up)) + slen(trim_first(down)) + slen(trim_first(off));
-      acc := acc + slen(trim_first(l.all)) + sleft(trim_first(l.all));
+      acc := acc + slen(trim_first(" " & integer'image(k) & up)) + slen(trim_first(integer'image(k) & down));
+      acc := acc + slen(trim_first(" " & integer'image(k) & off)) + sleft(trim_first(" " & integer'image(k) & l.all));
       acc := acc + churn(off) + churn(l.all(2 to 5));
+      acc := acc + slen(quote_msg(integer'image(k) & off)) + sleft(quote_msg(':' & integer'image(k)));
       acc := acc + corner(m) + slen(describe(up, k));
       measure(down, n, lo);
       acc := acc + n + lo;
@@ -168,6 +196,7 @@ begin
     end loop;
     report "trim " & trim_first(off) & "|" & trim_first(down) & "|" & trim_first(l.all) & "|" & trim_first("x");
     report "describe " & describe(down, 7);
+    report "quote " & quote_msg("ab") & "|" & quote_msg(":x") & "|" & quote_msg("") & "|" & quote_msg(down);
     report "pos " & integer'image(pos_first(':', l.all)) & " " & integer'image(pos_first('q', "q"));
     report "shape " & integer'image(shape(off, 0, 0)) & " " & integer'image(shape("", 0, 3));
     report "acc " & integer'image(acc) & " total " & integer'image(cnt.total);

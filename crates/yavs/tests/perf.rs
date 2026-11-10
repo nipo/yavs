@@ -112,8 +112,8 @@ fn check_bounds(design: &str, r: &Run, bounds: &[(&str, Bound)]) {
     let mut failed = Vec::new();
     for &(name, bound) in bounds {
         let Some(&v) = r.counters.get(name) else {
-            // A plain release build without `op-census` collects no `ops`, `wake_sole_left` or
-            // `cb_*` counters; those bounds are skipped there. In a debug build they are
+            // A plain release build without `op-census` collects no `ops`, `wake_sole_left`,
+            // `lean_late` or `cb_*` counters; those bounds are skipped there. In a debug build they are
             // collected, so a missing counter is a failure, not a vacuous pass (#732).
             if cfg!(debug_assertions) {
                 panic!("design `{design}`: no counter `{name}` in {:?}", r.counters);
@@ -122,6 +122,7 @@ fn check_bounds(design: &str, r: &Run, bounds: &[(&str, Bound)]) {
                 name == "ops"
                     || name == "ops_elab"
                     || name == "wake_sole_left"
+                    || name == "lean_late"
                     || name.starts_with("cb_"),
                 "design `{design}`: no counter `{name}` in {:?}",
                 r.counters
@@ -188,6 +189,9 @@ case!(frame_slices, "x=", &[], [("ops", Max(11400))]);
 // looks at each instruction a few times, not once per vector (a scan per vector made the
 // optimiser cost grow with the square of the function).
 case!(dopes_scan, "t=", &[], [("dopes_scans", Max(19000))]);
+// A function reading its string parameter's descriptor in the frame: its calls are lean from the
+// 128th on (`Pre::late`), 2 x 300 calls, so about 470 lean ones.
+case!(lean_late, "n=", &[], [("lean_late", Min(450))]);
 // A function on an array of vectors called every cycle: its result is data and bounds (#1122), so
 // each call skips the result pair and the descriptor copy; the floor shows a slide back to the pair.
 case!(

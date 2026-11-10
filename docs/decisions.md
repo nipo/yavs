@@ -15103,6 +15103,8 @@ Written by Claude. Landed with wave 3 batch 2 (maintainer's ruling of 2026-11-09
   equal.
 - Tests: `pre::tests::lean_writes_read_descriptors_and_skips_unread_parameters` (a descriptor read and stored, an unread
   string, a copy that keeps the full call, decided once at the 128th call), corpus `process/lean_array_params` (descriptor
-  reads, unread parameters, a returned parameter, a descriptor passed on to a call, a report and a line, ascending,
-  descending, null and heap strings, a callee that allocates and frees, a 2-D array, a protected method). Work counter
-  `lean_late` (debug and `op-census` builds): the calls that took the new path.
+  reads, unread parameters, a returned parameter, a result descriptor selected between the parameter's and a new one, a
+  descriptor passed on to a call, a report and a line, ascending, descending, null and heap strings, a callee that
+  allocates and frees, a 2-D array, a protected method; arguments differ every round so the memo of pure calls does not
+  answer them). Work counter `lean_late` (debug and `op-census` builds): the calls that took the new path; floor on the
+  perf design `lean_late` (`crates/yavs/tests/perf.rs`).
