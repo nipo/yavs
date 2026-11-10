@@ -365,7 +365,7 @@ fn the_profile_makes_a_function_a_candidate_at_its_first_look() {
     // Compiled in the meantime: skipped when its turn comes.
     let (mut w, f) = worker(100);
     pending.early = vec![(1, f)];
-    w.done[f.0 as usize][0] = true;
+    w.done[f.0 as usize] = true;
     assert!(w.next_early(&mut pending).is_none());
 }
 

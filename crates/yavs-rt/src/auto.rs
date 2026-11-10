@@ -1245,8 +1245,8 @@ struct Worker {
     /// The code generator, opened by the first function it compiles: a run that never gets hot
     /// pays nothing.
     generator: Box<dyn Generator>,
-    /// Per function: compiled the first time, compiled again in full.
-    done: Vec<[bool; 2]>,
+    /// Per function: compiled.
+    done: Vec<bool>,
     /// Per function: the address of its native-frame code once compiled (0: none), and whether
     /// `ntab` names it. Published once everything it calls natively is compiled too: a missing
     /// callee would materialise the frames at every call.
@@ -1511,7 +1511,7 @@ impl Worker {
             }
             let k = id.0 as usize;
             let seen_now = *t;
-            if self.declined[k] && !self.done[k][0] && !self.lost[k] && self.entered_from_code(id) {
+            if self.declined[k] && !self.done[k] && !self.lost[k] && self.entered_from_code(id) {
                 self.declined[k] = false;
                 pending.cands.push(id);
                 self.pick_at = 0;
@@ -1519,7 +1519,7 @@ impl Worker {
             if self.frame_at[k] != 0 && seen_now >= self.frame_at[k] {
                 self.frame_at[k] = 0;
                 self.asked_for[k] = true;
-                if !self.done[k][0] && !self.lost[k] {
+                if !self.done[k] && !self.lost[k] {
                     pending.cands.push(id);
                     self.pick_at = 0;
                 }
@@ -1559,7 +1559,7 @@ impl Worker {
             {
                 // Native-frame code of it exists (linked from the cache, compiled as a callee): its
                 // frame-mode code waits for `frame_at` like that of a root.
-                if self.nat[k].0 != 0 && !self.done[k][0] && self.natural_part(id) == Part::Native {
+                if self.nat[k].0 != 0 && !self.done[k] && self.natural_part(id) == Part::Native {
                     if self.frame_at[k] == 0
                         && self.prog.func(id).is_some_and(|f| loops(&self.prog, f))
                     {
@@ -1598,7 +1598,7 @@ impl Worker {
             asked_for: vec![false; nfuncs],
             frame_at: vec![0; nfuncs],
             deferred: Vec::new(),
-            done: vec![[false; 2]; nfuncs],
+            done: vec![false; nfuncs],
             nat: vec![(0, false); nfuncs],
             nat_by: vec![false; nfuncs],
             no_native: vec![false; nfuncs],
@@ -1821,7 +1821,7 @@ impl Worker {
             for &c in &callees[f as usize] {
                 let k = c as usize;
                 if walked[k]
-                    || self.done[k][0]
+                    || self.done[k]
                     || self.nat[k].0 != 0
                     || self
                         .prog
@@ -1841,7 +1841,7 @@ impl Worker {
                     .iter()
                     .filter(|&&g| {
                         let g = g as usize;
-                        !self.done[g][0] && (self.held[g] || self.time[g][0] > 0)
+                        !self.done[g] && (self.held[g] || self.time[g][0] > 0)
                     })
                     .count()
                     .max(1) as u64;
@@ -2055,7 +2055,7 @@ impl Worker {
             let mut deferred = std::mem::take(&mut self.deferred);
             deferred.retain(|&i| {
                 let k = i.0 as usize;
-                if self.done[k][0] || self.lost[k] || self.nat[k].0 == 0 {
+                if self.done[k] || self.lost[k] || self.nat[k].0 == 0 {
                     return false;
                 }
                 if self.native.materialised(i) == 0 {
@@ -2542,7 +2542,7 @@ impl Worker {
                     continue;
                 };
                 if !ids.contains(func)
-                    && !self.done[func.0 as usize][0]
+                    && !self.done[func.0 as usize]
                     && !self.unseen(*func, &hot)
                     && g.kind != FuncKind::Elab
                     && g.code.len() <= CALLEE_MAX
@@ -2550,7 +2550,7 @@ impl Worker {
                 {
                     total += g.code.len();
                     ids.push(*func);
-                } else if self.done[func.0 as usize][0]
+                } else if self.done[func.0 as usize]
                     && self.nat[func.0 as usize].0 == 0
                     && !natives.iter().any(|n| n.0 == *func)
                     && g.code.len() <= CALLEE_MAX
@@ -2668,7 +2668,7 @@ impl Worker {
     fn pick(&mut self, cands: &mut Vec<FuncId>) -> Option<Vec<(FuncId, Part)>> {
         // A function whose frame-mode code compiled in the meantime (as the callee of another
         // candidate) needs no pick; one with native-frame code only may still need its other part.
-        cands.retain(|c| !self.done[c.0 as usize][0]);
+        cands.retain(|c| !self.done[c.0 as usize]);
         if self.total < self.pick_at || cands.is_empty() {
             return None;
         }
@@ -2842,7 +2842,7 @@ impl Worker {
             .prog
             .func(self.prog.base_of(id))
             .map_or(u64::MAX, |b| self.heat.threshold(b));
-        if self.probed[k] || self.done[k][0] || seen < at.max(wait) {
+        if self.probed[k] || self.done[k] || seen < at.max(wait) {
             return false;
         }
         // The look-up generates the function's code: within the budget, as a compile is, with at
@@ -2898,7 +2898,7 @@ impl Worker {
         self.announce(&ids);
         self.probing = true;
         self.cached_only(true);
-        let hit = self.compile(root, false, true, part);
+        let hit = self.compile(root, true, part);
         self.cached_only(false);
         self.probing = false;
         if !hit {
@@ -2912,11 +2912,11 @@ impl Worker {
         let compute = self.is_compute(root);
         for &(i, p) in &ids[1..] {
             if compute || p == Part::Native && self.nset(root).contains(&root) {
-                self.compile(i, false, false, p);
+                self.compile(i, false, p);
             } else {
                 self.probing = true;
                 self.cached_only(true);
-                self.compile(i, false, false, p);
+                self.compile(i, false, p);
                 self.cached_only(false);
                 self.probing = false;
             }
@@ -3060,7 +3060,7 @@ impl Worker {
             // the processes that switched to one no longer run the code the trial measured.)
             let base = self.prog.base_of(id);
             for j in 0..self.lost.len() {
-                if base != id && self.prog.base_of(FuncId(j as u32)) == base && !self.done[j][0] {
+                if base != id && self.prog.base_of(FuncId(j as u32)) == base && !self.done[j] {
                     self.lost[j] = true;
                 }
             }
@@ -3137,7 +3137,7 @@ impl Worker {
             let k = (0..pending.early.len())
                 .max_by_key(|&i| (pending.early[i].0, std::cmp::Reverse(pending.early[i].1.0)))?;
             let (_, id) = pending.early.swap_remove(k);
-            if !self.done[id.0 as usize][0] && !self.lost[id.0 as usize] {
+            if !self.done[id.0 as usize] && !self.lost[id.0 as usize] {
                 return Some(self.tree(id));
             }
         }
@@ -3197,7 +3197,7 @@ impl Worker {
             .iter()
             .filter(|&&f| {
                 let k = f.0 as usize;
-                !self.done[k][0] && self.nat[k].0 == 0
+                !self.done[k] && self.nat[k].0 == 0
             })
             .fold(Vec::<(u32, u64)>::new(), |mut v, &f| {
                 // (By process: a copy's id is new in every run, the process's is not.)
@@ -3217,26 +3217,26 @@ impl Worker {
         }
     }
 
-    /// Compile `id`, or again in full when `o2`; whether it was compiled. Native-frame code
+    /// Compile `id`; whether it was compiled. Native-frame code
     /// of a function with a loop that the cache had brings its frame-mode code along when the cache has
     /// that too (a link costs a millisecond; `frame_at` decides only about compiling it).
-    fn compile(&mut self, id: FuncId, o2: bool, sampled: bool, part: Part) -> bool {
+    fn compile(&mut self, id: FuncId, sampled: bool, part: Part) -> bool {
         let k = id.0 as usize;
         // A function with no native-frame variant gets frame-mode code instead, as one the
         // static `native_set` did not allow: its callers reach it through the interpreter, which
         // runs that code (a compile of native-frame code that makes none is not a compile).
         if part == Part::Native && self.refused(id) {
-            return self.frame_instead(id, o2, sampled);
+            return self.frame_instead(id, sampled);
         }
         let hits = self.generator.cache_hits();
-        let ok = self.compile_part(id, o2, sampled, part);
+        let ok = self.compile_part(id, sampled, part);
         if part == Part::Native && !ok && self.refused(id) {
-            return self.frame_instead(id, o2, sampled);
+            return self.frame_instead(id, sampled);
         }
         if ok
             && part == Part::Native
             && self.generator.cache_hits() != hits
-            && !self.done[k][0]
+            && !self.done[k]
             && self.natural_part(id) == Part::Native
             && self.prog.func(id).is_some_and(|f| loops(&self.prog, f))
         {
@@ -3245,7 +3245,7 @@ impl Worker {
             if !probing {
                 self.cached_only(true);
             }
-            self.compile_part(id, o2, false, Part::Frame);
+            self.compile_part(id, false, Part::Frame);
             if !probing {
                 self.cached_only(false);
             }
@@ -3261,7 +3261,7 @@ impl Worker {
     /// lose: the frame-mode code of a function with a loop of natives, called from interpreted
     /// callers, ran 1.4 times the instructions of the interpreter. Left for later: `see` asks for
     /// it again once a caller is compiled.
-    fn frame_instead(&mut self, id: FuncId, o2: bool, sampled: bool) -> bool {
+    fn frame_instead(&mut self, id: FuncId, sampled: bool) -> bool {
         if !self.counted && !self.entered_from_code(id) {
             if let Some(tr) = &self.trace
                 && !self.declined[id.0 as usize]
@@ -3275,7 +3275,7 @@ impl Worker {
             return false;
         }
         self.declined[id.0 as usize] = false;
-        self.compile_part(id, o2, sampled, Part::Frame)
+        self.compile_part(id, sampled, Part::Frame)
     }
 
     /// Whether a function that calls `id` has compiled code that `id` is called from: frame-mode
@@ -3328,7 +3328,7 @@ impl Worker {
         }
     }
 
-    fn compile_part(&mut self, id: FuncId, o2: bool, sampled: bool, part: Part) -> bool {
+    fn compile_part(&mut self, id: FuncId, sampled: bool, part: Part) -> bool {
         // Native-frame code and frame-mode code are modules of their own, so the compilation
         // cache holds each one whatever was compiled with it (#510). Native-frame code is made
         // once.
@@ -3339,7 +3339,7 @@ impl Worker {
             && self.nat_by.get(id.0 as usize).is_some_and(|&made| made);
         if part == Part::Both {
             if !native_done && self.nset(id).contains(&id) {
-                let ok = self.compile(id, o2, sampled, Part::Native);
+                let ok = self.compile(id, sampled, Part::Native);
                 // No native-frame variant: `compile` made its frame-mode code.
                 if self.refused(id) {
                     return ok;
@@ -3349,7 +3349,7 @@ impl Worker {
                     return false;
                 }
             }
-            let frame = self.compile(id, o2, sampled, Part::Frame);
+            let frame = self.compile(id, sampled, Part::Frame);
             return frame || self.nat.get(id.0 as usize).is_some_and(|n| n.0 != 0);
         }
         // Each level once; elaboration code never runs again.
@@ -3358,7 +3358,7 @@ impl Worker {
         } else {
             self.done
                 .get_mut(id.0 as usize)
-                .is_some_and(|d| !std::mem::replace(&mut d[usize::from(o2)], true))
+                .is_some_and(|d| !std::mem::replace(d, true))
         };
         let Some(f) = self
             .prog
@@ -3374,7 +3374,7 @@ impl Worker {
             })
             .flatten();
         let waived = called_natively(&self.prog, f, id) && !self.refused(id);
-        let short = (sampled && !o2)
+        let short = sampled
             .then(|| {
                 // (A function with no native-frame variant is not called natively: no waiver.)
                 crate::rt::too_short(&self.prog, f)
@@ -3533,7 +3533,7 @@ impl Worker {
                 }
                 if part == Part::Native
                     && sampled
-                    && !self.done[id.0 as usize][0]
+                    && !self.done[id.0 as usize]
                     && loops(&self.prog, f)
                 {
                     self.frame_at[id.0 as usize] = self.time[id.0 as usize][0] + frame_need;
@@ -3574,7 +3574,7 @@ impl Worker {
             }
             Err(_) if self.probing => {
                 if part != Part::Native {
-                    self.done[id.0 as usize][usize::from(o2)] = false;
+                    self.done[id.0 as usize] = false;
                 }
                 false
             }
@@ -3582,7 +3582,7 @@ impl Worker {
                 // A short function stays interpreted as long as nothing compiled calls it;
                 // it compiles with a caller (`tree`).
                 if short_only && part != Part::Native {
-                    self.done[id.0 as usize][0] = false;
+                    self.done[id.0 as usize] = false;
                 }
                 (self.note)(id, Err(why));
                 false
@@ -4114,8 +4114,8 @@ impl AutoTier {
                                 None
                             };
                             let mut early = false;
-                            let Some((ids, o2, sampled)) = probe
-                                .map(|id| (vec![(id, Part::Both)], false, true))
+                            let Some((ids, sampled)) = probe
+                                .map(|id| (vec![(id, Part::Both)], true))
                                 .or_else(|| {
                                     let mut k = 0;
                                     while let Some(&id) = pending.asked.get(k) {
@@ -4148,16 +4148,16 @@ impl AutoTier {
                                     };
                                     let id = pending.asked.remove(k)?;
                                     w.note_unlocked(id);
-                                    Some((vec![(id, w.ask(id))], false, false))
+                                    Some((vec![(id, w.ask(id))], false))
                                 })
                                 .or_else(|| {
                                     w.next_early(&mut pending).map(|ids| {
                                         early = true;
-                                        (ids, false, true)
+                                        (ids, true)
                                     })
                                 })
                                 .or_else(|| {
-                                    w.pick(&mut pending.cands).map(|ids| (ids, false, true))
+                                    w.pick(&mut pending.cands).map(|ids| (ids, true))
                                 })
                             else {
                                 paced = over.get();
@@ -4213,7 +4213,7 @@ impl AutoTier {
                             let mut root_done = false;
                             w.early_root = early;
                             for (i, (id, part)) in ids.into_iter().enumerate() {
-                                let done = w.compile(id, o2, sampled && i == 0, part);
+                                let done = w.compile(id, sampled && i == 0, part);
                                 root_done |= done && i == 0;
                                 // Its callees compile for its sake only.
                                 if !done && i == 0 {
@@ -4222,7 +4222,7 @@ impl AutoTier {
                             }
                             w.early_root = false;
                             drop(held);
-                            if let (Some(id), true) = (first, w.counted && root_done && !sampled && !o2) {
+                            if let (Some(id), true) = (first, w.counted && root_done && !sampled) {
                                 w.native.count_stat(CountStat::Compiled);
                                 if w.prog.base_of(id) != id {
                                     w.native.count_stat(CountStat::Copies);
@@ -4233,7 +4233,7 @@ impl AutoTier {
                             // (Not a root the profile asked for: its share of the run is not known
                             // yet, and the run as a whole is judged at its end.)
                             if let (Some(id), true) =
-                                (first, root_done && sampled && !o2 && !early)
+                                (first, root_done && sampled && !early)
                             {
                                 sh.trial.store(true, Ordering::SeqCst);
                                 w.trial(id, &sh.halt);

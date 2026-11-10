@@ -15173,3 +15173,7 @@ Written by Claude. `YAVS_CLIFT_LIST` (with `write`, `on` and `all`), `YAVS_CLIFT
 - **Decided** (user, 2026-11-10, option (a)): land it, accepting `uvvm_axistream_vvc` run 2 at 1.33 for the cold cap.
   Reach: no corpus test lasts the second the rule waits for, so `tier_tree_held` is 0 on the corpus; its evidence is
   the realbench `uvvm_axistream_vvc` first run (`tier_tree_held` 55, the executor's copies), as for the floor above.
+
+## Auto tier: the second-compile slot is removed (yavs-rt `auto.rs`, 2026-11-10)
+
+Written by Claude. `Worker::compile`, `compile_part` and `frame_instead` lose their `o2` parameter and `Worker::done` goes from `[bool; 2]` per function to one flag. The slot served the make-again path of the stored never-run list (`done[k][1]`, entry above), which is retired, so `o2` was always false. The entries above that name the slot stay as history. Generated code is byte-identical (the `YAVS_CLIFT_CODEDIR` corpus check).
