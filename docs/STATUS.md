@@ -11102,5 +11102,9 @@ thread. Not measured: hosts with more than 8 CPUs, Windows.
   `lfsr64` still 1.02). Not reproduced on this host: the fixed `--threads=8` raise trap, `sc5_fifo_repack` slower
   with `auto` than on one thread.
 
+## Lean calls for array parameters
+
+A call whose parameters the prologue does not all load, or whose body reads a parameter's slot after it, was a full call (`call_pre`): every argument written to its slot. Such a function is looked at again at its 128th full call (`Pre::late`, `pre.rs` `lean_params`, `ParamAddrs`): when its body reads a parameter's slot only as a whole 8-byte word or as the descriptor of a flat array parameter (in place, or passed on to a call, a native or a fat pair), its calls from then on write the loaded parameters' registers and the slots of the read ones, and skip the parameters nothing reads (`exec.rs` `call_late`). It is what the string, logging and checking helpers of verification libraries are. Interpreter instructions (settled runs, `--tier=interp --threads 1`): `uvvm_sb_slv` -3.2 percent, `uvvm_axistream_vvc` -3.0, `uvvm_func_cov` -2.5; `docs/decisions.md` "Lean calls for array parameters". Corpus `process/lean_array_params`; work counter `lean_late` (debug and `op-census` builds).
+
 ## Copies of subprograms by descriptors
 A specialised copy calls a copy of a subprogram made for the descriptors of records and arrays of composites it knows at the call (`yavs-ir` `opt/subcopy.rs`, `docs/decisions.md` "Copies of subprograms by the descriptors of their arguments"). Stored copies name those calls by what they are for. Not on the eager `--tier=clift`, which has no copies; a descriptor a caller builds per call (a formal of a subtype with a non-static bound) is not known, and compiled-to-compiled calls are outside the debug check.

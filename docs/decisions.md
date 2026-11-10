@@ -15062,3 +15062,47 @@ Written by Claude. Landed with wave 3 batch 2 (maintainer's ruling of 2026-11-09
   measured 1.5 to 1.6 times main's run 2). `YAVS_AUTO_WAIT_SUBTREE` and `tier_unlocked` stay. Reach: the corpus test
   `process/dispatch_subtree` (a dispatcher over two waiting procedures, the inner one large) has the second run of
   `yavs-auto-warm` compile the dispatcher and the outer procedure for what they unlock (`tier_unlocked` 2).
+
+## Lean calls for array parameters (yavs-interp `pre.rs` `lean_params`, `ParamAddrs`, `exec.rs` `call_late`, agent, 2026-11-10; landing is the maintainer's call)
+
+- **A function whose calls the lean rule refuses only because a parameter is not loaded by the prologue, or its slot is read
+  after it, is looked at again at its 128th call through the full path (`Pre::late`, `LATE_AFTER`).** Its calls are lean from
+  then on when the body reads a parameter's slot only as a whole 8-byte word or as the descriptor of a flat array parameter,
+  or not at all. The string, logging and checking helpers of verification libraries are that shape: they read a string
+  parameter's bounds through its descriptor in the frame after the prologue (the descriptor is selected as a result, stored
+  in a fat pair for a native or passed to another call, which `opt/dopes.rs` cannot fold into registers), and leave
+  parameters unread (an unused `'right`, a default argument). The rule every call checks (`Pre::lean`, #443, #730) is as
+  before, decided when the function is first called.
+- **Why late.** The analysis follows registers through the blocks; run for every function on its first call it cost
+  `vunit_logging` 0.8 percent of a run's instructions (3.6 percent of a settled `--tier=auto` run), more than its few calls
+  saved. A count on the full path (a relaxed load and store, no read-modify-write) bounds it to functions called often.
+- **How.** `lean_params` follows the registers that hold a parameter slot's address (`ParamAddrs`: a forward data flow over
+  the blocks; `Move`, `Select` and `Index` by a constant carry an address on, any other definition ends it). At or after the
+  first op the call runs such a register may be loaded or stored as a whole 8-byte word (that parameter is kept), or used as
+  a descriptor (`DopeLen`, `Pos`, `SlicePos`, `LayoutOf`, `TempRoot`, `SigGather`, `SigScatter`, a one-dimensional
+  `SubtypeCheck`, `NewFill`/`NewFrame` of at most one descriptor, stored as a value, or an argument of a call or native)
+  when it is exactly the descriptor of a flat array parameter (`Param::flat`: its three words are kept). Any other use keeps
+  the full call. `call_late` (out of line) allocates the whole frame, writes the registers the prologue would load and the
+  kept parameters' slots, and skips the parameters nothing reads; the existing lean calls keep their code.
+- **Exact by construction.** A kept slot holds what `call_pre` writes there for the frame's whole life, and a skipped
+  parameter is never read. The frame is allocated whole, so every collector root slot exists (an `in` parameter's root slot
+  left empty is the existing lean rule: the caller keeps the object); `out`/`inout` parameters keep the `may_collect`
+  exclusion of #730; the registers holding parameter slot addresses stay preloaded, so the tier contract (#566) is not
+  touched. Folding the descriptor reads into registers was not taken: the optimiser shares registers, so a bound's register
+  is written again later in these bodies (`add_msg_delimiter` writes its `'left` register again), and a fold would need a
+  reaching-definition check where writing three slots is exact.
+- **Measured.** Exact counts by step (a lab build with the rule switched per run, every new shape decided at the first call,
+  `--tier=interp --threads 1`, whole runs, all-thread instructions): descriptor reads kept in the frame (a) `uvvm_sb_slv` 12.257
+  to 12.203 G, `uvvm_axistream_vvc` 34.493 to 34.330 G; plus unread parameters skipped (b) 11.832 G and 33.426 G (-3.5 and -3.1
+  percent in all). As built (late, plain bench builds, settled third run, `--tier=interp --threads 1`): `uvvm_sb_slv` 10.615 to
+  10.276 G (-3.2 %), `uvvm_axistream_vvc` 32.223 to 31.269 G (-3.0 %), `uvvm_func_cov` -2.5 %, `osvvm_axi4_random` -0.5 %,
+  `neorv32_dual_full` -0.8 %, `vunit_logging` -0.8 %, `uvvm_methods_log` level; outputs equal. Plain PGO bench builds, base
+  built twice for the A/A, cores 8 to 11 in a Latin square, 12 pairs, cycles: cold `uvvm_sb_slv` 0.970 +-2.5 (A/A 0.995
+  +-1.6), `uvvm_axistream_vvc` 0.979 +-3.0 against the second base build, `uvvm_func_cov` 0.976 +-2.0 against it; warm
+  `uvvm_sb_slv` 0.981 +-1.0 (A/A 0.997 +-1.3); the other cells within the A/A. GRLIB and Microwatt instructions level, outputs
+  equal.
+- Tests: `pre::tests::lean_writes_read_descriptors_and_skips_unread_parameters` (a descriptor read and stored, an unread
+  string, a copy that keeps the full call, decided once at the 128th call), corpus `process/lean_array_params` (descriptor
+  reads, unread parameters, a returned parameter, a descriptor passed on to a call, a report and a line, ascending,
+  descending, null and heap strings, a callee that allocates and frees, a 2-D array, a protected method). Work counter
+  `lean_late` (debug and `op-census` builds): the calls that took the new path.

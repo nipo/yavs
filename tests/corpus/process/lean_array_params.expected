@@ -1,0 +1,14 @@
+exit	0
+diag	note	0	0	:lean_array_params:_p0	describe heylo: world 12
+diag	note	0	0	:lean_array_params:_p0	describe hewlo: world 12
+diag	note	0	0	:lean_array_params:_p0	describe heulo: world 12
+diag	note	0	0	:lean_array_params:_p0	describe heslo: world 12
+diag	note	0	0	:lean_array_params:_p0	describe heqlo: world 12
+diag	note	0	0	:lean_array_params:_p0	describe heolo: world 12
+diag	note	0	0	:lean_array_params:_p0	describe hemlo: world 12
+diag	note	0	0	:lean_array_params:_p0	describe heklo: world 12
+diag	note	0	0	:lean_array_params:_p0	trim a0cd|dlrow :oKleh|frbm the heap: yes|x
+diag	note	0	0	:lean_array_params:_p0	describe dlrow :oKleh #7 at 7
+diag	note	0	0	:lean_array_params:_p0	pos 15 1
+diag	note	0	0	:lean_array_params:_p0	shape 45 6
+diag	note	0	0	:lean_array_params:_p0	acc 853887 total 28800

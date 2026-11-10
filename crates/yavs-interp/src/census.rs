@@ -44,6 +44,24 @@ pub fn ops_executed() -> Option<u64> {
     None
 }
 
+#[cfg(any(debug_assertions, feature = "op-census"))]
+static LEAN_LATE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// A lean call by the wider rule (`Pre::late`): parameter slots written, unread ones skipped.
+#[inline(always)]
+pub(crate) fn lean_late() {
+    #[cfg(any(debug_assertions, feature = "op-census"))]
+    LEAN_LATE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The calls `lean_late` counted; `None` in a release build without `op-census`.
+pub fn lean_late_calls() -> Option<u64> {
+    #[cfg(any(debug_assertions, feature = "op-census"))]
+    return Some(LEAN_LATE.load(std::sync::atomic::Ordering::Relaxed));
+    #[cfg(not(any(debug_assertions, feature = "op-census")))]
+    None
+}
+
 static IEEE_ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 static IEEE: std::sync::Mutex<Option<std::collections::HashMap<String, u64>>> =
     std::sync::Mutex::new(None);

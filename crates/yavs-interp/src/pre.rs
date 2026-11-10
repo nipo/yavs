@@ -37,6 +37,12 @@ pub(crate) struct Pre {
     /// A call from the plain loop needs not write the parameters to their slots: the prologue it
     /// skips is the only reader (`lean_params`).
     pub lean: bool,
+    /// Calls through the full path left before `lean_params` looks at the function (`late`):
+    /// 0 when it never does (`lean` holds, or the function's shape is not one for a lean call).
+    late_n: std::sync::atomic::AtomicU32,
+    /// What `lean_params` found: the parameters (by index) a lean call also writes to their
+    /// slots, `None` when no call of the function is lean.
+    late: std::sync::OnceLock<Option<Box<[u32]>>>,
     /// The bytes of slots such a call allocates: none when the parameters are all the frame has.
     pub fslots: u32,
     pub params: Box<[(u32, Width)]>,
@@ -217,7 +223,16 @@ impl Pre {
         let params: Box<[(u32, Width)]> = f.params.iter().map(|p| (p.slot, p.width)).collect();
         let pro = prologue(&mut code, &params);
         // The debug loop enters at the prologue, which reads the parameters' slots (#863).
-        let lean = !yavs_ir::opt::keep_variables_on() && lean_params(f, prog, &code, &pro);
+        let shape = (!yavs_ir::opt::keep_variables_on())
+            .then(|| lean_shape(f, &code, &pro))
+            .flatten();
+        // Every parameter is loaded by the prologue, and nothing else reads a parameter's slot.
+        let lean = shape.is_some_and(|end| {
+            pro.len() == f.params.len()
+                && !pro.contains(&NONE)
+                && entered_once(f, prog, end)
+                && !slot_address_used(f, end)
+        });
         // The registers holding the address of a parameter's slot are only read by the
         // prologue the call skips: they need no address.
         if lean {
@@ -240,6 +255,13 @@ impl Pre {
             init,
             slots: f.frame,
             lean,
+            late_n: if shape.is_some() && !lean {
+                LATE_AFTER
+            } else {
+                0
+            }
+            .into(),
+            late: Default::default(),
             fslots,
             params,
             pro,
@@ -253,6 +275,41 @@ impl Pre {
             next,
             code,
         }
+    }
+}
+
+/// The calls through the full path after which `lean_params` looks at a function `lean` refuses:
+/// its analysis costs more than a lean call saves, so only a function called often pays it.
+pub(crate) const LATE_AFTER: u32 = 128;
+
+impl Pre {
+    /// The parameters (by index) a lean call of the function also writes to their slots, when
+    /// its calls are lean by `lean_params`'s wider rule; `None` while it is not looked at yet
+    /// (a call through the full path counts down `late_n`) and when its calls are not lean.
+    #[inline(always)]
+    pub(crate) fn late(&self, f: &Func, prog: &Program) -> Option<&[u32]> {
+        use std::sync::atomic::Ordering::Relaxed;
+        if let Some(k) = self.late.get() {
+            return k.as_deref();
+        }
+        match self.late_n.load(Relaxed) {
+            0 => None,
+            1 => self.late_init(f, prog),
+            n => {
+                // A count, not a lock: threads racing here only look a call earlier or later.
+                self.late_n.store(n - 1, Relaxed);
+                None
+            }
+        }
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn late_init(&self, f: &Func, prog: &Program) -> Option<&[u32]> {
+        let k = self
+            .late
+            .get_or_init(|| lean_params(f, prog, &self.code, &self.pro));
+        k.as_deref()
     }
 }
 
@@ -1508,11 +1565,89 @@ fn may_collect(f: &Func) -> bool {
     })
 }
 
-/// Is every parameter handed over in the register the prologue loads it into, and read from
-/// its slot by nothing else? Then a call writes the registers and leaves the slots alone.
+/// Is every parameter handed over in the register the prologue loads it into, or in its slot
+/// when the body reads it only as a word of an array parameter's descriptor (the parameters
+/// returned, by index)? Then a call writes those and leaves the other slots alone.
 /// Plain functions and procedures (nested ones too, they get a static link) whose parameters are
 /// whole 8-byte values or addresses (`out` and `inout` scalars are by reference).
-fn lean_params(f: &Func, prog: &Program, code: &Code, pro: &[u32]) -> bool {
+fn lean_params(f: &Func, prog: &Program, code: &Code, pro: &[u32]) -> Option<Box<[u32]>> {
+    let end = lean_shape(f, code, pro).filter(|&end| entered_once(f, prog, end))?;
+    if !slot_address_used(f, end) {
+        return Some(Box::default());
+    }
+    let p = ParamAddrs { f };
+    let mut sc = Scratch::default();
+    // Where each block starts: the registers holding the address of a parameter's slot there,
+    // as `ParamAddrs::step` leaves them (`None`: not reached yet).
+    let blocks = f.blocks.values();
+    let mut entry: Vec<Option<Vec<(u32, u32)>>> = vec![None; blocks.len()];
+    *entry.first_mut()? = Some(Vec::new());
+    let mut work = vec![0usize];
+    while let Some(b) = work.pop() {
+        let mut st = entry[b].clone()?;
+        let blk = blocks[b];
+        let start = blk.start as usize;
+        for pc in start..blk.end as usize {
+            p.step(&mut st, (start, pc), f.code.get(pc)?, &mut sc)?;
+        }
+        let last = f.code.get((blk.end as usize).checked_sub(1)?)?;
+        if !last.is_terminator() {
+            return None;
+        }
+        let succ = match *last {
+            Inst::Case { table, .. } => {
+                let t = prog.cases.get(table)?;
+                (t.arms.iter().map(|a| a.2))
+                    .chain(std::iter::once(t.default))
+                    .collect()
+            }
+            ref i => i.targets(),
+        };
+        for s in succ {
+            let e = entry.get_mut(s.0 as usize)?;
+            let mut grown = e.is_none();
+            let e = e.get_or_insert_with(Vec::new);
+            for x in &st {
+                if !e.contains(x) {
+                    e.push(*x);
+                    grown = true;
+                }
+            }
+            if e.len() > 4096 {
+                return None;
+            }
+            if grown {
+                work.push(s.0 as usize);
+            }
+        }
+    }
+    // Nothing at or after the first op the call runs reads a parameter's slot, except as a
+    // whole 8-byte parameter (loaded or stored) or as the one-dimensional descriptor of a flat
+    // array parameter (its three words), or into another such register: those the call writes.
+    let mut keep: Vec<u32> = Vec::new();
+    for (b, blk) in blocks.iter().enumerate() {
+        let Some(mut st) = entry[b].clone() else {
+            continue;
+        };
+        let start = blk.start as usize;
+        for pc in start..blk.end as usize {
+            let i = f.code.get(pc)?;
+            if pc >= end as usize {
+                p.check(&st, (start, pc), i, &mut keep)?;
+            }
+            p.step(&mut st, (start, pc), i, &mut sc)?;
+        }
+    }
+    keep.sort_unstable();
+    keep.dedup();
+    // A parameter neither loaded by the prologue nor kept is read by nothing: the call skips it.
+    Some(keep.into())
+}
+
+/// A function or procedure whose calls can be lean by their shape: whole 8-byte parameters
+/// (`out` and `inout` ones only where no collection runs) and a prologue to skip. The IR pc of
+/// the first op such a call runs.
+fn lean_shape(f: &Func, code: &Code, pro: &[u32]) -> Option<u32> {
     if f.nested
         || f.body.is_some()
         || !matches!(
@@ -1520,8 +1655,7 @@ fn lean_params(f: &Func, prog: &Program, code: &Code, pro: &[u32]) -> bool {
             yavs_ir::FuncKind::Function | yavs_ir::FuncKind::Procedure
         )
         || code.skip == NONE
-        || pro.len() != f.params.len()
-        || pro.contains(&NONE)
+        || !pro.is_empty() && pro.len() != f.params.len()
         || f.params.iter().any(|p| {
             p.width != Width::B8
                 || p.class != yavs_ir::ParamClass::Value
@@ -1530,26 +1664,14 @@ fn lean_params(f: &Func, prog: &Program, code: &Code, pro: &[u32]) -> bool {
                 || p.mode != yavs_ir::Mode::In && may_collect(f)
         })
     {
-        return false;
+        return None;
     }
-    let in_param = |off: u32| f.params.iter().any(|p| p.slot == off);
-    // The registers holding a parameter slot's address, each defined once.
-    let mut addr: Vec<u32> = Vec::new();
-    for i in &f.code {
-        if let Inst::AddrOf {
-            dst,
-            space: AddrSpace::Frame,
-            off,
-        } = *i
-            && in_param(off)
-        {
-            addr.push(dst.0);
-        }
-    }
-    let Some(&end) = code.at.get(code.skip as usize) else {
-        return false;
-    };
-    // The prologue is entered by the call only: no jump goes back to it.
+    code.at.get(code.skip as usize).copied()
+}
+
+/// Is the prologue, which ends at IR pc `end`, entered by the call only (no jump goes back
+/// to it)?
+fn entered_once(f: &Func, prog: &Program, end: u32) -> bool {
     let targets = f.code.iter().flat_map(|i| match *i {
         Inst::Case { table, .. } => prog.cases.get(table).map_or_else(Vec::new, |t| {
             std::iter::once(t.default)
@@ -1563,20 +1685,243 @@ fn lean_params(f: &Func, prog: &Program, code: &Code, pro: &[u32]) -> bool {
             return false;
         }
     }
-    // Nothing at or after the first op the call runs reads one of them.
-    for i in f.code.iter().skip(end as usize) {
-        let mut used = false;
-        i.visit(&mut |r, role, _| used |= role == Role::Use && addr.contains(&r.0));
-        if let Some(l) = i.list() {
-            used |= f
-                .regs(l)
-                .is_none_or(|rs| rs.iter().any(|r| addr.contains(&r.0)));
-        }
-        if used {
-            return false;
+    true
+}
+
+/// Does anything at or after IR pc `end` use a register holding the address of a parameter's
+/// slot? Most functions use none after the prologue: nothing to follow then.
+fn slot_address_used(f: &Func, end: u32) -> bool {
+    let mut addr = vec![false; f.reg_ty.len()];
+    for i in &f.code {
+        if let Inst::AddrOf {
+            dst,
+            space: AddrSpace::Frame,
+            off,
+        } = *i
+            && f.params.iter().any(|p| p.slot == off)
+            && let Some(a) = addr.get_mut(dst.0 as usize)
+        {
+            *a = true;
         }
     }
-    true
+    let is = |r: &yavs_ir::Reg| addr.get(r.0 as usize).is_none_or(|&a| a);
+    f.code.iter().skip(end as usize).any(|i| {
+        let mut used = false;
+        i.visit(&mut |r, role, _| used |= role == Role::Use && is(&r));
+        used || i
+            .list()
+            .is_some_and(|l| f.regs(l).is_none_or(|rs| rs.iter().any(is)))
+    })
+}
+
+/// Which registers hold the address of a parameter's slot (`lean_params`): from an `AddrOf` of
+/// the slot, through `Move`, `Select` and an `Index` by a constant; any other definition holds
+/// none. States are lists of (register, slot offset), a register holding several on joined paths.
+/// Buffers `ParamAddrs::step` reuses: the slots a definition holds, the registers defined.
+#[derive(Default)]
+struct Scratch(Vec<u32>, Vec<u32>);
+
+struct ParamAddrs<'a> {
+    f: &'a Func,
+}
+
+impl<'a> ParamAddrs<'a> {
+    /// The constant in `r` before instruction `pc` of the block starting at `start`: its last
+    /// definition earlier in the block, else the constant every definition of it is.
+    fn konst(&self, start: usize, pc: usize, r: yavs_ir::Reg) -> Option<i64> {
+        let def = |i: &Inst| {
+            let mut d = false;
+            i.visit(&mut |x, role, _| d |= role == Role::Def && x == r);
+            d
+        };
+        let value = |i: &Inst| match *i {
+            Inst::Const { dst, v } if dst == r => Some(v),
+            _ => None,
+        };
+        if let Some(i) = self.f.code.get(start..pc)?.iter().rev().find(|i| def(i)) {
+            return value(i);
+        }
+        let mut all = self.f.code.iter().filter(|i| def(i)).map(value);
+        let first = all.next()??;
+        all.all(|v| v == Some(first)).then_some(first)
+    }
+
+    fn offs<'s>(st: &'s [(u32, u32)], r: yavs_ir::Reg) -> impl Iterator<Item = u32> + 's {
+        st.iter().filter(move |&&(a, _)| a == r.0).map(|&(_, o)| o)
+    }
+
+    /// The offset `Index` adds at `pc`, if its position is a constant.
+    fn index_by(&self, start: usize, pc: usize, pos: yavs_ir::Reg, stride: u32) -> Option<i64> {
+        self.konst(start, pc, pos)?.checked_mul(i64::from(stride))
+    }
+
+    /// The state after `i`. `None`: an address of a parameter's slot is derived in a way not
+    /// followed.
+    fn step(
+        &self,
+        st: &mut Vec<(u32, u32)>,
+        (start, pc): (usize, usize),
+        i: &Inst,
+        sc: &mut Scratch,
+    ) -> Option<()> {
+        let Scratch(derived, defs) = sc;
+        derived.clear();
+        defs.clear();
+        match *i {
+            Inst::AddrOf {
+                space: AddrSpace::Frame,
+                off,
+                ..
+            } if self.f.params.iter().any(|p| p.slot == off) => derived.push(off),
+            // Nothing held: nothing to carry on or end.
+            _ if st.is_empty() => return Some(()),
+            Inst::Move { src, .. } => derived.extend(Self::offs(st, src)),
+            Inst::Select { a, b, .. } => derived.extend(Self::offs(st, a).chain(Self::offs(st, b))),
+            Inst::Index {
+                base, pos, stride, ..
+            } if Self::offs(st, base).next().is_some() => {
+                let by = self.index_by(start, pc, pos, stride)?;
+                for o in Self::offs(st, base) {
+                    derived.push(u32::try_from(i64::from(o) + by).ok()?);
+                }
+            }
+            _ => {}
+        }
+        i.visit(&mut |r, role, _| {
+            if role == Role::Def {
+                defs.push(r.0);
+            }
+        });
+        st.retain(|&(a, _)| !defs.contains(&a));
+        for &d in defs.iter() {
+            for &o in derived.iter() {
+                if !st.contains(&(d, o)) {
+                    st.push((d, o));
+                }
+            }
+        }
+        Some(())
+    }
+
+    /// The parameter slots `i` reads or writes through a register of `st`, added to `keep` (by
+    /// parameter index): a whole 8-byte parameter loaded or stored, or the descriptor of a flat
+    /// array parameter (its three words) used in any way, read in place or passed on as the
+    /// descriptor of the array. `None`: it uses such a register in another way.
+    fn check(
+        &self,
+        st: &[(u32, u32)],
+        (start, pc): (usize, usize),
+        i: &Inst,
+        keep: &mut Vec<u32>,
+    ) -> Option<()> {
+        if st.is_empty() {
+            return Some(());
+        }
+        let f = self.f;
+        let held = |r: &yavs_ir::Reg| st.iter().any(|&(a, _)| a == r.0);
+        let mut uses = Vec::new();
+        i.visit(&mut |r, role, _| {
+            if role == Role::Use && held(&r) {
+                uses.push(r);
+            }
+        });
+        if let Some(l) = i.list() {
+            uses.extend(f.regs(l)?.iter().filter(|r| held(r)));
+        }
+        if uses.is_empty() {
+            return Some(());
+        }
+        // The registers used as a descriptor (of a flat array parameter, below).
+        let mut descs = Vec::new();
+        let mut take = |r: yavs_ir::Reg, desc: bool| {
+            if let Some(k) = uses.iter().position(|&u| u == r) {
+                uses.swap_remove(k);
+                if desc {
+                    descs.push(r);
+                }
+            }
+        };
+        match *i {
+            Inst::Load {
+                addr, w: Width::B8, ..
+            } if held(&addr) => {
+                take(addr, false);
+                for off in Self::offs(st, addr) {
+                    keep.push(f.params.iter().position(|p| p.slot == off)? as u32);
+                }
+            }
+            Inst::Store {
+                addr,
+                src,
+                w: Width::B8,
+            } => {
+                if held(&addr) {
+                    take(addr, false);
+                    for off in Self::offs(st, addr) {
+                        keep.push(f.params.iter().position(|p| p.slot == off)? as u32);
+                    }
+                }
+                // The descriptor's address as a value (a fat pair).
+                take(src, true);
+            }
+            // What flows on is followed by `step`: its readers are checked in turn.
+            Inst::Move { src, .. } => take(src, false),
+            Inst::Select { a, b, .. } => {
+                take(a, false);
+                take(b, false);
+            }
+            Inst::Index {
+                base, pos, stride, ..
+            } if self.index_by(start, pc, pos, stride).is_some() => take(base, false),
+            Inst::DopeLen { dope, dim: 0, .. }
+            | Inst::Pos { dope, dim: 0, .. }
+            | Inst::SlicePos { dope, .. }
+            | Inst::LayoutOf { desc: dope, .. }
+            | Inst::TempRoot {
+                desc: Some(dope), ..
+            }
+            | Inst::SigGather { desc: dope, .. }
+            | Inst::SigScatter { desc: dope, .. } => take(dope, true),
+            Inst::SubtypeCheck {
+                dope,
+                want,
+                dims: 1,
+                ..
+            } => {
+                take(dope, true);
+                take(want, true);
+            }
+            Inst::NewFill { desc, dsize, .. } | Inst::NewFrame { desc, dsize, .. }
+                if u64::from(dsize) <= yavs_ir::DOPE_DIM_BYTES =>
+            {
+                take(desc, true)
+            }
+            // Passed on as the descriptor of an array argument.
+            Inst::Call { args, .. }
+            | Inst::CallProt { args, .. }
+            | Inst::CallNative { args, .. } => {
+                for &r in f.regs(args)? {
+                    take(r, true);
+                }
+            }
+            _ => {}
+        }
+        if !uses.is_empty() {
+            return None;
+        }
+        for r in descs {
+            for off in Self::offs(st, r) {
+                // The descriptor of a flat array parameter: the three parameters after its data.
+                let d = f.params.iter().position(|p| p.flat && p.slot + 8 == off)?;
+                let words = f.params.get(d + 1..d + 4)?;
+                if !(words.iter().zip(0..).all(|(w, k)| w.slot == off + 8 * k)) {
+                    return None;
+                }
+                keep.extend(d as u32 + 1..d as u32 + 4);
+            }
+        }
+        Some(())
+    }
 }
 
 /// The leading ops that load a parameter from its slot into a register, each a whole 8-byte
@@ -6047,6 +6392,134 @@ mod tests {
             assert_eq!(pre.nested, nested);
             if pre.lean {
                 assert_eq!(pre.fslots, 0, "no collection runs in the callee: no root");
+            }
+        }
+    }
+
+    /// How `strlen` uses the descriptor of its string parameter.
+    #[derive(Clone, Copy, PartialEq, Debug)]
+    enum DescUse {
+        /// `DopeLen` of it, and its address stored in memory.
+        Len,
+        /// Nothing: the string is never read.
+        None,
+        /// A copy of its bytes, which may read past the descriptor.
+        Copy,
+    }
+
+    /// `strlen(s : string; k : integer)`: `k` loaded at the entry, `s` (data, then the three
+    /// words of its descriptor) read as `how` says.
+    fn strlen(how: DescUse) -> (Program, yavs_ir::FuncId) {
+        let mut pb = ProgramBuilder::new();
+        let chr = pb.ty(yavs_ir::Ty::Enum {
+            lits: vec!["'a'".into()],
+            logic: None,
+        });
+        let string = pb.ty(yavs_ir::Ty::Array {
+            elem: chr,
+            elem_desc: None,
+            dims: 1,
+        });
+        let id = pb.declare("strlen", FuncKind::Function, None);
+        let mut fb = pb.define(id);
+        let s = fb.param("s", Width::B8, ParamClass::Value, Mode::In, None);
+        for w in ["left", "right", "dir"] {
+            fb.param(
+                &format!("s'{w}"),
+                Width::B8,
+                ParamClass::Value,
+                Mode::In,
+                None,
+            );
+        }
+        fb.param_flat(s, string);
+        let k = fb.param("k", Width::B8, ParamClass::Value, Mode::In, None);
+        fb.stmt(StmtKind::Return, Span::new(FileId(0), 0, 1));
+        let at = fb.addr(AddrSpace::Frame, k);
+        let n = fb.reg(RegTy::I64);
+        fb.emit(Inst::Load {
+            dst: n,
+            addr: at,
+            w: Width::B8,
+        });
+        let d = fb.addr(AddrSpace::Frame, s + 8);
+        match how {
+            DescUse::Len => {
+                let len = fb.reg(RegTy::I64);
+                fb.emit(Inst::DopeLen {
+                    dst: len,
+                    dope: d,
+                    dim: 0,
+                });
+                fb.emit(Inst::Bin {
+                    op: yavs_ir::IntOp::Add,
+                    dst: n,
+                    a: n,
+                    b: len,
+                });
+                // The descriptor's address stored as a value (a fat pair): the optimiser leaves
+                // the descriptor in the frame.
+                let (size, pair) = (fb.int(16), fb.reg(RegTy::Ptr));
+                fb.emit(Inst::Alloc { dst: pair, size });
+                fb.emit(Inst::Store {
+                    addr: pair,
+                    src: d,
+                    w: Width::B8,
+                });
+                fb.emit(Inst::TempRoot {
+                    addr: pair,
+                    desc: None,
+                    ty: None,
+                });
+            }
+            DescUse::None => {}
+            DescUse::Copy => {
+                let to = fb.slot(32, 8);
+                let to = fb.addr(AddrSpace::Frame, to);
+                let bytes = fb.int(32);
+                fb.emit(Inst::Copy {
+                    dst: to,
+                    src: d,
+                    bytes,
+                });
+            }
+        }
+        fb.emit(Inst::Ret { v: Some(n) });
+        fb.finish();
+        (pb.finish().unwrap(), id)
+    }
+
+    /// A lean call by the wider rule writes the descriptor words the body reads in the frame, and
+    /// skips the parameters nothing reads; any other use of a parameter's slot keeps the full call.
+    #[test]
+    fn lean_writes_read_descriptors_and_skips_unread_parameters() {
+        for how in [DescUse::Len, DescUse::None, DescUse::Copy] {
+            let (prog, id) = strlen(how);
+            let f = prog.func(id).unwrap();
+            let pre = Pre::new(f, &prog, false);
+            assert!(!pre.lean, "{how:?}: not by the rule of every call");
+            assert_eq!(pre.pro[0], NONE, "{how:?}: the data is not loaded");
+            assert_ne!(pre.pro[4], NONE);
+            // The wider rule looks at the function at its `LATE_AFTER`th call.
+            for _ in 1..LATE_AFTER {
+                assert_eq!(pre.late(f, &prog), None, "{how:?}");
+            }
+            let keep = pre.late(f, &prog);
+            assert_eq!(keep, pre.late(f, &prog), "{how:?}: decided once");
+            match how {
+                DescUse::Len => {
+                    assert_eq!(keep, Some(&[1, 2, 3][..]));
+                    // The register holding the descriptor's address keeps it.
+                    let dope = f.code.iter().find_map(|i| match *i {
+                        Inst::Store { src, .. } => Some(src),
+                        _ => None,
+                    });
+                    let mut stack = vec![];
+                    pre.fill(&mut stack, 1).unwrap();
+                    assert_ne!(stack[dope.unwrap().0 as usize], 0);
+                }
+                DescUse::None => assert_eq!(keep, Some(&[][..])),
+                DescUse::Copy => assert_eq!(keep, None),
             }
         }
     }

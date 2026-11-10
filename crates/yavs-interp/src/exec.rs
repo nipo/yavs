@@ -6202,6 +6202,11 @@ impl Machine {
                         .regs(args)
                         .ok_or_else(|| ice_s!("operand list out of range"))?;
                     self.call_lean(cf, cid, cpre, regs, dst, None)?;
+                } else if plain && let Some(keep) = cpre.late(cf, prog) {
+                    let regs = f
+                        .regs(args)
+                        .ok_or_else(|| ice_s!("operand list out of range"))?;
+                    self.call_late(cf, cid, cpre, regs, dst, None, keep)?;
                 } else {
                     self.call_pre(f, cf, cid, cpre, args, dst, None)?;
                 }
@@ -7168,6 +7173,11 @@ impl Machine {
                             .regs(args)
                             .ok_or_else(|| ice_s!("operand list out of range"))?;
                         self.call_lean(cf, cid, cpre, regs, dst, Some(h))?;
+                    } else if plain && let Some(keep) = cpre.late(cf, prog) {
+                        let regs = f
+                            .regs(args)
+                            .ok_or_else(|| ice_s!("operand list out of range"))?;
+                        self.call_late(cf, cid, cpre, regs, dst, Some(h), keep)?;
                     } else {
                         self.call_pre(f, cf, cid, cpre, args, dst, Some(h))?;
                     }
@@ -10274,6 +10284,55 @@ impl Machine {
         }
         if pro.next().is_some() {
             return Err(ice_f!("missing argument of `{}`", callee.name));
+        }
+        Ok(())
+    }
+
+    /// `call_lean` for a callee whose calls are lean by `lean_params`'s wider rule (`Pre::late`):
+    /// the frame has all its slots, each argument goes to the register the prologue would load
+    /// it into, if any, and the ones `keep` names to their slots as well.
+    #[inline(never)]
+    #[allow(clippy::too_many_arguments)]
+    fn call_late(
+        &mut self,
+        callee: &Func,
+        func: FuncId,
+        pre: &pre::Pre,
+        args: &[Reg],
+        dst: Option<Reg>,
+        first: Option<u64>,
+        keep: &[u32],
+    ) -> R<()> {
+        crate::census::lean_late();
+        let skip = usize::from(first.is_some());
+        if args.len() + skip < pre.params.len() {
+            return Err(ice_f!("missing argument of `{}`", callee.name));
+        }
+        let link = if pre.nested {
+            self.static_link(callee, None)?
+        } else {
+            None
+        };
+        let caller = self.regs.base;
+        self.push_frame_pre(callee, func, pre, link, dst)?;
+        let arg = |m: &Self, i: usize| match first {
+            Some(h) if i == 0 => h,
+            _ => m.regs.v[caller + args[i - skip].0 as usize],
+        };
+        let base = self.regs.base;
+        for (i, &p) in pre.pro.iter().enumerate() {
+            if p != pre::NONE {
+                self.regs.v[base + p as usize] = arg(self, i);
+            }
+        }
+        let sbase = self.frames[self.frames.len() - 1].sbase as usize;
+        for &i in keep {
+            let v = arg(self, i as usize);
+            let slot = pre.params[i as usize].0 as usize;
+            self.sstack
+                .get_mut(sbase + slot..sbase + slot + 8)
+                .ok_or_else(|| ice_f!("parameter slot {slot} outside the frame"))?
+                .copy_from_slice(&v.to_le_bytes());
         }
         Ok(())
     }
