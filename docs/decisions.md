@@ -15147,7 +15147,7 @@ Written by Claude. `YAVS_CLIFT_LIST` (with `write`, `on` and `all`), `YAVS_CLIFT
 - **Why.** No gain beyond the A/A on main: the one cell that gained was a cold run of `uvvm_axistream_vvc` (0.95 of the instructions with native variants leaving), and the other designs and later runs were level or worse (GRLIB's run 2 at 1.05 to 1.06). The coverage run that makes a good list costs 1 to 12 cold runs. `uvvm_func_cov` loses 3 to 8 percent. A list made from an ordinary run, the only kind that costs nothing, was lost: the blocks it calls never run are the ones the next runs run.
 - **Kept.** `YAVS_CLIFT_CHEAP` (cheap lowering of the blocks of a `YAVS_CLIFT_BLOCKCOV` dump, and its `all` and `alt` test modes) with `YAVS_CLIFT_BLOCKCOV`, `YAVS_CLIFT_COLD` and `YAVS_CLIFT_CHEAP_NATIVE`, and `yavs_rt_steps`, now as it was before CG2: it steps the instructions of a cheap block and counts nothing. `YAVS_AUTO_SYNC` itself stays (`Tier::hot` waits for the compiles it asks for); only the wait for a tripped function's compile goes. With every switch off the generated code is byte-identical to the code before the removal (the `YAVS_CLIFT_CODEDIR` corpus check).
 
-## `--tier-compile=wait`: the first run holds a process until the callee tree it pulls in repays (yavs-rt `auto.rs`, 2026-11-10, not decided)
+## `--tier-compile=wait`: the first run holds a process until the callee tree it pulls in repays (yavs-rt `auto.rs`, 2026-11-10, user ruling: landed)
 
 - **Finding** (agent). With the sampler naming the caller after a resumed callee returns, the first run of
   `uvvm_axistream_vvc` sees its command executor's own time (44 ms, main saw 0), lets it past the first-run floor
@@ -15170,5 +15170,6 @@ Written by Claude. `YAVS_CLIFT_LIST` (with `write`, `on` and `all`), `YAVS_CLIFT
   it does not shrink it. With the booking fix run 2 is about 22.6 G instructions with an A/A band of 1 to 2 percent,
   while bringing run 1 under the cap takes about 5 G out of it, so no rule that only changes when the tree compiles
   can keep every run within the A/A.
-- **Not decided** (user): land the rule with the trade, keep the booking fix alone with the cap failing, or judge this
-  test by a sum over runs.
+- **Decided** (user, 2026-11-10, option (a)): land it, accepting `uvvm_axistream_vvc` run 2 at 1.33 for the cold cap.
+  Reach: no corpus test lasts the second the rule waits for, so `tier_tree_held` is 0 on the corpus; its evidence is
+  the realbench `uvvm_axistream_vvc` first run (`tier_tree_held` 55, the executor's copies), as for the floor above.
