@@ -7059,7 +7059,8 @@ at process start only, so the binary would have had to re-exec itself. Decisions
   was tried on the heaviest interpreted run (`neorv32_dual_full`): 83% fewer page faults again, cycles unchanged, RSS up.
   Memory beyond the first step is ordinary 4 KiB pages as before (the kernel does not merge a later `brk` extension into the
   advised range), and so are the arenas of other threads (`--threads N`; a spot check of `--threads 4` shows no change in
-  cycles). An allocator that asked for huge pages on every growth step (the tunable) would cover them; not worth a re-exec.
+  cycles). An allocator that asked for huge pages on every growth step (the tunable) would cover them; not worth a re-exec
+  (the `brk` steps after the first are marked since 2026-11-10 by a thread: "The rest of the heap" below).
 - **Cost**: peak RSS rises by the huge page granularity: median +2 to 4 MiB (+8% geometric mean, 46 to 49 MiB for a cold
   elab), at most +12 MiB on cells that run the interpreter and +39 MiB (4%) on runs that compile with LLVM (about 900 MiB). Zeroing a huge
   page is part of the first touch, so a very small run (`--version`) pays one 2 MiB clear: not measurable in its cycles.
@@ -7070,6 +7071,41 @@ at process start only, so the binary would have had to re-exec itself. Decisions
 Measured with `tools/realbench` `--compare` (41 tests, all phases, cold and warm, interleaved, cores 6 and 7, `perf stat`
 instructions, cycles and page faults as medians of every timed run, 2 to 5 runs) and the `tools/bench` h2h designs (9 runs):
 see docs/STATUS.md "Huge pages for the heap". No test or phase gets slower beyond noise.
+
+### The rest of the heap: a thread marks each later step (perf/b4-hugeheap, 2026-11-10; not decided)
+
+The first step covers 64 MiB. glibc takes every later step as a new `brk` mapping, which does not inherit the advice, so a large design
+runs on small pages from the 65th MiB: GRLIB (about 370 MiB peak) had 63 of 228 MiB of its heap on huge pages. Decisions, for the
+maintainer to confirm:
+
+- **`yavs-hugepoll`, a detached thread, marks the heap again as it grows.** It reads the end of the heap (`sbrk(0)`), looks again after
+  1 ms while the end moves, doubling up to 64 ms while it does not, and each time calls `madvise(MADV_HUGEPAGE)` on the whole heap from
+  the first advised page to the end (advice already given costs a lookup). The whole heap, not the new part: `trim_heap` and the
+  allocator's own trim give memory back, and what grows back is a new mapping below the old end. Started only when `huge_heap()` advised
+  the first step, so a system without THP in `madvise` mode, `YAVS_HUGE_HEAP=0` and other platforms never have it. It runs for the
+  life of the process. No new library symbol: the Linux archives built for glibc 2.17 link the same set as before.
+- **A user's tuning stands.** `huge_heap()` does nothing when `GLIBC_TUNABLES` names `glibc.malloc.top_pad`, `trim_threshold`,
+  `mmap_threshold` or `hugetlb` (or `MALLOC_TOP_PAD_`, `MALLOC_TRIM_THRESHOLD_`, `MALLOC_MMAP_THRESHOLD_` is set): its `mallopt` calls
+  would override the first three, and `hugetlb` gives the allocator's own marking of the whole heap. Other tunables change nothing.
+- **What it gets, and what not.** Pages touched before the thread comes round stay small, so coverage depends on how fast the heap is
+  filled: GRLIB second run at 8 s, 150 to 210 of 220 to 233 MiB of heap on huge pages (base 62 of 228); L1 data-TLB misses over whole
+  runs 0.54 to 0.57 of base on first runs, 0.25 to 1.00 on second runs (the glibc tunable `hugetlb=1`: 0.14 to 0.25), Microwatt 0.52 (tunable
+  0.42). Thread heaps (64 MiB mappings, about 52 MiB resident on GRLIB) and blocks over the mapping threshold are not covered; the
+  tunable covers both. Page faults: GRLIB 0.60 of base, Microwatt 0.98.
+- **Cycles: no gain shown.** On a loaded host (load 10 to 17, a co-runner on the timing CCD) GRLIB cold whole runs, 12 interleaved
+  pairs of two builds of the base and the candidate: A/A 1.033 +-7.6 %, candidate 1.021 +-8.8 %, the tunable 1.010 +-7.1 %; instructions
+  level. The bound from the counters: the removed L1 misses at about 7 cycles each are at most 3 % of GRLIB's cycles and 1.5 % of
+  Microwatt's. An earlier measurement on a quieter host read the tunable at 0.951 on GRLIB (2026-11-04).
+- **Memory:** peak RSS GRLIB +2.5 % (the tunable +5.5 %).
+- **Short runs:** `yavs --version` runs 20 600 more user instructions (1.26 M to 1.28 M: the thread). Cold runs of small tests
+  run 0.2 to 0.4 % more user instructions (`vunit_logging` +1.0 M, `hdlm_fifo_sync` +3.1 M); with `YAVS_HUGE_HEAP=0` both builds
+  run the same count, so it is the thread's presence (probably the allocator's locking once a second thread exists; not traced); their wall time against the pinned baseline stays within the cold cap
+  (`hdlm_fifo_sync` 0.88, `vunit_logging` 0.85, `olo_axi_master_full` 0.81, `uvvm_func_cov` 1.06, `osvvm_axi4_random` 1.01,
+  `uvvm_axistream_vvc` 1.15; main 0.84, 0.85, 0.82, 1.12, 1.03, 1.13, bands 5 to 13 %).
+- **Rejected, measured 2026-11-04:** a re-exec with the tunable (1.5 ms more on `--version`, does nothing on glibc older than 2.35), a bigger
+  first step (256 MiB or more: glibc serves a zeroed 96 MiB block of Microwatt from the top and clears it, peak RSS 117 to 217 MiB),
+  `M_ARENA_MAX=1` (no effect then), `MADV_COLLAPSE` at simulation start (the heap is under half its size then), a global allocator
+  wrapper (`unsafe` in a hot path, #437).
 
 ## Work-counter perf tests, op census (yavs, yavs-interp, yavs-kernel, #579, 2026-10-23)
 

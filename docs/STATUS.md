@@ -7634,6 +7634,16 @@ satcat5, vhdl-extras, en_cl_fix, fletcher, json-for-vhdl: all as expected.
 Not done: cloning only the bodies a run reaches (needs the stage and prefix rules to change, see the decision), the page faults of
 the whole run (#556).
 
+## Huge pages for the rest of the heap (perf/b4-hugeheap, 2026-11-10; not decided)
+
+`huge_heap()` also starts `yavs-hugepoll`, a detached thread that marks the whole `brk` heap for huge pages again as it grows (`docs/decisions.md`
+"The rest of the heap": options, numbers, what each system gets). GRLIB: heap on huge pages 62 of 228 MiB before, 150 to 210 of 220 to 233 MiB
+after; L1 data-TLB misses 0.54 to 0.57 of base on first runs, 0.25 to 1.00 on second runs (depends on how fast the heap fills); page faults
+0.60; peak RSS +2.5 %. Microwatt dTLB misses 0.52, page faults 0.98. No cycle gain shown: on a loaded host the A/A band is +-7.6 % and the
+counters bound the gain at about 3 % (GRLIB). Whole GRLIB and Microwatt output and exit status equal to the base. Not covered: thread heaps
+and blocks over the mapping threshold. A user who tunes `top_pad`, `trim_threshold`, `mmap_threshold` or `hugetlb` turns the feature off.
+Test: `crates/yavs-cache/tests/huge_heap.rs`. Docs: `docs/running-faster.rst` "Huge pages", `docs/environment.rst`.
+
 ## Huge pages for the heap (#556, 2026-10-23)
 
 `yavs_cache::huge_heap()` at the start of `main`: top pad 64 MiB, one growth step of the `brk` heap, `madvise(MADV_HUGEPAGE)` on it (Linux
