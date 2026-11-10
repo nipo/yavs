@@ -15146,3 +15146,27 @@ Written by Claude. Landed with wave 3 batch 2 (maintainer's ruling of 2026-11-09
 Written by Claude. `YAVS_CLIFT_LIST` (with `write`, `on` and `all`), `YAVS_CLIFT_LIST_NATIVE` and `YAVS_CLIFT_AGAIN` are removed, with everything that served only them: the coverage run's write path, the per-program list in the store (kind `never`), the list in the pre-key (`PreInputs::list`) and the function's id that #1126 put before it, the trip and make-again path (`rt::cheap_ran`, `take_again`, `tripped`, the `<symbol>_full` rebuild, the compile thread's wake and its `YAVS_AUTO_SYNC` wait), the counters `clift_listed`, `clift_tripped` and `clift_again`, the difftest candidate `yavs-clift-listall` and the tests of the list. The entries above stay as the history of what it was.
 - **Why.** No gain beyond the A/A on main: the one cell that gained was a cold run of `uvvm_axistream_vvc` (0.95 of the instructions with native variants leaving), and the other designs and later runs were level or worse (GRLIB's run 2 at 1.05 to 1.06). The coverage run that makes a good list costs 1 to 12 cold runs. `uvvm_func_cov` loses 3 to 8 percent. A list made from an ordinary run, the only kind that costs nothing, was lost: the blocks it calls never run are the ones the next runs run.
 - **Kept.** `YAVS_CLIFT_CHEAP` (cheap lowering of the blocks of a `YAVS_CLIFT_BLOCKCOV` dump, and its `all` and `alt` test modes) with `YAVS_CLIFT_BLOCKCOV`, `YAVS_CLIFT_COLD` and `YAVS_CLIFT_CHEAP_NATIVE`, and `yavs_rt_steps`, now as it was before CG2: it steps the instructions of a cheap block and counts nothing. `YAVS_AUTO_SYNC` itself stays (`Tier::hot` waits for the compiles it asks for); only the wait for a tripped function's compile goes. With every switch off the generated code is byte-identical to the code before the removal (the `YAVS_CLIFT_CODEDIR` corpus check).
+
+## `--tier-compile=wait`: the first run holds a process until the callee tree it pulls in repays (yavs-rt `auto.rs`, 2026-11-10, not decided)
+
+- **Finding** (agent). With the sampler naming the caller after a resumed callee returns, the first run of
+  `uvvm_axistream_vvc` sees its command executor's own time (44 ms, main saw 0), lets it past the first-run floor
+  and compiles it, and with it the bus procedures that waited for a compiled caller: run 1 rose from 1.13 to 1.44 of
+  the pinned baseline's cold wall (cap 1.20).
+- **Change** (agent; user ruling 2026-11-10: price the callee tree a process compile pulls in). Past `WAIT_LONG`,
+  `Worker::unpaid` also holds a process while it and the subprograms that wait only for it (`unlocked`) were seen for
+  less than `WAIT_TREE` (2) times what compiling them all costs, times `wait_payback` (`Worker::tree_unpaid`). Knob
+  `YAVS_AUTO_WAIT_TREE`, counter `tier_tree_held`.
+- **Measured** (agent; PGO bench builds, two builds of main with the booking fix as the A/A, 5 reps from pristine
+  worlds on two locked timing cores, `wait`; all-thread instructions / cycles against main): `uvvm_axistream_vvc`
+  run 1 0.86 / 0.85 (A/A 1.00 / 0.97), run 2 1.33 / 1.16, run 3 1.06 / 1.01, run 4 1.04, runs 5 to 8 level; eight-run
+  sum 1.03 / 0.98. On that test the factor acts as a switch: at 1.5 nothing changes, at 2 the whole tree waits for
+  run 2. On `osvvm_axi4_random`, `neorv32_dual_full`, `neorv32_single_cache` and GRLIB the rule never fires
+  (`tier_tree_held` 0 in every run), and `background` is level. Cold cap of `uvvm_axistream_vvc` (host loaded, wall
+  bands of 20 percent, so read in cycles): 1.06 of the pinned baseline with the rule, 1.34 without.
+- **Bound** (agent). The rule moves the compile bill of the executor's tree (about half a second) from run 1 to run 2;
+  it does not shrink it. With the booking fix run 2 is about 22.6 G instructions with an A/A band of 1 to 2 percent,
+  while bringing run 1 under the cap takes about 5 G out of it, so no rule that only changes when the tree compiles
+  can keep every run within the A/A.
+- **Not decided** (user): land the rule with the trade, keep the booking fix alone with the cap failing, or judge this
+  test by a sum over runs.
