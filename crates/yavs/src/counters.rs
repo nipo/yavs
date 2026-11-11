@@ -171,6 +171,15 @@ pub fn report(s: yavs_kernel::Stats, rt: Option<&yavs_interp::Runtime>) {
     // Pre-key entries named by the Cranelift key the compile hashed (no second hash of the body).
     #[cfg(feature = "clift")]
     rows.push(("clift_key_reused", yavs_clift::key_reused() as u64));
+    // Sites compiled code computes in place instead of calling the host: `is_x` or a reduction
+    // of a vector.
+    #[cfg(feature = "clift")]
+    for (name, v) in ["clift_scan_sites"]
+        .into_iter()
+        .zip(yavs_clift::inline_sites())
+    {
+        rows.push((name, v as u64));
+    }
     for (name, v) in rows {
         eprintln!("counters: {name}={v}");
     }
