@@ -15227,7 +15227,7 @@ Written by Claude. `YAVS_CLIFT_LIST` (with `write`, `on` and `all`), `YAVS_CLIFT
   Reach: no corpus test lasts the second the rule waits for, so `tier_tree_held` is 0 on the corpus; its evidence is
   the realbench `uvvm_axistream_vvc` first run (`tier_tree_held` 55, the executor's copies), as for the floor above.
 
-## `--tier-compile=wait`: the first run's tree rule leaves a margin over the end of the run (yavs-rt `auto.rs`, 2026-11-11, not decided)
+## `--tier-compile=wait`: the first run's tree rule leaves a margin over the end of the run (yavs-rt `auto.rs`, 2026-11-11, user ruling: landed)
 
 - **Finding** (agent). The first run of `uvvm_axistream_vvc` came in two modes, 32 or 40 G instructions of all threads
   (on two free cores 1.09 or 1.36 of the pinned baseline's wall, cap 1.20). The kernel thread retires the same 27.5 G
@@ -15249,6 +15249,10 @@ Written by Claude. `YAVS_CLIFT_LIST` (with `write`, `on` and `all`), `YAVS_CLIFT
   `uvvm_func_cov`, `neorv32_dual_full`, GRLIB and the small cap tests, so their decisions do not change at 2.5;
   `background` never applies the rule (`unpaid` needs `stops`). Microwatt's first run holds five processes at every
   factor and is level at 2.5.
+- **Cold cap** (agent; day sitting on two locked free cores with an A/A, 22 clean pairs a cell): 1.051 of the pinned
+  baseline's wall with 2.5 (no dear draw; 3.3 the same), main 1.07 to 1.11 (light runs 1.05, dear runs 1.33).
+- **Decided** (user, 2026-11-11): land 2.5; the cold cap keeps binding run 1 alone. The next night cap sitting
+  confirms it; if 2.5 draws the dear mode even once there, the factor becomes 3.3 (1 / `WAIT_GAIN`).
 
 ## Auto tier: the second-compile slot is removed (yavs-rt `auto.rs`, 2026-11-10)
 
